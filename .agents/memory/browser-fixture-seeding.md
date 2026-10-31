@@ -3,6 +3,30 @@ name: Browser fixture seeding
 description: Reliable ways to seed master data for authenticated browser journeys that reload and hydrate from the server.
 ---
 
+Use the production surface's rendered accessibility tree when selecting
+portaled controls; do not assume a standalone component demo's named wrapper
+also exists in the operational page.
+
+**Why:** A calendar demo supplied its own named region, while the real Schedule
+calendar lived in a separate popover dialog. Reusing the demo's container
+selector made valid calendar controls appear missing and obscured diagnosis.
+
+**How to apply:** Confirm the actual container before adapting component-demo
+selectors into an operational journey, and bound locator waits so a missing
+wrapper fails before fixture cleanup loses its test-time budget.
+
+Full-suite ordering can expose stale fixture epochs that a fresh-database
+standalone browser run cannot.
+
+**Why:** Guarded Undo advances a scope-wide master-data epoch. Later tests using
+raw API fixture writers can then fail before their journey begins, even under a
+different fixture account; restarting on an empty database hides that cause.
+
+**How to apply:** Exercise newly prepared fixture seeds against an advanced
+canonical epoch when confirming repairs. Preserve rejection of stale pending
+edits: fetching a new epoch must not become automatic replay of a rejected
+mutation.
+
 When a manual-counter browser fixture requires fixed totals, disable automatic
 tracking in the canonical seeded run as well as matching local recovery data.
 
@@ -55,6 +79,18 @@ For browser matrices whose projects share one disposable database, reset test-ow
 **Why:** Global setup runs once for the matrix; an earlier viewport can leave a live run in the shared fixture and make later projects start from the wrong state.
 
 **How to apply:** In each test's setup, remove only the current test's live-day fixture rows from the guarded disposable database, and keep the normal Home hydration path enabled.
+
+Immutable approval/audit fixtures need explicit test-owned record cleanup as
+well as account cleanup, even inside a disposable multi-project browser run.
+
+**Why:** Such ledgers intentionally survive actor deletion; one viewport's
+retained records can invalidate another viewport's empty-list assumption.
+Reusing the lifecycle record for a second fixture can also correctly conflict.
+
+**How to apply:** Give each independently seeded ledger record a unique opaque
+reference, track those references, and remove only those records in the guarded
+disposable database during cleanup. Do not weaken ledger retention or reset
+shared application data to make a fixture pass.
 
 For cold-reload journey tests, finish and canonically confirm lifecycle setup before reloading, then make the tested destination the first post-reload navigation.
 

@@ -7,7 +7,7 @@ describe("nested mixed-import review layers", () => {
   it("scopes Schedule picker portals above its z-70 parent without raising global dialogs", () => {
     const home = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
     const dialog = readFileSync(resolve(process.cwd(), "src/components/ui/dialog.tsx"), "utf8");
-    expect(home).toMatch(/showScheduleDialog && \(\s*<DialogLayerProvider value=\{80\}>/);
+    expect(home).toMatch(/showScheduleDialog && canManageFactorySettings && \(\s*<DialogLayerProvider value=\{80\}>/);
     expect(dialog).toContain('React.createContext<number | undefined>(undefined)');
     expect(dialog).toContain('<DialogOverlay style={zIndex === undefined ? undefined : { zIndex }}');
     expect(dialog).toContain('...(zIndex === undefined ? {} : { zIndex })');

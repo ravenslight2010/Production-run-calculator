@@ -20,3 +20,33 @@ The user reports that a phone/PWA repeatedly attempts sync after waking, and a m
 **Why:** A successful request acknowledgement does not prove that the wake queue converged or that a retained conflict was safely resolved.
 
 **How to apply:** Reproduce wake, reconnect, and refresh sequences; trace bounded queue/send/ack/recovery/conflict events; verify that the system settles without losing, duplicating, or silently overwriting operational changes.
+
+Treat a pause as effective only after its canonical acknowledgement. A valid automatic claim can settle while the pause request is still in flight, so the state observed before the click is not a reliable post-pause baseline.
+
+**Why:** Browser verification observed a legitimate auto-track update between the pause click and server acknowledgement; comparing against the earlier value falsely attributed it to a tick after pause.
+
+**How to apply:** For live counters or stock, wait for the acknowledged paused state, take the baseline then, and verify subsequent ticks do not change it. Keep each station's production units and claim rules distinct.
+
+When a queued stock claim is rebased, rebase its due anchor to the same canonical stock anchor and recompute the next due time from cadence; never retain the old schedule.
+
+**Why:** The server validates exact anchor-to-due equality, so a stale due time can reject an otherwise valid recovery claim.
+
+**How to apply:** Any stock-claim rebase path must update anchor, due time, and next due time together before sending the claim.
+
+When a reset is adopted, invalidate any foreground recovery owner that started before it before the reset barrier can be released.
+
+**Why:** An older recovery's cleanup can otherwise release the barrier and replay a stale queued write after the server has advanced the reset epoch.
+
+**How to apply:** Advance the recovery-owner token as part of reset adoption and keep stale recovery callbacks from releasing or replaying work.
+
+Every server-accepted automatic progress channel that peers merge independently must persist its private ownership proof atomically on every accepted producer path, including device claims and background ticks. Canonical state delivery alone is not sufficient when local stamps can tie or be newer.
+
+**Why:** Cross-tab applicator stock stayed stale even though the accepted claim updated canonical state and SSE delivery had no errors; one producer path lacked the ownership proof required by the peer merge.
+
+**How to apply:** When adding or changing auto-track producers or peer merge rules, verify the accepted sequence, generation, and timestamp proof survives both direct claims and server ticks, then test a second client adopting canonical progress.
+
+After a successful canonical acknowledgement, suppress a queued snapshot only when its signature exactly matches the acknowledged state. Keep sending when a signature is missing or the queued snapshot differs.
+
+**Why:** A wake sequence can leave an identical full-state snapshot queued after a successful response, producing duplicate writes; browser-observed request counts varied and did not identify the triggering caller.
+
+**How to apply:** Compare queued work against the state actually acknowledged or rebased, not an obsolete pre-recovery body. Test canonical convergence and distinct write contents rather than relying on a fixed request count.

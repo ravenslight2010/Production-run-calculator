@@ -7,7 +7,6 @@ import {
   ChevronDown,
   ClipboardCheck,
   ListChecks,
-  Lock,
   Package,
   Snowflake,
   Square,
@@ -27,16 +26,23 @@ import ReorderCard from "./ReorderCard";
 import UseFirstCard from "./UseFirstCard";
 import SurplusMixCard from "./SurplusMixCard";
 import { WarehouseSwitchoverBanner } from "./WarehouseSwitchoverBanner";
+import { useMe } from "../useRole";
+import { hasRoleSurfaceAccess } from "../roleSurfaceAccess";
 
 export default memo(function WarehouseTabContent() {
+  const { me } = useMe();
+  const canManageProductionSchedule = hasRoleSurfaceAccess(
+    "productionSchedule",
+    me?.capabilities ?? [],
+  );
   const {
     activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
     cycleCountSchedules, dayState, freezerPullPlan,
     freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
-    isSupervisor, markCountedMutation,
+    markCountedMutation,
     adjustFinishedCaseStock, refreshFreezerSurplus, replaceRunSurplus, runValuesById,
-    scheduledDays, scheduledValues, setPinError, setPinInput, setScheduleDeleteConfirm,
-    setScheduledDays, setScheduleView, setShowPinDialog, setShowScheduleDialog,
+    scheduledDays, scheduledValues, setScheduleDeleteConfirm,
+    setScheduledDays, setScheduleView, setShowScheduleDialog,
     todayScheduledValues, toggleStagedItem,
   } = useWarehouseTabCtx();
   return (
@@ -327,17 +333,18 @@ export default memo(function WarehouseTabContent() {
                       <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                         <CalendarDays className="w-4 h-4" /> Production Schedule
                       </CardTitle>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
-                          fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
-                        }}
-                        title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
-                      >
-                        {isSupervisor ? <CalendarPlus className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} Manage
-                      </button>
+                      {canManageProductionSchedule && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
+                          }}
+                          title="Manage production schedule"
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+                        >
+                          <CalendarPlus className="w-3.5 h-3.5" /> Manage
+                        </button>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">

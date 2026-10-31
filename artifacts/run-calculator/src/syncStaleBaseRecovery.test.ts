@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SyncPayload } from "./types";
-import { rebaseStaleSyncIntent } from "./syncStaleBaseRecovery";
+import {
+  describeServerWinsConflictOutcome,
+  rebaseStaleSyncIntent,
+  selectUnchangedRunValueIdsForRecovery,
+  shouldResetLiveFormForSync,
+} from "./syncStaleBaseRecovery";
 
 function snapshot(): SyncPayload {
   return {
@@ -21,6 +26,104 @@ function snapshot(): SyncPayload {
 }
 
 describe("stale-base intent recovery", () => {
+  it("clearly reports that conflicting local values are discarded in favor of server values", () => {
+    expect(describeServerWinsConflictOutcome(0)).toBe("");
+    expect(describeServerWinsConflictOutcome(1)).toBe(
+      "kept the server value for 1 conflict; discarded the conflicting local value; review the current value before editing again",
+    );
+    expect(describeServerWinsConflictOutcome(2)).toBe(
+      "kept server values for 2 conflicts; discarded the conflicting local values; review the current values before editing again",
+    );
+    expect(() => describeServerWinsConflictOutcome(-1)).toThrow(RangeError);
+    expect(() => describeServerWinsConflictOutcome(1.5)).toThrow(RangeError);
+  });
+
+  it("selects the rebased result when the live run still matches the sent request", () => {
+    const sent = {
+      "run-1": { casesNeeded: 777, casesOnCurrentSkid: 12 },
+    };
+    const recovered = {
+      "run-1": { casesNeeded: 999, casesOnCurrentSkid: 15 },
+    };
+
+    // The recovered value is not the server snapshot: it keeps a distinct
+    // local edit while discarding the conflicting casesNeeded value.
+    expect(selectUnchangedRunValueIdsForRecovery(
+      sent,
+      recovered,
+      structuredClone(sent),
+    )).toEqual(["run-1"]);
+  });
+
+  it("does not select a run whose live values changed after the request was sent", () => {
+    expect(selectUnchangedRunValueIdsForRecovery(
+      { "run-1": { casesNeeded: 777 } },
+      { "run-1": { casesNeeded: 999 } },
+      { "run-1": { casesNeeded: 888 } },
+    )).toEqual([]);
+  });
+
+  it("does not select a run missing from the recovered or current snapshot", () => {
+    expect(selectUnchangedRunValueIdsForRecovery(
+      { "run-1": { casesNeeded: 777 }, "run-2": { casesNeeded: 300 } },
+      { "run-1": { casesNeeded: 999 } },
+      { "run-1": { casesNeeded: 777 } },
+    )).toEqual(["run-1"]);
+  });
+
+  it("allows an explicitly rebased run to reset the live form without an ack", () => {
+    expect(shouldResetLiveFormForSync({
+      currentRunId: "run-1",
+      hasCurrentRunValues: true,
+      adoptedPackaging: false,
+      explicitRebaseAdoption: true,
+      localUpdatedAt: 20,
+      remoteUpdatedAt: 10,
+      allowForegroundCanonicalFormReset: false,
+      localEditQuietMs: 100,
+      pushAcknowledged: false,
+      emptyOverPopulated: false,
+    })).toBe(true);
+  });
+
+  it("keeps the empty-over-populated safeguard for explicit rebase adoption", () => {
+    expect(shouldResetLiveFormForSync({
+      currentRunId: "run-1",
+      hasCurrentRunValues: true,
+      adoptedPackaging: false,
+      explicitRebaseAdoption: true,
+      localUpdatedAt: 20,
+      remoteUpdatedAt: 10,
+      allowForegroundCanonicalFormReset: false,
+      localEditQuietMs: 100,
+      pushAcknowledged: false,
+      emptyOverPopulated: true,
+    })).toBe(false);
+  });
+
+  it("retains the quiet-period and acknowledgment guard for ordinary updates", () => {
+    const base = {
+      currentRunId: "run-1",
+      hasCurrentRunValues: true,
+      adoptedPackaging: false,
+      explicitRebaseAdoption: false,
+      localUpdatedAt: 10,
+      remoteUpdatedAt: 10,
+      allowForegroundCanonicalFormReset: false,
+      emptyOverPopulated: false,
+    };
+    expect(shouldResetLiveFormForSync({
+      ...base,
+      localEditQuietMs: 3000,
+      pushAcknowledged: true,
+    })).toBe(true);
+    expect(shouldResetLiveFormForSync({
+      ...base,
+      localEditQuietMs: 1000,
+      pushAcknowledged: true,
+    })).toBe(false);
+  });
+
   it("keeps distinct offline edits and retains the server's conflicting value", () => {
     const base = snapshot();
     const local = structuredClone(base);
@@ -28,6 +131,7 @@ describe("stale-base intent recovery", () => {
       ...local.runValues["run-1"],
       casesNeeded: 777,
       casesOnCurrentSkid: 50,
+      pizzasPerCase: 8,
     };
     const canonical = structuredClone(base);
     canonical.runValues["run-1"] = {
@@ -45,10 +149,11 @@ describe("stale-base intent recovery", () => {
       casesNeeded: 999,
       casesOnCurrentSkid: 50,
       casesPerSkid: 60,
+      pizzasPerCase: 8,
     });
     expect(result.payload.baseSnapshotId).toBe("canonical-2");
     expect(result.payload.completeness).toBe("complete");
-    expect(result.reappliedChanges).toBeGreaterThan(0);
+    expect(result.reappliedChanges).toBe(2);
     expect(result.retainedServerConflicts).toBe(1);
   });
 

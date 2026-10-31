@@ -13,8 +13,10 @@ export const DEFAULT_ARTIFACT_PATH = resolve(
   ),
 );
 
-const AUDIT_PROTECTION_COMMAND =
-  "pnpm --filter @workspace/db run apply-audit-log-protection";
+const AUDIT_PROTECTION_COMMANDS = [
+  "pnpm --filter @workspace/db run apply-audit-log-protection",
+  "bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection",
+];
 
 function readProductionRunArgs(artifactToml) {
   const sectionHeader = "[services.production.run]";
@@ -60,7 +62,10 @@ function readProductionRunArgs(artifactToml) {
 export function validateAuditProtectionConfig(artifactToml) {
   const args = readProductionRunArgs(artifactToml);
   const command = args.join(" ");
-  const migrationIndex = command.indexOf(AUDIT_PROTECTION_COMMAND);
+  const migrationIndex = AUDIT_PROTECTION_COMMANDS
+    .map((candidate) => command.indexOf(candidate))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0] ?? -1;
   const serverIndex = command.indexOf("exec node ");
 
   if (migrationIndex < 0) {

@@ -93,16 +93,18 @@ export function QcImportReviewBadge() {
   const { pending, rejected } = query.data;
   if (!pending && !rejected) return null;
   return (
-    <div
-      role="status"
-      aria-label={`Import QC review: ${pending} pending, ${rejected} rejected`}
-      data-testid="badge-qc-import-review"
-      className="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-3 z-40 flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-[11px] font-semibold shadow-md backdrop-blur"
-    >
-      <FileClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-      <span>Import QC</span>
-      <span data-testid="text-qc-import-badge-pending" className="rounded-full bg-amber-500/15 px-2 text-amber-800 dark:text-amber-200">{pending} pending</span>
-      {rejected > 0 && <span data-testid="text-qc-import-badge-rejected" className="rounded-full bg-rose-500/15 px-2 text-rose-800 dark:text-rose-200">{rejected} rejected</span>}
+    <div className="mx-auto w-full max-w-6xl px-2 py-1.5 sm:px-4">
+      <div
+        role="status"
+        aria-label={`Import QC review: ${pending} pending, ${rejected} rejected`}
+        data-testid="badge-qc-import-review"
+        className="pointer-events-none inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-[11px] font-semibold shadow-md backdrop-blur"
+      >
+        <FileClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+        <span>Import QC</span>
+        <span data-testid="text-qc-import-badge-pending" className="rounded-full bg-amber-500/15 px-2 text-amber-800 dark:text-amber-200">{pending} pending</span>
+        {rejected > 0 && <span data-testid="text-qc-import-badge-rejected" className="rounded-full bg-rose-500/15 px-2 text-rose-800 dark:text-rose-200">{rejected} rejected</span>}
+      </div>
     </div>
   );
 }

@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { SingleFlightSyncQueue } from "./syncPushQueue";
+import {
+  shouldSendDistinctQueuedSyncWork,
+  SingleFlightSyncQueue,
+} from "./syncPushQueue";
 
 describe("SingleFlightSyncQueue", () => {
+  it("suppresses a queued snapshot already covered by the successful acknowledgement", () => {
+    expect(shouldSendDistinctQueuedSyncWork("same-snapshot", "same-snapshot")).toBe(false);
+    expect(shouldSendDistinctQueuedSyncWork("newer-snapshot", "same-snapshot")).toBe(true);
+  });
+
+  it("keeps conservative sending when either signature is unavailable", () => {
+    expect(shouldSendDistinctQueuedSyncWork(undefined, "same-snapshot")).toBe(true);
+    expect(shouldSendDistinctQueuedSyncWork("same-snapshot", undefined)).toBe(true);
+  });
+
   it("releases a stale-dated push and starts the newer queued request", () => {
     const queue = new SingleFlightSyncQueue<string>();
 

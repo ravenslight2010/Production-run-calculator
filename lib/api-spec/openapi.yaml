@@ -6499,6 +6499,116 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceConflict" }
 
+  /sync/schedule-move:
+    post:
+      operationId: moveSyncScheduledRuns
+      tags: [sync]
+      summary: Atomically move selected runs between dates
+      description: >-
+        Moves one, several or all unstarted runs in one scoped transaction.
+        The source and destination revisions and reset epoch are checked before
+        either date changes. Setup values, run-value stamps, packaging progress,
+        timers, automatic-tracking state and staged run items follow the moved
+        runs. A rejected or stale request leaves both dates unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduledRunMoveRequest" }
+      responses:
+        "200":
+          description: Source and destination changes committed with sync outbox events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [moved, sourceRemoved, sourceRevision, destinationRevision, destinationSnapshotId]
+                properties:
+                  moved: { type: boolean, const: true }
+                  sourceRemoved: { type: boolean }
+                  sourceRevision: { type: integer, minimum: 0 }
+                  destinationRevision: { type: integer, minimum: 0 }
+                  destinationSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        "400": { description: "Invalid dates, run selection, revisions, or reset epoch" }
+        "403": { description: Manager schedule capability required }
+        "404": { description: Source or destination schedule no longer exists }
+        "409": { description: "Reset, revision, run selection, or run lifecycle conflict" }
+        "500": { description: Move outcome may require canonical date refresh }
+
+  /sync/schedule-swap-eligibility:
+    get:
+      operationId: getSyncScheduleSwapEligibility
+      tags: [sync]
+      summary: Check whether a whole-day schedule swap is available
+      description: >-
+        Returns scoped schedule presence and server facility-local eligibility.
+        A swap involving today is allowed only when no run has started or the
+        facility-local time is before 7:00 a.m. This read is manager-only; the
+        swap endpoint rechecks all conditions transactionally.
+      parameters:
+        - name: sourceDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: destinationDate
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Schedule presence and current swap eligibility
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [today, sourceScheduled, destinationScheduled, canSwap, reason]
+                properties:
+                  today: { type: string, format: date }
+                  sourceScheduled: { type: boolean }
+                  destinationScheduled: { type: boolean }
+                  canSwap: { type: boolean }
+                  reason:
+                    type: [string, "null"]
+                    enum: [today-started-after-6am, null]
+        "400": { description: Invalid date range }
+        "403": { description: Manager schedule capability required }
+        "500": { description: Eligibility could not be determined }
+    post:
+      operationId: swapSyncScheduleDays
+      tags: [sync]
+      summary: Atomically exchange two date-scoped schedules
+      description: >-
+        Exchanges run metadata, values, per-run stamps, packaging progress,
+        timers, automatic-tracking state and date-specific settings. Factory-wide
+        data remains attached to its original date. Both canonical revisions,
+        scope, reset epoch and the today eligibility rule are checked under
+        transaction locks before either date is written. Rejected or stale
+        requests leave both dates unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduledDaySwapRequest" }
+      responses:
+        "200":
+          description: Both schedule dates were swapped and their outbox events committed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [swapped, sourceRevision, destinationRevision, sourceSnapshotId, destinationSnapshotId]
+                properties:
+                  swapped: { type: boolean, const: true }
+                  sourceRevision: { type: integer, minimum: 0 }
+                  destinationRevision: { type: integer, minimum: 0 }
+                  sourceSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+                  destinationSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        "400": { description: "Invalid dates, revisions, or reset epoch" }
+        "403": { description: Manager schedule capability required }
+        "404": { description: One or both schedule dates no longer exist }
+        "409": { description: "Reset, revision, or today-swap eligibility conflict" }
+        "500": { description: Swap outcome may require canonical date refresh }
+
   /sync/today:
     get:
       operationId: getSyncToday
@@ -6751,6 +6861,94 @@ paths:
         "400":
           description: Invalid cursor
 
+  /import-gold/approvals:
+    get:
+      operationId: listImportGoldApprovals
+      tags: [specImport]
+      description: Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture.
+      parameters:
+        - name: before
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: recordRef
+          in: query
+          schema: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+          description: Exact opaque approval reference, filtered on the server within the authenticated scope.
+      responses:
+        "200":
+          description: At most 50 scoped approval records, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalsResponse" }
+        "400": { description: Invalid cursor }
+        "403": { description: Role or capability denied }
+    post:
+      operationId: createImportGoldApproval
+      tags: [specImport]
+      description: Create immutable pending metadata only. Never submit workbook data, names, locations, or approval documents. References identify evidence retained in a separate restricted system. Creation is not verification or enablement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldApprovalInput" }
+      responses:
+        "201":
+          description: Pending record created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalResponse" }
+        "400": { description: Invalid or incomplete metadata }
+        "403": { description: Role or capability denied }
+        "409": { description: "This source, type and reference already exist" }
+  /import-gold/approvals/{id}/verification:
+    post:
+      operationId: verifyImportGoldApproval
+      tags: [specImport]
+      description: Explicit authorized human attestation that referenced private evidence was reviewed. Records current actor and server time, not an independent automated privacy review. Does not enable capture.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldApprovalReview" }
+      responses:
+        "200":
+          description: Verification saved or already present.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalResponse" }
+        "400": { description: Invalid review confirmation }
+        "403": { description: Role or capability denied }
+        "404": { description: Record absent in current scope }
+        "409": { description: "Expired, revoked or incomplete" }
+  /import-gold/approvals/{id}/revocation:
+    post:
+      operationId: revokeImportGoldApproval
+      tags: [specImport]
+      description: Permanently revoke an approval. Audit and metadata are retained; future captures cannot use it. Requires current Manager or QC Manager role and manage-staff or manage-qc capability.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldApprovalReview" }
+      responses:
+        "200":
+          description: Revoked or already revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalResponse" }
+        "400": { description: Invalid review confirmation }
+        "403": { description: Role or capability denied }
+        "404": { description: Record absent in current scope }
   /import-gold/config:
     get:
       operationId: getImportGoldConfig
@@ -6763,6 +6961,64 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ImportGoldConfig" }
         "403": { description: Manager capability required }
+  /import-gold/local-scoring:
+    patch:
+      operationId: setImportGoldLocalScoring
+      tags: [specImport]
+      summary: Enable or disable app-side local scoring in a development workspace
+      description: This setting does not enable real-source capture approvals, Gemini, or the private evaluator workflow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldLocalScoringRequest" }
+      responses:
+        "200":
+          description: Development-scoped local scoring setting saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldLocalScoringResponse" }
+        "400": { description: Invalid setting }
+        "403": { description: Manager capability required }
+        "404": { description: Development-only setting is unavailable }
+  /import-gold/synthetic-review:
+    get:
+      operationId: getImportGoldSyntheticReview
+      tags: [specImport]
+      summary: Read the fixed development-only synthetic evaluation sample
+      responses:
+        "200":
+          description: Fixed synthetic sample for human review; contains no customer workbook data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldSyntheticReview" }
+        "403": { description: Manager capability required }
+        "404": { description: Development-only fixture is unavailable }
+  /import-gold/synthetic-apply:
+    post:
+      operationId: applyImportGoldSyntheticReview
+      tags: [specImport]
+      summary: Apply the reviewed fixed synthetic sample to the development evaluation lab
+      description: Creates an idempotent synthetic evaluation case only and does not change recipes, inventory, or real-source approval settings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldSyntheticApplyRequest" }
+      responses:
+        "200":
+          description: Existing sample case returned without duplication
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldSyntheticApplyResponse" }
+        "201":
+          description: Synthetic sample case created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldSyntheticApplyResponse" }
+        "400": { description: Review confirmation or fixture version is invalid }
+        "403": { description: Manager capability required }
+        "404": { description: Development-only fixture is unavailable }
   /import-gold/cases:
     get:
       operationId: listImportGoldCases
@@ -6779,6 +7035,96 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ImportGoldCasesResponse" }
         "403": { description: Manager capability required }
+  /import-gold/cleanup-cases:
+    get:
+      operationId: listImportGoldCleanupCases
+      tags: [specImport]
+      summary: List minimal scoped case metadata when cleanup-only mode is enabled
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 512 }
+          description: Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
+      responses:
+        "200":
+          description: Bounded case identifiers for cleanup; case and score contents are not returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldCleanupCasesResponse" }
+        "403": { description: Manager capability required }
+        "404": { description: Cleanup-only mode is unavailable }
+        "400": { description: Invalid or cross-scope cleanup cursor }
+  /import-gold/cleanup-cases/{id}:
+    delete:
+      operationId: deleteImportGoldCleanupCase
+      tags: [specImport]
+      summary: Delete one scoped case and its score history in cleanup-only mode
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "204": { description: "Case and score history deleted; audit evidence contains only actor, scope, case ID, and time" }
+        "400": { description: Invalid case identity }
+        "403": { description: Manager capability required }
+        "404": { description: Cleanup-only mode unavailable or case not found in the current scope }
+  /import-gold/retention:
+    get:
+      operationId: listImportGoldRetention
+      tags: [specImport]
+      summary: List scoped Gold Lab deadlines for Managers and QC Managers
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, maximum: 10000, default: 0 }
+        - in: query
+          name: status
+          description: Return only records with this current retention status; filtering is applied before pagination.
+          schema: { $ref: "#/components/schemas/ImportGoldRetentionStatus" }
+        - in: query
+          name: revision
+          description: Pass the first page's revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Capture deadlines and manual application-deletion verification metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldRetentionResponse" }
+        "400": { description: Invalid pagination or retention status }
+        "403": { description: Manager or QC Manager role required }
+        "409":
+          description: Register changed since the supplied revision; restart pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+  /import-gold/retention/{caseId}/verification:
+    post:
+      operationId: recordImportGoldDeletionVerification
+      tags: [specImport]
+      summary: Record manual verification for Managers and QC Managers
+      parameters:
+        - in: path
+          name: caseId
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Existing or newly recorded verification
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldDeletionVerification" }
+        "403": { description: Manager or QC Manager role required }
+        "404": { description: Retention record not found in the current scope }
+        "409": { description: The application case still exists or verification could not be recorded }
   /import-gold/cases/{id}/exclusion:
     patch:
       operationId: setImportGoldCaseExclusion
@@ -7645,9 +7991,10 @@ components:
         goldCapture:
           type: object
           description: Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
-          required: [input]
+          required: [input, approvalId]
           additionalProperties: false
           properties:
+            approvalId: { type: integer, minimum: 1, description: "Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference." }
             input: { type: object, maxProperties: 2 }
         sourceEvidence:
           type: object
@@ -7661,15 +8008,142 @@ components:
           type: object
           description: Reviewed entity batches keyed by supported master-data domain.
           additionalProperties: true
+    ImportGoldOpaqueReference:
+      type: string
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$"
+      description: Opaque identifier only, never a URL, name, file path, email or private document text.
+    ImportGoldApprovalInput:
+      type: object
+      additionalProperties: false
+      required: [recordRef, sourceDigest, importType, purpose, ownerRef, ownerApprovedAt, privacyStatus, privacyReviewerRef, privacyReviewedAt, conditionsRef, externalCopiesRef, backupHandlingRef, manualDeletionAccepted, retentionDays, conditionsSatisfied, validUntil]
+      properties:
+        recordRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        sourceDigest:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+          description: SHA-256 of evaluation input JSON with recursively sorted object keys and original array order. Not a workbook-file hash and not approval evidence.
+        importType: { type: string, enum: [spec, premix, cheese] }
+        purpose: { type: string, enum: [local_spec_import_accuracy] }
+        ownerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        ownerApprovedAt: { type: string, format: date-time }
+        privacyStatus: { type: string, enum: [approved, not_required] }
+        privacyReviewerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        privacyReviewedAt: { type: string, format: date-time }
+        conditionsRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        externalCopiesRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        backupHandlingRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        manualDeletionAccepted:
+          type: boolean
+          enum: [true]
+          description: Human confirms manual deletion within 30 days or earlier on owner request, covering cases, scores and evaluation working copies. Backups require separately documented handling.
+        retentionDays: { type: integer, enum: [30] }
+        conditionsSatisfied: { type: boolean, enum: [true] }
+        validUntil: { type: string, format: date-time }
+    ImportGoldApproval:
+      type: object
+      required: [id, scope, recordRef, sourceDigest, importType, purpose, ownerRef, ownerApprovedAt, privacyStatus, privacyReviewerRef, privacyReviewedAt, conditionsRef, externalCopiesRef, backupHandlingRef, manualDeletionAccepted, retentionDays, conditionsSatisfied, validUntil, createdBy, createdAt, verifiedBy, verifiedAt, revokedBy, revokedAt]
+      properties:
+        id: { type: integer }
+        scope: { type: string }
+        recordRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        sourceDigest: { type: string, pattern: "^[a-f0-9]{64}$" }
+        importType: { type: string, enum: [spec, premix, cheese] }
+        purpose: { type: string, enum: [local_spec_import_accuracy] }
+        ownerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        ownerApprovedAt: { type: string, format: date-time }
+        privacyStatus: { type: string, enum: [approved, not_required] }
+        privacyReviewerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        privacyReviewedAt: { type: string, format: date-time }
+        conditionsRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        externalCopiesRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        backupHandlingRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        manualDeletionAccepted: { type: boolean, enum: [true] }
+        retentionDays: { type: integer, enum: [30] }
+        conditionsSatisfied: { type: boolean, enum: [true] }
+        validUntil: { type: string, format: date-time }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        verifiedBy: { type: string, nullable: true }
+        verifiedAt: { type: string, format: date-time, nullable: true }
+        revokedBy: { type: string, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    ImportGoldApprovalReview:
+      type: object
+      additionalProperties: false
+      required: [reviewed]
+      properties:
+        reviewed: { type: boolean, enum: [true] }
+    ImportGoldApprovalResponse:
+      type: object
+      required: [approval]
+      properties:
+        approval: { $ref: "#/components/schemas/ImportGoldApproval" }
+    ImportGoldApprovalsResponse:
+      type: object
+      required: [approvals, nextBefore]
+      properties:
+        expiryReminders:
+          type: object
+          description: Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension.
+          required: [windowDays, expiringCount, asOf]
+          properties:
+            windowDays: { type: integer, enum: [7] }
+            expiringCount: { type: integer, minimum: 0 }
+            asOf: { type: string, format: date-time }
+        approvals:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/ImportGoldApproval" }
+        nextBefore: { type: integer, nullable: true }
     ImportGoldConfig:
       type: object
-      required: [enabled, localConfigured, geminiConfigured, retention, persistsAcrossFactoryPurge]
+      required: [enabled, cleanupEnabled, localConfigured, localAvailable, localScoringSwitchAvailable, localScoringEnabled, syntheticFixtureAvailable, geminiConfigured, retention, persistsAcrossFactoryPurge]
       properties:
         enabled: { type: boolean }
+        cleanupEnabled: { type: boolean, description: True only when explicitly configured and source approvals are disabled }
         localConfigured: { type: boolean }
+        localAvailable: { type: boolean }
+        localScoringSwitchAvailable: { type: boolean }
+        localScoringEnabled: { type: boolean }
+        syntheticFixtureAvailable: { type: boolean }
         geminiConfigured: { type: boolean }
         retention: { type: string }
         persistsAcrossFactoryPurge: { type: boolean }
+    ImportGoldLocalScoringRequest:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean }
+    ImportGoldLocalScoringResponse:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    ImportGoldSyntheticReview:
+      type: object
+      required: [fixtureVersion, importType, sourceLabel, input, expectedResult, applyEffect]
+      properties:
+        fixtureVersion: { type: string }
+        importType: { type: string, enum: [premix] }
+        sourceLabel: { type: string }
+        input: { type: object, additionalProperties: true }
+        expectedResult: { type: object, additionalProperties: true }
+        applyEffect: { type: string }
+    ImportGoldSyntheticApplyRequest:
+      type: object
+      required: [fixtureVersion, reviewed]
+      additionalProperties: false
+      properties:
+        fixtureVersion: { type: string, enum: [synthetic-mix-v1] }
+        reviewed: { type: boolean, enum: [true] }
+    ImportGoldSyntheticApplyResponse:
+      type: object
+      required: [caseId, created]
+      properties:
+        caseId: { type: integer, minimum: 1 }
+        created: { type: boolean }
     ImportGoldScoreRequest:
       type: object
       required: [provider]
@@ -7726,6 +8200,53 @@ components:
         cases:
           type: array
           items: { $ref: "#/components/schemas/ImportGoldCase" }
+    ImportGoldCleanupCase:
+      type: object
+      required: [id, importType, createdAt]
+      properties:
+        id: { type: integer, minimum: 1 }
+        importType: { type: string, enum: [spec, premix, cheese] }
+        createdAt: { type: string, format: date-time }
+    ImportGoldCleanupCasesResponse:
+      type: object
+      required: [cases, nextCursor]
+      properties:
+        nextCursor:
+          type: [string, "null"]
+          description: Cursor for older cases, or null when the scoped inventory ends.
+        cases:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldCleanupCase" }
+    ImportGoldRetentionStatus:
+      type: string
+      enum: [within_limit, due_soon, overdue, deletion_incomplete, verification_needed, verified]
+    ImportGoldRetentionRecord:
+      type: object
+      required: [caseId, capturedAt, deleteBy, status, verifiedAt, verifiedBy]
+      properties:
+        caseId: { type: integer, minimum: 1 }
+        capturedAt: { type: string, format: date-time }
+        deleteBy: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/ImportGoldRetentionStatus" }
+        verifiedAt: { type: string, format: date-time, nullable: true }
+        verifiedBy: { type: string, nullable: true }
+    ImportGoldRetentionResponse:
+      type: object
+      required: [records, hasMore, nextOffset, revision]
+      properties:
+        revision: { type: string, pattern: "^[a-f0-9]{64}$" }
+        records:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldRetentionRecord" }
+        hasMore: { type: boolean }
+        nextOffset: { type: integer, nullable: true }
+    ImportGoldDeletionVerification:
+      type: object
+      required: [caseId, verifiedAt, verifiedBy]
+      properties:
+        caseId: { type: integer, minimum: 1 }
+        verifiedAt: { type: string, format: date-time }
+        verifiedBy: { type: string }
     ImportGoldScoreResponse:
       type: object
       required: [results, scoredCount, errorCount]
@@ -8650,6 +9171,39 @@ components:
           properties:
             resetEpoch: { type: integer, minimum: 0 }
             rollover: { type: boolean }
+
+    ScheduledRunMoveRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceDate, destinationDate, sourceRevision, destinationRevision, resetEpoch, runIds]
+      properties:
+        sourceDate: { type: string, format: date }
+        destinationDate: { type: string, format: date }
+        sourceRevision: { type: integer, minimum: 0 }
+        destinationRevision: { type: integer, minimum: 0 }
+        resetEpoch: { type: integer, minimum: 0 }
+        senderId: { type: string, maxLength: 160 }
+        runIds:
+          oneOf:
+            - type: string
+              const: all
+            - type: array
+              minItems: 1
+              maxItems: 100
+              uniqueItems: true
+              items: { type: string, minLength: 1, maxLength: 160, pattern: "^[A-Za-z0-9:_-]+$" }
+
+    ScheduledDaySwapRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceDate, destinationDate, sourceRevision, destinationRevision, resetEpoch]
+      properties:
+        sourceDate: { type: string, format: date }
+        destinationDate: { type: string, format: date }
+        sourceRevision: { type: integer, minimum: 0 }
+        destinationRevision: { type: integer, minimum: 0 }
+        resetEpoch: { type: integer, minimum: 0 }
+        senderId: { type: string, maxLength: 160 }
 
     SyncWriteRequest:
       type: object
@@ -10645,7 +11199,12 @@ components:
       type: object
       required:
         - capabilities
+        - expectedRole
       properties:
+        expectedRole:
+          allOf:
+            - $ref: "#/components/schemas/RoleDefinition"
+          description: Reviewed role baseline. A stale baseline is rejected without overwriting newer permissions. Older callers without a baseline must refresh before editing.
         capabilities:
           type: array
           items:
@@ -14805,6 +15364,12 @@ components:
             $ref: "#/components/schemas/NamedRecipeComponent"
         enabled:
           type: boolean
+        isPremadeCrust:
+          type: boolean
+          description: >-
+            Dough recipes only. Manager-controlled classification for a
+            premade crust that does not require an in-house dough formula.
+            Omit on older-client updates to preserve the stored classification.
         brand:
           type: string
           description: >-

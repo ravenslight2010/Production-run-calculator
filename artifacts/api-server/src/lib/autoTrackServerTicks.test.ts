@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeSauceRunRequirement, computeServerCalc } from "@workspace/live-calc";
 import { buildNetSecondServerClaims, buildWallClockServerClaims } from "./autoTrackServerTicks";
 import { applyAutoTrackClaim, parseAutoTrackClaim } from "./autoTrackCoordination";
+import { buildServerWallClockPlans, fitServerWallClockPlans } from "./serverWallClockPlans";
 
 const NOW = 1_800_000_000_000;
 const RUN = "server-tick-run";
@@ -33,6 +34,41 @@ function payload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("server auto-track claim builders", () => {
+  it.each([false, true])("continues an ended run's case-only drain after selection advances (next running: %s)", (nextRunning) => {
+    const source = payload({ freezerTime: 3 }) as any;
+    source.dayState.runs[0] = {
+      ...source.dayState.runs[0], startedAt: NOW - 360_000,
+      endedAt: NOW - 1_000, metaUpdatedAt: NOW - 1_000,
+    };
+    const next = "next-pending-run";
+    source.dayState.runs.push({ id: next, metaUpdatedAt: NOW, ...(nextRunning ? { startedAt: NOW } : {}) });
+    source.dayState.currentIndex = 1;
+    source.runValues[next] = {
+      ...source.runValues[RUN], casesOnCurrentSkid: 0,
+      approxLineSpeed: 0, crustsPerCycle: 0, cycleSpeed: 0,
+    };
+    const armed = buildServerWallClockPlans(source, NOW, "drain");
+    const prior = armed.find((plan) => plan.runId === RUN)!;
+    expect(prior).toBeDefined();
+    source.autoTrackServerState = { wallClockBookkeeping: { [RUN]: prior.bookkeeping } };
+    const plans = buildServerWallClockPlans(source, NOW + 2_000, "drain");
+    const claim = plans.find((plan) => plan.runId === RUN)!.claims.find((claim) => claim.channel === "case")!;
+    expect(claim).toBeDefined();
+    expect(plans.flatMap((plan) => plan.claims).every((claim) => claim.channel === "case")).toBe(true);
+    const applied = applyAutoTrackClaim(source, claim, NOW + 2_000);
+    expect(applied.outcome).toBe("accepted");
+    expect((applied.data.packagingProgress as Record<string, { casesOnCurrentSkid: number }>)[RUN].casesOnCurrentSkid).toBeGreaterThan(0);
+    expect((applied.data.dayState as typeof source.dayState).currentIndex).toBe(1);
+    expect(source.runValues[next].casesOnCurrentSkid).toBe(0);
+    expect(applyAutoTrackClaim(applied.data, claim, NOW + 2_000).outcome).toBe("duplicate");
+    expect(fitServerWallClockPlans(plans, 0).flatMap((plan) => plan.claims)).toHaveLength(0);
+    expect(fitServerWallClockPlans(plans, 1).flatMap((plan) => plan.claims)).toHaveLength(1);
+    expect(buildServerWallClockPlans(source, NOW + 180_000, "expired")
+      .some((plan) => plan.runId === RUN)).toBe(false);
+    source.dayState.runs[0].autoTrackDisabled = true;
+    expect(buildServerWallClockPlans(source, NOW + 2_000, "disabled")
+      .some((plan) => plan.runId === RUN)).toBe(false);
+  });
   it("keeps Dough, Sauce, and Frontline canonical channels eligible during a Packaging-only manual hold", () => {
     const source = payload({
       freezerTime: 0.5, preTunnelMin: 0.5, postTunnelMin: 0.5,

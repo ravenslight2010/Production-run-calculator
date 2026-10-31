@@ -10,7 +10,7 @@ name = "API Server"
 paths = ["/api"]
 
 [services.development]
-run = "pnpm --filter @workspace/api-server run dev"
+run = "bash ../../scripts/src/run-project-pnpm.sh --filter @workspace/api-server run dev"
 
 [services.env]
 PORT = "8080"
@@ -18,14 +18,14 @@ PORT = "8080"
 [services.production]
 
 [services.production.build]
-args = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
+args = ["bash", "scripts/src/run-project-pnpm.sh", "--filter", "@workspace/api-server", "run", "build"]
 
 [services.production.build.env]
 NODE_ENV = "production"
 
 [services.production.run]
 # Apply raw SQL protections before the API can report readiness.
-args = ["sh", "-c", "pnpm --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
+args = ["sh", "-c", "bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
 
 [services.production.run.env]
 PORT = "8080"

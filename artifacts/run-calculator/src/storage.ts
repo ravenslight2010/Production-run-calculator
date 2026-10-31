@@ -57,6 +57,7 @@ import {
   type RecipeRow,
   type CrustField,
 } from "./types";
+import { isDayStatePersistenceBlocked } from "./adapters/dayStatePersistenceFence";
 import { normalizeDayBreaks } from "./dayTimeline";
 import { queueCompletedRun, loadCompletedHistoryForActiveScope } from "./completedHistorySync";
 import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
@@ -940,6 +941,7 @@ export function profileWritesEnabled(): boolean {
 
 export type SaveProfileOptions = {
   authoritative?: boolean;
+  subTab?: "dough" | "crusts";
 };
 
 export function saveProfile(
@@ -977,6 +979,10 @@ export function saveProfile(
       }
     }
   } catch {}
+
+  if (options.subTab) {
+    dough = JSON.stringify({ ...JSON.parse(dough), _subTab: options.subTab });
+  }
 
   // Change detection — profiles are now a factory-wide server pool with
   // per-profile last-write-wins stamps, so an unchanged nav-save must not mint
@@ -1023,8 +1029,8 @@ export function saveProfile(
   if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
   if (!profileSyncSuppressed) {
-    if (options.authoritative) markProfileForceEdited(key);
-    else markProfileEdited(key);
+    if (options.authoritative) markProfileForceEdited(key, { brand, flavor });
+    else markProfileEdited(key, { brand, flavor });
   }
   return true;
 }
@@ -1038,13 +1044,14 @@ export async function saveProfileAndWaitForServer(
   brand: string,
   flavor: string,
   values: FormValues,
+  options: Pick<SaveProfileOptions, "subTab"> = {},
 ): Promise<"saved" | "unchanged"> {
   const key = canonicalProfileKey(brand, flavor);
-  const changed = saveProfile(brand, flavor, values, { authoritative: true });
+  const changed = saveProfile(brand, flavor, values, { ...options, authoritative: true });
   // If a previous attempt failed after writing the same local values, promote
   // its pending plain operation to an authoritative manager write so Retry
   // does not get mistaken for an unchanged form.
-  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key);
+  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key, { brand, flavor });
   if (!changed && !hasPendingProfileWrite(key)) return "unchanged";
   await flushProfileQueueStrict();
   return "saved";
@@ -1066,22 +1073,41 @@ export function saveProfileSubTab(
   flavor: string,
   subTab: "dough" | "crusts",
 ): void {
-  if (!brand && !flavor) return;
+  if (!profileWritesAllowed || (!brand && !flavor)) return;
   const profileKey = canonicalProfileKey(brand, flavor);
-  try { localStorage.setItem(profileKey + ":subtab", subTab); } catch {}
+  const raw = readProfileBlob(profileKey, "dough");
+  // A mode toggle must not resurrect a deleted profile or invent a setup stub.
+  if (!raw) return;
+  const profile = JSON.parse(raw) as Record<string, unknown>;
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return;
+  if (!profileCacheIsActive()) {
+    try { localStorage.setItem(profileKey + ":subtab", subTab); } catch {}
+  }
+  if (profile._subTab === subTab) return;
+  writeProfileBlob(profileKey, "dough", JSON.stringify({ ...profile, _subTab: subTab }));
+  markProfileEdited(profileKey, { brand, flavor });
 }
 
 /**
  * Return the saved Line Type preference for a brand+flavor pair, or null when
  * none has been explicitly recorded (caller defaults to "dough").
  *
- * This is device navigation, not shared setup metadata.
+ * This is shared product setup. Prefer the authenticated profile cache; a
+ * previous identity's legacy fast-access key must never override server data.
  */
 export function loadProfileSubTab(
   brand: string,
   flavor: string,
 ): "dough" | "crusts" | null {
   const profileKey = canonicalProfileKey(brand, flavor);
+  const raw = readProfileBlob(profileKey, "dough");
+  if (raw) {
+    try {
+      const value = JSON.parse(raw)._subTab;
+      if (value === "dough" || value === "crusts") return value;
+    } catch { /* Invalid legacy metadata is not a saved default. */ }
+  }
+  if (profileCacheIsActive()) return null;
   try {
     const v = localStorage.getItem(profileKey + ":subtab");
     if (v === "dough" || v === "crusts") return v;
@@ -1113,8 +1139,9 @@ export function applyPackagingPatchToProfile(
       if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
     } catch {}
     for (const k of keys) existing[k] = patch[k];
-    writeProfileBlob(canonicalProfileKey(brand, flavor), "dough", JSON.stringify(existing));
-    markProfileEdited(canonicalProfileKey(brand, flavor));
+    const key = canonicalProfileKey(brand, flavor);
+    writeProfileBlob(key, "dough", JSON.stringify(existing));
+    markProfileEdited(key, { brand, flavor });
   } catch {}
 }
 
@@ -1291,9 +1318,11 @@ export function refreshProfilesFromNamedRecipes(
       const curRows = Array.isArray(obj[rowsField])
         ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
         : [];
-      // emptyRowsOnly: skip profiles that already have rows stored — the full
-      // diff path handles them when the pool actually changes.
-      if (opts?.emptyRowsOnly && curRows.length > 0) continue;
+      // Passive pool snapshots may fill missing/zero-only rows, but must not
+      // overwrite populated profile data. Explicit manager saves use the full
+      // replacement path without this option.
+      const curRowsAllZero = curRows.every((row) => !(Number(row.lbs) > 0));
+      if (opts?.emptyRowsOnly && curRows.length > 0 && !curRowsAllZero) continue;
       const rowsDiffer = !recipeRowsEqual(curRows, patch.rows);
 
       // Doughball weight is PER-FLAVOR (one family serves many flavors). Two
@@ -1331,7 +1360,7 @@ export function refreshProfilesFromNamedRecipes(
       if (weightDiffers) obj.targetDoughballWeight = effectiveWeight;
       if (trayDiffers) obj.doughballsPerTray = wantTray;
       writeProfileBlobEntry(entry, JSON.stringify(obj));
-      markProfileEdited(entry.key);
+      markProfileEdited(entry.key, { brand: profileBrand, flavor: profileFlavor });
       touched.push({ brand: profileBrand, flavor: profileFlavor });
     } catch {
       // Skip an unreadable profile — never let one bad row block the fan-out.
@@ -1350,8 +1379,8 @@ export function refreshProfilesFromNamedRecipes(
  * fields but not the row arrays) and on the one-time boot heal to correct
  * profiles that accumulated stale rows from earlier merges.
  *
- * @param opts.emptyRowsOnly  When true, skip slots that already have rows —
- *   safe for ongoing empty-row healing without overwriting valid data.
+ * @param opts.emptyRowsOnly  When true, update only empty or all-zero slots —
+ *   safe for passive pool refreshes without overwriting populated profile data.
  */
 export function refreshCheeseOrMixProfileRows(
   targetName: string,
@@ -1429,6 +1458,7 @@ export function loadDayState(): DayState {
 // adopted FROM a peer keep the peer's stamp instead of being re-claimed as a
 // local edit (which would defeat the newer-stamp-wins merge and start echo wars).
 export function saveDayState(ds: DayState, opts?: { stampMeta?: boolean }): void {
+  if (isDayStatePersistenceBlocked()) return;
   let toSave = ds;
   if (opts?.stampMeta !== false) {
     try { toSave = stampDayStateMeta(ds, loadDayState(), Date.now()); } catch {}

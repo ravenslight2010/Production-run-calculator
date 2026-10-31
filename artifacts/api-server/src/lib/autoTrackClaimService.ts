@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import type { Scope } from "./requestScope";
 import {
   applyAutoTrackClaim,
+  attachServerOwnedAutoTrackClaim,
   type AutoTrackClaim,
 } from "./autoTrackCoordination";
 import { emptySyncData } from "./syncContract";
@@ -179,6 +180,9 @@ export async function executeAutoTrackClaim(
         }
 
         const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
+        const canonicalData = applied.outcome === "accepted"
+          ? attachServerOwnedAutoTrackClaim(applied.data, claim, applied.channelState.updatedAt)
+          : applied.data;
         if (applied.outcome === "accepted" && /^app[1-4]-batch$/.test(claim.channel)) {
           const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
           if (mutation) {
@@ -208,18 +212,18 @@ export async function executeAutoTrackClaim(
         const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
         if (existing) {
           await tx.update(dailySyncTable)
-            .set({ data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) })
+            .set({ data: canonicalData as any, canonicalRevision, updatedAt: new Date(serverTime) })
             .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
         } else {
           await tx.insert(dailySyncTable)
-            .values({ date, scope, data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) });
+            .values({ date, scope, data: canonicalData as any, canonicalRevision, updatedAt: new Date(serverTime) });
         }
         await tx.insert(operationalIntentLedgerTable).values({
           scope,
           date,
           intentId: commandId,
           outcome: applied.outcome,
-          snapshot: applied.data as any,
+          snapshot: canonicalData as any,
           commandType: "auto-track",
           actorId: command.actorId,
           deviceId: command.deviceId,
@@ -237,7 +241,7 @@ export async function executeAutoTrackClaim(
             canonicalRevision,
           });
         }
-        return { ...applied, canonicalRevision, serverTime, duplicate: false };
+        return { ...applied, data: canonicalData, canonicalRevision, serverTime, duplicate: false };
       });
       break;
     } catch (error) {

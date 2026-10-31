@@ -22,12 +22,12 @@ afterEach(() => {
   toast.mockReset();
 });
 
-function auditResponse() {
+function auditResponse(action = "role_changed") {
   return new Response(JSON.stringify({
     logs: [{
       id: 1,
       actor: "manager",
-      action: "role_changed",
+      action,
       resource: "staff",
       changes: { outcome: "success" },
       createdAt: "2026-09-21T12:00:00.000Z",
@@ -46,6 +46,17 @@ function renderAuditLogCard() {
     </QueryClientProvider>,
   );
 }
+
+describe("AuditLogCard action labels", () => {
+  it("shows a manager-facing label for Gold Lab case deletions", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => auditResponse("import_gold_case_deleted")));
+
+    renderAuditLogCard();
+
+    expect(await screen.findByText("Gold Lab case deleted")).toBeTruthy();
+    expect(screen.queryByText("import_gold_case_deleted")).toBeNull();
+  });
+});
 
 describe("AuditLogCard PDF export", () => {
   it("uses newly applied date and row filters for the list and PDF", async () => {

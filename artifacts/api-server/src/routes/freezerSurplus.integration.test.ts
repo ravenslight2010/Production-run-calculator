@@ -772,7 +772,22 @@ describe("dated freezer surplus API", () => {
   it("requires authentication and preserves separate dated lots on reload", async () => {
     expect((await req(null, "GET", "/api/freezer-surplus")).status).toBe(401);
 
-    expect((await confirm(MANAGER)).status).toBe(201);
+    const concurrentQueryWarnings: string[] = [];
+    const onWarning = (warning: Error) => {
+      if (warning.message.includes("Calling client.query() when the client is already executing a query")) {
+        concurrentQueryWarnings.push(warning.message);
+      }
+    };
+    process.on("warning", onWarning);
+    let firstLotResponse: Awaited<ReturnType<typeof confirm>>;
+    try {
+      firstLotResponse = await confirm(MANAGER);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("warning", onWarning);
+    }
+    expect(concurrentQueryWarnings).toEqual([]);
+    expect(firstLotResponse.status).toBe(201);
     expect((await confirm(MANAGER, { productionDate: "2026-08-29", cases: 7 })).status).toBe(201);
     const loaded = await ledger();
     expect(loaded.lots).toHaveLength(2);

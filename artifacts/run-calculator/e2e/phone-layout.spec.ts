@@ -647,8 +647,9 @@ async function assertKeyboardReachable(
   page: Page,
   area: string,
   tabCount = 10,
+  scope?: Locator,
 ): Promise<void> {
-  const controls = page.locator(
+  const controls = (scope ?? page).locator(
     'button, input, select, textarea, [role="button"], [role="tab"]',
   ).filter({ visible: true });
   await expect(controls.first(), `${area} should expose a keyboard-reachable control`).toBeVisible();
@@ -663,6 +664,14 @@ async function assertKeyboardReachable(
       const style = window.getComputedStyle(element);
       return {
         tag: element.tagName,
+        id: element.id,
+        testId: element.getAttribute("data-testid"),
+        role: element.getAttribute("role"),
+        ariaLabel: element.getAttribute("aria-label"),
+        text: (element instanceof HTMLInputElement ? element.value : element.textContent ?? "")
+          .trim()
+          .replace(/\s+/g, " ")
+          .slice(0, 80),
         disabled: "disabled" in element && Boolean((element as HTMLButtonElement).disabled),
         left: rect.left,
         right: rect.right,
@@ -671,12 +680,26 @@ async function assertKeyboardReachable(
         outline: style.outlineStyle,
       };
     });
-    expect(focusGeometry, `${area} should retain a visible focused element`).not.toBeNull();
-    expect(focusGeometry?.disabled, `${area} should not focus disabled controls`).toBeFalsy();
-    expect(focusGeometry?.left, `${area} focus should remain on-screen`).toBeGreaterThanOrEqual(-1);
-    expect(focusGeometry?.right, `${area} focus should remain on-screen`).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
-    expect(focusGeometry?.top, `${area} focus should remain on-screen`).toBeGreaterThanOrEqual(-1);
-    expect(focusGeometry?.bottom, `${area} focus should remain on-screen`).toBeLessThanOrEqual((page.viewportSize()?.height ?? 0) + 1);
+    const focusSummary = focusGeometry
+      ? [
+          `${focusGeometry.tag.toLowerCase()}${focusGeometry.id ? `#${focusGeometry.id}` : ""}`,
+          focusGeometry.testId ? `[data-testid="${focusGeometry.testId}"]` : "",
+          focusGeometry.ariaLabel ? `[aria-label="${focusGeometry.ariaLabel}"]` : "",
+          focusGeometry.text ? `"${focusGeometry.text}"` : "",
+        ].filter(Boolean).join(" ")
+      : "no active element";
+    const remainsInScope = scope
+      ? await scope.evaluate((element) => element.contains(document.activeElement))
+      : undefined;
+    expect(focusGeometry, `${area} should retain a visible focused element after Tab ${i + 1}; active: ${focusSummary}`).not.toBeNull();
+    if (scope) {
+      expect(remainsInScope, `${area} focus should stay within its dialog after Tab ${i + 1}; active: ${focusSummary}`).toBe(true);
+    }
+    expect(focusGeometry?.disabled, `${area} should not focus disabled controls after Tab ${i + 1}; active: ${focusSummary}`).toBeFalsy();
+    expect(focusGeometry?.left, `${area} focus should remain on-screen after Tab ${i + 1}; active: ${focusSummary}`).toBeGreaterThanOrEqual(-1);
+    expect(focusGeometry?.right, `${area} focus should remain on-screen after Tab ${i + 1}; active: ${focusSummary}`).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
+    expect(focusGeometry?.top, `${area} focus should remain on-screen after Tab ${i + 1}; active: ${focusSummary}`).toBeGreaterThanOrEqual(-1);
+    expect(focusGeometry?.bottom, `${area} focus should remain on-screen after Tab ${i + 1}; active: ${focusSummary}`).toBeLessThanOrEqual((page.viewportSize()?.height ?? 0) + 1);
   }
 }
 
@@ -1327,7 +1350,15 @@ test.describe("phone layout smoke", () => {
       // mistaken for a separate obstruction over its own dialog contents.
       skipModalOverlayCoverage: true,
     });
-    await assertKeyboardReachable(page, "narrow landscape manager settings", 12);
+    // The active modal is the workflow under test. Scoping avoids starting from
+    // off-screen controls behind the aria-modal overlay while retaining all
+    // twelve consecutive in-dialog keyboard stops.
+    await assertKeyboardReachable(
+      page,
+      "narrow landscape manager settings",
+      12,
+      page.getByRole("dialog", { name: "Manage Lists & Settings" }),
+    );
   });
 
   for (const viewport of [PHONE_VIEWPORTS[0], LANDSCAPE_VIEWPORT] as const) {
@@ -1991,7 +2022,15 @@ test.describe("phone layout smoke", () => {
           { brand: uniqueTestId("touch-picker-brand-a"), flavor: "Phone" },
           { brand: uniqueTestId("touch-picker-brand-b"), flavor: "Tablet" },
         ];
+        const canonicalProfiles = await page.request.get("/api/brand-profiles");
+        expect(canonicalProfiles.ok(), "touch picker profile epoch read").toBe(true);
+        const masterDataEpoch = canonicalProfiles.headers()["x-master-data-epoch"];
+        expect(masterDataEpoch, "touch picker profile seed epoch").toMatch(/^\d+$/);
         const profileSeed = await page.request.post("/api/brand-profiles", {
+          headers: {
+            "X-Client-Id": uniqueTestId("touch-picker-seed"),
+            "X-Master-Data-Epoch": masterDataEpoch,
+          },
           data: {
             items: pickerBrands.map(({ brand, flavor }) => ({
               key: `${brand.toLowerCase()}__${flavor.toLowerCase()}`,

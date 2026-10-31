@@ -60,7 +60,11 @@ function deleteCalls(): FetchCall[] {
   return calls.filter((c) => c.method === "DELETE");
 }
 
-function readQueue(): Array<{ t: string; key: string }> {
+function readQueue(): Array<{
+  t: string;
+  key: string;
+  displayIdentity?: { brand: string; flavor: string };
+}> {
   const raw = localStorage.getItem(scopeProfileCacheStorageKey(QUEUE_KEY));
   return raw ? JSON.parse(raw) : [];
 }
@@ -189,6 +193,54 @@ it("automatically retries owned offline edits on reconnect and detaches on clean
   window.dispatchEvent(new Event("focus"));
   await settle();
   expect(calls).toHaveLength(count);
+});
+
+it("retains profile display spelling in the persisted offline queue and retry", async () => {
+  networkDown = true;
+  setLocalBlobs(KEY, { targetCases: 17 });
+  markProfileEdited(KEY, { brand: "Acme", flavor: "Pepperoni" });
+  await settle();
+  expect(readQueue()[0]?.displayIdentity).toEqual({ brand: "Acme", flavor: "Pepperoni" });
+
+  networkDown = false;
+  await flushProfileQueue();
+  expect(readQueue()).toEqual([]);
+  expect(postCalls().at(-1)?.body).toMatchObject({
+    items: [{
+      key: KEY,
+      brand: "Acme",
+      flavor: "Pepperoni",
+      values: { targetCases: 17 },
+    }],
+  });
+});
+
+it("reuses the server display identity when an ordinary edit only has a canonical key", async () => {
+  listItems = [{
+    key: KEY,
+    brand: "Acme",
+    flavor: "Pepperoni",
+    values: { targetCases: 17 },
+    crustValues: {},
+    updatedAt: 10,
+  }];
+  await reconcileProfilesFromServer();
+
+  setLocalBlobs(KEY, { targetCases: 18 });
+  listItems = [{
+    key: KEY,
+    brand: "Acme",
+    flavor: "Pepperoni",
+    values: { targetCases: 18 },
+    crustValues: {},
+    updatedAt: 11,
+  }];
+  markProfileEdited(KEY);
+  await flushProfileQueue();
+
+  expect(postCalls().at(-1)?.body).toMatchObject({
+    items: [{ key: KEY, brand: "Acme", flavor: "Pepperoni" }],
+  });
 });
 
 it("does not retry or adopt a previous identity from its old lifecycle", async () => {

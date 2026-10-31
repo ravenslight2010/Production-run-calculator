@@ -20,6 +20,7 @@ vi.mock("@workspace/db", () => {
   const cheeseRecipesTable = table("cheeseRecipes");
   const mixesTable = table("mixes");
   return {
+    deferUntilDatabaseCommit: (_callback: () => void) => false,
     db: {
       select: () => ({
         from: (selected: { kind: string }) => ({

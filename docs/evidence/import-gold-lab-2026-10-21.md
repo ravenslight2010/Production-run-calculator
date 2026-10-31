@@ -79,6 +79,17 @@ rather than relying on `localhost` name resolution.
 
 Cases remain stored until a manager permanently deletes them. Exclusion only removes a case from scoring and JSONL export; it does not delete data. Cases and scores are isolated by current scope and intentionally survive ordinary daily reset and factory purge. Authorized managers must export or delete cases according to the retention authorization. No automatic purge is implied by export.
 
+When source approval is disabled, an authorized manager can use the separate
+cleanup-only interface only if `IMPORT_GOLD_CLEANUP_ENABLED=true`. It exposes
+case ID, import type, and creation time only, and deletes the scoped application
+case plus its score history. It does not expose case or score contents, enable
+capture/scoring/export, or restore the ordinary case-content APIs (including
+development-only synthetic review and scoring). It does not delete source
+workbooks, recall downloaded exports, or establish backup/evaluator-side
+erasure. Each successful cleanup records only the actor, scope, case ID, and
+time in the append-only audit log. The flag is off unless explicitly
+configured; this does not approve or enable real-source work.
+
 The local OpenAI-compatible scorer is optional and score-only; provider availability is not part of `/api/readyz`. Gemini comparison is also an explicit manager action when credentials are configured. Any proposal to route live imports through a provider or promote a model requires a separate owner decision and independent evaluation evidence.
 
 Implementation and automated tests use synthetic fixtures only. Integration tests use a test-only approval reference and `not_required` privacy status; they do not represent or grant customer approval. No real customer workbook was collected, captured, or sent to a provider for this change.

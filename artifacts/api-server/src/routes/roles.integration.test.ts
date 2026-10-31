@@ -54,7 +54,7 @@ const ALL_CAPS: Capability[] = [
 const ROLE_CAPS: Record<string, Capability[]> = {
   manager: [...ALL_CAPS],
   operator: [],
-  supervisor: ["review-incidents", "edit-production-rules"],
+  supervisor: ["review-incidents", "edit-production-rules", "approve-password-resets"],
   "qc-operator": ["use-ai-tools", "record-qc"],
   "qc-manager": ["use-ai-tools", "review-incidents", "manage-allergens", "record-qc", "manage-qc"],
   warehouse: [],
@@ -276,6 +276,17 @@ async function req(
   pathname: string,
   body?: unknown,
 ): Promise<Response> {
+  // Existing permission/rename assertions still exercise the real reviewed-edit
+  // contract. Concurrency tests supply their own intentionally old baseline.
+  if (method === "PUT" && pathname.startsWith("/api/roles/") && body && typeof body === "object"
+    && !("expectedRole" in body)) {
+    const current = await req(MANAGER, "GET", "/api/roles");
+    if (current.ok) {
+      const roles = await current.json() as Array<{ name: string }>;
+      const expectedRole = roles.find((role) => role.name === decodeURIComponent(pathname.slice("/api/roles/".length)));
+      body = { ...body, expectedRole };
+    }
+  }
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
   if (userId) headers["authorization"] = `Bearer ${signLegacyTokenForTests(userId)}`;
@@ -320,20 +331,33 @@ async function makeItem(key: string): Promise<number> {
 
 const validImage = "a".repeat(64);
 
-// Each gated route, tagged with the single capability it requires plus a body
-// and okStatus that would succeed once past the guard. The test derives expected
-// allow/deny for every role purely from whether the role holds `capability`.
+// Each gated route is tagged with its required capability or capabilities, plus
+// a body and okStatus that would succeed once past the guard. The test derives
+// expected allow/deny from whether a role holds every required capability.
 type GatedRoute = {
   name: string;
-  capability: Capability;
+  capability: Capability | readonly Capability[];
   method: string;
   path: (ctx: { itemId: number }) => string;
   body?: unknown;
   okStatus: number;
 };
 
+function routeCapabilities(
+  capability: Capability | readonly Capability[],
+): readonly Capability[] {
+  return typeof capability === "string" ? [capability] : capability;
+}
+
 const ROUTES: GatedRoute[] = [
   // --- manage-inventory ---
+  {
+    name: "POST /inventory/consume-day-start",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/inventory/consume-day-start",
+    okStatus: 200,
+  },
   {
     name: "POST /inventory/items",
     capability: "manage-inventory",
@@ -742,6 +766,14 @@ const ROUTES: GatedRoute[] = [
     okStatus: 400,
   },
   {
+    name: "POST /freezer-surplus/confirmations/:runId/corrections",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/freezer-surplus/confirmations/test-run/corrections",
+    body: {},
+    okStatus: 400,
+  },
+  {
     name: "POST /die-line-defaults",
     capability: "manage-inventory",
     method: "POST",
@@ -772,6 +804,30 @@ const ROUTES: GatedRoute[] = [
     path: () => "/api/factory-data",
     body: { key: "capability-coverage", value: true },
     okStatus: 200,
+  },
+  {
+    name: "POST /master-data-operations/:operationId/preview",
+    capability: ["manage-factory-settings", "manage-inventory", "manage-profiles"],
+    method: "POST",
+    path: () => "/api/master-data-operations/invalid/preview",
+    body: {},
+    okStatus: 400,
+  },
+  {
+    name: "POST /master-data-operations/:operationId/apply",
+    capability: ["manage-factory-settings", "manage-inventory", "manage-profiles"],
+    method: "POST",
+    path: () => "/api/master-data-operations/invalid/apply",
+    body: {},
+    okStatus: 400,
+  },
+  {
+    name: "POST /master-data-operations/:operationId/undo",
+    capability: ["manage-factory-settings", "manage-inventory", "manage-profiles"],
+    method: "POST",
+    path: () => "/api/master-data-operations/invalid/undo",
+    body: {},
+    okStatus: 400,
   },
   {
     name: "GET /sync/conflict-stats",
@@ -939,6 +995,13 @@ const ROUTES: GatedRoute[] = [
     path: () => "/api/ai-memory/health-check",
     okStatus: 200,
   },
+  {
+    name: "GET /background-operations/diagnostics",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/background-operations/diagnostics",
+    okStatus: 200,
+  },
 ];
 
 type ExpressRouteLayer = {
@@ -948,6 +1011,16 @@ type ExpressRouteLayer = {
     stack: Array<{ handle: unknown }>;
   };
 };
+
+// This handler revalidates a persisted session inside its database transaction.
+// Its manager allow/staff deny behavior is covered by the dedicated session-backed
+// masterDataOperations.integration.test.ts, not this legacy-token role matrix.
+const SESSION_BACKED_AUTHORIZATION_COVERAGE: Array<{
+  name: string;
+  capability: Capability;
+}> = [
+  { name: "GET /master-data-operations", capability: "manage-factory-settings" },
+];
 
 function declaredAuthorizationRoutes(
   ownedRouters: readonly {
@@ -1004,11 +1077,97 @@ const USER_BY_ROLE: Record<string, string> = {
   inventory: INVENTORY,
 };
 
+describe("role definition concurrency and atomic audit", () => {
+  it("accepts one concurrent reviewed edit and rejects the stale writer without losing permissions", async () => {
+    const created = await req(MANAGER, "POST", "/api/roles", {
+      name: "reviewed-concurrent-role", capabilities: [],
+    });
+    expect(created.status).toBe(201);
+    const expectedRole = await created.json() as { name: string; builtin: boolean; capabilities: string[] };
+    const results = await Promise.all([
+      req(MANAGER, "PUT", "/api/roles/reviewed-concurrent-role", {
+        expectedRole, capabilities: ["manage-inventory"],
+      }),
+      req(MANAGER, "PUT", "/api/roles/reviewed-concurrent-role", {
+        expectedRole, capabilities: ["review-incidents"],
+      }),
+    ]);
+    expect(results.map((response) => response.status).sort()).toEqual([200, 409]);
+    const accepted = await results.find((response) => response.status === 200)!.json() as {
+      capabilities: string[];
+    };
+    const roleResponse = await req(MANAGER, "GET", "/api/roles");
+    const roles = await roleResponse.json() as Array<{ name: string; capabilities: string[] }>;
+    expect(roles.find((role) => role.name === expectedRole.name)?.capabilities).toEqual(accepted.capabilities);
+    const events = (await auditLogs()).logs.filter((event) =>
+      event.action === "role_definition_updated" && event.resource === `role:${expectedRole.name}`,
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].actor).toBe(MANAGER);
+    expect(events[0].changes).toMatchObject({
+      beforeCapabilities: [], afterCapabilities: accepted.capabilities,
+      beforeName: expectedRole.name, afterName: expectedRole.name, outcome: "updated",
+    });
+  });
+
+  it("fails closed for an older caller without a reviewed baseline", async () => {
+    // Raw fetch intentionally does not use the convenience baseline fixture.
+    const response = await fetch(`${baseUrl}/api/roles/warehouse`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
+      },
+      body: JSON.stringify({ capabilities: ["manage-inventory"] }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("rolls back both a role rename and its evidence when audit insertion fails", async () => {
+    const created = await req(MANAGER, "POST", "/api/roles", {
+      name: "reviewed-audit-rollback", capabilities: ["manage-inventory"],
+    });
+    expect(created.status).toBe(201);
+    const expectedRole = await created.json() as { name: string; builtin: boolean; capabilities: string[] };
+    await db.execute(sql`CREATE FUNCTION role_audit_failure_fixture() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.action = 'role_definition_updated' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF;
+        RETURN NEW;
+      END $$`);
+    await db.execute(sql`CREATE TRIGGER role_audit_failure_fixture BEFORE INSERT ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION role_audit_failure_fixture()`);
+    try {
+      const response = await req(MANAGER, "PUT", "/api/roles/reviewed-audit-rollback", {
+        expectedRole, name: "reviewed-audit-new-name", capabilities: [],
+      });
+      expect(response.status).toBe(500);
+      const roleResponse = await req(MANAGER, "GET", "/api/roles");
+      const roles = await roleResponse.json() as Array<{ name: string; capabilities: string[] }>;
+      expect(roles.find((role) => role.name === expectedRole.name)).toEqual(expectedRole);
+      expect(roles.find((role) => role.name === "reviewed-audit-new-name")).toBeUndefined();
+      expect((await auditLogs()).logs.filter((event) =>
+        event.action === "role_definition_updated" && event.resource === `role:${expectedRole.name}`,
+      )).toHaveLength(0);
+    } finally {
+      await db.execute(sql`DROP TRIGGER role_audit_failure_fixture ON audit_logs`);
+      await db.execute(sql`DROP FUNCTION role_audit_failure_fixture()`);
+    }
+  });
+});
+
 describe("capability-based access control", () => {
   it("keeps owned operations routes in the direct authorization inventory", async () => {
     const { directAuthorizationCoverageRouters } = await import("./index");
     const declared = declaredAuthorizationRoutes(directAuthorizationCoverageRouters);
-    const covered = ROUTES.map(({ name, capability }) => ({ name, capability }));
+    const covered = [
+      ...ROUTES.flatMap(({ name, capability }) =>
+        routeCapabilities(capability).map((requiredCapability) => ({
+          name,
+          capability: requiredCapability,
+        })),
+      ),
+      ...SESSION_BACKED_AUTHORIZATION_COVERAGE,
+    ];
 
     for (const route of declared.capabilityRoutes) {
       expect(covered, `${route.name} direct capability coverage`).toContainEqual(route);
@@ -1047,6 +1206,15 @@ describe("capability-based access control", () => {
     expect(mutationAuthorizationInventory).toContainEqual({
       method: "POST",
       path: "/freezer-surplus/confirmations",
+      ownership: "capability-gated",
+      scope: "scoped",
+      sandbox: "allowed",
+      capabilities: ["manage-inventory"],
+      capabilityMatch: "all",
+    });
+    expect(mutationAuthorizationInventory).toContainEqual({
+      method: "POST",
+      path: "/freezer-surplus/confirmations/:runId/corrections",
       ownership: "capability-gated",
       scope: "scoped",
       sandbox: "allowed",
@@ -1229,15 +1397,16 @@ describe("capability-based access control", () => {
   });
 
   // Route guards and role-to-capability resolution are orthogonal: every route
-  // is exercised with one role that has its required capability and one that
+  // is exercised with one role that has all required capabilities and one that
   // does not, while the test above verifies the complete seeded role map.
   for (const route of ROUTES) {
-    it(`enforces the capability required by ${route.name}`, async () => {
+    it(`enforces the capability requirements for ${route.name}`, async () => {
       const itemId = await makeItem("ingredient:Target:lbs");
+      const requiredCapabilities = routeCapabilities(route.capability);
       const roleHasRequiredCapability = ([, caps]: [string, Capability[]]) =>
         route.name === "GET /import-history"
           ? caps.includes("manage-profiles") || caps.includes("manage-inventory")
-          : caps.includes(route.capability);
+          : requiredCapabilities.every((capability) => caps.includes(capability));
       const allowedRole =
         Object.entries(ROLE_CAPS).find(
           ([roleName, caps]) =>
@@ -1248,7 +1417,7 @@ describe("capability-based access control", () => {
       const deniedRole = Object.entries(ROLE_CAPS).find(([, caps]) =>
         route.name === "GET /import-history"
           ? !caps.includes("manage-profiles") && !caps.includes("manage-inventory")
-          : !caps.includes(route.capability)
+          : !requiredCapabilities.every((capability) => caps.includes(capability))
       )?.[0];
       if (!allowedRole || !deniedRole) {
         throw new Error(`Missing allow/deny role fixture for ${route.name}`);
@@ -1289,11 +1458,25 @@ describe("manager action queue manual resolution", () => {
     `);
 
     try {
-      const initialResponse = await req(
-        MANAGER,
-        "GET",
-        "/api/manager-action-queue?category=incident&status=all",
-      );
+      const concurrentQueryWarnings: string[] = [];
+      const onWarning = (warning: Error) => {
+        if (warning.message.includes("Calling client.query() when the client is already executing a query")) {
+          concurrentQueryWarnings.push(warning.message);
+        }
+      };
+      process.on("warning", onWarning);
+      let initialResponse: Awaited<ReturnType<typeof req>>;
+      try {
+        initialResponse = await req(
+          MANAGER,
+          "GET",
+          "/api/manager-action-queue?category=incident&status=all",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      } finally {
+        process.off("warning", onWarning);
+      }
+      expect(concurrentQueryWarnings).toEqual([]);
       expect(initialResponse.status).toBe(200);
       const initial = await initialResponse.json() as {
         items: Array<{ id: number; dedupKey: string; status: string; version: number }>;
@@ -1551,7 +1734,13 @@ describe("POST /ingredients/merge endpoint behavior", () => {
     expect(second.status).toBe(200);
 
     const body = (await second.json()) as {
-      items: Array<{ id: string; name: string; categories: string[]; enabled: boolean }>;
+      items: Array<{
+        id: string;
+        name: string;
+        categories: string[];
+        enabled: boolean;
+        updatedAt: number;
+      }>;
     };
     expect(body.items.filter((item) => item.enabled && item.name.toLowerCase() === "mozzarella")).toEqual([
       {
@@ -1562,6 +1751,7 @@ describe("POST /ingredients/merge endpoint behavior", () => {
         enabled: true,
         allergens: [],
         allergensReviewed: false,
+        updatedAt: expect.any(Number),
       },
     ]);
   });
@@ -2097,6 +2287,32 @@ describe("role administration", () => {
     expect(res.status).toBe(400);
   });
 
+  it("protects the last enabled manager when editing a custom role (400)", async () => {
+    await db.insert(rolesTable).values({
+      name: "solo-manager",
+      capabilities: ["manage-staff"],
+      builtin: false,
+    });
+    await db
+      .update(userRolesTable)
+      .set({ role: "solo-manager" })
+      .where(eq(userRolesTable.userId, MANAGER));
+
+    const res = await req(MANAGER, "PUT", "/api/roles/solo-manager", {
+      capabilities: [],
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringMatching(/last staff manager/i),
+    });
+
+    const [role] = await db
+      .select({ capabilities: rolesTable.capabilities })
+      .from(rolesTable)
+      .where(eq(rolesTable.name, "solo-manager"));
+    expect(role.capabilities).toEqual(["manage-staff"]);
+  });
+
   it("refuses to delete a built-in role (400)", async () => {
     const res = await req(MANAGER, "DELETE", "/api/roles/operator");
     expect(res.status).toBe(400);
@@ -2217,6 +2433,51 @@ describe("privilege-escalation guard", () => {
     expect(res.status).toBe(403);
   });
 
+  it("allows the junior-admin to remove a capability they hold from another role", async () => {
+    await db
+      .update(rolesTable)
+      .set({ capabilities: ["manage-staff", "manage-inventory"] })
+      .where(eq(rolesTable.name, "junior-admin"));
+    await db.insert(rolesTable).values({
+      name: "limited-admin",
+      capabilities: ["manage-staff", "manage-inventory"],
+      builtin: false,
+    });
+
+    const res = await req(OPERATOR, "PUT", "/api/roles/limited-admin", {
+      capabilities: ["manage-staff"],
+    });
+
+    expect(res.status).toBe(200);
+    const [role] = await db
+      .select({ capabilities: rolesTable.capabilities })
+      .from(rolesTable)
+      .where(eq(rolesTable.name, "limited-admin"));
+    expect(role.capabilities).toEqual(["manage-staff"]);
+  });
+
+  it("forbids the junior-admin from removing a capability they do not hold (403)", async () => {
+    await db.insert(rolesTable).values({
+      name: "ai-reviewer",
+      capabilities: ["use-ai-tools"],
+      builtin: false,
+    });
+
+    const res = await req(OPERATOR, "PUT", "/api/roles/ai-reviewer", {
+      capabilities: [],
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringMatching(/remove capabilities you don't have: use-ai-tools/i),
+    });
+
+    const [role] = await db
+      .select({ capabilities: rolesTable.capabilities })
+      .from(rolesTable)
+      .where(eq(rolesTable.name, "ai-reviewer"));
+    expect(role.capabilities).toEqual(["use-ai-tools"]);
+  });
+
   it("forbids the junior-admin assigning a role with capabilities they lack (403)", async () => {
     // qc-operator carries use-ai-tools, which junior-admin does not hold.
     const res = await req(OPERATOR, "PUT", `/api/users/${WAREHOUSE}/role`, {
@@ -2253,6 +2514,16 @@ describe("privilege-escalation guard", () => {
     expect(res.status).toBe(204);
   });
 });
+
+async function listEnabledManagerCount(): Promise<number> {
+  const managers = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
+    .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+    .where(sql`${usersTable.sandbox} = false AND ${usersTable.disabled} = false AND ${rolesTable.capabilities} ? 'manage-staff'`);
+  return managers.length;
+}
 
 describe("last-manager guard", () => {
   // The guard blocks demoting the only manager to ANY non-manager role, not just
@@ -2301,26 +2572,43 @@ describe("last-manager guard", () => {
     expect(row.role).toBe("operator");
   });
 
-  it("serializes concurrent final-manager disable attempts", async () => {
+  it("does not count a disabled manager when protecting the last enabled manager", async () => {
+    await db.insert(usersTable).values({
+      id: "disabled-manager",
+      username: "disabled-manager",
+      passwordHash: "x",
+      disabled: true,
+    });
+    await db.insert(userRolesTable).values({ userId: "disabled-manager", role: "manager" });
+
+    const res = await req(MANAGER, "PUT", `/api/users/${MANAGER}/role`, {
+      role: "operator",
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringMatching(/last staff manager/i),
+    });
+  });
+
+  it("serializes concurrent attempts to demote the final manager", async () => {
     await db.insert(usersTable).values({
       id: "manager-race-2",
       username: "manager-race-2",
       passwordHash: "x",
     });
     await db.insert(userRolesTable).values({ userId: "manager-race-2", role: "manager" });
+    expect(await listEnabledManagerCount()).toBe(2);
 
-    // Equal-privilege targets remain protected, even when requests arrive at
-    // the same time. The target must not be left disabled by either request.
+    // Two managers each try to demote the other. At most one demotion may
+    // commit, even if both requests pass authorization before either commits.
     const responses = await Promise.all([
-      req(MANAGER, "PATCH", `/api/users/manager-race-2/status`, { disabled: true }),
-      req("manager-race-2", "PATCH", `/api/users/${MANAGER}/status`, { disabled: true }),
+      req(MANAGER, "PUT", "/api/users/manager-race-2/role", { role: "operator" }),
+      req("manager-race-2", "PUT", `/api/users/${MANAGER}/role`, { role: "operator" }),
     ]);
-    expect(responses.map((response) => response.status).sort()).toEqual([403, 403]);
-    const rows = await db.select({ id: usersTable.id, disabled: usersTable.disabled })
-      .from(usersTable);
-    const relevant = rows.filter((row) => row.id === MANAGER || row.id === "manager-race-2");
-    expect(relevant).toHaveLength(2);
-    expect(relevant.every((row) => row.disabled === false)).toBe(true);
+    const statuses = responses.map((response) => response.status);
+    expect(statuses.filter((status) => status === 200)).toHaveLength(1);
+    expect(statuses.some((status) => status === 400 || status === 403)).toBe(true);
+    expect(await listEnabledManagerCount()).toBe(1);
   });
 
   it("rejects removing the only manager (DELETE /users/:id → 400)", async () => {
@@ -2352,9 +2640,53 @@ describe("last-manager guard", () => {
       .where(sql`${usersTable.id} = ${"manager-2"}`);
     expect(row).toBeUndefined();
   });
+
+  it("serializes concurrent manager deletions so one enabled manager remains", async () => {
+    await db.insert(usersTable).values({
+      id: "manager-delete-race-2",
+      username: "manager-delete-race-2",
+      passwordHash: "x",
+    });
+    await db.insert(userRolesTable).values({
+      userId: "manager-delete-race-2",
+      role: "manager",
+    });
+
+    const responses = await Promise.all([
+      req(MANAGER, "DELETE", `/api/users/${MANAGER}`),
+      req("manager-delete-race-2", "DELETE", "/api/users/manager-delete-race-2"),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([204, 400]);
+    expect(await listEnabledManagerCount()).toBe(1);
+  });
 });
 
 describe("staff account administration", () => {
+  it("preserves approved manage-staff-only deletion of a higher-capability account", async () => {
+    await db.insert(rolesTable).values({
+      name: "limited-staff-deleter",
+      capabilities: ["manage-staff"],
+      builtin: false,
+    });
+    await db.insert(usersTable).values({
+      id: "limited-staff-deleter",
+      username: "limited-staff-deleter",
+      passwordHash: "x",
+    });
+    await db.insert(userRolesTable).values({
+      userId: "limited-staff-deleter",
+      role: "limited-staff-deleter",
+    });
+
+    const response = await req(
+      "limited-staff-deleter",
+      "DELETE",
+      `/api/users/${MANAGER}`,
+    );
+    expect(response.status).toBe(204);
+    expect(await listEnabledManagerCount()).toBe(1);
+  });
+
   it("removes a staff member and cascades their role row (DELETE → 204)", async () => {
     const res = await req(MANAGER, "DELETE", `/api/users/${OPERATOR}`);
     expect(res.status).toBe(204);

@@ -1,13 +1,22 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { fetchImportGoldLocal, isImportGoldLocalConfigured } from "../lib/importGoldEndpoint";
-import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  fetchImportGoldLocal,
+  isImportGoldDevelopmentRuntime,
+  isImportGoldLocalAvailable,
+  isImportGoldLocalConfigured,
+} from "../lib/importGoldEndpoint";
+import { Router, type IRouter, type NextFunction, type Request, type Response } from "express";
+import { requireGoldRetentionCapability, requireGoldRetentionRole } from "../lib/importGoldAccess";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, not, or, sql } from "drizzle-orm";
 import {
   db,
+  factoryKvTable,
   importHistoryTable,
   importOperationsTable,
   importGoldCasesTable,
+  importGoldApprovalsTable,
+  importGoldRetentionTable,
   importGoldScoresTable,
   mixesTable,
   cheeseRecipesTable,
@@ -21,6 +30,14 @@ import {
 import { buildImportQcSummary } from "../lib/importQcSummary";
 import { IMPORT_SOURCE_RETENTION_MS } from "@workspace/db/schema";
 import { currentScope } from "../lib/requestScope";
+import { completeStoredGoldApproval, goldSourceDigest } from "../lib/importGoldApproval";
+import goldApprovalsRouter from "./importGoldApprovals";
+import {
+  IMPORT_GOLD_RETENTION_REMINDER_MS,
+  importGoldDeleteBy,
+  importGoldRetentionStatus,
+  type ImportGoldRetentionStatus,
+} from "../lib/importGoldRetention";
 import {
   buildRecipeQcCapture,
   lockRecipeQcFamily,
@@ -51,10 +68,52 @@ const MAX_EXPORT_PAGE_SIZE = 20;
 const MAX_GOLD_INPUT_BYTES = 100 * 1024;
 const MAX_GOLD_EXPECTED_BYTES = 200 * 1024;
 const MAX_GOLD_CASES = 100;
+const MAX_GOLD_RETENTION_PAGE_SIZE = 100;
+const MAX_GOLD_RETENTION_OFFSET = 10_000;
+const IMPORT_GOLD_RETENTION_STATUSES: ImportGoldRetentionStatus[] = [
+  "within_limit",
+  "due_soon",
+  "overdue",
+  "deletion_incomplete",
+  "verification_needed",
+  "verified",
+];
 const MAX_GOLD_SCORE_CASES = 3;
 const MAX_GOLD_DIFFS = 30;
 const MAX_GOLD_DIFF_VALUE_CHARS = 400;
 const GOLD_SOURCE_LABELS = { spec: "Spec import", premix: "Premix import", cheese: "Cheese import" } as const;
+const LOCAL_GOLD_SCORING_SETTING = "importGoldLocalScoringEnabled";
+const SYNTHETIC_GOLD_SOURCE_LABEL = "Synthetic local scoring fixture";
+const SYNTHETIC_GOLD_OPERATION_ID = "dev-synthetic-local-score:v1";
+const SYNTHETIC_GOLD_FIXTURE_VERSION = "synthetic-mix-v1";
+const SYNTHETIC_GOLD_FIXTURE = {
+  importType: "premix",
+  input: {
+    candidates: [{
+      name: "Synthetic Sample Mix",
+      brand: "Synthetic Brand",
+      flavor: "Synthetic Flavor",
+      batchSize: 4,
+      components: [
+        { ingredient: "Synthetic Flour", lbs: 2.5 },
+        { ingredient: "Synthetic Water", lbs: 1.5 },
+      ],
+    }],
+  },
+  expectedResult: {
+    mixes: [{
+      name: "Synthetic Sample Mix",
+      brand: "Synthetic Brand",
+      flavor: "Synthetic Flavor",
+      batchSize: 4,
+      components: [
+        { ingredient: "Synthetic Flour", lbs: 2.5 },
+        { ingredient: "Synthetic Water", lbs: 1.5 },
+      ],
+    }],
+  },
+} as const;
+router.use(goldApprovalsRouter);
 const TABLES = {
   mixes: { table: mixesTable, key: "id" },
   cheeseRecipes: { table: cheeseRecipesTable, key: "id" },
@@ -122,6 +181,16 @@ function importGoldEnabled(): boolean {
     (privacyReviewStatus === "approved" || privacyReviewStatus === "not_required");
 }
 
+function importGoldCleanupOnlyEnabled(): boolean {
+  return process.env.IMPORT_GOLD_CLEANUP_ENABLED === "true" && !importGoldEnabled();
+}
+
+function rejectImportGoldContentDuringCleanup(res: Response): boolean {
+  if (!importGoldCleanupOnlyEnabled()) return false;
+  res.status(404).json({ error: "Import Gold content operations are unavailable during cleanup-only mode" });
+  return true;
+}
+
 function jsonBytes(value: unknown): number {
   try { return Buffer.byteLength(JSON.stringify(value), "utf8"); } catch { return Number.POSITIVE_INFINITY; }
 }
@@ -164,7 +233,7 @@ function goldExpectedSnapshot(after: Record<string, unknown[]>, importType: stri
     brandProfiles: ["key", "brand", "flavor", "values", "crustValues"],
     mixes: ["name", "brand", "flavor", "batchSize", "daysEarly", "notes", "amountAlreadyMade", "components", "isPrep", "enabled"],
     cheeseRecipes: ["name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled"],
-    doughRecipes: ["name", "notes", "components", "enabled", "brand", "flavors", "doughballWeightOz", "doughballsPerTray", "doughballVariants"],
+    doughRecipes: ["name", "notes", "components", "enabled", "isPremadeCrust", "brand", "flavors", "doughballWeightOz", "doughballsPerTray", "doughballVariants"],
     sauceRecipes: ["name", "notes", "components", "enabled", "brand", "flavors"],
     freezerPullItems: ["ingredient", "freezerDaysEarly", "enabled"],
   };
@@ -233,12 +302,54 @@ function safeDiffValue(value: unknown): unknown {
     : value;
 }
 
-function parseGoldPrediction(content: unknown): Record<string, unknown> {
+function parseGoldPrediction(content: unknown, allowSingleObjectWrapper = false): Record<string, unknown> {
   if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_GOLD_EXPECTED_BYTES) {
     throw new Error("invalid_output");
   }
   let value: unknown;
-  try { value = JSON.parse(content); } catch { throw new Error("invalid_output"); }
+  try {
+    value = JSON.parse(content);
+  } catch {
+    if (!allowSingleObjectWrapper) throw new Error("invalid_output");
+    // The pinned local model can return one valid object inside a reasoning
+    // wrapper even with server-side reasoning disabled. Never guess between
+    // multiple objects; Gemini keeps the strict whole-response JSON contract.
+    const objectCandidates: string[] = [];
+    let depth = 0;
+    let objectStart = -1;
+    let inString = false;
+    let escaped = false;
+    let malformedBraces = false;
+    for (let index = 0; index < content.length; index += 1) {
+      const character = content.charAt(index);
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === "\"") inString = false;
+        continue;
+      }
+      if (character === "\"") {
+        inString = true;
+      } else if (character === "{") {
+        if (depth === 0) objectStart = index;
+        depth += 1;
+      } else if (character === "}") {
+        if (depth === 0) {
+          malformedBraces = true;
+          continue;
+        }
+        depth -= 1;
+        if (depth === 0 && objectStart >= 0) {
+          objectCandidates.push(content.slice(objectStart, index + 1));
+          objectStart = -1;
+        }
+      }
+    }
+    if (malformedBraces || depth !== 0 || objectCandidates.length !== 1) {
+      throw new Error("invalid_output");
+    }
+    try { value = JSON.parse(objectCandidates[0]!); } catch { throw new Error("invalid_output"); }
+  }
   if (!value || typeof value !== "object" || Array.isArray(value) || jsonBytes(value) > MAX_GOLD_EXPECTED_BYTES) {
     throw new Error("invalid_output");
   }
@@ -291,12 +402,12 @@ async function requestLocalGoldPrediction(input: Record<string, unknown>, import
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: process.env.IMPORT_GOLD_LOCAL_MODEL ?? "qwen3.5-9b-q3_k_m",
+      model: "qwen3.5-9b-q3_k_m",
       messages: [
-        { role: "system", content: `Score-only import evaluator. Extract a ${importType} import result from evaluatedInput. Return JSON matching the keys and value types in expectedShape; do not copy placeholder values. No prose, tools, or extra keys.` },
+        { role: "system", content: `Score-only import evaluator. Extract a ${importType} import result from evaluatedInput. Return exactly one JSON object matching the keys and value types in expectedShape; do not copy placeholder values. No reasoning tags, prose, Markdown, tools, or extra keys.` },
         { role: "user", content: JSON.stringify({ evaluatedInput: input, expectedShape: outputShape(expected) }) },
       ],
-      response_format: { type: "json_object" },
+      temperature: 0,
       max_tokens: 256,
       stream: false,
     }),
@@ -304,7 +415,7 @@ async function requestLocalGoldPrediction(input: Record<string, unknown>, import
   });
   if (!response.ok) throw new Error("provider_unavailable");
   const body = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
-  return parseGoldPrediction(body.choices?.[0]?.message?.content);
+  return parseGoldPrediction(body.choices?.[0]?.message?.content, true);
 }
 
 async function requestGeminiGoldPrediction(input: Record<string, unknown>, importType: string, expected: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -851,6 +962,7 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
     return;
   }
   let goldInput: Record<string, unknown> | null = null;
+  let goldApprovalId: number | null = null;
   if (body.goldCapture !== undefined) {
     const capture = body.goldCapture as Record<string, unknown> | null;
     if (
@@ -858,7 +970,8 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       !capabilities.includes("manage-staff") ||
       !["spec", "premix", "cheese"].includes(importType) ||
       !capture || typeof capture !== "object" || Array.isArray(capture) ||
-      Object.keys(capture).sort().join(",") !== "input"
+      Object.keys(capture).sort().join(",") !== "approvalId,input" ||
+      !Number.isSafeInteger(capture.approvalId) || Number(capture.approvalId) < 1
     ) {
       res.status(importGoldEnabled() ? 403 : 404).json({ error: "Import gold capture is unavailable" });
       return;
@@ -869,10 +982,28 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       return;
     }
     goldInput = validated.input;
+    goldApprovalId = Number(capture.approvalId);
   }
   try {
     const operation = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"import-operation:" + scope}, 0))`);
+      if (goldInput) {
+        // Lock the immutable approval before any domain writes. Revocation uses
+        // this same row lock, so it cannot race a new capture past this check.
+        const [approval] = await tx.select().from(importGoldApprovalsTable).where(and(
+          eq(importGoldApprovalsTable.id, goldApprovalId!),
+          eq(importGoldApprovalsTable.scope, scope),
+        )).for("update");
+        if (!approval || !completeStoredGoldApproval(approval) || !approval.verifiedAt || !approval.verifiedBy || approval.revokedAt ||
+            approval.validUntil.getTime() <= Date.now() ||
+            approval.recordRef !== process.env.IMPORT_GOLD_APPROVAL_RECORD_REF?.trim() ||
+            approval.sourceDigest !== goldSourceDigest(goldInput) || approval.importType !== importType ||
+            approval.purpose !== "local_spec_import_accuracy" ||
+            approval.retentionDays !== 30 ||
+            !approval.manualDeletionAccepted || !approval.conditionsSatisfied) {
+          throw Object.assign(new Error("Gold approval is unavailable"), { code: "GOLD_APPROVAL" });
+        }
+      }
       const prior = await tx.select().from(importOperationsTable).where(and(
         eq(importOperationsTable.id, operationId), eq(importOperationsTable.scope, scope),
       )).limit(1);
@@ -948,15 +1079,27 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
         snapshotId: null, operationId, actorId: req.userId ?? null,
       });
       if (goldInput && expectedResult) {
-        await tx.insert(importGoldCasesTable).values({
+        const [goldCase] = await tx.insert(importGoldCasesTable).values({
           scope,
           operationId,
+          approvalId: goldApprovalId,
           importType,
           sourceLabel: GOLD_SOURCE_LABELS[importType as keyof typeof GOLD_SOURCE_LABELS],
           evaluatedInput: goldInput,
           expectedResult,
           createdBy: req.userId ?? null,
-        }).onConflictDoNothing();
+        }).onConflictDoNothing().returning({
+          id: importGoldCasesTable.id,
+          createdAt: importGoldCasesTable.createdAt,
+        });
+        if (goldCase) {
+          await tx.insert(importGoldRetentionTable).values({
+            scope,
+            caseId: goldCase.id,
+            capturedAt: goldCase.createdAt,
+            deleteBy: importGoldDeleteBy(goldCase.createdAt),
+          }).onConflictDoNothing();
+        }
       }
       fail("after-history");
       return inserted[0];
@@ -976,6 +1119,7 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
     res.json({ operation: operationApi(operation) });
   } catch (err: any) {
     if (err?.code === "STALE_REVIEW") { res.status(409).json({ error: "STALE_REVIEWED_STATE" }); return; }
+    if (err?.code === "GOLD_APPROVAL") { res.status(403).json({ error: "A verified, matching and current source approval is required" }); return; }
     if (err?.code === "REQUEST_CHANGED") { res.status(409).json({ error: "IMPORT_REQUEST_CHANGED" }); return; }
     if (err?.code === "STALE_IMPORT") { res.status(409).json({ error: "STALE_IMPORT_REVISION" }); return; }
     if (err?.code === "GOLD_TOO_LARGE") { res.status(413).json({ error: "Applied result is too large to save as an evaluation case" }); return; }
@@ -985,25 +1129,135 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
   }
 });
 
-router.get("/import-gold/config", requireCapability("manage-staff"), (_req, res) => {
+async function getLocalGoldScoringEnabled(scope = currentScope()): Promise<boolean> {
+  if (!isImportGoldDevelopmentRuntime()) return false;
+  const [row] = await db.select({ value: factoryKvTable.value }).from(factoryKvTable).where(and(
+    eq(factoryKvTable.scope, scope),
+    eq(factoryKvTable.key, LOCAL_GOLD_SCORING_SETTING),
+  )).limit(1);
+  return row?.value === true;
+}
+
+function syntheticGoldCaseCondition() {
+  return and(
+    eq(importGoldCasesTable.operationId, SYNTHETIC_GOLD_OPERATION_ID),
+    eq(importGoldCasesTable.sourceLabel, SYNTHETIC_GOLD_SOURCE_LABEL),
+  );
+}
+
+router.get("/import-gold/config", requireCapability("manage-staff"), async (_req, res) => {
+  const developmentRuntime = isImportGoldDevelopmentRuntime();
+  const cleanupOnly = importGoldCleanupOnlyEnabled();
+  const localConfigured = !cleanupOnly && developmentRuntime && isImportGoldLocalConfigured();
+  const localBase = process.env.IMPORT_GOLD_LOCAL_BASE_URL ?? "http://127.0.0.1:11434/v1";
   res.json({
     enabled: importGoldEnabled(),
-    localConfigured: importGoldEnabled() && isImportGoldLocalConfigured(),
-    geminiConfigured: importGoldEnabled() && isGeminiProviderConfigured(),
-    retention: "Cases remain until a manager deletes them; exclusion only removes them from scoring and export. Source-use and retention approval are required before enablement.",
+    cleanupEnabled: cleanupOnly,
+    localConfigured,
+    localAvailable: localConfigured && await isImportGoldLocalAvailable(localBase),
+    localScoringSwitchAvailable: !cleanupOnly && developmentRuntime,
+    localScoringEnabled: !cleanupOnly && developmentRuntime && await getLocalGoldScoringEnabled(),
+    syntheticFixtureAvailable: !cleanupOnly && developmentRuntime,
+    geminiConfigured: !cleanupOnly && importGoldEnabled() && isGeminiProviderConfigured(),
+    retention: "Cases have a capture-based 30-day manual deletion deadline. The register reminds managers but does not delete cases; cleanup-only mode is separately gated.",
     persistsAcrossFactoryPurge: true,
   });
 });
 
+router.patch("/import-gold/local-scoring", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only setting is unavailable" }); return; }
+  const body = objectBody(req);
+  if (!body || Object.keys(body).length !== 1 || typeof body.enabled !== "boolean") {
+    res.status(400).json({ error: "Invalid local-scoring setting" }); return;
+  }
+  const scope = currentScope();
+  await db.insert(factoryKvTable).values({
+    scope,
+    key: LOCAL_GOLD_SCORING_SETTING,
+    value: body.enabled,
+  }).onConflictDoUpdate({
+    target: [factoryKvTable.scope, factoryKvTable.key],
+    set: { value: body.enabled, updatedAt: new Date() },
+  });
+  res.json({ enabled: body.enabled });
+});
+
+router.get("/import-gold/synthetic-review", requireCapability("manage-staff"), (_req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only fixture is unavailable" }); return; }
+  res.json({
+    fixtureVersion: SYNTHETIC_GOLD_FIXTURE_VERSION,
+    importType: SYNTHETIC_GOLD_FIXTURE.importType,
+    sourceLabel: SYNTHETIC_GOLD_SOURCE_LABEL,
+    input: SYNTHETIC_GOLD_FIXTURE.input,
+    expectedResult: SYNTHETIC_GOLD_FIXTURE.expectedResult,
+    applyEffect: "Creates a fixed synthetic evaluation case only; it does not change recipes, inventory, import approvals, or evaluator workflow state.",
+  });
+});
+
+router.post("/import-gold/synthetic-apply", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only fixture is unavailable" }); return; }
+  const body = objectBody(req);
+  if (
+    !body || Object.keys(body).length !== 2 ||
+    body.fixtureVersion !== SYNTHETIC_GOLD_FIXTURE_VERSION ||
+    body.reviewed !== true
+  ) {
+    res.status(400).json({ error: "Review the available synthetic sample before applying it" }); return;
+  }
+  const scope = currentScope();
+  const stored = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(importGoldCasesTable).values({
+      scope,
+      operationId: SYNTHETIC_GOLD_OPERATION_ID,
+      importType: SYNTHETIC_GOLD_FIXTURE.importType,
+      sourceLabel: SYNTHETIC_GOLD_SOURCE_LABEL,
+      evaluatedInput: SYNTHETIC_GOLD_FIXTURE.input,
+      expectedResult: SYNTHETIC_GOLD_FIXTURE.expectedResult,
+      createdBy: req.userId ?? null,
+    }).onConflictDoNothing({
+      target: [importGoldCasesTable.scope, importGoldCasesTable.operationId],
+    }).returning({ id: importGoldCasesTable.id, createdAt: importGoldCasesTable.createdAt });
+    const [existing] = created ? [] : await tx.select({
+      id: importGoldCasesTable.id,
+      createdAt: importGoldCasesTable.createdAt,
+    }).from(importGoldCasesTable).where(and(
+      eq(importGoldCasesTable.scope, scope),
+      eq(importGoldCasesTable.operationId, SYNTHETIC_GOLD_OPERATION_ID),
+      eq(importGoldCasesTable.sourceLabel, SYNTHETIC_GOLD_SOURCE_LABEL),
+    )).limit(1);
+    const storedCase = created ?? existing;
+    if (!storedCase) return null;
+    await tx.insert(importGoldRetentionTable).values({
+      scope,
+      caseId: storedCase.id,
+      capturedAt: storedCase.createdAt,
+      deleteBy: importGoldDeleteBy(storedCase.createdAt),
+    }).onConflictDoNothing();
+    return { id: storedCase.id, created: Boolean(created) };
+  });
+  if (!stored) { res.status(500).json({ error: "The synthetic evaluation case could not be saved" }); return; }
+  res.status(stored.created ? 201 : 200).json({ caseId: stored.id, created: stored.created });
+});
+
 router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) {
+    res.status(404).json({ error: "Import gold is disabled" }); return;
+  }
   const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_GOLD_CASES) {
     res.status(400).json({ error: `Limit must be an integer from 1 to ${MAX_GOLD_CASES}` }); return;
   }
   const scope = currentScope();
   const cases = await db.select().from(importGoldCasesTable)
-    .where(eq(importGoldCasesTable.scope, scope))
+    .where(and(
+      eq(importGoldCasesTable.scope, scope),
+      ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
+    ))
     .orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id))
     .limit(limit);
   const scores = cases.length
@@ -1029,8 +1283,207 @@ router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, 
   });
 });
 
+router.get("/import-gold/retention", requireGoldRetentionCapability, requireGoldRetentionRole, async (req, res) => {
+  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+  const statusParam = req.query.status;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_GOLD_RETENTION_PAGE_SIZE) {
+    res.status(400).json({ error: `Limit must be an integer from 1 to ${MAX_GOLD_RETENTION_PAGE_SIZE}` }); return;
+  }
+  if (!Number.isInteger(offset) || offset < 0 || offset > MAX_GOLD_RETENTION_OFFSET) {
+    res.status(400).json({ error: `Offset must be an integer from 0 to ${MAX_GOLD_RETENTION_OFFSET}` }); return;
+  }
+  if (statusParam !== undefined &&
+    (typeof statusParam !== "string" || !IMPORT_GOLD_RETENTION_STATUSES.includes(statusParam as ImportGoldRetentionStatus))) {
+    res.status(400).json({ error: "Invalid retention status" }); return;
+  }
+  const requestedRevision = req.query.revision;
+  if (requestedRevision !== undefined &&
+      (typeof requestedRevision !== "string" || !/^[a-f0-9]{64}$/.test(requestedRevision))) {
+    res.status(400).json({ error: "Revision must be a retention register token" }); return;
+  }
+
+  const scope = currentScope();
+  // Backfill metadata for cases captured before the register existed. Only case
+  // IDs and timestamps are selected; payload and score data stay out of this API.
+  const existingCases = await db.select({
+    caseId: importGoldCasesTable.id,
+    capturedAt: importGoldCasesTable.createdAt,
+  }).from(importGoldCasesTable).where(eq(importGoldCasesTable.scope, scope));
+  if (existingCases.length) {
+    await db.insert(importGoldRetentionTable).values(existingCases.map((row) => ({
+      scope,
+      caseId: row.caseId,
+      capturedAt: row.capturedAt,
+      deleteBy: importGoldDeleteBy(row.capturedAt),
+    }))).onConflictDoNothing();
+  }
+
+  const status = statusParam as ImportGoldRetentionStatus | undefined;
+  const now = new Date();
+  const reminderThreshold = new Date(now.getTime() + IMPORT_GOLD_RETENTION_REMINDER_MS);
+  const caseExists = sql`EXISTS (
+    SELECT 1 FROM ${importGoldCasesTable}
+    WHERE ${importGoldCasesTable.id} = ${importGoldRetentionTable.caseId}
+      AND ${importGoldCasesTable.scope} = ${scope}
+  )`;
+  const scoreHistoryExists = sql`EXISTS (
+    SELECT 1 FROM ${importGoldScoresTable}
+    WHERE ${importGoldScoresTable.caseId} = ${importGoldRetentionTable.caseId}
+      AND ${importGoldScoresTable.scope} = ${scope}
+  )`;
+  const statusCondition = status
+    ? {
+        within_limit: and(isNull(importGoldRetentionTable.verifiedAt), caseExists, gt(importGoldRetentionTable.deleteBy, reminderThreshold)),
+        due_soon: and(
+          isNull(importGoldRetentionTable.verifiedAt),
+          caseExists,
+          gt(importGoldRetentionTable.deleteBy, now),
+          lte(importGoldRetentionTable.deleteBy, reminderThreshold),
+        ),
+        overdue: and(isNull(importGoldRetentionTable.verifiedAt), caseExists, lte(importGoldRetentionTable.deleteBy, now)),
+        deletion_incomplete: and(
+          isNull(importGoldRetentionTable.verifiedAt),
+          not(caseExists),
+          scoreHistoryExists,
+        ),
+        verification_needed: and(
+          isNull(importGoldRetentionTable.verifiedAt),
+          not(caseExists),
+          not(scoreHistoryExists),
+        ),
+        verified: isNotNull(importGoldRetentionTable.verifiedAt),
+      }[status]
+    : undefined;
+  // Fingerprint, filtered membership and page must share one database snapshot.
+  // Include membership so clock-driven status-filter changes also fence offsets.
+  const result = await db.transaction(async (tx) => {
+    const [fingerprint] = await tx.select({
+      value: sql<string>`md5(coalesce(string_agg(jsonb_build_array(
+        ${importGoldRetentionTable.id}, ${importGoldRetentionTable.caseId},
+        ${importGoldRetentionTable.capturedAt}, ${importGoldRetentionTable.deleteBy},
+        ${importGoldRetentionTable.verifiedAt}, ${importGoldRetentionTable.verifiedBy},
+        ${caseExists}, ${scoreHistoryExists}, ${statusCondition ?? sql`true`}
+      )::text, ',' order by ${importGoldRetentionTable.id}), ''))`,
+    }).from(importGoldRetentionTable).where(eq(importGoldRetentionTable.scope, scope));
+    const revision = createHash("sha256").update(`${scope}:${status ?? "all"}:${fingerprint!.value}`).digest("hex");
+    if (requestedRevision !== undefined && requestedRevision !== revision) return null;
+  const rows = await tx.select().from(importGoldRetentionTable)
+    .where(and(eq(importGoldRetentionTable.scope, scope), ...(statusCondition ? [statusCondition] : [])))
+    .orderBy(
+      asc(sql`CASE WHEN ${importGoldRetentionTable.verifiedAt} IS NULL THEN 0 ELSE 1 END`),
+      asc(importGoldRetentionTable.deleteBy),
+      asc(importGoldRetentionTable.id),
+    )
+    .limit(limit + 1)
+    .offset(offset);
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const presentIds = page.length
+    ? new Set((await tx.select({ id: importGoldCasesTable.id }).from(importGoldCasesTable).where(and(
+      eq(importGoldCasesTable.scope, scope),
+      inArray(importGoldCasesTable.id, page.map((row) => row.caseId)),
+    ))).map((row) => row.id))
+    : new Set<number>();
+  const scoreHistoryIds = page.length
+    ? new Set((await tx.select({ caseId: importGoldScoresTable.caseId }).from(importGoldScoresTable).where(and(
+      eq(importGoldScoresTable.scope, scope),
+      inArray(importGoldScoresTable.caseId, page.map((row) => row.caseId)),
+    ))).map((row) => row.caseId))
+    : new Set<number>();
+  return {
+    revision,
+    records: page.map((row) => ({
+      caseId: row.caseId,
+      capturedAt: row.capturedAt.toISOString(),
+      deleteBy: row.deleteBy.toISOString(),
+      status: importGoldRetentionStatus({
+        deleteBy: row.deleteBy,
+        casePresent: presentIds.has(row.caseId),
+        scoreHistoryPresent: scoreHistoryIds.has(row.caseId),
+        verifiedAt: row.verifiedAt,
+      }, now),
+      verifiedAt: row.verifiedAt?.toISOString() ?? null,
+      verifiedBy: row.verifiedBy,
+    })),
+    hasMore,
+    nextOffset: hasMore ? offset + limit : null,
+  };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
+  if (result === null) {
+    res.status(409).json({ error: "Retention register changed. Restart pagination from the first page." }); return;
+  }
+  res.json(result);
+});
+
+router.post(
+  "/import-gold/retention/:caseId/verification",
+  requireGoldRetentionCapability,
+  requireGoldRetentionRole,
+  async (req, res) => {
+  const caseId = Number(req.params.caseId);
+  if (!Number.isSafeInteger(caseId) || caseId < 1) { res.status(400).json({ error: "Invalid case identity" }); return; }
+  const scope = currentScope();
+  const [record] = await db.select({
+    caseId: importGoldRetentionTable.caseId,
+    verifiedAt: importGoldRetentionTable.verifiedAt,
+    verifiedBy: importGoldRetentionTable.verifiedBy,
+  }).from(importGoldRetentionTable).where(and(
+    eq(importGoldRetentionTable.scope, scope),
+    eq(importGoldRetentionTable.caseId, caseId),
+  )).limit(1);
+  if (!record) { res.status(404).json({ error: "Retention record not found in the current scope" }); return; }
+
+  const [caseRow] = await db.select({ id: importGoldCasesTable.id }).from(importGoldCasesTable).where(and(
+    eq(importGoldCasesTable.scope, scope),
+    eq(importGoldCasesTable.id, caseId),
+  )).limit(1);
+  if (caseRow) { res.status(409).json({ error: "Delete the application case before recording deletion verification" }); return; }
+  const [scoreRow] = await db.select({ id: importGoldScoresTable.id }).from(importGoldScoresTable).where(and(
+    eq(importGoldScoresTable.scope, scope),
+    eq(importGoldScoresTable.caseId, caseId),
+  )).limit(1);
+  if (scoreRow) { res.status(409).json({ error: "Delete the application score history before recording deletion verification" }); return; }
+  if (record.verifiedAt) {
+    res.json({ caseId, verifiedAt: record.verifiedAt.toISOString(), verifiedBy: record.verifiedBy });
+    return;
+  }
+
+  const [verified] = await db.update(importGoldRetentionTable).set({
+    verifiedAt: new Date(),
+    verifiedBy: req.userId!,
+  }).where(and(
+    eq(importGoldRetentionTable.scope, scope),
+    eq(importGoldRetentionTable.caseId, caseId),
+    isNull(importGoldRetentionTable.verifiedAt),
+  )).returning({
+    caseId: importGoldRetentionTable.caseId,
+    verifiedAt: importGoldRetentionTable.verifiedAt,
+    verifiedBy: importGoldRetentionTable.verifiedBy,
+  });
+  if (verified?.verifiedAt) {
+    res.json({ caseId: verified.caseId, verifiedAt: verified.verifiedAt.toISOString(), verifiedBy: verified.verifiedBy });
+    return;
+  }
+  const [latest] = await db.select({
+    verifiedAt: importGoldRetentionTable.verifiedAt,
+    verifiedBy: importGoldRetentionTable.verifiedBy,
+  }).from(importGoldRetentionTable).where(and(
+    eq(importGoldRetentionTable.scope, scope),
+    eq(importGoldRetentionTable.caseId, caseId),
+  )).limit(1);
+  if (latest?.verifiedAt) {
+    res.json({ caseId, verifiedAt: latest.verifiedAt.toISOString(), verifiedBy: latest.verifiedBy });
+    return;
+  }
+  res.status(409).json({ error: "Deletion verification could not be recorded; refresh and retry" });
+  },
+);
+
 router.patch("/import-gold/cases/:id/exclusion", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const id = Number(req.params.id);
   const body = objectBody(req);
   if (!Number.isSafeInteger(id) || id < 1 || !body || typeof body.excluded !== "boolean") {
@@ -1039,30 +1492,136 @@ router.patch("/import-gold/cases/:id/exclusion", requireCapability("manage-staff
   const scope = currentScope();
   const [row] = await db.update(importGoldCasesTable)
     .set({ excluded: body.excluded, excludedAt: body.excluded ? new Date() : null })
-    .where(and(eq(importGoldCasesTable.id, id), eq(importGoldCasesTable.scope, scope)))
+    .where(and(
+      eq(importGoldCasesTable.id, id),
+      eq(importGoldCasesTable.scope, scope),
+      ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
+    ))
     .returning({ id: importGoldCasesTable.id, excluded: importGoldCasesTable.excluded });
   if (!row) { res.status(404).json({ error: "Evaluation case not found" }); return; }
   res.json(row);
 });
 
 router.delete("/import-gold/cases/:id", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) { res.status(400).json({ error: "Invalid case identity" }); return; }
-  const deleted = await db.delete(importGoldCasesTable).where(and(
-    eq(importGoldCasesTable.id, id),
-    eq(importGoldCasesTable.scope, currentScope()),
-  )).returning({ id: importGoldCasesTable.id });
-  if (!deleted.length) { res.status(404).json({ error: "Evaluation case not found" }); return; }
+  const deleted = await db.transaction(async (tx) => {
+    const [row] = await tx.delete(importGoldCasesTable).where(and(
+      eq(importGoldCasesTable.id, id),
+      eq(importGoldCasesTable.scope, currentScope()),
+      ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
+    )).returning({ id: importGoldCasesTable.id });
+    if (!row) return false;
+    await writeAuditEvent(tx, {
+      action: "import_gold_case_deleted",
+      resource: "import_gold_case",
+      changes: { outcome: "success", targetId: String(row.id) },
+    });
+    return true;
+  });
+  if (!deleted) { res.status(404).json({ error: "Evaluation case not found" }); return; }
+  res.status(204).end();
+});
+
+router.get("/import-gold/cleanup-cases", requireCapability("manage-staff"), async (req, res) => {
+  if (!importGoldCleanupOnlyEnabled()) {
+    res.status(404).json({ error: "Import gold cleanup is unavailable" });
+    return;
+  }
+  let cursor: { createdAt: string; id: number; scope: string } | undefined;
+  if (req.query.cursor !== undefined) {
+    try {
+      if (typeof req.query.cursor !== "string" || req.query.cursor.length > 512) throw new Error();
+      cursor = JSON.parse(Buffer.from(req.query.cursor, "base64url").toString("utf8"));
+      if (!cursor || Object.keys(cursor).sort().join(",") !== "createdAt,id,scope"
+        || !Number.isSafeInteger(cursor.id) || cursor.id < 1 || cursor.scope !== currentScope()
+        || typeof cursor.createdAt !== "string"
+        || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/u.test(cursor.createdAt)
+        || !Number.isFinite(Date.parse(cursor.createdAt))) throw new Error();
+    } catch {
+      res.status(400).json({ error: "Invalid cleanup cursor. Return to the newest cases and retry." });
+      return;
+    }
+  }
+  const rows = await db.select({
+    id: importGoldCasesTable.id,
+    importType: importGoldCasesTable.importType,
+    createdAt: importGoldCasesTable.createdAt,
+    // A JS Date truncates PostgreSQL microseconds. Retain native ordering bytes
+    // in the cursor so same-millisecond cases cannot disappear between pages.
+    cursorCreatedAt: sql<string>`to_char(${importGoldCasesTable.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+  }).from(importGoldCasesTable)
+    .where(and(
+      eq(importGoldCasesTable.scope, currentScope()),
+      cursor ? or(
+        sql`${importGoldCasesTable.createdAt} < ${cursor.createdAt}::timestamptz`,
+        and(
+          sql`${importGoldCasesTable.createdAt} = ${cursor.createdAt}::timestamptz`,
+          sql`${importGoldCasesTable.id} < ${cursor.id}`,
+        ),
+      ) : undefined,
+    ))
+    .orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id))
+    .limit(MAX_GOLD_CASES + 1);
+  const cases = rows.slice(0, MAX_GOLD_CASES);
+  const last = cases.at(-1);
+  res.json({
+    cases: cases.map((row) => ({
+      id: row.id,
+      importType: row.importType,
+      createdAt: row.createdAt.toISOString(),
+    })),
+    nextCursor: rows.length > MAX_GOLD_CASES && last ? Buffer.from(JSON.stringify({
+      createdAt: last.cursorCreatedAt, id: last.id, scope: currentScope(),
+    })).toString("base64url") : null,
+  });
+});
+
+router.delete("/import-gold/cleanup-cases/:id", requireCapability("manage-staff"), async (req, res) => {
+  if (!importGoldCleanupOnlyEnabled()) {
+    res.status(404).json({ error: "Import gold cleanup is unavailable" });
+    return;
+  }
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) {
+    res.status(400).json({ error: "Invalid case identity" });
+    return;
+  }
+  const deleted = await db.transaction(async (tx) => {
+    const [row] = await tx.delete(importGoldCasesTable).where(and(
+      eq(importGoldCasesTable.id, id),
+      eq(importGoldCasesTable.scope, currentScope()),
+    )).returning({ id: importGoldCasesTable.id });
+    if (!row) return false;
+    await writeAuditEvent(tx, {
+      action: "import_gold_case_deleted",
+      resource: "import_gold_case",
+      changes: { outcome: "success", targetId: String(row.id) },
+    });
+    return true;
+  });
+  if (!deleted) {
+    res.status(404).json({ error: "Evaluation case not found" });
+    return;
+  }
   res.status(204).end();
 });
 
 router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async (_req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const cases = await db.select().from(importGoldCasesTable).where(and(
     eq(importGoldCasesTable.scope, currentScope()),
     eq(importGoldCasesTable.excluded, false),
+    ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
   )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_CASES);
+  if (cases.some((row) => row.operationId !== SYNTHETIC_GOLD_OPERATION_ID || row.sourceLabel !== SYNTHETIC_GOLD_SOURCE_LABEL)) {
+    res.status(403).json({ error: "Local-evaluation approval does not authorize case exports" }); return;
+  }
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="import-gold-cases.jsonl"');
   res.send(cases.map((row) => JSON.stringify({
@@ -1075,7 +1634,9 @@ router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async
 });
 
 router.post("/import-gold/score", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  if (rejectImportGoldContentDuringCleanup(res)) return;
+  const realSourceAccess = importGoldEnabled();
+  const developmentRuntime = isImportGoldDevelopmentRuntime();
   const body = objectBody(req);
   const provider = body?.provider;
   const requestedIds = body?.caseIds;
@@ -1086,10 +1647,19 @@ router.post("/import-gold/score", requireCapability("manage-staff"), async (req,
   ) {
     res.status(400).json({ error: "Invalid score request" }); return;
   }
+  if (!realSourceAccess && !(developmentRuntime && provider === "local")) {
+    res.status(404).json({ error: "Import gold is disabled" }); return;
+  }
+  if (provider === "local" && !developmentRuntime) {
+    res.status(403).json({ error: "Local scoring is available only in a development workspace" }); return;
+  }
+  if (provider === "local" && !await getLocalGoldScoringEnabled()) {
+    res.status(403).json({ error: "Local scoring is disabled in this development workspace" }); return;
+  }
   if (provider === "local" && !isImportGoldLocalConfigured()) {
     res.status(503).json({ error: "The local evaluator is not configured" }); return;
   }
-  if (provider === "gemini" && !isGeminiProviderConfigured()) {
+  if (provider === "gemini" && (!realSourceAccess || !isGeminiProviderConfigured())) {
     res.status(503).json({ error: "Gemini comparison is not configured" }); return;
   }
   const scope = currentScope();
@@ -1097,8 +1667,29 @@ router.post("/import-gold/score", requireCapability("manage-staff"), async (req,
   const eligible = await db.select().from(importGoldCasesTable).where(and(
     eq(importGoldCasesTable.scope, scope),
     eq(importGoldCasesTable.excluded, false),
+    ...(!realSourceAccess ? [syntheticGoldCaseCondition()!] : []),
     ...(ids ? [inArray(importGoldCasesTable.id, ids)] : []),
   )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_SCORE_CASES);
+  for (const goldCase of eligible) {
+    const synthetic = goldCase.operationId === SYNTHETIC_GOLD_OPERATION_ID &&
+      goldCase.sourceLabel === SYNTHETIC_GOLD_SOURCE_LABEL;
+    if (!synthetic && goldCase.approvalId === null) {
+      res.status(403).json({ error: "Legacy source cases require a source-specific approval before scoring" }); return;
+    }
+    if (goldCase.approvalId !== null) {
+      const [approval] = await db.select().from(importGoldApprovalsTable).where(and(
+        eq(importGoldApprovalsTable.id, goldCase.approvalId),
+        eq(importGoldApprovalsTable.scope, scope),
+      )).limit(1);
+      if (provider !== "local" || !approval || !completeStoredGoldApproval(approval) ||
+          !approval.verifiedAt || !approval.verifiedBy || approval.revokedAt ||
+          approval.sourceDigest !== goldSourceDigest(goldCase.evaluatedInput) ||
+          approval.importType !== goldCase.importType ||
+          approval.recordRef !== process.env.IMPORT_GOLD_APPROVAL_RECORD_REF?.trim()) {
+        res.status(403).json({ error: "Current source approval is required; local-evaluation approval does not authorize Gemini" }); return;
+      }
+    }
+  }
   const results = [];
   for (const goldCase of eligible) {
     try {

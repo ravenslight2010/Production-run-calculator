@@ -15,9 +15,11 @@ import {
   type AuthorizedTestAccount,
 } from "./isolation";
 import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
+const FACILITY_TIME_ZONE = "America/Chicago";
 const VIEWPORT = { width: 1440, height: 1000 };
 const RESPONSIVE_VIEWPORTS = [
   { name: "phone-320", width: 320, height: 740 },
@@ -33,12 +35,27 @@ const RESPONSIVE_VIEWPORTS = [
 type AuthenticatedPage = { context: BrowserContext; page: Page };
 
 function localDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: FACILITY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 function localDateTime(value: Date): string {
-  const offset = value.getTimezoneOffset() * 60_000;
-  return new Date(value.getTime() - offset).toISOString().slice(0, 16);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: FACILITY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
+  const field = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${field("year")}-${field("month")}-${field("day")}T${field("hour")}:${field("minute")}`;
 }
 
 async function openAuthenticatedPage(
@@ -46,7 +63,10 @@ async function openAuthenticatedPage(
   account: AuthorizedTestAccount,
   baseURL: string,
 ): Promise<AuthenticatedPage> {
-  const context = await browser.newContext({ viewport: VIEWPORT });
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    timezoneId: FACILITY_TIME_ZONE,
+  });
   await context.addCookies([{
     name: "rc_auth",
     value: account.token,
@@ -369,6 +389,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
        VALUES ($1, 'live', $2, '["general"]'::jsonb, '["milk"]'::jsonb, true)`,
       [longIngredientId, longIngredientName],
     );
+    const doughRecipeName = uniqueTestId("QC Browser Dough");
     await db.query(
       `INSERT INTO brand_profiles
          (key, scope, brand, flavor, values, crust_values, updated_at_ms)
@@ -378,8 +399,18 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
         brand,
         flavor,
         JSON.stringify({
+          pizzasPerCase: 12,
+          doughRecipeName,
+          doughRecipe: [
+            { ingredient: ingredientName, ingredientId, lbs: 10 },
+            { ingredient: longIngredientName, ingredientId: longIngredientId, lbs: 1 },
+          ],
           app1Type: "cheese",
           app1CheeseRecipeName: ingredientName,
+          app1CheeseRecipe: [
+            { ingredient: ingredientName, ingredientId, lbs: 2 },
+            { ingredient: longIngredientName, ingredientId: longIngredientId, lbs: 1 },
+          ],
           app1OzPerPizza: 1.25,
         }),
         Date.now(),
@@ -394,6 +425,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
           date,
           runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
           currentIndex: 0,
+          currentRunId: runId,
           resetAt: 0,
           substitutions: [{
             id: "qc-browser-dough-substitution",
@@ -408,7 +440,8 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
           [runId]: {
             casesNeeded: 1,
             casesPerSkid: 12,
-            doughRecipeName: uniqueTestId("QC Browser Dough"),
+            pizzasPerCase: 12,
+            doughRecipeName,
             doughRecipe: [
               { ingredient: ingredientName, ingredientId, lbs: 10 },
               { ingredient: longIngredientName, ingredientId: longIngredientId, lbs: 1 },
@@ -456,6 +489,8 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
 
     operatorPage = await openAuthenticatedPage(browser, operator, webOrigin);
     managerPage = await openAuthenticatedPage(browser, manager, webOrigin);
+    await selectCanonicalFixtureRun(operatorPage.page, runId);
+    await selectCanonicalFixtureRun(managerPage.page, runId);
     attachBrowserDiagnostics(operatorPage.page, "operator", browserEvidence);
     attachBrowserDiagnostics(managerPage.page, "manager", browserEvidence);
 
@@ -1157,16 +1192,7 @@ test("QC manager targets and operator checks fit phone and tablet layouts", asyn
   let operatorPage: AuthenticatedPage | undefined;
 
   async function selectFixtureRun(page: Page): Promise<void> {
-    await page.getByTestId("tab-run").click();
-    const runOwner = page.getByTestId("run-identity");
-    const firstRun = page.getByRole("button", { name: "Select run 1", exact: true });
-    // Canonical bootstrap can preserve a separate locally selected blank run.
-    // Select the seeded first run through the real UI, not by rewriting sync.
-    await expect.poll(async () =>
-      await runOwner.getAttribute("data-run-id") === runId || await firstRun.isVisible(),
-    { timeout: 25_000 }).toBe(true);
-    if (await runOwner.getAttribute("data-run-id") !== runId) await firstRun.click();
-    await expect(runOwner).toHaveAttribute("data-run-id", runId, { timeout: 25_000 });
+    await selectCanonicalFixtureRun(page, runId);
   }
 
   try {
@@ -1199,6 +1225,7 @@ test("QC manager targets and operator checks fit phone and tablet layouts", asyn
           date,
           runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
           currentIndex: 0,
+          currentRunId: runId,
           resetAt: 0,
           substitutions: [],
           substitutionLog: [],
@@ -1296,7 +1323,7 @@ test("QC manager targets and operator checks fit phone and tablet layouts", asyn
       if (["phone-320", "tablet-landscape", "phone-short-landscape"].includes(viewport.name)) {
         await assertQcActionReachable(saveTarget, "Save reviewed target", viewport);
       }
-      if (["phone-320", "tablet-landscape", "desktop"].includes(viewport.name)) {
+      if (["phone-320", "tablet-portrait", "tablet-landscape", "desktop"].includes(viewport.name)) {
         await capture(managerPage.page, testInfo, `qc-manager-target-${viewport.name}`, [
           longIngredientName,
           runId,
@@ -1359,7 +1386,7 @@ test("QC manager targets and operator checks fit phone and tablet layouts", asyn
       if (["phone-320", "tablet-landscape", "phone-short-landscape"].includes(viewport.name)) {
         await assertQcActionReachable(recordChecklist, "Record checklist", viewport);
       }
-      if (["phone-320", "tablet-landscape", "desktop"].includes(viewport.name)) {
+      if (["phone-320", "tablet-portrait", "tablet-landscape", "desktop"].includes(viewport.name)) {
         await capture(operatorPage.page, testInfo, `qc-operator-checklist-${viewport.name}`, [
           longIngredientName,
           runId,

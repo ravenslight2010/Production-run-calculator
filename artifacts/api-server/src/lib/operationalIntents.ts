@@ -152,9 +152,32 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
       const pairedPausePolicy = control?.kind === "pause-policy" && !!pause
         && now >= Number(pause.startedAt) && now - Number(pause.startedAt) <= 60_000
         && pause.stopTunnel !== false;
-      const currentBase = canonicalRevision !== undefined && intent.baseRevision === canonicalRevision;
+      const baseRevision = intent.baseRevision;
+      const currentBase = canonicalRevision !== undefined
+        && baseRevision !== undefined
+        && baseRevision === canonicalRevision;
+      const controls = obj(data.doughTimerControls);
+      const priorDoughControl = obj(controls[intent.runId]);
+      const priorControlRevision = priorDoughControl.controlRevision;
+      const priorRevisionIsValid = Number.isSafeInteger(priorControlRevision)
+        && Number(priorControlRevision) >= 0;
+      const hasNewerDoughControl = priorDoughControl.generation === generation(run)
+        && (!priorRevisionIsValid
+          || (baseRevision !== undefined && Number(priorControlRevision) > baseRevision));
+      // Counter-only auto-track claims advance the document revision without
+      // changing this run's lifecycle or its Dough timer control. Permit that
+      // narrow rebase, while the per-run control revision still fences a
+      // competing timer command based on an older control state.
+      const safeDoughTimerRebase = control?.kind === "dough-timer"
+        && canonicalRevision !== undefined
+        && baseRevision !== undefined
+        && baseRevision < canonicalRevision
+        && !hasNewerDoughControl;
       if (!control || (run.endedAt && control.kind !== "stoppages")
-        || (!pairedPausePolicy && (!exactGeneration || !currentBase))) {
+        || (!pairedPausePolicy && (
+          !exactGeneration
+          || (!currentBase && !safeDoughTimerRebase)
+        ))) {
         outcome = "conflicted";
       } else if (control.kind === "pause-policy") {
         if (!pause || now - Number(pause.startedAt) > 60_000) outcome = "review-required";
@@ -181,12 +204,16 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
       } else if (!run.startedAt || run.pausedAt) {
         outcome = "review-required";
       } else {
-        const controls = obj(data.doughTimerControls);
         controls[intent.runId] = {
           generation: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
           pausedAt: control.paused ? now : 0,
           resumeAt: control.paused && control.durationMs ? now + control.durationMs : 0,
           updatedAt: now,
+          ...(canonicalRevision !== undefined
+            ? { controlRevision: canonicalRevision + 1 }
+            : priorDoughControl.controlRevision !== undefined
+              ? { controlRevision: priorDoughControl.controlRevision }
+              : {}),
         };
         data.doughTimerControls = controls;
         outcome = "accepted";

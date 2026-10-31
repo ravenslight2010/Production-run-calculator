@@ -122,7 +122,7 @@ describe("SyncStatusPopover wake-recovery activity", () => {
     );
   });
 
-  it("shows bounded stale-base recovery and server-conflict counts", () => {
+  it("shows that same-field local values were discarded in favor of server values", () => {
     render(
       <SyncStatusPopover
         {...baseProps}
@@ -131,7 +131,7 @@ describe("SyncStatusPopover wake-recovery activity", () => {
           kind: "merge",
           at: 1_758_211_200_000,
           date: "2026-09-18",
-          message: "Recovered stale-base write: reapplied 4 changes; retained 2 server conflicts",
+          message: "Recovered stale-base write: reapplied 4 changes; kept server values for 2 conflicts; discarded the conflicting local values; review the current values before editing again",
           response: "stale-base-recovered",
         }]}
       />,
@@ -140,7 +140,7 @@ describe("SyncStatusPopover wake-recovery activity", () => {
     openPopover();
 
     expect(screen.getByTestId("sync-activity-stale-base-recovered").textContent).toContain(
-      "Recovered stale-base write: reapplied 4 changes; retained 2 server conflicts [stale-base-recovered]",
+      "Recovered stale-base write: reapplied 4 changes; kept server values for 2 conflicts; discarded the conflicting local values; review the current values before editing again [stale-base-recovered]",
     );
   });
 

@@ -3,6 +3,21 @@ name: Database capacity evidence
 description: Interpret app-owned PostgreSQL capacity samples without overstating provider or Autoscale headroom.
 ---
 
+Correlate phase intervals and event-loop histogram windows only after checking
+that they belong to the same process, not just the same serving revision.
+Even same-process overlap cannot locate the histogram maximum within the phase
+or distinguish database waiting from delayed JavaScript callbacks.
+
+**Why:** A short configured acquisition deadline can coexist with much longer
+client-observed failures during runtime stalls. Treating that observation as a
+long configured deadline or pure server query time would recommend the wrong
+repair.
+
+**How to apply:** Verify the effective deadline from allowlisted runtime
+evidence when available; compare interval bounds and process-envelope equality
+without retaining host/process identities. Keep server execution time and
+provider/host causation unknown until independently measured.
+
 Treat PostgreSQL client-backend counts separately from application pool connections. A remaining-slot estimate is conservative PostgreSQL evidence, not proof of the hosting provider's usable quota or worst-case Autoscale capacity.
 
 Record capture times for independently supplied Autoscale, provider-limit, and peak-metric evidence. Assess each against report generation separately; an outdated or missing source timestamp makes only that source group unknown.

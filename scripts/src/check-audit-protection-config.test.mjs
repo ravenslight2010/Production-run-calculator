@@ -24,6 +24,15 @@ test("accepts the API artifact production command with audit protection first", 
   assert.doesNotThrow(() => validateAuditProtectionConfig(artifactToml));
 });
 
+test("accepts the legacy direct manager command during the entry-point transition", () => {
+  const legacyConfig = replaceProductionArgs(artifactToml, [
+    "sh",
+    "-c",
+    "pnpm --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs",
+  ]);
+  assert.doesNotThrow(() => validateAuditProtectionConfig(legacyConfig));
+});
+
 test("rejects a production command that starts the API directly", () => {
   const bypassingConfig = replaceProductionArgs(artifactToml, [
     "node",

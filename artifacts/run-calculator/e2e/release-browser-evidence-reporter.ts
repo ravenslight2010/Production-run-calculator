@@ -1,5 +1,7 @@
 import { captureReleaseIdentity } from "../../../scripts/src/release-source-identity.mjs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
+import { atomicWriteBrowserMetadata } from "../../../scripts/src/browser-attempt-progress.mjs";
+import { WebKitAttemptProgress } from "./webkit-attempt-progress";
 import { fileURLToPath } from "node:url";
 import { relative, resolve } from "node:path";
 import type {
@@ -26,6 +28,12 @@ function relativeFilePath(file: string): string {
 
 type FailureClassification = (typeof VALID_CLASSIFICATIONS)[number];
 
+function errorName(error: TestResult["errors"][number]): string {
+  // Older fixture/error adapters supplied a name; Playwright TestError does not
+  // require one. Narrow it without assuming an Error instance.
+  return "name" in error && typeof error.name === "string" ? error.name : "";
+}
+
 type EvidenceCase = {
   file: string;
   title: string;
@@ -51,11 +59,11 @@ function outputPath(requireConfiguredPath: boolean): string | undefined {
 function classifyFailure(result: TestResult): FailureClassification | undefined {
   if (result.status === "passed" || result.status === "skipped") return undefined;
   const text = result.errors
-    .map((error) => `${error.name ?? ""} ${error.message ?? ""}`)
+    .map((error) => `${errorName(error)} ${error.message ?? ""}`)
     .join(" ")
     .toLowerCase();
   if (
-    result.status === "timedout" ||
+    result.status === "timedOut" ||
     /browser.*(launch|closed|crash)|target page, context or browser has been closed|econnrefused|timeout.*database|playwright.*executable|executable doesn't exist|missing librar(?:y|ies)|host system is missing/u.test(
       text,
     )
@@ -71,18 +79,22 @@ function classifyFailure(result: TestResult): FailureClassification | undefined 
 function errorSummary(result: TestResult): string | undefined {
   const first = result.errors[0];
   if (!first) return undefined;
-  return `${first.name ? `${first.name}: ` : ""}${first.message.slice(0, 1_000)}`;
+  const name = errorName(first);
+  return `${name ? `${name}: ` : ""}${(first.message ?? "Browser test failed.").slice(0, 1_000)}`;
 }
 
 export default class ReleaseBrowserEvidenceReporter implements Reporter {
   private readonly cases = new Map<string, EvidenceCase>();
   private readonly requireConfiguredPath: boolean;
+  private readonly progress: WebKitAttemptProgress;
 
   constructor(options?: { requireConfiguredPath?: boolean }) {
     this.requireConfiguredPath = options?.requireConfiguredPath ?? false;
+    this.progress = new WebKitAttemptProgress(this.requireConfiguredPath ? "webkit-compatibility" : "webkit-smoke");
   }
 
   onBegin(_config: FullConfig, suite: Suite): void {
+    this.progress.begin(_config, suite);
     for (const testCase of suite.allTests()) {
       this.cases.set(testCase.id, {
         file: relativeFilePath(testCase.location.file),
@@ -94,7 +106,14 @@ export default class ReleaseBrowserEvidenceReporter implements Reporter {
     }
   }
 
+  onTestBegin(testCase: TestCase, result: TestResult): void {
+    this.progress.testBegin(testCase, result);
+  }
+
+  onError(): void { this.progress.error(); }
+
   onTestEnd(testCase: TestCase, result: TestResult): void {
+    this.progress.testEnd(testCase, result);
     this.cases.set(testCase.id, {
       file: relativeFilePath(testCase.location.file),
       title: testCase.titlePath().join(" › "),
@@ -107,14 +126,16 @@ export default class ReleaseBrowserEvidenceReporter implements Reporter {
   }
 
   async onEnd(result: FullResult): Promise<void> {
+    const eligible = this.progress.end(result);
     const path = outputPath(this.requireConfiguredPath);
-    if (!path) return;
+    if (!path || !eligible || [...this.cases.values()].some((entry) =>
+      ["not-run", "interrupted", "timedOut"].includes(entry.status))) return;
     const cases = [...this.cases.values()];
     const failed = cases.filter(
       (testCase) => testCase.status !== "passed" && testCase.status !== "skipped",
     );
     await mkdir(resolve(path, ".."), { recursive: true });
-    await writeFile(
+    atomicWriteBrowserMetadata(
       path,
       `${JSON.stringify(
         {
@@ -140,7 +161,6 @@ export default class ReleaseBrowserEvidenceReporter implements Reporter {
         null,
         2,
       )}\n`,
-      "utf8",
     );
     console.log(`Retained WebKit browser evidence: ${path} (${cases.length} cases)`);
   }

@@ -1,5 +1,19 @@
 import { SynchronizationStateMachine } from "./synchronizationStateMachine";
 
+/**
+ * A queued snapshot that is byte-for-byte represented by the accepted
+ * signature needs no second PUT. If either signature is unavailable, keep the
+ * conservative behavior and send the queued work.
+ */
+export function shouldSendDistinctQueuedSyncWork(
+  queuedSignature: string | undefined,
+  acknowledgedSignature: string | undefined,
+): boolean {
+  return queuedSignature === undefined
+    || acknowledgedSignature === undefined
+    || queuedSignature !== acknowledgedSignature;
+}
+
 // One browser tab may have exactly one sync PUT/retry chain in flight. Local
 // edits arriving during that chain replace the queued request, so the next
 // write always uses the newest snapshot.

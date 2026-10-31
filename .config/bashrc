@@ -10,3 +10,11 @@ fi
 if ! source "$REPL_HOME/scripts/src/select-replit-shell-node.sh"; then
   exit 1
 fi
+
+if ! source "$REPL_HOME/scripts/src/configure-project-pnpm.sh"; then
+  exit 1
+fi
+if ! configure_project_pnpm "$REPL_HOME"; then
+  exit 1
+fi
+unset -f configure_project_pnpm

@@ -867,6 +867,24 @@ export const finalizeApplicatorBatchTotalResponseCanonicalSlotMax = 4;
 export const finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin = 0;
 export const finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin = 0;
 export const finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const moveSyncScheduledRunsBodySourceRevisionMin = 0;
+export const moveSyncScheduledRunsBodyDestinationRevisionMin = 0;
+export const moveSyncScheduledRunsBodyResetEpochMin = 0;
+export const moveSyncScheduledRunsBodySenderIdMax = 160;
+export const moveSyncScheduledRunsBodyRunIdsTwoItemMax = 160;
+export const moveSyncScheduledRunsBodyRunIdsTwoItemRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const moveSyncScheduledRunsBodyRunIdsTwoMax = 100;
+export const moveSyncScheduledRunsResponseSourceRevisionMin = 0;
+export const moveSyncScheduledRunsResponseDestinationRevisionMin = 0;
+export const moveSyncScheduledRunsResponseDestinationSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const swapSyncScheduleDaysBodySourceRevisionMin = 0;
+export const swapSyncScheduleDaysBodyDestinationRevisionMin = 0;
+export const swapSyncScheduleDaysBodyResetEpochMin = 0;
+export const swapSyncScheduleDaysBodySenderIdMax = 160;
+export const swapSyncScheduleDaysResponseSourceRevisionMin = 0;
+export const swapSyncScheduleDaysResponseDestinationRevisionMin = 0;
+export const swapSyncScheduleDaysResponseSourceSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const swapSyncScheduleDaysResponseDestinationSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayResponseOneTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -1024,8 +1042,85 @@ export const listOperationalIntentReceiptsQueryAfterMin = 0;
 export const listOperationalIntentReceiptsResponseCursorMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+export const listImportGoldApprovalsQueryRecordRefMax = 128;
+export const listImportGoldApprovalsQueryRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseExpiryRemindersExpiringCountMin = 0;
+export const listImportGoldApprovalsResponseApprovalsItemRecordRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const listImportGoldApprovalsResponseApprovalsItemOwnerRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemConditionsRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsMax = 50;
+export const createImportGoldApprovalBodyRecordRefMax = 128;
+export const createImportGoldApprovalBodyRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodySourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const createImportGoldApprovalBodyOwnerRefMax = 128;
+export const createImportGoldApprovalBodyOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyPrivacyReviewerRefMax = 128;
+export const createImportGoldApprovalBodyPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyConditionsRefMax = 128;
+export const createImportGoldApprovalBodyConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyExternalCopiesRefMax = 128;
+export const createImportGoldApprovalBodyExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyBackupHandlingRefMax = 128;
+export const createImportGoldApprovalBodyBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalRecordRefMax = 128;
+export const createImportGoldApprovalResponseApprovalRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const createImportGoldApprovalResponseApprovalOwnerRefMax = 128;
+export const createImportGoldApprovalResponseApprovalOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalPrivacyReviewerRefMax = 128;
+export const createImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalConditionsRefMax = 128;
+export const createImportGoldApprovalResponseApprovalConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalExternalCopiesRefMax = 128;
+export const createImportGoldApprovalResponseApprovalExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalBackupHandlingRefMax = 128;
+export const createImportGoldApprovalResponseApprovalBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalRecordRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const verifyImportGoldApprovalResponseApprovalOwnerRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalConditionsRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalExternalCopiesRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalBackupHandlingRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalRecordRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const revokeImportGoldApprovalResponseApprovalOwnerRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalConditionsRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalExternalCopiesRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalBackupHandlingRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
 export const listImportGoldCasesQueryLimitDefault = 50;
 export const listImportGoldCasesQueryLimitMax = 100;
+export const listImportGoldCleanupCasesQueryCursorMax = 512;
+export const listImportGoldRetentionQueryLimitDefault = 50;
+export const listImportGoldRetentionQueryLimitMax = 100;
+export const listImportGoldRetentionQueryOffsetDefault = 0;
+export const listImportGoldRetentionQueryOffsetMin = 0;
+export const listImportGoldRetentionQueryOffsetMax = 10000;
+export const listImportGoldRetentionQueryRevisionRegExp = new RegExp('^[a-f0-9]{64}$');
+export const listImportGoldRetentionResponseRevisionRegExp = new RegExp('^[a-f0-9]{64}$');
 export const scoreImportGoldCasesBodyCaseIdsMax = 3;
 export const previewImportOperationBodyImportTypeMax = 40;
 export const previewImportOperationBodySourceKeyMax = 300;
@@ -6297,6 +6392,7 @@ export const ListDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6337,6 +6433,7 @@ export const SaveDoughRecipesBody = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6364,6 +6461,7 @@ export const SaveDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6408,6 +6506,7 @@ export const DeleteDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6448,6 +6547,7 @@ export const ListSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6488,6 +6588,7 @@ export const SaveSauceRecipesBody = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6515,6 +6616,7 @@ export const SaveSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6559,6 +6661,7 @@ export const DeleteSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -9126,6 +9229,11 @@ export const UpdateRoleParams = zod.object({
 })
 
 export const UpdateRoleBody = zod.object({
+  "expectedRole": zod.object({
+  "name": zod.string().describe('Unique role name (also its identifier).'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
+}).describe('Reviewed role baseline. A stale baseline is rejected without overwriting newer permissions. Older callers without a baseline must refresh before editing.'),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "name": zod.string().min(1).max(updateRoleBodyNameMax).optional().describe('Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.')
 })
@@ -9338,6 +9446,68 @@ export const FinalizeApplicatorBatchTotalResponse = zod.object({
   "hashContract": zod.enum(['canonical-json-v1']),
   "createdAt": zod.coerce.date()
 })
+})
+
+/**
+ * Moves one, several or all unstarted runs in one scoped transaction. The source and destination revisions and reset epoch are checked before either date changes. Setup values, run-value stamps, packaging progress, timers, automatic-tracking state and staged run items follow the moved runs. A rejected or stale request leaves both dates unchanged.
+ * @summary Atomically move selected runs between dates
+ */
+
+export const MoveSyncScheduledRunsBody = zod.object({
+  "sourceDate": zod.coerce.date(),
+  "destinationDate": zod.coerce.date(),
+  "sourceRevision": zod.int().min(moveSyncScheduledRunsBodySourceRevisionMin),
+  "destinationRevision": zod.int().min(moveSyncScheduledRunsBodyDestinationRevisionMin),
+  "resetEpoch": zod.int().min(moveSyncScheduledRunsBodyResetEpochMin),
+  "senderId": zod.string().max(moveSyncScheduledRunsBodySenderIdMax).optional(),
+  "runIds": zod.union([zod.literal("all"),zod.array(zod.string().min(1).max(moveSyncScheduledRunsBodyRunIdsTwoItemMax).regex(moveSyncScheduledRunsBodyRunIdsTwoItemRegExp)).min(1).max(moveSyncScheduledRunsBodyRunIdsTwoMax)])
+})
+
+export const MoveSyncScheduledRunsResponse = zod.object({
+  "moved": zod.literal(true),
+  "sourceRemoved": zod.boolean(),
+  "sourceRevision": zod.int().min(moveSyncScheduledRunsResponseSourceRevisionMin),
+  "destinationRevision": zod.int().min(moveSyncScheduledRunsResponseDestinationRevisionMin),
+  "destinationSnapshotId": zod.string().regex(moveSyncScheduledRunsResponseDestinationSnapshotIdRegExp)
+})
+
+/**
+ * Returns scoped schedule presence and server facility-local eligibility. A swap involving today is allowed only when no run has started or the facility-local time is before 7:00 a.m. This read is manager-only; the swap endpoint rechecks all conditions transactionally.
+ * @summary Check whether a whole-day schedule swap is available
+ */
+export const GetSyncScheduleSwapEligibilityQueryParams = zod.object({
+  "sourceDate": zod.date(),
+  "destinationDate": zod.date()
+})
+
+export const GetSyncScheduleSwapEligibilityResponse = zod.object({
+  "today": zod.coerce.date(),
+  "sourceScheduled": zod.boolean(),
+  "destinationScheduled": zod.boolean(),
+  "canSwap": zod.boolean(),
+  "reason": zod.union([zod.literal('today-started-after-6am'),zod.literal(null)]).nullable()
+})
+
+/**
+ * Exchanges run metadata, values, per-run stamps, packaging progress, timers, automatic-tracking state and date-specific settings. Factory-wide data remains attached to its original date. Both canonical revisions, scope, reset epoch and the today eligibility rule are checked under transaction locks before either date is written. Rejected or stale requests leave both dates unchanged.
+ * @summary Atomically exchange two date-scoped schedules
+ */
+
+export const SwapSyncScheduleDaysBody = zod.object({
+  "sourceDate": zod.coerce.date(),
+  "destinationDate": zod.coerce.date(),
+  "sourceRevision": zod.int().min(swapSyncScheduleDaysBodySourceRevisionMin),
+  "destinationRevision": zod.int().min(swapSyncScheduleDaysBodyDestinationRevisionMin),
+  "resetEpoch": zod.int().min(swapSyncScheduleDaysBodyResetEpochMin),
+  "senderId": zod.string().max(swapSyncScheduleDaysBodySenderIdMax).optional()
+})
+
+export const SwapSyncScheduleDaysResponse = zod.object({
+  "swapped": zod.literal(true),
+  "sourceRevision": zod.int().min(swapSyncScheduleDaysResponseSourceRevisionMin),
+  "destinationRevision": zod.int().min(swapSyncScheduleDaysResponseDestinationRevisionMin),
+  "sourceSnapshotId": zod.string().regex(swapSyncScheduleDaysResponseSourceSnapshotIdRegExp),
+  "destinationSnapshotId": zod.string().regex(swapSyncScheduleDaysResponseDestinationSnapshotIdRegExp)
 })
 
 /**
@@ -10126,14 +10296,235 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
 })
 
 /**
+ * Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture.
+ */
+
+export const ListImportGoldApprovalsQueryParams = zod.object({
+  "before": zod.coerce.number().int().min(1).optional(),
+  "recordRef": zod.coerce.string().max(listImportGoldApprovalsQueryRecordRefMax).regex(listImportGoldApprovalsQueryRecordRefRegExp).optional().describe('Exact opaque approval reference, filtered on the server within the authenticated scope.')
+})
+
+export const ListImportGoldApprovalsResponse = zod.object({
+  "expiryReminders": zod.object({
+  "windowDays": zod.literal(7),
+  "expiringCount": zod.int().min(listImportGoldApprovalsResponseExpiryRemindersExpiringCountMin),
+  "asOf": zod.coerce.date()
+}).optional().describe('Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension.'),
+  "approvals": zod.array(zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemRecordRefMax).regex(listImportGoldApprovalsResponseApprovalsItemRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(listImportGoldApprovalsResponseApprovalsItemSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemOwnerRefMax).regex(listImportGoldApprovalsResponseApprovalsItemOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefMax).regex(listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemConditionsRefMax).regex(listImportGoldApprovalsResponseApprovalsItemConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefMax).regex(listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefMax).regex(listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})).max(listImportGoldApprovalsResponseApprovalsMax),
+  "nextBefore": zod.int().nullable()
+})
+
+/**
+ * Create immutable pending metadata only. Never submit workbook data, names, locations, or approval documents. References identify evidence retained in a separate restricted system. Creation is not verification or enablement.
+ */
+
+export const CreateImportGoldApprovalBody = zod.object({
+  "recordRef": zod.string().max(createImportGoldApprovalBodyRecordRefMax).regex(createImportGoldApprovalBodyRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(createImportGoldApprovalBodySourceDigestRegExp).describe('SHA-256 of evaluation input JSON with recursively sorted object keys and original array order. Not a workbook-file hash and not approval evidence.'),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(createImportGoldApprovalBodyOwnerRefMax).regex(createImportGoldApprovalBodyOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(createImportGoldApprovalBodyPrivacyReviewerRefMax).regex(createImportGoldApprovalBodyPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(createImportGoldApprovalBodyConditionsRefMax).regex(createImportGoldApprovalBodyConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(createImportGoldApprovalBodyExternalCopiesRefMax).regex(createImportGoldApprovalBodyExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(createImportGoldApprovalBodyBackupHandlingRefMax).regex(createImportGoldApprovalBodyBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true).describe('Human confirms manual deletion within 30 days or earlier on owner request, covering cases, scores and evaluation working copies. Backups require separately documented handling.'),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date()
+})
+
+export const CreateImportGoldApprovalResponse = zod.object({
+  "approval": zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(createImportGoldApprovalResponseApprovalRecordRefMax).regex(createImportGoldApprovalResponseApprovalRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(createImportGoldApprovalResponseApprovalSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(createImportGoldApprovalResponseApprovalOwnerRefMax).regex(createImportGoldApprovalResponseApprovalOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(createImportGoldApprovalResponseApprovalPrivacyReviewerRefMax).regex(createImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(createImportGoldApprovalResponseApprovalConditionsRefMax).regex(createImportGoldApprovalResponseApprovalConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(createImportGoldApprovalResponseApprovalExternalCopiesRefMax).regex(createImportGoldApprovalResponseApprovalExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(createImportGoldApprovalResponseApprovalBackupHandlingRefMax).regex(createImportGoldApprovalResponseApprovalBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})
+})
+
+/**
+ * Explicit authorized human attestation that referenced private evidence was reviewed. Records current actor and server time, not an independent automated privacy review. Does not enable capture.
+ */
+
+export const VerifyImportGoldApprovalParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const VerifyImportGoldApprovalBody = zod.object({
+  "reviewed": zod.literal(true)
+})
+
+export const VerifyImportGoldApprovalResponse = zod.object({
+  "approval": zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(verifyImportGoldApprovalResponseApprovalRecordRefMax).regex(verifyImportGoldApprovalResponseApprovalRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(verifyImportGoldApprovalResponseApprovalSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(verifyImportGoldApprovalResponseApprovalOwnerRefMax).regex(verifyImportGoldApprovalResponseApprovalOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefMax).regex(verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(verifyImportGoldApprovalResponseApprovalConditionsRefMax).regex(verifyImportGoldApprovalResponseApprovalConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(verifyImportGoldApprovalResponseApprovalExternalCopiesRefMax).regex(verifyImportGoldApprovalResponseApprovalExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(verifyImportGoldApprovalResponseApprovalBackupHandlingRefMax).regex(verifyImportGoldApprovalResponseApprovalBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})
+})
+
+/**
+ * Permanently revoke an approval. Audit and metadata are retained; future captures cannot use it. Requires current Manager or QC Manager role and manage-staff or manage-qc capability.
+ */
+
+export const RevokeImportGoldApprovalParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const RevokeImportGoldApprovalBody = zod.object({
+  "reviewed": zod.literal(true)
+})
+
+export const RevokeImportGoldApprovalResponse = zod.object({
+  "approval": zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(revokeImportGoldApprovalResponseApprovalRecordRefMax).regex(revokeImportGoldApprovalResponseApprovalRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(revokeImportGoldApprovalResponseApprovalSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(revokeImportGoldApprovalResponseApprovalOwnerRefMax).regex(revokeImportGoldApprovalResponseApprovalOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefMax).regex(revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(revokeImportGoldApprovalResponseApprovalConditionsRefMax).regex(revokeImportGoldApprovalResponseApprovalConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(revokeImportGoldApprovalResponseApprovalExternalCopiesRefMax).regex(revokeImportGoldApprovalResponseApprovalExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(revokeImportGoldApprovalResponseApprovalBackupHandlingRefMax).regex(revokeImportGoldApprovalResponseApprovalBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})
+})
+
+/**
  * @summary Read manager-only import-gold feature and provider configuration
  */
 export const GetImportGoldConfigResponse = zod.object({
   "enabled": zod.boolean(),
+  "cleanupEnabled": zod.boolean().describe('True only when explicitly configured and source approvals are disabled'),
   "localConfigured": zod.boolean(),
+  "localAvailable": zod.boolean(),
+  "localScoringSwitchAvailable": zod.boolean(),
+  "localScoringEnabled": zod.boolean(),
+  "syntheticFixtureAvailable": zod.boolean(),
   "geminiConfigured": zod.boolean(),
   "retention": zod.string(),
   "persistsAcrossFactoryPurge": zod.boolean()
+})
+
+/**
+ * This setting does not enable real-source capture approvals, Gemini, or the private evaluator workflow.
+ * @summary Enable or disable app-side local scoring in a development workspace
+ */
+export const SetImportGoldLocalScoringBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const SetImportGoldLocalScoringResponse = zod.object({
+  "enabled": zod.boolean()
+})
+
+/**
+ * @summary Read the fixed development-only synthetic evaluation sample
+ */
+export const GetImportGoldSyntheticReviewResponse = zod.object({
+  "fixtureVersion": zod.string(),
+  "importType": zod.enum(['premix']),
+  "sourceLabel": zod.string(),
+  "input": zod.record(zod.string(), zod.unknown()),
+  "expectedResult": zod.record(zod.string(), zod.unknown()),
+  "applyEffect": zod.string()
+})
+
+/**
+ * Creates an idempotent synthetic evaluation case only and does not change recipes, inventory, or real-source approval settings.
+ * @summary Apply the reviewed fixed synthetic sample to the development evaluation lab
+ */
+export const ApplyImportGoldSyntheticReviewBody = zod.object({
+  "fixtureVersion": zod.enum(['synthetic-mix-v1']),
+  "reviewed": zod.literal(true)
+})
+
+export const ApplyImportGoldSyntheticReviewResponse = zod.object({
+  "caseId": zod.int().min(1),
+  "created": zod.boolean()
 })
 
 /**
@@ -10167,6 +10558,72 @@ export const ListImportGoldCasesResponse = zod.object({
   "createdAt": zod.coerce.date()
 }))
 }))
+})
+
+/**
+ * @summary List minimal scoped case metadata when cleanup-only mode is enabled
+ */
+
+export const ListImportGoldCleanupCasesQueryParams = zod.object({
+  "cursor": zod.coerce.string().max(listImportGoldCleanupCasesQueryCursorMax).optional().describe('Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.')
+})
+
+export const ListImportGoldCleanupCasesResponse = zod.object({
+  "nextCursor": zod.string().nullable().describe('Cursor for older cases, or null when the scoped inventory ends.'),
+  "cases": zod.array(zod.object({
+  "id": zod.int().min(1),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+/**
+ * @summary Delete one scoped case and its score history in cleanup-only mode
+ */
+
+export const DeleteImportGoldCleanupCaseParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const DeleteImportGoldCleanupCaseResponse = zod.void()
+
+/**
+ * @summary List scoped Gold Lab deadlines for Managers and QC Managers
+ */
+
+export const ListImportGoldRetentionQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(listImportGoldRetentionQueryLimitMax).default(listImportGoldRetentionQueryLimitDefault),
+  "offset": zod.coerce.number().int().min(listImportGoldRetentionQueryOffsetMin).max(listImportGoldRetentionQueryOffsetMax).default(listImportGoldRetentionQueryOffsetDefault),
+  "status": zod.enum(['within_limit', 'due_soon', 'overdue', 'deletion_incomplete', 'verification_needed', 'verified']).optional().describe('Return only records with this current retention status; filtering is applied before pagination.'),
+  "revision": zod.coerce.string().regex(listImportGoldRetentionQueryRevisionRegExp).optional().describe('Pass the first page\'s revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.')
+})
+
+export const ListImportGoldRetentionResponse = zod.object({
+  "revision": zod.string().regex(listImportGoldRetentionResponseRevisionRegExp),
+  "records": zod.array(zod.object({
+  "caseId": zod.int().min(1),
+  "capturedAt": zod.coerce.date(),
+  "deleteBy": zod.coerce.date(),
+  "status": zod.enum(['within_limit', 'due_soon', 'overdue', 'deletion_incomplete', 'verification_needed', 'verified']),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "verifiedBy": zod.string().nullable()
+})),
+  "hasMore": zod.boolean(),
+  "nextOffset": zod.int().nullable()
+})
+
+/**
+ * @summary Record manual verification for Managers and QC Managers
+ */
+
+export const RecordImportGoldDeletionVerificationParams = zod.object({
+  "caseId": zod.coerce.number().int().min(1)
+})
+
+export const RecordImportGoldDeletionVerificationResponse = zod.object({
+  "caseId": zod.int().min(1),
+  "verifiedAt": zod.coerce.date(),
+  "verifiedBy": zod.string()
 })
 
 /**
@@ -10239,6 +10696,7 @@ export const PreviewImportOperationBody = zod.object({
   "requestHash": zod.string().regex(previewImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(previewImportOperationBodyExpectedStateHashRegExp).nullish(),
   "goldCapture": zod.object({
+  "approvalId": zod.int().min(1).describe('Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference.'),
   "input": zod.looseObject({
 
 })
@@ -10279,6 +10737,7 @@ export const ApplyImportOperationBody = zod.object({
   "requestHash": zod.string().regex(applyImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(applyImportOperationBodyExpectedStateHashRegExp).nullish(),
   "goldCapture": zod.object({
+  "approvalId": zod.int().min(1).describe('Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference.'),
   "input": zod.looseObject({
 
 })

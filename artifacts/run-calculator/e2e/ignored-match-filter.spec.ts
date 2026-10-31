@@ -3,6 +3,7 @@ import { Client } from "pg";
 import {
   cleanupTestUsers,
   DEFAULT_MANAGER_CAPABILITIES,
+  freshMasterDataSeedHeaders,
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
@@ -83,7 +84,10 @@ async function seedDoughNames(page: Page, names: string[]): Promise<void> {
     testRecipeIds.add(id);
     return { id, name, notes: "", components: [], enabled: true, brand: "", flavors: [] };
   });
-  const response = await page.request.post("/api/dough-recipes", { data: { items } });
+  const response = await page.request.post("/api/dough-recipes", {
+    headers: await freshMasterDataSeedHeaders(page.request, "/api/dough-recipes"),
+    data: { items },
+  });
   expect(response.status(), "seed disposable dough recipe names").toBe(200);
 }
 
@@ -96,6 +100,7 @@ async function seedAliases(
 ): Promise<void> {
   testAliasNames.add(firstName);
   const response = await page.request.post("/api/merge-aliases", {
+    headers: await freshMasterDataSeedHeaders(page.request, "/api/merge-aliases"),
     data: {
       category,
       ...(category === "flavor" && brand ? { brand } : {}),

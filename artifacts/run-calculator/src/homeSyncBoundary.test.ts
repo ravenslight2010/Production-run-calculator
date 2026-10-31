@@ -46,6 +46,18 @@ describe("Home sync manager boundary", () => {
     expect(home.match(/syncWriteFieldCheck\(/g)).toHaveLength(5);
   });
 
+  it("records duplicate suppression as reconciliation, not a new server acknowledgement", () => {
+    const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
+    const duplicateSuppressionEvents = home.match(
+      /recordSyncEvent\(\s*"merge",\s*"Queued change already matches the confirmed server state; no duplicate write was sent",\s*"duplicate-suppressed"/g,
+    );
+
+    expect(duplicateSuppressionEvents).toHaveLength(3);
+    expect(home).not.toMatch(
+      /recordSyncEvent\(\s*"ack",\s*"Queued change already matches the confirmed server state; no duplicate write was sent",\s*"duplicate-suppressed"/,
+    );
+  });
+
   it("keeps scheduled profile propagation on the causally fenced write contract", () => {
     const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
     const start = home.indexOf("async function propagateProfileToPendingRunsNow");
@@ -56,5 +68,24 @@ describe("Home sync manager boundary", () => {
     expect(propagation).toContain('completeness: "complete"');
     expect(propagation).toContain("baseSnapshotId: payloadResult.snapshotId");
     expect(propagation).toContain("fallback?.partialFallback");
+  });
+
+  it("routes stale-base recovery through persisted run-value and live-form adoption", () => {
+    const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
+    const recoveryStart = home.indexOf("function rebasePendingSyncWork(");
+    const recoveryEnd = home.indexOf("\n  function ", recoveryStart + 1);
+    const recovery = home.slice(recoveryStart, recoveryEnd);
+    const sentValuesCapture = recovery.indexOf(
+      "const sentRunValues = work.payload.runValues ?? {};",
+    );
+    const recoveredPayloadReplace = recovery.indexOf("work.payload = recovery.payload;");
+
+    expect(sentValuesCapture).toBeGreaterThanOrEqual(0);
+    expect(sentValuesCapture).toBeLessThan(recoveredPayloadReplace);
+    expect(recovery).toContain("selectUnchangedRunValueIdsForRecovery(");
+    expect(recovery).toContain("acceptCanonicalRunValueIds: canonicalRunValueIds,");
+    expect(home).toContain("shouldResetLiveFormForSync({");
+    expect(home).toContain("explicitRebaseAdoption: explicitCanonicalRunAdoption,");
+    expect(home).toContain("if (canResetLiveForm) {");
   });
 });

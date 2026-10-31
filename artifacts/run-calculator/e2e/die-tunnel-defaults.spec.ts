@@ -25,8 +25,23 @@ function localDate(): string {
   ].join("-");
 }
 
+async function clearToday(): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("die tunnel daily-state fixture"),
+  });
+  try {
+    await db.connect();
+    await db.query("DELETE FROM daily_sync WHERE scope = 'live' AND date = $1", [localDate()]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "Welcome2Lucias!";
 const testUsernames = new Set<string>();
+
+test.beforeEach(clearToday);
+test.afterEach(clearToday);
 
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
@@ -200,6 +215,10 @@ test.describe("run-form die defaults and split timer", () => {
     await expect(page.locator('[data-testid="line-transit-total"]'))
       .toContainText(/Press \/ Oven carries pairs.*Frontline carries single pizzas/);
 
+    await expect(page.getByTestId("operational-state-badge")).toHaveText(
+      "Confirmed server baseline",
+      { timeout: 25_000 },
+    );
     await page.getByTestId("button-start-run").click();
     const pauseButton = page.getByRole("button", { name: /pause run/i });
     await pauseButton.waitFor({ state: "visible", timeout: 10_000 });
@@ -278,8 +297,6 @@ test.describe("run-form die defaults and split timer", () => {
     try {
       await secondTab.goto("/", { waitUntil: "domcontentloaded" });
       await secondTab.locator('[title="Sync connected"]').waitFor({ state: "visible", timeout: 20_000 });
-      await expect(secondTab.getByText("Confirmed server baseline", { exact: true }))
-        .toBeVisible({ timeout: 20_000 });
       // Selection is device-local: a cold browser may initially select its
       // pending blank run. Select the same canonical run through normal UI.
       const peerResponse = await secondTab.request.get(`/api/sync/today?today=${today}`);
@@ -293,6 +310,8 @@ test.describe("run-form die defaults and split timer", () => {
         await secondTab.getByRole("button", { name: `Select run ${peerIndex + 1}`, exact: true }).click();
       }
       await expect(secondTab.getByTestId("run-identity")).toHaveAttribute("data-run-id", runId);
+      await expect(secondTab.getByText("Confirmed server baseline", { exact: true }))
+        .toBeVisible({ timeout: 20_000 });
       const peerPhases = secondTab.getByTestId("line-phase-strip");
       await expect(peerPhases.getByText(/Press \/ Oven/)).toBeVisible({ timeout: 20_000 });
       await expect(peerPhases.getByText(/Frontline/)).toBeVisible();

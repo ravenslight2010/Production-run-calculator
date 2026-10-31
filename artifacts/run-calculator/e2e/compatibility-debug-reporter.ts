@@ -1,4 +1,5 @@
 import { captureReleaseIdentity } from "../../../scripts/src/release-source-identity.mjs";
+import { WebKitAttemptProgress } from "./webkit-attempt-progress";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +7,7 @@ import type {
   FullConfig,
   FullResult,
   Reporter,
+  Suite,
   TestCase,
   TestResult,
   TestStep,
@@ -246,7 +248,8 @@ function collectSafeSteps(steps: TestStep[]): SafeStep[] {
 
 function failureType(result: TestResult): FailureRecord["failureType"] {
   if (result.status === "timedOut") return "timeout";
-  const firstName = result.errors[0]?.name;
+  const first = result.errors[0];
+  const firstName = first && "name" in first && typeof first.name === "string" ? first.name : undefined;
   if (firstName === "TimeoutError") return "timeout";
   if (
     firstName === "ExpectError" ||
@@ -336,14 +339,25 @@ async function safeScreenshotBytes(
 }
 
 export default class CompatibilityDebugReporter implements Reporter {
+  private readonly progress = new WebKitAttemptProgress("webkit-compatibility-debug");
   private readonly failures = new Map<string, FailureRecord>();
-  private playwrightOutputDir = "";
+  private readonly playwrightOutputDirs = new Map<string, string>();
 
-  onBegin(config: FullConfig): void {
-    this.playwrightOutputDir = config.outputDir;
+  onBegin(config: FullConfig, suite: Suite): void {
+    for (const project of config.projects) {
+      if (ALLOWED_PROJECTS.has(project.name)) this.playwrightOutputDirs.set(project.name, project.outputDir);
+    }
+    this.progress.begin(config, suite);
   }
 
+  onTestBegin(testCase: TestCase, result: TestResult): void {
+    this.progress.testBegin(testCase, result);
+  }
+
+  onError(): void { this.progress.error(); }
+
   onTestEnd(testCase: TestCase, result: TestResult): void {
+    this.progress.testEnd(testCase, result);
     const projectName = testCase.parent.project()?.name;
     if (!ALLOWED_PROJECTS.has(projectName ?? "")) return;
     if (
@@ -377,10 +391,11 @@ export default class CompatibilityDebugReporter implements Reporter {
   }
 
   async onEnd(_result: FullResult): Promise<void> {
+    this.progress.end(_result);
     const failures = [...this.failures.values()];
     if (failures.length === 0) return;
     const output = debugOutput();
-    if (!output || !this.playwrightOutputDir) return;
+    if (!output || this.playwrightOutputDirs.size === 0) return;
 
     try {
       const outputRoot = await realpath(process.env.RUNNER_TEMP!);
@@ -404,7 +419,7 @@ export default class CompatibilityDebugReporter implements Reporter {
         const id = `failure-${String(index + 1).padStart(2, "0")}`;
         const screenshot = await safeScreenshotBytes(
           failure,
-          this.playwrightOutputDir,
+          this.playwrightOutputDirs.get(failure.project) ?? "",
         );
         let screenshotName: string | undefined;
         if (screenshot) {

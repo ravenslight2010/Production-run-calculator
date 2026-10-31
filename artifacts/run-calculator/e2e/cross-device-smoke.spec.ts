@@ -9,6 +9,7 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
 import {
   dismissOnboardingIfPresent,
@@ -208,15 +209,14 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
     // cross-device fixture, not during the initial sign-up.
     onboarding: false,
   });
-  await seedPendingRun(page);
+  const runId = await seedPendingRun(page);
   // The reload used to install the pending run can race the first-login
   // mutation; make the post-reload boundary explicit before clicking tabs.
   await dismissOnboarding(page);
 
-  // Selecting the Run tab is the stable cross-layout equivalent of choosing
-  // the account's newly-created pending run from the run strip.
-  await page.getByTestId("tab-run").click();
-  const runId = await selectedRunId(page);
+  // A device-local blank may remain selected after canonical bootstrap.
+  await selectCanonicalFixtureRun(page, runId);
+  expect(await selectedRunId(page)).toBe(runId);
   await expect(page.getByTestId("button-start-run")).toBeVisible();
 
   await page.getByTestId("button-start-run").click();

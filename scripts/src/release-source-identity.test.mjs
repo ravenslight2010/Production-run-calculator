@@ -50,6 +50,17 @@ test("changing a test command invalidates assessment evidence", (t) => {
   assert.notEqual(captureReleaseIdentity(root).revision, before.revision);
 });
 
+test("changing the recovery manifest invalidates assessment evidence", (t) => {
+  const root = fixture(t);
+  put(root, "scripts/recovery-manifest.json", '{"version":1,"entries":[]}');
+  const before = captureReleaseIdentity(root);
+  put(root, "scripts/recovery-manifest.json", '{"version":1,"entries":[{"id":"new-check"}]}');
+  const after = captureReleaseIdentity(root);
+  assert.equal(after.sourceRevision, before.sourceRevision);
+  assert.notEqual(after.verificationFingerprintSha256, before.verificationFingerprintSha256);
+  assert.notEqual(after.revision, before.revision);
+});
+
 test("legacy identities remain readable but assessment IDs are not deployment IDs", () => {
   assert(isDeploymentRevision(`source-sha256:${"a".repeat(64)}`));
   assert(isEvidenceRevision(`test-sha256:${"b".repeat(64)}`));

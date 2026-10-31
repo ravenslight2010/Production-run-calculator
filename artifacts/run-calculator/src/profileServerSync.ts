@@ -49,6 +49,35 @@ export function canonicalProfileKey(brand: string, flavor: string): string {
   return `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 }
 
+export type ProfileDisplayIdentity = { brand: string; flavor: string };
+
+type CachedProfileDisplayIdentity = ProfileDisplayIdentity & { generation: number };
+const profileDisplayIdentityByKey = new Map<string, CachedProfileDisplayIdentity>();
+
+function validDisplayIdentity(
+  key: string,
+  identity?: ProfileDisplayIdentity,
+): ProfileDisplayIdentity | undefined {
+  if (!identity || typeof identity.brand !== "string" || typeof identity.flavor !== "string") return undefined;
+  const normalized = { brand: identity.brand.trim(), flavor: identity.flavor.trim() };
+  if ((!normalized.brand && !normalized.flavor) || canonicalProfileKey(normalized.brand, normalized.flavor) !== key) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function rememberDisplayIdentity(key: string, identity: ProfileDisplayIdentity): void {
+  const valid = validDisplayIdentity(key, identity);
+  if (!valid) return;
+  profileDisplayIdentityByKey.set(key, { ...valid, generation: getProfileCacheGeneration() });
+}
+
+function knownDisplayIdentity(key: string): ProfileDisplayIdentity | undefined {
+  const cached = profileDisplayIdentityByKey.get(key);
+  if (!cached || cached.generation !== getProfileCacheGeneration()) return undefined;
+  return { brand: cached.brand, flavor: cached.flavor };
+}
+
 function doughStorageKey(key: string): string {
   return `${DOUGH_PREFIX}${key}`;
 }
@@ -70,6 +99,8 @@ type QueueOp = {
   blobs?: { dough: string | null; crust: string | null };
   updatedAt?: number;
   undoEpoch?: string;
+  /** Preserve the display spelling lost by the case-folded canonical key. */
+  displayIdentity?: ProfileDisplayIdentity;
 };
 
 let genCounter = Date.now();
@@ -96,6 +127,7 @@ export function profileRecoveryIsMemoryOnly(): boolean {
 export function resetProfileSyncMemoryFallbackForTests(): void {
   memoryQueues.clear();
   memoryMaps.clear();
+  profileDisplayIdentityByKey.clear();
 }
 
 function readProfileBlobs(key: string): { dough: string | null; crust: string | null } {
@@ -183,8 +215,14 @@ function writeQueue(ops: QueueOp[]): void {
 function enqueue(op: QueueOp): void {
   const prev = readQueue().find((o) => o.key === op.key);
   const ops = readQueue().filter((o) => o.key !== op.key);
+  const displayIdentity = op.t === "up"
+    ? validDisplayIdentity(op.key, op.displayIdentity)
+      ?? (prev?.t === "up" ? validDisplayIdentity(op.key, prev.displayIdentity) : undefined)
+    : undefined;
   const stamped = {
-    ...op, g: nextGen(), undoEpoch: op.undoEpoch ?? (prev ? prev.undoEpoch ?? "unbound"
+    ...op,
+    ...(displayIdentity ? { displayIdentity } : {}),
+    g: nextGen(), undoEpoch: op.undoEpoch ?? (prev ? prev.undoEpoch ?? "unbound"
       : adoptedProfileEpochGeneration === getProfileCacheGeneration() ? adoptedProfileWriteEpoch : "unbound"),
     ...(op.t === "up" ? {
       blobs: op.blobs ?? readProfileBlobs(op.key),
@@ -210,13 +248,15 @@ export function getProfileStamp(key: string): number {
  * upsert, and kick a background flush. Call AFTER the localStorage blobs were
  * written.
  */
-export function markProfileEdited(key: string): void {
+export function markProfileEdited(key: string, displayIdentity?: ProfileDisplayIdentity): void {
   if (!profileCacheIsActive()) return;
   if (!key || key === "__") return;
   const stamps = readMap(STAMPS_KEY);
   stamps[key] = Math.max(Date.now(), (stamps[key] ?? 0) + 1);
   writeMap(STAMPS_KEY, stamps);
-  enqueue({ t: "up", key });
+  const identity = validDisplayIdentity(key, displayIdentity) ?? knownDisplayIdentity(key);
+  if (identity) rememberDisplayIdentity(key, identity);
+  enqueue({ t: "up", key, ...(identity ? { displayIdentity: identity } : {}) });
   void flushProfileQueue();
 }
 
@@ -229,13 +269,15 @@ export function markProfileEdited(key: string): void {
  * Masala reimport-blocked incident). Call AFTER the localStorage blobs were
  * written.
  */
-export function markProfileForceEdited(key: string): void {
+export function markProfileForceEdited(key: string, displayIdentity?: ProfileDisplayIdentity): void {
   if (!profileCacheIsActive()) return;
   if (!key || key === "__") return;
   const stamps = readMap(STAMPS_KEY);
   stamps[key] = Math.max(Date.now(), (stamps[key] ?? 0) + 1);
   writeMap(STAMPS_KEY, stamps);
-  enqueue({ t: "up", key, force: true });
+  const identity = validDisplayIdentity(key, displayIdentity) ?? knownDisplayIdentity(key);
+  if (identity) rememberDisplayIdentity(key, identity);
+  enqueue({ t: "up", key, force: true, ...(identity ? { displayIdentity: identity } : {}) });
   void flushProfileQueue();
 }
 
@@ -317,6 +359,9 @@ async function apiList(): Promise<ApiProfile[]> {
       || !item.values || typeof item.values !== "object" || Array.isArray(item.values)
       || !item.crustValues || typeof item.crustValues !== "object" || Array.isArray(item.crustValues)
     )) throw new Error("Invalid profile directory response");
+    for (const item of data.items) {
+      rememberDisplayIdentity(item.key, { brand: item.brand, flavor: item.flavor });
+    }
     profileReadEpochs.set(data.items, { generation: cacheGeneration, epoch: res.headers.get("x-master-data-epoch") ?? "unbound" });
     return data.items;
   })();
@@ -432,6 +477,7 @@ async function apiSave(items: ApiProfile[], undoEpoch: string): Promise<Map<stri
     for (const item of data.items) {
       if (item && typeof item.key === "string" && typeof item.updatedAt === "number") {
         serverStamps.set(item.key, item.updatedAt);
+        rememberDisplayIdentity(item.key, { brand: item.brand, flavor: item.flavor });
       }
     }
     // The endpoint's response is the acknowledgement boundary. A stamp/key
@@ -577,7 +623,8 @@ async function flushOnce(): Promise<void> {
       dropKeys.push(op.key);
       continue;
     }
-    const { brand, flavor } = splitKey(op.key);
+    const displayIdentity = validDisplayIdentity(op.key, op.displayIdentity) ?? knownDisplayIdentity(op.key);
+    const { brand, flavor } = displayIdentity ?? splitKey(op.key);
     upserts.push({
       key: op.key,
       brand,

@@ -49,6 +49,7 @@ export function setFactoryDataIdentity(identity: string | null, writable: boolea
   scopeIdentity = identity; canWrite = writable; scopeEpoch++; adoptedWriteEpoch = "unbound";
   memoryQueue = null; flushInFlight = null; settings.clear();
   setFactoryDirectoryIdentity(identity);
+  notifyFactoryDirectory();
 }
 function queueKey(): string | null { return scopeIdentity ? QUEUE_PREFIX + encodeURIComponent(scopeIdentity) : null; }
 function stampKey(key: string): string { return `${STAMP_PREFIX}${scopeIdentity ?? "unbound"}:${key}`; }
@@ -62,7 +63,7 @@ export function stampLocalWrite(key: string): number {
   const stamp = Math.max(Date.now(), localStamp(key) + 1);
   setStamp(key, stamp); return stamp;
 }
-function readQueue(): FactoryQueueOp[] {
+function readQueue(reportError = true): FactoryQueueOp[] {
   if (memoryQueue) return [...memoryQueue];
   const key = queueKey();
   if (!key) return [];
@@ -75,7 +76,7 @@ function readQueue(): FactoryQueueOp[] {
     }
     return raw;
   } catch {
-    setFactoryDirectoryStatus("unavailable", "Pending factory edits could not be read. Stored edits were retained; do not clear browser data. Ask a manager to review this device.");
+    if (reportError) setFactoryDirectoryStatus("unavailable", "Pending factory edits could not be read. Stored edits were retained; do not clear browser data. Ask a manager to review this device.");
     throw new Error("Pending factory edits unavailable; stored commands retained.");
   }
 }
@@ -87,6 +88,7 @@ function writeQueue(queue: FactoryQueueOp[]): void {
     memoryQueue = [...queue];
     setFactoryDirectoryStatus("unavailable", "This device could not save pending factory edits. Keep this tab open, free browser storage, then retry online before closing it.");
   }
+  notifyFactoryDirectory();
 }
 function enqueue(key: string, value: unknown, updatedAt: number): void {
   generation = Math.max(generation + 1, Date.now());
@@ -183,14 +185,26 @@ export function putFactoryKey(key: string, value: unknown): void {
   void flushFactoryQueue();
 }
 export const pendingFactoryDataWriteCount = () => readQueue().length;
+/** Manager-only projection; never mutate the store while React reads it.
+ * Keep the transport/save-guard count above unchanged, including its errors.
+ */
+export function managerPendingFactoryDataWriteCount(): number | null {
+  if (!scopeIdentity || !canWrite) return 0;
+  try { return readQueue(false).length; }
+  catch { return null; }
+}
 export function flushFactoryQueue(): Promise<void> {
   if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return Promise.resolve();
   if (flushInFlight) return flushInFlight;
   const epoch = scopeEpoch;
   const request = Promise.resolve().then(async () => {
+    // A rejected acknowledgment blocks only its key for this pass. Retain the
+    // exact command as evidence, without retrying it (or a replacement for the
+    // same key) in a tight loop while unrelated settings wait behind it.
+    const blockedKeys = new Set<string>();
     try {
       while (epoch === scopeEpoch && canWrite) {
-        const op = readQueue()[0];
+        const op = readQueue().find((candidate) => !blockedKeys.has(candidate.key));
         if (!op) return;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -202,19 +216,25 @@ export function flushFactoryQueue(): Promise<void> {
           body: JSON.stringify({ key: op.key, value: op.value, updatedAt: op.updatedAt }),
         }); } finally { clearTimeout(timeout); }
         if (!res.ok || epoch !== scopeEpoch) return;
-        const body = await res.json();
+        let body;
+        try { body = await res.json(); }
+        catch { blockedKeys.add(op.key); continue; }
         if (epoch !== scopeEpoch) return;
         // HTTP success alone is not an acknowledgment. A canonical timestamp
         // and valid value are required before retiring the exact generation.
         if (typeof body?.updatedAt !== "string" || !Number.isFinite(Date.parse(body.updatedAt))
-          || !validValue(op.key, body.value)) return;
+          || !validValue(op.key, body.value)) {
+          blockedKeys.add(op.key); continue;
+        }
         const current = readQueue();
-        if (current[0]?.g !== op.g) continue;
+        if (!current.some((candidate) => candidate.key === op.key && candidate.g === op.g)) continue;
         const stamp = Date.parse(body.updatedAt);
-        if (stamp < op.updatedAt && JSON.stringify(body.value) !== JSON.stringify(op.value)) return;
+        if (stamp < op.updatedAt && JSON.stringify(body.value) !== JSON.stringify(op.value)) {
+          blockedKeys.add(op.key); continue;
+        }
         applyValue(op.key, body.value);
         setStamp(op.key, stamp);
-        writeQueue(current.slice(1));
+        writeQueue(current.filter((candidate) => candidate.key !== op.key || candidate.g !== op.g));
         cleanLegacy(op.key, body.value);
       }
     } catch { /* Durable operation remains pending for reconnect. */ }
@@ -222,6 +242,9 @@ export function flushFactoryQueue(): Promise<void> {
   });
   flushInFlight = request;
   return request;
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => { void flushFactoryQueue(); });
 }
 function cleanLegacy(key: string, canonical: unknown): void {
   if (!MEMORY_DIRECTORY_KEYS.has(key)) return;

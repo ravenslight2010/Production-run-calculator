@@ -1095,6 +1095,11 @@ export type ImportOperationApplyInputGoldCaptureInput = { [key: string]: unknown
  * Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
  */
 export type ImportOperationApplyInputGoldCapture = {
+  /**
+     * Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference.
+     * @minimum 1
+     */
+  approvalId: number;
   input: ImportOperationApplyInputGoldCaptureInput;
 };
 
@@ -1147,12 +1152,223 @@ export interface ImportOperationApplyInput {
   changes: ImportOperationApplyInputChanges;
 }
 
+/**
+ * Opaque identifier only, never a URL, name, file path, email or private document text.
+ * @maxLength 128
+ * @pattern ^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$
+ */
+export type ImportGoldOpaqueReference = string;
+
+export type ImportGoldApprovalInputImportType = typeof ImportGoldApprovalInputImportType[keyof typeof ImportGoldApprovalInputImportType];
+
+
+export const ImportGoldApprovalInputImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export type ImportGoldApprovalInputPurpose = typeof ImportGoldApprovalInputPurpose[keyof typeof ImportGoldApprovalInputPurpose];
+
+
+export const ImportGoldApprovalInputPurpose = {
+  local_spec_import_accuracy: 'local_spec_import_accuracy',
+} as const;
+
+export type ImportGoldApprovalInputPrivacyStatus = typeof ImportGoldApprovalInputPrivacyStatus[keyof typeof ImportGoldApprovalInputPrivacyStatus];
+
+
+export const ImportGoldApprovalInputPrivacyStatus = {
+  approved: 'approved',
+  not_required: 'not_required',
+} as const;
+
+export type ImportGoldApprovalInputRetentionDays = typeof ImportGoldApprovalInputRetentionDays[keyof typeof ImportGoldApprovalInputRetentionDays];
+
+
+export const ImportGoldApprovalInputRetentionDays = {
+  NUMBER_30: 30,
+} as const;
+
+export interface ImportGoldApprovalInput {
+  recordRef: ImportGoldOpaqueReference;
+  /**
+     * SHA-256 of evaluation input JSON with recursively sorted object keys and original array order. Not a workbook-file hash and not approval evidence.
+     * @pattern ^[a-f0-9]{64}$
+     */
+  sourceDigest: string;
+  importType: ImportGoldApprovalInputImportType;
+  purpose: ImportGoldApprovalInputPurpose;
+  ownerRef: ImportGoldOpaqueReference;
+  ownerApprovedAt: string;
+  privacyStatus: ImportGoldApprovalInputPrivacyStatus;
+  privacyReviewerRef: ImportGoldOpaqueReference;
+  privacyReviewedAt: string;
+  conditionsRef: ImportGoldOpaqueReference;
+  externalCopiesRef: ImportGoldOpaqueReference;
+  backupHandlingRef: ImportGoldOpaqueReference;
+  /** Human confirms manual deletion within 30 days or earlier on owner request, covering cases, scores and evaluation working copies. Backups require separately documented handling. */
+  manualDeletionAccepted: true;
+  retentionDays: ImportGoldApprovalInputRetentionDays;
+  conditionsSatisfied: true;
+  validUntil: string;
+}
+
+export type ImportGoldApprovalImportType = typeof ImportGoldApprovalImportType[keyof typeof ImportGoldApprovalImportType];
+
+
+export const ImportGoldApprovalImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export type ImportGoldApprovalPurpose = typeof ImportGoldApprovalPurpose[keyof typeof ImportGoldApprovalPurpose];
+
+
+export const ImportGoldApprovalPurpose = {
+  local_spec_import_accuracy: 'local_spec_import_accuracy',
+} as const;
+
+export type ImportGoldApprovalPrivacyStatus = typeof ImportGoldApprovalPrivacyStatus[keyof typeof ImportGoldApprovalPrivacyStatus];
+
+
+export const ImportGoldApprovalPrivacyStatus = {
+  approved: 'approved',
+  not_required: 'not_required',
+} as const;
+
+export type ImportGoldApprovalRetentionDays = typeof ImportGoldApprovalRetentionDays[keyof typeof ImportGoldApprovalRetentionDays];
+
+
+export const ImportGoldApprovalRetentionDays = {
+  NUMBER_30: 30,
+} as const;
+
+export interface ImportGoldApproval {
+  id: number;
+  scope: string;
+  recordRef: ImportGoldOpaqueReference;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceDigest: string;
+  importType: ImportGoldApprovalImportType;
+  purpose: ImportGoldApprovalPurpose;
+  ownerRef: ImportGoldOpaqueReference;
+  ownerApprovedAt: string;
+  privacyStatus: ImportGoldApprovalPrivacyStatus;
+  privacyReviewerRef: ImportGoldOpaqueReference;
+  privacyReviewedAt: string;
+  conditionsRef: ImportGoldOpaqueReference;
+  externalCopiesRef: ImportGoldOpaqueReference;
+  backupHandlingRef: ImportGoldOpaqueReference;
+  manualDeletionAccepted: true;
+  retentionDays: ImportGoldApprovalRetentionDays;
+  conditionsSatisfied: true;
+  validUntil: string;
+  createdBy: string;
+  createdAt: string;
+  /** @nullable */
+  verifiedBy: string | null;
+  /** @nullable */
+  verifiedAt: string | null;
+  /** @nullable */
+  revokedBy: string | null;
+  /** @nullable */
+  revokedAt: string | null;
+}
+
+export interface ImportGoldApprovalReview {
+  reviewed: true;
+}
+
+export interface ImportGoldApprovalResponse {
+  approval: ImportGoldApproval;
+}
+
+export type ImportGoldApprovalsResponseExpiryRemindersWindowDays = typeof ImportGoldApprovalsResponseExpiryRemindersWindowDays[keyof typeof ImportGoldApprovalsResponseExpiryRemindersWindowDays];
+
+
+export const ImportGoldApprovalsResponseExpiryRemindersWindowDays = {
+  NUMBER_7: 7,
+} as const;
+
+/**
+ * Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension.
+ */
+export type ImportGoldApprovalsResponseExpiryReminders = {
+  windowDays: ImportGoldApprovalsResponseExpiryRemindersWindowDays;
+  /** @minimum 0 */
+  expiringCount: number;
+  asOf: string;
+};
+
+export interface ImportGoldApprovalsResponse {
+  /** Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension. */
+  expiryReminders?: ImportGoldApprovalsResponseExpiryReminders;
+  /** @maxItems 50 */
+  approvals: ImportGoldApproval[];
+  /** @nullable */
+  nextBefore: number | null;
+}
+
 export interface ImportGoldConfig {
   enabled: boolean;
+  /** True only when explicitly configured and source approvals are disabled */
+  cleanupEnabled: boolean;
   localConfigured: boolean;
+  localAvailable: boolean;
+  localScoringSwitchAvailable: boolean;
+  localScoringEnabled: boolean;
+  syntheticFixtureAvailable: boolean;
   geminiConfigured: boolean;
   retention: string;
   persistsAcrossFactoryPurge: boolean;
+}
+
+export interface ImportGoldLocalScoringRequest {
+  enabled: boolean;
+}
+
+export interface ImportGoldLocalScoringResponse {
+  enabled: boolean;
+}
+
+export type ImportGoldSyntheticReviewImportType = typeof ImportGoldSyntheticReviewImportType[keyof typeof ImportGoldSyntheticReviewImportType];
+
+
+export const ImportGoldSyntheticReviewImportType = {
+  premix: 'premix',
+} as const;
+
+export type ImportGoldSyntheticReviewInput = { [key: string]: unknown };
+
+export type ImportGoldSyntheticReviewExpectedResult = { [key: string]: unknown };
+
+export interface ImportGoldSyntheticReview {
+  fixtureVersion: string;
+  importType: ImportGoldSyntheticReviewImportType;
+  sourceLabel: string;
+  input: ImportGoldSyntheticReviewInput;
+  expectedResult: ImportGoldSyntheticReviewExpectedResult;
+  applyEffect: string;
+}
+
+export type ImportGoldSyntheticApplyRequestFixtureVersion = typeof ImportGoldSyntheticApplyRequestFixtureVersion[keyof typeof ImportGoldSyntheticApplyRequestFixtureVersion];
+
+
+export const ImportGoldSyntheticApplyRequestFixtureVersion = {
+  'synthetic-mix-v1': 'synthetic-mix-v1',
+} as const;
+
+export interface ImportGoldSyntheticApplyRequest {
+  fixtureVersion: ImportGoldSyntheticApplyRequestFixtureVersion;
+  reviewed: true;
+}
+
+export interface ImportGoldSyntheticApplyResponse {
+  /** @minimum 1 */
+  caseId: number;
+  created: boolean;
 }
 
 export type ImportGoldScoreRequestProvider = typeof ImportGoldScoreRequestProvider[keyof typeof ImportGoldScoreRequestProvider];
@@ -1232,6 +1448,71 @@ export interface ImportGoldCase {
 
 export interface ImportGoldCasesResponse {
   cases: ImportGoldCase[];
+}
+
+export type ImportGoldCleanupCaseImportType = typeof ImportGoldCleanupCaseImportType[keyof typeof ImportGoldCleanupCaseImportType];
+
+
+export const ImportGoldCleanupCaseImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export interface ImportGoldCleanupCase {
+  /** @minimum 1 */
+  id: number;
+  importType: ImportGoldCleanupCaseImportType;
+  createdAt: string;
+}
+
+export interface ImportGoldCleanupCasesResponse {
+  /**
+     * Cursor for older cases, or null when the scoped inventory ends.
+     * @nullable
+     */
+  nextCursor: string | null;
+  cases: ImportGoldCleanupCase[];
+}
+
+export type ImportGoldRetentionStatus = typeof ImportGoldRetentionStatus[keyof typeof ImportGoldRetentionStatus];
+
+
+export const ImportGoldRetentionStatus = {
+  within_limit: 'within_limit',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  deletion_incomplete: 'deletion_incomplete',
+  verification_needed: 'verification_needed',
+  verified: 'verified',
+} as const;
+
+export interface ImportGoldRetentionRecord {
+  /** @minimum 1 */
+  caseId: number;
+  capturedAt: string;
+  deleteBy: string;
+  status: ImportGoldRetentionStatus;
+  /** @nullable */
+  verifiedAt: string | null;
+  /** @nullable */
+  verifiedBy: string | null;
+}
+
+export interface ImportGoldRetentionResponse {
+  /** @pattern ^[a-f0-9]{64}$ */
+  revision: string;
+  records: ImportGoldRetentionRecord[];
+  hasMore: boolean;
+  /** @nullable */
+  nextOffset: number | null;
+}
+
+export interface ImportGoldDeletionVerification {
+  /** @minimum 1 */
+  caseId: number;
+  verifiedAt: string;
+  verifiedBy: string;
 }
 
 export type ImportGoldScoreResponseResultsItemProvider = typeof ImportGoldScoreResponseResultsItemProvider[keyof typeof ImportGoldScoreResponseResultsItemProvider];
@@ -3163,6 +3444,33 @@ export type SyncRecoveryPayload = SyncPayload & {
   resetEpoch: number;
   rollover: boolean;
 };
+
+export interface ScheduledRunMoveRequest {
+  sourceDate: string;
+  destinationDate: string;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /** @maxLength 160 */
+  senderId?: string;
+  runIds: 'all' | string[];
+}
+
+export interface ScheduledDaySwapRequest {
+  sourceDate: string;
+  destinationDate: string;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /** @maxLength 160 */
+  senderId?: string;
+}
 
 export type SyncWriteRequestPayload = SyncPayload & ({
   syncVersion?: 1;
@@ -5449,6 +5757,8 @@ export interface CreateRole {
 }
 
 export interface RoleCapabilitiesUpdate {
+  /** Reviewed role baseline. A stale baseline is rejected without overwriting newer permissions. Older callers without a baseline must refresh before editing. */
+  expectedRole: RoleDefinition;
   capabilities: Capability[];
   /**
      * Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.
@@ -8688,6 +8998,8 @@ export interface NamedRecipe {
   /** The ingredients that make up the recipe */
   components: NamedRecipeComponent[];
   enabled: boolean;
+  /** Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification. */
+  isPremadeCrust?: boolean;
   /** Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers. */
   brand?: string;
   /** Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes). */
@@ -10810,6 +11122,53 @@ cursor?: string;
 limit?: number;
 };
 
+export type MoveSyncScheduledRuns200 = {
+  moved: true;
+  sourceRemoved: boolean;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  destinationSnapshotId: string;
+};
+
+export type GetSyncScheduleSwapEligibilityParams = {
+sourceDate: string;
+destinationDate: string;
+};
+
+/**
+ * @nullable
+ */
+export type GetSyncScheduleSwapEligibility200Reason = typeof GetSyncScheduleSwapEligibility200Reason[keyof typeof GetSyncScheduleSwapEligibility200Reason] | null;
+
+
+export const GetSyncScheduleSwapEligibility200Reason = {
+  'today-started-after-6am': 'today-started-after-6am',
+} as const;
+
+export type GetSyncScheduleSwapEligibility200 = {
+  today: string;
+  sourceScheduled: boolean;
+  destinationScheduled: boolean;
+  canSwap: boolean;
+  /** @nullable */
+  reason: GetSyncScheduleSwapEligibility200Reason;
+};
+
+export type SwapSyncScheduleDays200 = {
+  swapped: true;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceSnapshotId: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  destinationSnapshotId: string;
+};
+
 export type GetSyncTodayParams = {
 today?: ClientTodayParameter;
 /**
@@ -10894,12 +11253,57 @@ export type ListOperationalIntentReceipts200 = {
   mutations: OperationalIntentReceipt[];
 };
 
+export type ListImportGoldApprovalsParams = {
+/**
+ * @minimum 1
+ */
+before?: number;
+/**
+ * Exact opaque approval reference, filtered on the server within the authenticated scope.
+ */
+recordRef?: ImportGoldOpaqueReference;
+};
+
 export type ListImportGoldCasesParams = {
 /**
  * @minimum 1
  * @maximum 100
  */
 limit?: number;
+};
+
+export type ListImportGoldCleanupCasesParams = {
+/**
+ * Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
+ * @maxLength 512
+ */
+cursor?: string;
+};
+
+export type ListImportGoldRetentionParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * @minimum 0
+ * @maximum 10000
+ */
+offset?: number;
+/**
+ * Return only records with this current retention status; filtering is applied before pagination.
+ */
+status?: ImportGoldRetentionStatus;
+/**
+ * Pass the first page's revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.
+ * @pattern ^[a-f0-9]{64}$
+ */
+revision?: string;
+};
+
+export type ListImportGoldRetention409 = {
+  error: string;
 };
 
 export type ListDistillationApplyEvidenceParams = {

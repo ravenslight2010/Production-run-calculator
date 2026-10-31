@@ -58,20 +58,17 @@ run_phase_or_exit node-version-check node scripts/src/check-routine-node-version
 # broad port-owner killing because developers may have unrelated services.
 run_phase_or_exit stop-artifact-workflows node scripts/src/stop-artifact-workflows.mjs
 
-# Replit's system pnpm can be older than the version pinned in package.json.
-# Install Corepack's shim in the workspace-local bin directory that Replit puts
-# ahead of the system package manager. This also keeps reconciled workflows and
-# nested package scripts on the pinned version after this hook exits.
-pnpm_shim_dir="$PWD/.config/npm/node_global/bin"
-mkdir -p "$pnpm_shim_dir"
-run_phase_or_exit corepack-enable corepack enable --install-directory "$pnpm_shim_dir" pnpm
+# Route direct and nested package-manager calls through the project pin before
+# running any post-merge package scripts.
+run_phase_or_exit pnpm-selection bash scripts/src/run-project-pnpm.sh --version
 
-run_phase_or_exit frozen-install env CI=true pnpm install --frozen-lockfile
+run_phase_or_exit frozen-install env CI=true bash scripts/src/run-project-pnpm.sh install --frozen-lockfile
 
 # drizzle push can hit transient "too many clients already" on the dev DB
 # (leftover backends from killed test/validation runs). Retry a few times.
 attempts=0
-until run_phase "schema-push-attempt-$((attempts + 1))" pnpm --filter db push-force; do
+until run_phase "schema-push-attempt-$((attempts + 1))" \
+  bash scripts/src/run-project-pnpm.sh --filter db push-force; do
   push_status=$?
   attempts=$((attempts + 1))
   if [ "$attempts" -ge 4 ]; then
@@ -84,4 +81,4 @@ done
 
 # Keep the independent publish expectation synchronized with the merged source.
 # Deployment builds reuse this exact record and fail if source changes afterward.
-run_phase_or_exit prepare-publish pnpm run prepare:publish
+run_phase_or_exit prepare-publish bash scripts/src/run-project-pnpm.sh run prepare:publish

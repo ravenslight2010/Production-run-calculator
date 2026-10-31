@@ -8,6 +8,7 @@ type PoolRecipe = {
   id: string;
   name: string;
   brand?: string;
+  isPremadeCrust?: boolean;
   components: Array<{ ingredient: string; lbs: number }>;
 };
 
@@ -24,8 +25,9 @@ const rec = (over: Partial<PoolRecipe> = {}): PoolRecipe => ({
 
 describe("updateRecipePoolComponents", () => {
   it("replaces the matched recipe's components with the sheet rows (ci-name match)", () => {
+    const premade = rec({ isPremadeCrust: true });
     const { next, updated } = updateRecipePoolComponents(
-      [rec()],
+      [premade],
       [{ name: "  aldo's cheese mix ", rows: [{ ingredient: "Provolone", lbs: 12 }] }],
     );
     expect(updated).toBe(1);
@@ -33,6 +35,7 @@ describe("updateRecipePoolComponents", () => {
     // Everything else on the pool recipe is preserved.
     expect(next[0].id).toBe("r1");
     expect(next[0].brand).toBe("Aldo's");
+    expect(next[0].isPremadeCrust).toBe(true);
   });
 
   it("leaves non-matching recipes untouched (same object identity)", () => {

@@ -1,4 +1,5 @@
 import { ImportReviewTiming } from "../importReviewTiming";
+import { REAL_SOURCE_CAPTURE_UI_AVAILABLE } from "../importGold";
 import { useEffect, useMemo, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle, Link2 } from "lucide-react";
 import {
@@ -825,7 +826,7 @@ export default function PremixImportDialog({
           )}
         </div>
 
-        {goldCaptureEnabled && prepared && (
+        {REAL_SOURCE_CAPTURE_UI_AVAILABLE && goldCaptureEnabled && prepared && (
           <label className="mx-4 flex cursor-pointer items-start gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
             <input
               type="checkbox"

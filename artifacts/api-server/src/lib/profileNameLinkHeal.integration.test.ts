@@ -797,6 +797,7 @@ describe("master-data health launch classification", () => {
     await db.insert(doughRecipesTable).values([
       { id: "health-purchased-crust", scope: "live", name: 'Pedone Crust 7"x12" Oval', components: [] },
       { id: "health-review-dough", scope: "live", name: "Lucia's Dough recipe", components: [] },
+      { id: "health-explicit-premade", scope: "live", name: "Specialty Crust Without Formula", components: [], isPremadeCrust: true },
     ]);
     await db.insert(brandProfilesTable).values({
       key: "health-legacy__", scope: "live", brand: "Health Legacy", flavor: "",
@@ -812,9 +813,22 @@ describe("master-data health launch classification", () => {
     );
 
     expect(findings.length).toBeGreaterThanOrEqual(3);
-    expect(findings.every((item: any) => item.severity === "warning")).toBe(true);
+    expect(findings.some((item: any) => item.id.includes("health-purchased-crust") && item.severity === "error")).toBe(true);
+    expect(findings.filter((item: any) => !item.id.includes("health-purchased-crust")).every((item: any) => item.severity === "warning")).toBe(true);
     expect(findings.every((item: any) => item.owner)).toBe(true);
     expect(findings.every((item: any) => item.followUpDate === "2026-09-30")).toBe(true);
+    const unmarkedEmptyDough = findings.find((item: any) =>
+      item.id.includes("health-review-dough"),
+    );
+    expect(unmarkedEmptyDough?.severity).toBe("warning");
+    expect(unmarkedEmptyDough?.message).toContain(
+      "approved empty/placeholder record pending manager setup",
+    );
+    expect(report.findings.some((item: any) =>
+      item.id.includes("health-explicit-premade") &&
+      !item.stableKey.startsWith("unreferenced:") &&
+      item.message.includes("no positive component values"),
+    )).toBe(false);
   });
 
   it("cross-import health recognizes shared recipes and direct slots, and reports absent explicit links without repair", async () => {

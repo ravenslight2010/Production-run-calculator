@@ -6,6 +6,7 @@ import type { RunMeta } from "../../types";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { SauceStockControl } from "./SauceStockControl";
+import { BatchMadeRow } from "./BatchMadeRow";
 import { TickBar } from "../TickBar";
 import { ReadOnlyRecipeCard, fmtMS } from "./stationShared";
 import { useHomeTabCtx } from "../../contexts/HomeTabCtx";
@@ -33,6 +34,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
   const packagingLock = useManualControlLock(currentRunId, "packaging-skids");
   const sauceStockLock = useManualControlLock(currentRunId, "sauce-stock");
+  const sauceProgressLock = useManualControlLock(currentRunId, "sauce-batches");
 
   // ── Barrel progress: backed by module-level store so it survives Radix ────
   // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
@@ -290,6 +292,34 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               Planned for this run: <span className="font-mono font-semibold text-foreground">{fmtNum(sauceRequirement.totalUnits, 2)} barrels</span>
               {sauceMade > 0 && <> · Historical full barrels recorded: <span className="font-mono font-semibold text-foreground">{sauceMade}</span></>}
             </p>
+            <BatchMadeRow
+              label="Barrel supply"
+              pipeline="sauce"
+              testId="output-sauce-batches"
+              totalBatches={sauceRequirement.totalUnits}
+              made={sauceMade}
+              isLive={isLive}
+              disabled={!!sauceProgressLock}
+              disabledReason={sauceProgressLock
+                ? sauceProgressLock.peer
+                  ? "Sauce consumption is being corrected on another device."
+                  : "Sauce consumption correction is awaiting server confirmation."
+                : undefined}
+              onIncrement={() => {
+                if (getManualSectionLock(currentRunId, "sauce")) return;
+                applyManualSauceProgress(
+                  (Number(form.getValues("sauceBarrelsMade")) || 0) + 1,
+                  Math.max(lastBarrelNetSecRef.current, elapsedBatchSec),
+                );
+              }}
+              onDecrement={() => {
+                if (getManualSectionLock(currentRunId, "sauce")) return;
+                applyManualSauceProgress(
+                  Math.max(0, (Number(form.getValues("sauceBarrelsMade")) || 0) - 1),
+                  Math.max(lastBarrelNetSecRef.current, elapsedBatchSec),
+                );
+              }}
+            />
             <SauceStockControl
               barrels={sauceStockOnHand}
               disabled={!isLive || !!sauceStockLock}

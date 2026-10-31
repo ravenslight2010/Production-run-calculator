@@ -15,6 +15,22 @@ Public status history is evidence of broad incidents only: a matching incident c
 
 **How to apply:** Use public status for service context, not root-cause attribution. Preserve the exact missing run evidence and hand it to the platform owner rather than inferring from task-card update times or current service status.
 
+## Workspace write-quota evidence
+
+Do not use free space reported by `df` to rule out an Agent/workspace quota.
+Shrinking regenerable caches can reduce the live project tree without restoring
+atomic file writes or durable tool execution. Keep that failure distinct from
+application defects and platform-managed merge-lock waits.
+
+**Why:** Workspace writes returned system error `-122` despite substantial
+filesystem free space, and the error persisted after safe cache cleanup.
+The session could not inspect filesystem quota groups.
+
+**How to apply:** Measure before and after cleanup, preserve source, uploads,
+installed dependencies, saved history, and managed Agent state, and retry the
+affected write after each coherent cleanup batch. Do not delete managed state
+or infer a shared cause for stalled tasks merely because the symptoms overlap.
+
 A client-side queue read followed by creation is not an atomic acceptance snapshot. Retrofitting dependencies after submission can race with acceptance and launch. Explicit manual dependency support also does not establish that the generated-follow-up path accepts the same inputs or retains the same hierarchy metadata.
 
 ## Genuine dependencies, not global sequencing

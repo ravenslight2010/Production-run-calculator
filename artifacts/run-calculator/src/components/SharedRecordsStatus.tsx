@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState, useSyncExternalStore } from "react";
+import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { useAuth } from "../useAuth";
 import { getProfileCacheVersion, profileReadStatus, subscribeProfileCache } from "../profileCache";
 import { reconcileProfilesFromServer, pendingProfileWriteCount, profileRecoveryIsMemoryOnly } from "../profileServerSync";
@@ -21,6 +21,9 @@ export function SharedRecordsStatus() {
   useSyncExternalStore(subscribeRunTemplates, runTemplatesVersion);
   const [, update] = useReducer((n) => n + 1, 0);
   const [reviewError, setReviewError] = useState("");
+  const [reviewNotice, setReviewNotice] = useState("");
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const removingItemId = useRef<string | null>(null);
   useEffect(() => {
     window.addEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, update);
     return () => window.removeEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, update);
@@ -36,7 +39,8 @@ export function SharedRecordsStatus() {
   const pending = pendingCompletedHistoryCount();
   const pendingProfiles = pendingProfileWriteCount();
   const pendingTemplates = pendingRunTemplateCount();
-  if (!unavailable.length && !pending && !pendingProfiles && !pendingTemplates && !evidence.length) return null;
+  if (!unavailable.length && !pending && !pendingProfiles && !pendingTemplates && !evidence.length
+    && !reviewError && !reviewNotice) return null;
   return <aside role="status" data-testid="shared-records-status" className="mb-3 rounded-md border border-amber-500 p-3 text-sm">
     {profileRecoveryIsMemoryOnly() && <p role="alert">
       Device storage could not save some profile edits. Keep this page open and reconnect
@@ -62,23 +66,35 @@ export function SharedRecordsStatus() {
       <summary>{evidence.length} saved local item{evidence.length === 1 ? "" : "s"} to review</summary>
       <p className="mt-2">These are saved copies from this device, not a list of confirmed shared records. They were not uploaded automatically because their owner or history is unclear. Pending work and conflict records stay protected.</p>
       <ul className="mt-2 space-y-3">
-        {evidence.map((item) => <li key={`${item.key}:${item.recordIndex ?? "unreadable"}`} className="rounded border border-border p-3">
+        {evidence.map((item) => {
+          const itemId = `${item.key}:${item.recordIndex ?? "unreadable"}`;
+          return <li key={itemId} className="rounded border border-border p-3">
           <p className="font-medium">{item.kind}</p>
           <p>{item.summary}</p>
           <p className="text-muted-foreground">Removing this copy affects only this device. It does not delete the facility’s shared records, but this may be the only offline copy here.</p>
           {item.canRemove ? <button type="button" className="mt-2 underline" onClick={() => {
+            if (removingItemId.current) return;
             if (!window.confirm(`Permanently remove only this saved item: ${item.summary} This cannot be undone here. Shared facility data will not be changed.`)) return;
+            removingItemId.current = itemId;
+            setBusyItemId(itemId);
+            setReviewError("");
+            setReviewNotice("");
             const removed = removeRetainedSharedRecord(identity, me.capabilities.includes("manage-profiles"), item);
             if (removed) {
-              setReviewError("");
+              setReviewNotice("Saved copy removed from this device.");
               update();
             } else {
+              setReviewNotice("");
               setReviewError("This saved copy changed or could not be removed. Nothing else was removed; refresh the review and try again.");
             }
-          }}>Remove this saved copy from this device</button> : <p className="mt-2 text-muted-foreground">{item.removeBlockedReason}</p>}
-        </li>)}
+            removingItemId.current = null;
+            setBusyItemId(null);
+          }} disabled={!!busyItemId}>{busyItemId === itemId ? "Removing saved copy…" : "Remove this saved copy from this device"}</button> : <p className="mt-2 text-muted-foreground">{item.removeBlockedReason}</p>}
+        </li>;
+        })}
       </ul>
-      {reviewError && <p role="alert" className="mt-2">{reviewError}</p>}
     </details>}
+    {reviewError && <p role="alert" className="mt-2">{reviewError}</p>}
+    {reviewNotice && <p role="status" aria-live="polite" className="mt-2">{reviewNotice}</p>}
   </aside>;
 }

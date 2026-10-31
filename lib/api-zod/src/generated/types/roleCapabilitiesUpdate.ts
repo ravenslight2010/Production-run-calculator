@@ -6,8 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Capability } from './capability';
+import type { RoleDefinition } from './roleDefinition';
 
 export interface RoleCapabilitiesUpdate {
+  /** Reviewed role baseline. A stale baseline is rejected without overwriting newer permissions. Older callers without a baseline must refresh before editing. */
+  expectedRole: RoleDefinition;
   capabilities: Capability[];
   /**
      * Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.

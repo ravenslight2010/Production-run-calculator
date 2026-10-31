@@ -6,11 +6,19 @@ import { DEFAULT_VALUES } from "../types";
 
 const mocks = vi.hoisted(() => ({
   loadProfile: vi.fn(),
+  loadProfileSubTab: vi.fn((): "dough" | "crusts" | null => null),
   saveProfileAndWaitForServer: vi.fn(),
   toast: vi.fn(),
+  namedRecipes: [] as Array<{
+    id: string;
+    name: string;
+    components: Array<{ ingredient: string; lbs: number }>;
+    isPremadeCrust?: boolean;
+  }>,
 }));
 vi.mock("../storage", () => ({
   loadProfile: mocks.loadProfile,
+  loadProfileSubTab: mocks.loadProfileSubTab,
   saveProfileAndWaitForServer: mocks.saveProfileAndWaitForServer,
 }));
 
@@ -27,7 +35,7 @@ vi.mock("@/hooks/useCheeseRecipes", () => ({
 }));
 
 vi.mock("@/hooks/useNamedRecipes", () => ({
-  useNamedRecipes: () => ({ items: [] }),
+  useNamedRecipes: () => ({ items: mocks.namedRecipes }),
 }));
 
 vi.mock("../hooks/useDieLineDefaults", () => ({
@@ -123,9 +131,30 @@ afterEach(() => {
   mocks.loadProfile.mockReset();
   mocks.saveProfileAndWaitForServer.mockReset();
   mocks.toast.mockReset();
+  mocks.namedRecipes = [];
 });
 
 describe("SetupProfileEditor capability gate", () => {
+  it("selects Crust mode and explains why for an explicitly marked recipe", () => {
+    mocks.loadProfile.mockReturnValue({
+      ...DEFAULT_VALUES,
+      doughRecipeName: "Specialty Crust",
+    });
+    mocks.namedRecipes = [{
+      id: "premade-crust",
+      name: "Specialty Crust",
+      components: [],
+      isPremadeCrust: true,
+    }];
+
+    render(<SetupProfileEditor {...editorProps(true)} />);
+
+    expect(screen.getByTestId("setup-profile-premade-crust").textContent)
+      .toContain("This manager-classified recipe needs no in-house dough formula.");
+    expect(screen.getByRole("button", { name: "Crust" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Dough" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("keeps the sauce ingredient picker labeled in Setup Profiles", () => {
     mocks.loadProfile.mockReturnValue({
       ...DEFAULT_VALUES,
@@ -180,6 +209,7 @@ describe("SetupProfileEditor capability gate", () => {
       "Northstar",
       "Pepperoni",
       expect.objectContaining({ pep1Combined: true }),
+      { subTab: "dough" },
     );
   });
 
@@ -256,6 +286,23 @@ describe("SetupProfileEditor capability gate", () => {
     expect(onSaved).not.toHaveBeenCalled();
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "No changes to save for Northstar — Pepperoni" }),
+    );
+  });
+
+  it("saves the server-backed crust default without legacy crust indicators", async () => {
+    mocks.loadProfile.mockReturnValue({ ...DEFAULT_VALUES });
+    mocks.loadProfileSubTab.mockReturnValue("crusts");
+    mocks.saveProfileAndWaitForServer.mockResolvedValue("saved");
+    const user = userEvent.setup();
+
+    render(<SetupProfileEditor {...editorProps(true)} />);
+    await user.click(screen.getByRole("button", { name: "Save Setup" }));
+
+    expect(mocks.saveProfileAndWaitForServer).toHaveBeenCalledWith(
+      "Northstar",
+      "Pepperoni",
+      expect.any(Object),
+      { subTab: "crusts" },
     );
   });
 });

@@ -1,24 +1,30 @@
 {
   "schemaVersion": 1,
-  "accessDate": "2026-10-26",
-  "sourceRevision": "ded88b96104b58eea47cf36e66204cd4d79d5409",
+  "accessDate": "2026-10-30",
+  "sourceRevision": "6db5dcbcae06e74645a1a55b51ffc6f6895779fe",
+  "worktreeDirty": true,
+  "worktreeChangedFileCount": 4,
+  "worktreePatchSha256": "8ccca3c1145ad2cfb1ced23968363999962f20d3b2577102645d5a9be705a447",
   "method": "Local metadata inventory, not an exhaustive content or authorization review. Date/family/domain fields are discovery hints. No archive extraction, attachment execution, remote task retrieval or production access.",
   "hashLimitBytes": 10485760,
   "recordDefaults": {
     "dateAuthority": "filename hint only; inspect source for effective date",
     "approval": "unknown; filename, task plan and heading are not approval",
+    "catalogClass": "unclassified local candidate unless explicitly mapped in sources.md",
+    "authority": "unknown unless an accessible authoritative source is explicitly identified",
+    "decisionDisposition": "unresolved unless explicitly assessed in sources.md or the current audit",
     "review": "metadata-only unless explicitly assessed in sources.md or matrix.md",
     "supersession": "unresolved unless explicitly assessed in sources.md"
   },
-  "recordCount": 1889,
+  "recordCount": 1915,
   "countsByOrigin": {
-    ".agents": 517,
-    "local-plan-not-live-task-record": 565,
+    ".agents": 521,
+    "local-plan-not-live-task-record": 568,
     "AGENTS.md": 1,
     "README.md": 1,
     "artifacts": 3,
-    "attached_assets": 523,
-    "docs": 228,
+    "attached_assets": 535,
+    "docs": 235,
     "replit.md": 1,
     "research": 50
   },
@@ -1327,8 +1333,8 @@
       "title": "MEMORY",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 28917,
-      "sha256": "d481c7dbcb4b177d15ef6187a2ebd77a1d6c219a65f0280eaa031f21a9279694",
+      "bytes": 29556,
+      "sha256": "769635e241fdc1355583315a905d827e40cc4ddf5aeeca89ed7d4765088c826e",
       "familyCandidate": "memory",
       "domains": [
         "12-maintenance"
@@ -1481,8 +1487,8 @@
       "title": "ai-evaluation-framework-boundary",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 4517,
-      "sha256": "599c14d15b5bcddc8ee83c38e3cc5daf613ec010df67da4b618c667ac3dda6c2",
+      "bytes": 5320,
+      "sha256": "4bcd0123209bfa46dc9623899843c21fd0dac859fdfe7f1f14530b3d69f3790e",
       "familyCandidate": "ai-evaluation-framework-boundary",
       "domains": [
         "09-ai",
@@ -2108,8 +2114,8 @@
       "title": "browser-fixture-seeding",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 7200,
-      "sha256": "4ed53f7f93319472d99cf01f9dfdc889386cd29886524cd0c3a490f22f050fd7",
+      "bytes": 7784,
+      "sha256": "d329707a1e94edfece81b729df65f0ff410f41c343d610e65dc6488a217b9cb6",
       "familyCandidate": "browser-fixture-seeding",
       "domains": [
         "12-maintenance"
@@ -2434,8 +2440,8 @@
       "title": "codeexecution-network-globals",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 1150,
-      "sha256": "83ed059276918f78f27cd5525310b02bb3a7f55a4de71f9170ee0dff238f3a22",
+      "bytes": 1344,
+      "sha256": "0212e9a6d7c5ac9000d2b47d71a1951e3adf969a01a77a597f83a29d243b47b3",
       "familyCandidate": "codeexecution-network-globals",
       "domains": [
         "12-maintenance"
@@ -2694,6 +2700,19 @@
       "domains": [
         "02-sync-tracking",
         "08-security",
+        "12-maintenance"
+      ]
+    },
+    {
+      "path": ".agents/memory/day-timeline-estimate-policy.md",
+      "title": "day-timeline-estimate-policy",
+      "origin": ".agents",
+      "dateHint": null,
+      "bytes": 1876,
+      "sha256": "8818708ac542db7543bcef95826a386825308bca2c7e4515bffddc8b0d141f01",
+      "familyCandidate": "day-timeline-estimate-policy",
+      "domains": [
+        "05-planning-reporting",
         "12-maintenance"
       ]
     },
@@ -4052,8 +4071,8 @@
       "title": "isolated-destructive-browser-tests",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 1247,
-      "sha256": "8fc5bc83752b8ddeea0a90ac9ed64246d471219e5b14266b49c7f398b1084283",
+      "bytes": 2290,
+      "sha256": "59fe543d91105fc6417f9a57106673830d95fd51bb71a2047e96bb6980b2b29f",
       "familyCandidate": "isolated-destructive-browser-tests",
       "domains": [
         "11-verification-operations",
@@ -4254,8 +4273,8 @@
       "title": "local-model-memory-headroom",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 1585,
-      "sha256": "35a668ce97cecf9547f194e99eb31445bcf9d2b15be29e13ccb17761d8883af9",
+      "bytes": 1739,
+      "sha256": "699495264388f4d3ebc26db06f4dee5bed9f789a580747202a6dadf3604a49a6",
       "familyCandidate": "local-model-memory-headroom",
       "domains": [
         "09-ai",
@@ -5267,8 +5286,8 @@
       "title": "playwright-offline-sse",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 1984,
-      "sha256": "4cc3eb8ef2e1d635dc9b85b825306d487cb362081e4f6a1ed432885b9d685edf",
+      "bytes": 3087,
+      "sha256": "ca2f2b621b0ac8b3fb4a38e3067db227e92e40d3a8b1f86842a7b5f241f41044",
       "familyCandidate": "playwright-offline-sse",
       "domains": [
         "07-ux-pwa",
@@ -5292,8 +5311,8 @@
       "title": "pnpm-workspace-tool-cache",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 2072,
-      "sha256": "01ec685e362d3c49a2a1e00c602462ea169f93ee1aa52c6dd68d256a861efe02",
+      "bytes": 2464,
+      "sha256": "f3df4a906a2b2fb8b9335294c1bd0625f59300c63d40f91e8d3dc66c0717b525",
       "familyCandidate": "pnpm-workspace-tool-cache",
       "domains": [
         "12-maintenance"
@@ -5541,6 +5560,18 @@
       ]
     },
     {
+      "path": ".agents/memory/profile-display-identity.md",
+      "title": "profile-display-identity",
+      "origin": ".agents",
+      "dateHint": null,
+      "bytes": 677,
+      "sha256": "ba43254f4ded80c0a7484cce8a32bc0c0d753768a0dc6f252cc5bbe537b3a1a6",
+      "familyCandidate": "profile-display-identity",
+      "domains": [
+        "12-maintenance"
+      ]
+    },
+    {
       "path": ".agents/memory/profile-force-apply.md",
       "title": "Explicit Apply beats profile LWW",
       "origin": ".agents",
@@ -5570,8 +5601,8 @@
       "title": "profile-write-gating",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 1347,
-      "sha256": "2aa6063ff3c861a33ae7e64312f2c25416b934a02d4497d97f9bd53a7f3461bb",
+      "bytes": 2754,
+      "sha256": "494aecaaa9563aef64fee1e58fabdab8763cc09fc33c4856dabb36aa4b3e9319",
       "familyCandidate": "profile-write-gating",
       "domains": [
         "12-maintenance"
@@ -5594,8 +5625,8 @@
       "title": "provider-audit-isolation",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 3208,
-      "sha256": "1c364eb3f29900fc9f6bd63079c67ae353e5df5246e7fd0583e6c48d690d466c",
+      "bytes": 4002,
+      "sha256": "de61b4f485b8701743b6da95b181bf11fc80d497678c0834e225848ea12e4874",
       "familyCandidate": "provider-audit-isolation",
       "domains": [
         "08-security",
@@ -5665,6 +5696,19 @@
       "domains": [
         "06-qc-allergen",
         "08-security",
+        "12-maintenance"
+      ]
+    },
+    {
+      "path": ".agents/memory/qc-badge-normal-flow.md",
+      "title": "qc-badge-normal-flow",
+      "origin": ".agents",
+      "dateHint": null,
+      "bytes": 708,
+      "sha256": "65f901f1cac2cedc8bd19c3e4b3ee7579916e0bc4018b961de0facef3aa3a254",
+      "familyCandidate": "qc-badge-normal-flow",
+      "domains": [
+        "06-qc-allergen",
         "12-maintenance"
       ]
     },
@@ -6019,8 +6063,8 @@
       "title": "release-finalization-retry",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 1110,
-      "sha256": "630654ab0f21d1927949ce38002adfa6a7910f797a5c53990ddf6d51c3d34dda",
+      "bytes": 1944,
+      "sha256": "ff23167522d735427387e9fa605761129f271d61aaaf0b5e68a58aee611ab4ff",
       "familyCandidate": "release-finalization-retry",
       "domains": [
         "11-verification-operations",
@@ -6787,8 +6831,8 @@
       "title": "shared-recipe-refresh-run-identity",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 926,
-      "sha256": "28923af91a0dac21c1418dd257eddbf6cc3d8bb9a19ba2494ec5e5e2b068cc12",
+      "bytes": 1816,
+      "sha256": "912b1c607ee1538b252c9f7db34bba3a9212638b2cabe9a201951b4fc5f9faf4",
       "familyCandidate": "shared-recipe-refresh-run-identity",
       "domains": [
         "03-import-master-data",
@@ -7343,8 +7387,8 @@
       "title": "sync-autotracking-priority",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 1521,
-      "sha256": "39cb5ba7f1aa067d33bba660ca5e5c975aa26b452c50e615ca2cf4d64def698b",
+      "bytes": 5339,
+      "sha256": "265884e96106d0ba5eb908aca47fa0c92f099a2a72acb64e48026edd36cefc7f",
       "familyCandidate": "sync-autotracking-priority",
       "domains": [
         "02-sync-tracking",
@@ -7359,6 +7403,19 @@
       "bytes": 997,
       "sha256": "42dc754f734a80deff9bf80c656aed879c5a86b968d1f6371bffc46c8721bfd0",
       "familyCandidate": "sync-body-limit",
+      "domains": [
+        "02-sync-tracking",
+        "12-maintenance"
+      ]
+    },
+    {
+      "path": ".agents/memory/sync-conflict-policy.md",
+      "title": "sync-conflict-policy",
+      "origin": ".agents",
+      "dateHint": null,
+      "bytes": 870,
+      "sha256": "5b73f487029ccf11c712763cd1872e36881e3e52e9a755aa9357daa93ca3b593",
+      "familyCandidate": "sync-conflict-policy",
       "domains": [
         "02-sync-tracking",
         "12-maintenance"
@@ -7564,8 +7621,8 @@
       "title": "unified-setup-editing",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 3147,
-      "sha256": "8622b4fa0aa8396b5c7d634dae05f9c229f3a5a5bf30ced2d5223c45d312ff24",
+      "bytes": 3614,
+      "sha256": "44a4c66c55dc9059941987037503fc60158f2bcbeaba2d5eba2da6eb26e88244",
       "familyCandidate": "unified-setup-editing",
       "domains": [
         "12-maintenance"
@@ -7750,8 +7807,8 @@
       "title": "Run-calculator web Vitest harness",
       "origin": ".agents",
       "dateHint": null,
-      "bytes": 8394,
-      "sha256": "aef1b7b3d7ab8ed9a762500f2ba6ec2917d8e261e959b7524b680e60cb2d8060",
+      "bytes": 9238,
+      "sha256": "7fbafb8416717824e40f39108c9c997f9fa5b803e054dea821e2eab9946cdaf8",
       "familyCandidate": "web-test-harness",
       "domains": [
         "11-verification-operations",
@@ -8161,6 +8218,31 @@
       "bytes": 11610,
       "sha256": "137eade1c1b5ddc7c1b6575700352815cb8f67a30b7f80b353fba670275f8332",
       "familyCandidate": "api-network-failure-investigation",
+      "domains": [
+        "12-maintenance"
+      ]
+    },
+    {
+      "path": ".local/tasks/app-wide-e2e-audit-and-repair.md",
+      "title": "Make App-Wide Workflows Dependable",
+      "origin": "local-plan-not-live-task-record",
+      "dateHint": null,
+      "bytes": 34674,
+      "sha256": "f6f006945ac56eaac547ad9a9a3a5b30614448b87571dc039de68f9c4160cf7a",
+      "familyCandidate": "app-wide-e2e-audit-and-repair",
+      "domains": [
+        "08-security",
+        "12-maintenance"
+      ]
+    },
+    {
+      "path": ".local/tasks/app-wide-research-plans-current-state.md",
+      "title": "Reconcile Research With App",
+      "origin": "local-plan-not-live-task-record",
+      "dateHint": null,
+      "bytes": 15632,
+      "sha256": "c5e6d920496ee42efca26a60720792a9bc8a1060561f08f634f5e98a5d3602f1",
+      "familyCandidate": "app-wide-research-plans-current-state",
       "domains": [
         "12-maintenance"
       ]
@@ -13599,6 +13681,19 @@
       ]
     },
     {
+      "path": ".local/tasks/resume-browser-release-verification.md",
+      "title": "Resume Browser Release Verification",
+      "origin": "local-plan-not-live-task-record",
+      "dateHint": null,
+      "bytes": 5280,
+      "sha256": "90747f6f29f36b91b40f17b3595e76af88a99e73decae03ad0ba8c0beb05fa2b",
+      "familyCandidate": "resume-browser-release-verification",
+      "domains": [
+        "11-verification-operations",
+        "12-maintenance"
+      ]
+    },
+    {
       "path": ".local/tasks/resume-full-evidence-verification.md",
       "title": "Resume Full Evidence Verification",
       "origin": "local-plan-not-live-task-record",
@@ -14718,13 +14813,13 @@
       ]
     },
     {
-      "path": ".local/tasks/task-3715.md",
-      "title": "Task #3715: Compare all research and plans with the current app",
+      "path": ".local/tasks/task-3722.md",
+      "title": "Task #3722: Make App-Wide Workflows Dependable",
       "origin": "local-plan-not-live-task-record",
       "dateHint": null,
-      "bytes": 15700,
-      "sha256": "5510ac7789808d8abf7cbb73705f82dcddd097b789e41d6e5a2f974e2c11edf8",
-      "familyCandidate": "task-3715",
+      "bytes": 34725,
+      "sha256": "78c22cf9047e037256564287eb51de1a553e5edf5d4106c143d976af8335684e",
+      "familyCandidate": "task-3722",
       "domains": [
         "12-maintenance"
       ]
@@ -17287,6 +17382,126 @@
       "bytes": 394895,
       "sha256": "4443d26bc578f082c556f87dab0e7a7d770af0943bcf5aacae290945e92a7460",
       "familyCandidate": "screenshot_20261026_083218_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261027_102104_Chrome_1793114532758.jpg",
+      "title": "Screenshot_20261027_102104_Chrome_1793114532758",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 526893,
+      "sha256": "0b4b0d1702713160e499d3601970c8ab987149522eae32187829aba18ad555e9",
+      "familyCandidate": "screenshot_20261027_102104_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261027_102125_Chrome_1793114532746.jpg",
+      "title": "Screenshot_20261027_102125_Chrome_1793114532746",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 525719,
+      "sha256": "42d38db8941249f1d896c86f1a3354d9f7cc75bd0c1c8432cc6bd3b3a1a5e8b3",
+      "familyCandidate": "screenshot_20261027_102125_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261027_102127_Chrome_1793114532722.jpg",
+      "title": "Screenshot_20261027_102127_Chrome_1793114532722",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 596936,
+      "sha256": "62c2d50a005eb319f4237d25bf2d5a0bf34c661db8e49abd6472b66397031761",
+      "familyCandidate": "screenshot_20261027_102127_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261027_105025_Chrome_1793116248303.jpg",
+      "title": "Screenshot_20261027_105025_Chrome_1793116248303",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 703208,
+      "sha256": "9e984c1c1db20e3adee890b2820415ddb48ef398359a464cec41fc88d13a155b",
+      "familyCandidate": "screenshot_20261027_105025_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261027_134825_Chrome_1793127923608.jpg",
+      "title": "Screenshot_20261027_134825_Chrome_1793127923608",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 404500,
+      "sha256": "6f27591626a984c67e5c188ba07185407a0f8bb03b0557d9e22d05c53f2a5c92",
+      "familyCandidate": "screenshot_20261027_134825_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261027_134841_Chrome_1793127923585.jpg",
+      "title": "Screenshot_20261027_134841_Chrome_1793127923585",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 430476,
+      "sha256": "436cd001a81e89eb3d5179a2d9a58eb28848c84bfda56591bf6ff4af89d635b1",
+      "familyCandidate": "screenshot_20261027_134841_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261029_055818_Chrome_1793271557133.jpg",
+      "title": "Screenshot_20261029_055818_Chrome_1793271557133",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 715341,
+      "sha256": "1b0202b8674e57bbdbc2e99f5b91873315cdb11a188f5f123d306bff88b46e30",
+      "familyCandidate": "screenshot_20261029_055818_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261029_055828_Chrome_1793271557127.jpg",
+      "title": "Screenshot_20261029_055828_Chrome_1793271557127",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 636669,
+      "sha256": "236ee5a7b3cfe1e2fd0275d93b58aa48363bda4bb1fe00e4edc1d709c0175259",
+      "familyCandidate": "screenshot_20261029_055828_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261029_055838_Chrome_1793271557118.jpg",
+      "title": "Screenshot_20261029_055838_Chrome_1793271557118",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 649662,
+      "sha256": "4365b9f3bf87a886c78bcc8a73ecf579880f7ad1e809e6a506c2488409f37c84",
+      "familyCandidate": "screenshot_20261029_055838_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261029_055846_Chrome_1793271557104.jpg",
+      "title": "Screenshot_20261029_055846_Chrome_1793271557104",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 609954,
+      "sha256": "e53b78413446eef0a803ba83ed23b6071fc0c9578f608a97dc23963b69271d0c",
+      "familyCandidate": "screenshot_20261029_055846_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261029_175201_Chrome_1793314388459.jpg",
+      "title": "Screenshot_20261029_175201_Chrome_1793314388459",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 428740,
+      "sha256": "e74317622a575854c9e940c71c218c6807f5fa9de831c2283e6ceda8727868e5",
+      "familyCandidate": "screenshot_20261029_175201_chrome",
+      "domains": []
+    },
+    {
+      "path": "attached_assets/Screenshot_20261029_175219_Chrome_1793314388413.jpg",
+      "title": "Screenshot_20261029_175219_Chrome_1793314388413",
+      "origin": "attached_assets",
+      "dateHint": null,
+      "bytes": 523305,
+      "sha256": "cea3552c1de58900718c9d82d8aac1f0a6df366a70d6cb2d4d9d0fb559b707e7",
+      "familyCandidate": "screenshot_20261029_175219_chrome",
       "domains": []
     },
     {
@@ -21558,6 +21773,20 @@
       ]
     },
     {
+      "path": "docs/evidence/break-planning-repair.md",
+      "title": "Break planning and estimate repair",
+      "origin": "docs",
+      "dateHint": null,
+      "bytes": 8025,
+      "sha256": "7529fd9c4f1e8229e704d8e099f0581d8b35f8b88da169c9f883acdb37ca2987",
+      "familyCandidate": "break-planning-repair",
+      "domains": [
+        "05-planning-reporting",
+        "11-verification-operations",
+        "12-maintenance"
+      ]
+    },
+    {
       "path": "docs/evidence/conditional-qlora-promotion-bar-2026-10-02.md",
       "title": "Conditional QLoRA candidate promotion bar \u2014 frozen before holdout",
       "origin": "docs",
@@ -21654,6 +21883,42 @@
       "bytes": 11910,
       "sha256": "ab2f029e317f7996f5a5075586830c50840ba45edbb2668b6a74a5fba849bfa7",
       "familyCandidate": "field-check-filters-{date}",
+      "domains": [
+        "11-verification-operations"
+      ]
+    },
+    {
+      "path": "docs/evidence/full-browser-repair-progress-2026-10-24.md",
+      "title": "Full-browser repair progress \u2014 2026-10-24",
+      "origin": "docs",
+      "dateHint": "2026-10-24",
+      "bytes": 37502,
+      "sha256": "58637df1a1e7432177de26808b5907d931c712e32e0b03cc27ac3712ad3748d1",
+      "familyCandidate": "full-browser-repair-progress-{date}",
+      "domains": [
+        "11-verification-operations"
+      ]
+    },
+    {
+      "path": "docs/evidence/full-browser-runtime-certification-2026-10-24.md",
+      "title": "Full browser runtime certification attempt \u2014 NO-GO",
+      "origin": "docs",
+      "dateHint": "2026-10-24",
+      "bytes": 18206,
+      "sha256": "8a8dd2fabd6ba9b607a2ac859655e2c70f784020f434a90b3de8e5e23e2a2059",
+      "familyCandidate": "full-browser-runtime-certification-{date}",
+      "domains": [
+        "11-verification-operations"
+      ]
+    },
+    {
+      "path": "docs/evidence/full-browser-runtime-generated-2026-10-24.md",
+      "title": "Full Browser Release Run",
+      "origin": "docs",
+      "dateHint": "2026-10-24",
+      "bytes": 25705,
+      "sha256": "aa08fa4a974a8d27a850496a1e0cb423a6dc6292f1eda11f96ef30ac8950507c",
+      "familyCandidate": "full-browser-runtime-generated-{date}",
       "domains": [
         "11-verification-operations"
       ]
@@ -22028,6 +22293,30 @@
       ]
     },
     {
+      "path": "docs/evidence/shared-update-live-observation-2026-10-26.md",
+      "title": "Live shared-update stall observation \u2014 2026-10-26",
+      "origin": "docs",
+      "dateHint": "2026-10-26",
+      "bytes": 13542,
+      "sha256": "17fe7ce9646dba9b0810f39c4a4857dc1b8072a6eeb41b5c864a7f1d0b09bbc1",
+      "familyCandidate": "shared-update-live-observation-{date}",
+      "domains": [
+        "11-verification-operations"
+      ]
+    },
+    {
+      "path": "docs/evidence/shared-update-observation-prerequisites-2026-10-26.md",
+      "title": "Live shared-update observation: superseded prerequisite checkpoint",
+      "origin": "docs",
+      "dateHint": "2026-10-26",
+      "bytes": 11020,
+      "sha256": "78a81192b508578ddadd15eca9a3ce4e5f00f686c1e45545b0d71715f4520d2a",
+      "familyCandidate": "shared-update-observation-prerequisites-{date}",
+      "domains": [
+        "11-verification-operations"
+      ]
+    },
+    {
       "path": "docs/evidence/source-library-pool-owner-review-2026-10-08.md",
       "title": "Production source-library pool review",
       "origin": "docs",
@@ -22180,8 +22469,8 @@
       "title": "Reviewed default full-release browser inventory",
       "origin": "docs",
       "dateHint": null,
-      "bytes": 20093,
-      "sha256": "4cd5c65d1162c91b82de4637dea6431c95ac634358e7bf21392e0a67d2dcaba7",
+      "bytes": 22072,
+      "sha256": "bb6567481802870aaaa1db3d5d38d2978f7bd8efa3a7e8505acd12d4906b79e0",
       "familyCandidate": "full-browser-inventory",
       "domains": [
         "04-inventory"
@@ -22440,8 +22729,8 @@
       "title": "Private local AI evaluator",
       "origin": "docs",
       "dateHint": null,
-      "bytes": 7131,
-      "sha256": "cc91421ebd61d748315e7015a6ce8e274615a1cea938e444e47d4b6e25b2f639",
+      "bytes": 9114,
+      "sha256": "d0c7fbc26e525ab4f007d48cd9908bdf9de04524c39560c056422429c8cfd18a",
       "familyCandidate": "local-ai-evaluation",
       "domains": [
         "09-ai"
@@ -23895,6 +24184,18 @@
       ]
     },
     {
+      "path": "docs/sync-tracking-baseline-2026-10-26.md",
+      "title": "Sync and automatic tracking: integrated evidence baseline",
+      "origin": "docs",
+      "dateHint": "2026-10-26",
+      "bytes": 46068,
+      "sha256": "d82d9d5571ea187e7c652ee50dab7cd61febd2e7fcbefd87cf01271da234affb",
+      "familyCandidate": "sync-tracking-baseline-{date}",
+      "domains": [
+        "02-sync-tracking"
+      ]
+    },
+    {
       "path": "docs/test-release-matrix.md",
       "title": "Test and release evidence matrix",
       "origin": "docs",
@@ -24004,8 +24305,8 @@
       "title": "replit",
       "origin": "replit.md",
       "dateHint": null,
-      "bytes": 33619,
-      "sha256": "ea33f289afd5227417d566f7ede2dfc302620de2d2971e54a7a0b3e775330105",
+      "bytes": 33777,
+      "sha256": "00a490fdf299deea6e3eb0ba2caa7e9ebeddb458821188bedfc2a4b23f253dab",
       "familyCandidate": "replit",
       "domains": []
     },

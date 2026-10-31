@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "target": "isolated-local-staging",
+  "runId": "8eaacfab8fbcfda17df2fdd05792ddbf",
+  "startedAt": "2026-10-30T21:41:03.694Z",
+  "status": "PASS",
+  "results": [
+    {"check":"independent-app-and-cluster-preflight","role":"stage-runner","status":"PASS"},
+    {"check":"synthetic-seed","role":"manager","status":"PASS"},
+    {"check":"denial:POST:/inventory/items","role":"operator","status":"PASS"},
+    {"check":"denial:PATCH:/inventory/items/:item","role":"operator","status":"PASS"},
+    {"check":"denial:DELETE:/inventory/items/:item","role":"operator","status":"PASS"},
+    {"check":"denial:POST:/inventory/adjust","role":"operator","status":"PASS"},
+    {"check":"denial:PUT:/inventory/settings","role":"operator","status":"PASS"},
+    {"check":"invalid-session-and-validation-no-write","role":"manager/operator","status":"PASS"},
+    {"check":"authorized-adjustment-committed","role":"manager","status":"PASS"},
+    {"check":"restart-signin-persistence-and-denial-recovery","role":"manager/operator","status":"PASS"},
+    {"check":"reset-empty-synthetic-database","role":"stage-runner","status":"PASS"},
+    {"check":"synthetic-seed","role":"manager","status":"PASS"},
+    {"check":"owned-app-cluster-and-fixture-cleanup","role":"stage-runner","status":"PASS"}
+  ],
+  "publishedProduction": "NOT REACHED: independent published-target acceptance remains unverified.",
+  "verificationScope": "Real local API/database; not browser offline, physical device, or published runtime proof.",
+  "webBuild": {
+    "appBuildId": "app-build:56ed7e43-637e-40db-8953-768b3582e161",
+    "sourceFingerprintSha256": "26de85a5eae857374e3b780530d6214df7909249e057582bde7196eec3f6790e",
+    "indexSha256": "4c66d6bca6d681094aa7bb97617f89e2752794d4081c77e296439923358baa97"
+  },
+  "source": {
+    "gitHead": "45615805acfb5e3440f2e0d370bef40b1095d14a",
+    "gitBinding": "unavailable",
+    "sourceFingerprintSha256": "26de85a5eae857374e3b780530d6214df7909249e057582bde7196eec3f6790e"
+  },
+  "build": {
+    "schemaVersion": 1,
+    "kind": "app-build-info",
+    "appBuildId": "app-build:12a9b2ff-3823-44ed-91c8-08e9d39e226e",
+    "sourcePolicy": "production-source-v4",
+    "sourceFingerprintSha256": "26de85a5eae857374e3b780530d6214df7909249e057582bde7196eec3f6790e",
+    "gitRevision": null,
+    "gitBinding": "unavailable",
+    "completedAt": "2026-10-30T21:41:31.440Z",
+    "buildMode": "development",
+    "platformDeploymentId": null,
+    "platformBuildId": null,
+    "platformIdentitySource": "unavailable"
+  },
+  "targetIdentity": {
+    "appUrl": "http://127.0.0.1:33035",
+    "databaseName": "stage_8eaacfab8fbcfda17df2fdd05792ddbf",
+    "systemIdentifier": "7702579342936974828",
+    "appRunId": "8eaacfab8fbcfda17df2fdd05792ddbf"
+  },
+  "auditStatus": "PASS",
+  "completedAt": "2026-10-30T21:42:03.809Z"
+}

@@ -1461,7 +1461,14 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
           const resumeAt = asNumber(raw.resumeAt);
           const updatedAt = asNumber(raw.updatedAt);
           if (!generation || updatedAt <= 0 || pausedAt < 0 || resumeAt < 0) continue;
-          controls[runId] = { generation, pausedAt, resumeAt, updatedAt };
+          const controlRevision = Number.isSafeInteger(raw.controlRevision)
+            && Number(raw.controlRevision) >= 0
+            ? Number(raw.controlRevision)
+            : undefined;
+          controls[runId] = {
+            generation, pausedAt, resumeAt, updatedAt,
+            ...(controlRevision === undefined ? {} : { controlRevision }),
+          };
         }
         out[key] = controls;
       }

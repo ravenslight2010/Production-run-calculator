@@ -12,8 +12,10 @@ import {
   deleteRole,
   deleteUser,
   getStaffMember,
+  listEnabledStaffManagerIds,
   listRoles,
   listStaff,
+  lockStaffAdminMutation,
   markOnboardingSeen,
   markTourCompleted,
   resetUserPassword,
@@ -212,8 +214,9 @@ router.post(
   res.status(201).json(result.row);
 });
 
-// Edit a role's capabilities. Refuses to grant capabilities the actor lacks,
-// to strip manage-staff from the manager role, or to strand the last admin.
+// Edit a role's capabilities. Refuses to grant or remove capabilities the actor
+// doesn't hold, to strip manage-staff from the manager role, or to strand the
+// last admin.
 router.put("/roles/:name", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
   const name = pathUserId(req.params.name);
   if (!name) {
@@ -230,6 +233,21 @@ router.put("/roles/:name", requireLiveScope, requireCapability("manage-staff"), 
     parsed.data.capabilities,
     (req.capabilities ?? []) as Capability[],
     parsed.data.name,
+    {
+      expectedRole: parsed.data.expectedRole,
+      onUpdated: (tx, before, after) => writeAuditEvent(tx, {
+        action: "role_definition_updated",
+        resource: `role:${before.name}`,
+        changes: {
+          outcome: "updated",
+          beforeName: before.name,
+          afterName: after.name,
+          beforeCapabilities: before.capabilities,
+          afterCapabilities: after.capabilities,
+          builtin: after.builtin,
+        },
+      }),
+    },
   );
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });
@@ -291,7 +309,7 @@ router.patch("/users/:userId/status", requireLiveScope, requireCapability("manag
     // Serialize all staff lifecycle changes, then re-read the enabled
     // manage-staff holders while holding row locks. This closes the
     // check-then-disable race between two concurrent manager requests.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('staff-admin-mutation', 0))`);
+    await lockStaffAdminMutation(tx);
     const [lockedTarget] = await tx.select({ id: usersTable.id, disabled: usersTable.disabled })
       .from(usersTable).where(eq(usersTable.id, targetUserId)).for("update");
     if (!lockedTarget) return { ok: false as const, conflict: false };
@@ -310,12 +328,10 @@ router.patch("/users/:userId/status", requireLiveScope, requireCapability("manag
     }
     const targetCurrentlyManagesStaff = currentCapabilities.includes("manage-staff");
     if (req.body.disabled && targetCurrentlyManagesStaff) {
-      const holders = await tx.select({ id: usersTable.id }).from(usersTable)
-        .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
-        .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
-        .where(sql`${usersTable.disabled} = false AND ${rolesTable.capabilities} ? 'manage-staff'`)
-        .for("update");
-      if (holders.length <= 1) return { ok: false as const, conflict: true };
+      const holders = await listEnabledStaffManagerIds(tx);
+      if (holders.includes(targetUserId) && holders.length <= 1) {
+        return { ok: false as const, conflict: true };
+      }
     }
     await tx.update(usersTable).set({
       disabled: req.body.disabled,
@@ -390,7 +406,7 @@ router.put(
   }
   const previous = await getStaffMember(targetUserId);
   const result = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('staff-admin-mutation', 0))`);
+    await lockStaffAdminMutation(tx);
     const changed = await setUserRole(targetUserId, parsed.data.role,
       (req.capabilities ?? []) as Capability[], tx);
     if (changed.ok && previous.role !== changed.row.role) {

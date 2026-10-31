@@ -133,14 +133,14 @@ async function getFactoryData(userId: string): Promise<Response> {
   });
 }
 
-async function putFactoryData(userId: string, key: string, value: unknown): Promise<Response> {
+async function putFactoryData(userId: string, key: string, value: unknown, updatedAt?: number): Promise<Response> {
   return fetch(`${baseUrl}/api/factory-data`, {
     method: "PUT",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${signLegacyTokenForTests(userId)}`,
     },
-    body: JSON.stringify({ key, value }),
+    body: JSON.stringify({ key, value, ...(updatedAt === undefined ? {} : { updatedAt }) }),
   });
 }
 
@@ -289,6 +289,30 @@ describe("server-only PIN verification", () => {
 });
 
 describe("PUT /factory-data", () => {
+  it("keeps stale retries canonical and independent keys idempotent within their scope", async () => {
+    const manager = await freshUser("manager");
+    const sandbox = await freshUser("manager");
+    await db.execute(sql`UPDATE ${usersTable} SET sandbox = true WHERE id = ${sandbox}`);
+    clearUserValidityCache();
+    const now = Date.now();
+    const firstKey = "run-calc-shift-start-time";
+    const secondKey = "run-calc-production-start-time";
+    const canonical = await (await putFactoryData(manager, firstKey, "09:00", now)).json();
+    const stale = await putFactoryData(manager, firstKey, "07:00", now - 1_000);
+    expect(stale.status).toBe(200);
+    expect(await stale.json()).toEqual(canonical);
+    const independent = await putFactoryData(manager, secondKey, "09:15", now);
+    expect(independent.status).toBe(200);
+    const accepted = await independent.json();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(await (await putFactoryData(manager, firstKey, "07:00", now - 1_000)).json()).toEqual(canonical);
+      expect(await (await putFactoryData(manager, secondKey, "09:15", now)).json()).toEqual(accepted);
+    }
+    expect(await (await getFactoryData(sandbox)).json()).toEqual({ data: {} });
+    const live = await (await getFactoryData(manager)).json() as { data: Record<string, { value: unknown }> };
+    expect(live.data[firstKey].value).toBe("09:00");
+    expect(live.data[secondKey].value).toBe("09:15");
+  });
   it("upserts a key and returns updatedAt", async () => {
     const mgr = await freshUser("manager");
     const res = await putFactoryData(mgr, "testKey", [1, 2, 3]);

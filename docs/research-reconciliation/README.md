@@ -1,6 +1,8 @@
 # Research reconciled with the Production Run Calculator
 
-**Assessment:** 2026-10-26. **Inspected source:** `ded88b96104b58eea47cf36e66204cd4d79d5409`.
+> **Current overlay (2026-10-30):** use [the app-wide evidence audit](app-wide-audit-2026-10-29.md) for the twelve-domain comparison, source/build identity, evidence limits and remaining actions. Current source is `source-sha256:1e20f432bf9aae563deb7496375522204234868b452306122e52f44e228e0989`; current test identity is `test-sha256:ce47237edc6c06a30a98cedcab8801f1ecfdd3b5c2205b4c5153b40fa872534b`. S177–S183 record five focused API persistence/retry/authorization cases, the five-run lifecycle PASS, signed-in manager importer visuals, operator Warehouse stage/reload visuals, Dough correction/resume, root typecheck and the rechecked development API identity. The manager-only inventory request now checks client capability; F50 closes the observed 403. Browser timings varied between cold and later authenticated navigation; F51 records the bounded browser measurements and explains why they do not establish server latency. Screenshots were visually reviewed but not committed. The managed API remains at build `35f1a664-57b4-4d40-a2d4-c34b49de8154`, serving older source `b577c902…`; it was not restarted under the owner’s no-startup-schema-push choice. The Vite preview is verified only to its sign-in screen; signed-in journeys use isolated synthetic browser evidence. Phone/PWA screenshots show browser errors, failed recovery/update and offline/paused states; the owner clarified the app did not run, so device wake and first-tap behavior remain NOT RUN. The 3,733/1 client suite and 227/278 inventory listings are earlier revision/listing evidence, not current release proof. Full browser release evidence remains with #3692; this audit is not a production GO/NO-GO. Development data remains unchanged. The October 26 report below remains historical.
+
+**Historical assessment:** 2026-10-26. **Inspected source:** `ded88b96104b58eea47cf36e66204cd4d79d5409`.
 **Owner:** assigned app-wide research agent. **Decision brief, not implementation approval or release certification.**
 
 ## The short answer
@@ -33,20 +35,21 @@ Four distinctions matter:
 
 | Record | Purpose |
 |---|---|
+| [App-wide evidence audit, 2026-10-29](app-wide-audit-2026-10-29.md) | Current integrated source overlay, decisions, domain/journey matrix, failures and evidence boundaries |
 | [Source register](sources.md) | Authority, chronology, duplicate/supersession decisions, accessible task context |
 | [Searchable inventory](inventory.json) | All discovered local candidate paths, hashes where bounded, dates, origin, domain hints and duplicate families |
 | [Outcome matrix](matrix.md) | Plans → UI/API/data → actual evidence limits → discrepancies, decisions and owners |
 | [New primary research](primary-research.md) | Current primary sources, alternatives, applicability, costs and approval gates |
 | [Coverage and failure ledger](coverage-ledger.md) | What was inspected, what remains unknown, status/owner/next observation |
 
-The JSON is a metadata catalog, **not a claim that 1,889 sources were read**.
-It includes 228 docs, 565 local task-plan files, 50 research files, 523 attachments,
-517 memory records, three app-local docs and three root instruction/readme files.
-The counts are mutually exclusive by origin. One more task-plan file was present
-than the initial scoping count; this is discovery, not proof of another approved
-task. The catalog found 124 exact-byte duplicate groups and 153 name/date family
-candidates; families are not automatically duplicates or superseded sources.
-Dates extracted from filenames are hints, never approval or effective dates.
+The JSON is a metadata catalog, **not a claim that 1,915 sources were read**.
+Its current mutually exclusive origins are 235 docs, 568 local task-plan files,
+50 research files, 535 attachments, 521 agent-memory records, three app-local
+docs and three root instruction/readme files. Local task plans are not live task
+records. The catalog found 124 exact-byte duplicate groups (335 member paths)
+and 153 name/date family candidates; families are not automatically duplicates
+or superseded sources. Dates extracted from filenames are hints, never approval
+or effective dates.
 
 ## What old plans still call open but now exists
 
@@ -90,13 +93,16 @@ waiting for input in the supplied board; no timing limit or gate is relaxed here
 **Concrete feature-evidence gap:** the audited-import report's real Chromium spec
 journey stopped at an overlay interception. The layering correction has cheaper
 checks but no retained successful browser Apply/history/reload for that journey.
-The 56 shared-review viewport/engine/label cases are not seven real importer
-journeys. API transactions cannot alone close that UI delivery gap.
+The shared-review viewport/engine/label cases are not seven real importer
+journeys; S159 is a synthetic dialog interaction matrix, not parser/Apply proof.
+API transactions cannot alone close that UI delivery gap.
 
-**Source-confirmed wiring gap:** the manager background-warning handler exists
-and has an isolated router test, but it is not mounted in B's API composition.
-The new #3718/#3719 proposals already own endpoint restoration and assembled
-handler coverage. This is not the separately mounted rich health-diagnostics
+**Historical source-confirmed wiring gap:** at source B, the manager
+background-warning handler existed but was not mounted in the API composition.
+Current source `906e241…` mounts it through `routes/index.ts`; an isolated
+current-source HTTP integration test verified anonymous 401, operator 403 and
+manager 200 through the actual auth/capability middleware. Published behavior
+remains unverified. This is not the separately mounted rich health-diagnostics
 endpoint and does not reopen the repaired public-disclosure finding.
 
 **Active user-facing repair:** breaks and timeline estimates have an existing
@@ -140,6 +146,15 @@ Existing task references below come from supplied accessible context.
   Late supplied #3718 background-warning endpoint and #3719 assembled handler
   coverage are also **PROPOSED**, with source boundaries in M41.
   Preserve these separate existing scopes; do not create another umbrella task.
+- **Current status reconciliation (2026-10-29):** the supplied task context marks
+  #3709, #3712, #3715 and #3719 as merged inputs; read-only task-record queries
+  confirm #3692 and #3717 are merged. This supersedes the historical status
+  labels above. The #3717 bounded production observation is available in
+  [its evidence report](../evidence/shared-update-live-observation-2026-10-26.md)
+  and still leaves the initiating cause unknown. The final #3692 run result is
+  not available in this checkout or the task record; the accessible October 24
+  report is historical and is not its completion result. #3696/#3697 remain
+  optional proposals per supplied context.
 - **Dependencies:** consume #3712's actual revision-bound findings; correlate
   prospective stall phases only after an authorized serving build emits them.
   Break repair and source discovery need not wait for production metrics.

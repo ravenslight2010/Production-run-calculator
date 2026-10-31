@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Playwright } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 import * as XLSX from "xlsx";
 import {
@@ -17,7 +17,13 @@ const GOLD_CAPTURE_ENABLED =
   process.env.IMPORT_GOLD_RETENTION_APPROVED === "true";
 
 type ImportKind = "spec" | "premix" | "cheese";
-type ListedCase = { id: number; importType: ImportKind; sourceLabel: string };
+type ListedCase = {
+  id: number;
+  importType: ImportKind;
+  sourceLabel: string;
+  scores?: Array<{ id: number; provider: string; status: string }>;
+};
+const LIVE_LOCAL_SCORER = process.env.IMPORT_GOLD_LOCAL_LIVE === "true";
 
 function workbookBuffer(sheets: Array<{ name: string; rows: unknown[][] }>): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -55,10 +61,49 @@ function cheeseWorkbook(brand: string, recipeName: string): Buffer {
     rows: [
       [`${brand} Cheese`],
       ["Cheese Shredder Setting: #1"],
+      [`All Varieties: ${recipeName}`],
+      [],
       [recipeName],
       ["", "LBS"],
       ["Mozzarella", "10"],
       ["Total", "10"],
+    ],
+  }]);
+}
+
+function shippingGuideWorkbook(brand: string): Buffer {
+  return workbookBuffer([{
+    name: "Shipping Guide",
+    rows: [
+      ["PIZZA", "BOX", "CIRCLE", "PIZZAS/CS", "CASES", "GRIPSHEETS", "STACKING"],
+      [brand, '12" shipper', "12 inch", 16, 40, "N/A", "Column"],
+    ],
+  }]);
+}
+
+function sauceGuideWorkbook(brand: string): Buffer {
+  return workbookBuffer([{
+    name: "Sauce Guide",
+    rows: [[`${brand} uses Guide Sauce on all varieties at 0.75oz`]],
+  }]);
+}
+
+function doughGuideWorkbook(brand: string): Buffer {
+  return workbookBuffer([{
+    name: "Dough Guide",
+    rows: [
+      ["Pizza to Dough Recipes"],
+      [`${brand} (all) = Guide Dough`],
+    ],
+  }]);
+}
+
+function scheduleWorkbook(brand: string, flavor: string, date: string): Buffer {
+  return workbookBuffer([{
+    name: "Weekly Plan",
+    rows: [
+      ["Friday - Day", date, "Brand", "Flavor", "Units", "Customer", "Ship", "PO"],
+      ["", "", brand, flavor, 3, "Synthetic Customer", "2030-03-16", "SYN-PO-1"],
     ],
   }]);
 }
@@ -94,6 +139,35 @@ async function uploadFromSettings(
   });
 }
 
+async function applyProfileGuide(
+  page: Page,
+  options: {
+    buttonName: string;
+    dialogTestId: string;
+    confirmTestId: string;
+    fileName: string;
+    buffer: Buffer;
+    expectedText: string;
+  },
+): Promise<void> {
+  await uploadFromSettings(page, "Import", options.buttonName, options.fileName, options.buffer);
+  const dialog = page.getByTestId(options.dialogTestId);
+  await expect(dialog).toBeVisible({ timeout: 20_000 });
+  await expect(dialog).toContainText(options.expectedText, { timeout: 20_000 });
+  await expect(dialog).toContainText("1 of 1 row will apply");
+  const acknowledge = dialog.getByRole("checkbox", { name: /I reviewed the changes/ });
+  if (await acknowledge.count()) await acknowledge.check();
+  const confirm = dialog.getByTestId(options.confirmTestId);
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+
+  const safety = page.getByTestId("dialog-import-safety-review");
+  await expect(safety).toBeVisible({ timeout: 20_000 });
+  await safety.getByTestId("button-import-safety-confirm").click();
+  await expect(safety).toBeHidden();
+  await expect(dialog).toBeHidden();
+}
+
 async function openImportGoldLab(page: Page) {
   const settings = await settingsDialog(page);
   await settings.getByRole("button", { name: "Settings", exact: true }).click();
@@ -115,6 +189,157 @@ async function listCases(
   return (await response.json() as { cases: ListedCase[] }).cases;
 }
 
+async function runSyntheticLocalScoringJourney(
+  page: Page,
+  playwright: Playwright,
+  expectedScore: "unavailable" | "scored",
+): Promise<void> {
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+  const api = await playwright.request.newContext();
+  let accountToken: string | undefined;
+  let syntheticCaseId: number | undefined;
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_gold_synthetic"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    accountToken = account.token;
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.context().addCookies([{
+      name: "rc_auth",
+      value: account.token,
+      url: new URL(page.url()).origin,
+    }]);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    const lab = await openImportGoldLab(page);
+    await expect(lab.getByText(/Real-source Import Gold capture and scoring remain disabled/)).toBeVisible();
+    const scoringSwitch = lab.getByRole("checkbox", {
+      name: "Enable local scoring in this development workspace",
+    });
+    await expect(scoringSwitch).not.toBeChecked();
+    await scoringSwitch.click();
+    await expect(scoringSwitch).toBeChecked();
+    await expect(lab.getByText(/App scoring access is enabled/)).toBeVisible();
+    await expect(lab.getByText(
+      expectedScore === "scored" ? /configured; available/ : /configured; unavailable/,
+    )).toBeVisible();
+
+    const review = lab.getByTestId("import-gold-synthetic-review");
+    await expect(review.locator("pre").first()).toContainText("Synthetic Sample Mix");
+    await expect(review.locator("pre").nth(1)).toContainText("Synthetic Sample Mix");
+    await expect(review.getByText(/creates an evaluation case only/)).toBeVisible();
+    await review.getByRole("checkbox", { name: "I reviewed this synthetic sample and expected result" }).check();
+    const applyResponsePromise = page.waitForResponse((response) =>
+      response.url().endsWith("/api/import-gold/synthetic-apply"),
+    );
+    await review.getByRole("button", { name: "Apply synthetic sample" }).click();
+    const applyResponse = await applyResponsePromise;
+    expect([200, 201]).toContain(applyResponse.status());
+    syntheticCaseId = (await applyResponse.json() as { caseId: number }).caseId;
+    const cookieHeader = { Cookie: `rc_auth=${account.token}` };
+    const cases = await listCases(api, cookieHeader);
+    expect(cases).toContainEqual(expect.objectContaining({
+      id: syntheticCaseId,
+      importType: "premix",
+      sourceLabel: "Synthetic local scoring fixture",
+    }));
+
+    const scoreResponsePromise = page.waitForResponse((response) =>
+      response.url().endsWith("/api/import-gold/score"),
+    );
+    await lab.getByRole("button", { name: "Score locally" }).click();
+    const scoreResponse = await scoreResponsePromise;
+    expect(scoreResponse.status()).toBe(200);
+    const scoreBody = await scoreResponse.json() as {
+      scoredCount: number;
+      errorCount: number;
+      results: Array<{
+        caseId: number;
+        provider: string;
+        status: string;
+        scoreId: number;
+        accuracy?: number;
+        errorCode?: string;
+      }>;
+    };
+    const caseCard = lab.getByTestId(`import-gold-case-${syntheticCaseId}`);
+    if (expectedScore === "unavailable") {
+      expect(scoreBody).toMatchObject({ scoredCount: 0, errorCount: 1 });
+      await expect(caseCard.getByText("local: error: provider_unavailable", { exact: true })).toBeVisible();
+      await expect(lab.getByRole("alert")).toContainText("1 score attempt failed");
+    } else {
+      const safeCodes = new Set(["provider_not_configured", "invalid_output", "provider_unavailable"]);
+      const failureCodes = scoreBody.results
+        .filter((result) => result.caseId === syntheticCaseId && result.provider === "local" && result.status === "error")
+        .map((result) => result.errorCode && safeCodes.has(result.errorCode) ? result.errorCode : "unclassified");
+      expect(scoreBody, `safe local scorer error codes: ${failureCodes.join(",") || "none"}`)
+        .toMatchObject({ scoredCount: 1, errorCount: 0 });
+      const score = scoreBody.results.find((result) =>
+        result.caseId === syntheticCaseId && result.provider === "local",
+      );
+      expect(score).toMatchObject({ status: "scored" });
+      expect(score?.accuracy).toBeGreaterThanOrEqual(0);
+      expect(score?.accuracy).toBeLessThanOrEqual(100);
+      const storedCase = (await listCases(api, { Cookie: `rc_auth=${account.token}` }))
+        .find((item) => item.id === syntheticCaseId);
+      expect(storedCase?.scores).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: score?.scoreId, provider: "local", status: "scored" }),
+      ]));
+      await expect(caseCard).toContainText(/local: \d+(?:\.\d+)?% \(\d+\/\d+\)/);
+    }
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    const reloadedLab = await openImportGoldLab(page);
+    await expect(reloadedLab.getByRole("checkbox", {
+      name: "Enable local scoring in this development workspace",
+    })).toBeChecked();
+    const reloadedCase = reloadedLab.getByTestId(`import-gold-case-${syntheticCaseId}`);
+    if (expectedScore === "unavailable") {
+      await expect(reloadedCase.getByText("local: error: provider_unavailable", { exact: true })).toBeVisible();
+    } else {
+      await expect(reloadedCase).toContainText(/local: \d+(?:\.\d+)?% \(\d+\/\d+\)/);
+    }
+    await expect(reloadedLab.getByRole("button", { name: "Compare with Gemini" })).toHaveCount(0);
+  } finally {
+    if (accountToken) {
+      const cookieHeader = { Cookie: `rc_auth=${accountToken}` };
+      if (syntheticCaseId !== undefined) {
+        await api.delete(`${API_BASE}/api/import-gold/cases/${syntheticCaseId}`, { headers: cookieHeader }).catch(() => {});
+      }
+      await api.patch(`${API_BASE}/api/import-gold/local-scoring`, {
+        headers: cookieHeader,
+        data: { enabled: false },
+      }).catch(() => {});
+    }
+    await api.dispose();
+    await fixtures.cleanup();
+  }
+}
+
+test("development-only synthetic local scoring retains a safe unavailable result", async ({
+  page,
+  playwright,
+}) => {
+  test.skip(LIVE_LOCAL_SCORER, "Use the live-evaluator journey when IMPORT_GOLD_LOCAL_LIVE=true.");
+  test.setTimeout(120_000);
+  await runSyntheticLocalScoringJourney(page, playwright, "unavailable");
+});
+
+test("development-only synthetic local scoring persists a score from the private evaluator", async ({
+  page,
+  playwright,
+}) => {
+  test.skip(!LIVE_LOCAL_SCORER, "Requires the private evaluator and IMPORT_GOLD_LOCAL_LIVE=true.");
+  test.setTimeout(240_000);
+  await runSyntheticLocalScoringJourney(page, playwright, "scored");
+});
+
 async function applyFromReview(
   page: Page,
   kind: ImportKind,
@@ -131,6 +356,86 @@ async function applyFromReview(
   const response = await responsePromise;
   expect(response.status(), `${kind} human Apply should be accepted`).toBe(200);
   await expect(page.getByTestId(optInTestId)).toBeHidden();
+  const closeSettings = page.getByRole("button", { name: "Close settings", exact: true });
+  if (await closeSettings.isVisible().catch(() => false)) {
+    await closeSettings.click();
+  }
+}
+
+async function applyWithoutGoldCapture(
+  page: Page,
+  optInTestId: string,
+  applyButton: RegExp,
+  importType: ImportKind,
+): Promise<void> {
+  await expect(page.getByTestId(optInTestId)).toHaveCount(0);
+  const observed: Array<{ phase: "request" | "response"; method: string; path: string; status?: number }> = [];
+  const safePath = (url: string) => {
+    const pathname = new URL(url).pathname;
+    if (pathname === "/api/import-operations/preview") return pathname;
+    return pathname.replace(/^\/api\/import-operations\/[^/]+/, "/api/import-operations/:operationId");
+  };
+  const onRequest = (request: import("@playwright/test").Request) => {
+    if (!new URL(request.url()).pathname.startsWith("/api/import-operations/")) return;
+    observed.push({ phase: "request", method: request.method(), path: safePath(request.url()) });
+  };
+  const onResponse = (response: import("@playwright/test").Response) => {
+    if (!new URL(response.url()).pathname.startsWith("/api/import-operations/")) return;
+    observed.push({
+      phase: "response",
+      method: response.request().method(),
+      path: safePath(response.url()),
+      status: response.status(),
+    });
+  };
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  try {
+    const apply = page.getByRole("button", { name: applyButton });
+    const safety = page.getByTestId("dialog-import-safety-review");
+    let hasSafetyReview = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const previewPromise = page.waitForResponse((candidate) =>
+        candidate.request().method() === "POST" &&
+        new URL(candidate.url()).pathname === "/api/import-operations/preview",
+      { timeout: 30_000 });
+      await apply.click();
+      const preview = await previewPromise;
+      expect(preview.status(), "The reviewed import preview should be accepted").toBe(200);
+      if (await safety.isVisible().catch(() => false)) {
+        hasSafetyReview = true;
+        break;
+      }
+      const refreshed = await page.getByText(
+        "Nothing was saved. The current recipe library changed this review; check the updated changes below and confirm again.",
+        { exact: true },
+      ).isVisible().catch(() => false);
+      if (attempt === 0 && refreshed) {
+        await expect(apply).toBeEnabled();
+        continue;
+      }
+      await expect(safety).toBeVisible({ timeout: 10_000 });
+      hasSafetyReview = true;
+      break;
+    }
+    expect(hasSafetyReview, `${importType} Apply requires explicit confirmation of the server preview`).toBe(true);
+    const applyPromise = page.waitForResponse((candidate) =>
+      candidate.request().method() === "POST" &&
+      /^\/api\/import-operations\/[^/]+\/apply$/.test(new URL(candidate.url()).pathname),
+    { timeout: 30_000 });
+    await safety.getByTestId("button-import-safety-confirm").click();
+    const response = await applyPromise;
+    await expect(safety).toBeHidden();
+    expect(response.status(), `${importType} Apply should succeed without Gold capture`).toBe(200);
+    const applyBody = response.request().postDataJSON() as Record<string, unknown>;
+    expect(Object.hasOwn(applyBody, "goldCapture")).toBe(false);
+  } catch (error) {
+    console.log("ordinary-import-apply-diagnostic", JSON.stringify({ importType, observed }));
+    throw error;
+  } finally {
+    page.off("request", onRequest);
+    page.off("response", onResponse);
+  }
   const closeSettings = page.getByRole("button", { name: "Close settings", exact: true });
   if (await closeSettings.isVisible().catch(() => false)) {
     await closeSettings.click();
@@ -314,6 +619,286 @@ test("opted-in spec, premix, and cheese cases appear after Apply and manager rel
         await api.delete(`${API_BASE}/api/import-gold/cases/${item.id}`, { headers }).catch(() => {});
       }
     }
+    await api.dispose();
+    await fixtures.cleanup();
+  }
+});
+
+test("synthetic workbook imports Apply and persist without Gold capture", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(180_000);
+  expect(GOLD_CAPTURE_ENABLED, "The ordinary import journey must run with Gold capture disabled").toBe(false);
+
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+  const api = await playwright.request.newContext();
+  const suffix = uniqueTestId("ordinary-import");
+  // Cheese workbook customer names are worksheet names, which Excel limits to 31 characters.
+  const brand = `Synthetic ${suffix.slice(-16)}`;
+  const flavor = "Classic";
+  const cheeseRecipe = `${brand} Classic Cheese Mix`;
+  let account: Awaited<ReturnType<typeof fixtures.createAccount>> | undefined;
+
+  try {
+    account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_ordinary_import"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES.filter((capability) => capability !== "use-ai-tools"),
+      onboardingSeen: true,
+    });
+    await page.context().route("**/api/ai/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/ai/match-premix") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ matches: [], generatedAt: 0, decision: "suggestion" }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "AI endpoints are disabled in this test." }),
+      });
+    });
+
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.context().addCookies([{
+      name: "rc_auth",
+      value: account.token,
+      url: new URL(page.url()).origin,
+    }]);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    await uploadFromSettings(page, "Import", "Import Spec Sheet", `${suffix}-spec.xlsx`, specWorkbook(brand, flavor));
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await applyWithoutGoldCapture(page, "spec-import-gold-opt-in", /Apply \d+ item/, "spec");
+
+    const premixRecipe = `${brand} ${flavor} Blend Mix`;
+    await uploadFromSettings(
+      page,
+      "Mix Recipes",
+      "Import Premix Sheet",
+      `${suffix}-premix.xlsx`,
+      premixWorkbook(brand, flavor),
+    );
+    await applyWithoutGoldCapture(page, "premix-import-gold-opt-in", /Apply \d+ mix/, "premix");
+
+    await uploadFromSettings(
+      page,
+      "Cheese",
+      "Import Cheese Mix Recipe Specs",
+      `${suffix}-cheese.xlsx`,
+      cheeseWorkbook(brand, cheeseRecipe),
+    );
+    await applyWithoutGoldCapture(page, "cheese-import-gold-opt-in", /Apply \d+ recipe/, "cheese");
+
+    await applyProfileGuide(page, {
+      buttonName: "Import Shipping & Palletizing Guide",
+      dialogTestId: "dialog-shipping-import",
+      confirmTestId: "button-shipping-import-confirm",
+      fileName: `${suffix}-shipping.xlsx`,
+      buffer: shippingGuideWorkbook(brand),
+      expectedText: brand,
+    });
+    await applyProfileGuide(page, {
+      buttonName: "Import Sauce Guide",
+      dialogTestId: "dialog-sauce-guide-import",
+      confirmTestId: "button-sauce-guide-import-confirm",
+      fileName: `${suffix}-sauce.xlsx`,
+      buffer: sauceGuideWorkbook(brand),
+      expectedText: "Guide Sauce",
+    });
+    await applyProfileGuide(page, {
+      buttonName: "Import Dough Recipe Guide",
+      dialogTestId: "dialog-dough-guide-import",
+      confirmTestId: "button-dough-guide-import-confirm",
+      fileName: `${suffix}-dough.xlsx`,
+      buffer: doughGuideWorkbook(brand),
+      expectedText: "Guide Dough",
+    });
+    await page.getByRole("button", { name: "Close settings", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Manage Lists & Settings" })).toBeHidden();
+
+    const scheduledDate = "2030-03-15";
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const scheduledDays = page.getByRole("dialog", { name: "Scheduled Days" });
+    await scheduledDays.getByRole("button", { name: "Schedule New Day", exact: true }).click();
+    const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
+    const [scheduleFileChooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      scheduleEditor.getByRole("button", { name: "Import Excel", exact: true }).click(),
+    ]);
+    await scheduleFileChooser.setFiles({
+      name: `${suffix}-schedule.xlsx`,
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: scheduleWorkbook(brand, flavor, scheduledDate),
+    });
+    const scheduleImport = page.getByRole("dialog", { name: "Import Excel" });
+    await expect(scheduleImport).toContainText(`${brand} · ${flavor} · 3 cases · ${scheduledDate}`);
+    await expect(scheduleImport).toContainText("1 run across 1 day");
+    const confirmSchedule = scheduleImport.getByTestId("button-excel-import-confirm");
+    await expect(confirmSchedule).toBeEnabled();
+    await confirmSchedule.click();
+
+    const scheduleSafety = page.getByTestId("dialog-import-safety-review");
+    await expect(scheduleSafety).toBeVisible({ timeout: 20_000 });
+    await expect(scheduleSafety).toContainText(scheduledDate);
+    const scheduleWrite = page.waitForResponse((response) =>
+      response.request().method() === "PUT" &&
+      new URL(response.url()).pathname === `/api/sync/${scheduledDate}`,
+    { timeout: 30_000 });
+    await scheduleSafety.getByTestId("button-import-safety-confirm").click();
+    const scheduleWriteResponse = await scheduleWrite;
+    expect(scheduleWriteResponse.status(), "Schedule date should be acknowledged independently").toBe(200);
+    await expect(scheduleSafety).toBeHidden();
+    await expect(scheduleImport).toBeHidden();
+
+    const uncertainDate = "2030-03-16";
+    let serverAcknowledgedUncertainWrite = false;
+    let uncertainPutRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "PUT" &&
+        new URL(request.url()).pathname === `/api/sync/${uncertainDate}`
+      ) uncertainPutRequests += 1;
+    });
+    await page.route(
+      (url) => url.pathname === `/api/sync/${uncertainDate}`,
+      async (route) => {
+        if (route.request().method() !== "PUT") {
+          await route.continue();
+          return;
+        }
+        const response = await route.fetch();
+        serverAcknowledgedUncertainWrite = response.status() === 200;
+        await route.abort("failed");
+      },
+    );
+    const [uncertainFileChooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      scheduleEditor.getByRole("button", { name: "Import Excel", exact: true }).click(),
+    ]);
+    await uncertainFileChooser.setFiles({
+      name: `${suffix}-schedule-uncertain.xlsx`,
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: scheduleWorkbook(brand, flavor, uncertainDate),
+    });
+    const uncertainImport = page.getByRole("dialog", { name: "Import Excel" });
+    await expect(uncertainImport).toContainText(`${brand} · ${flavor} · 3 cases · ${uncertainDate}`);
+    await uncertainImport.getByTestId("button-excel-import-confirm").click();
+    const uncertainSafety = page.getByTestId("dialog-import-safety-review");
+    await expect(uncertainSafety).toBeVisible({ timeout: 20_000 });
+    const partialHistoryResponse = page.waitForResponse((response) => {
+      if (
+        response.request().method() !== "POST" ||
+        new URL(response.url()).pathname !== "/api/import-history"
+      ) return false;
+      try {
+        const body = response.request().postDataJSON() as { importType?: string; status?: string };
+        return body.importType === "schedule" && body.status === "partial";
+      } catch {
+        return false;
+      }
+    }, { timeout: 30_000 });
+    await uncertainSafety.getByTestId("button-import-safety-confirm").click();
+    const partialHistory = await partialHistoryResponse;
+    expect(partialHistory.status()).toBe(201);
+    const partialHistoryBody = await partialHistory.json() as {
+      import?: {
+        status?: string;
+        sourceKey?: string | null;
+        summary?: {
+          counts?: Record<string, number>;
+          landed?: Record<string, number>;
+          followUp?: string[];
+        };
+      };
+    };
+    expect(serverAcknowledgedUncertainWrite).toBe(true);
+    expect(uncertainPutRequests).toBe(1);
+    expect(partialHistoryBody.import?.status).toBe("partial");
+    expect(partialHistoryBody.import?.sourceKey).toBeTruthy();
+    expect(partialHistoryBody.import?.summary?.counts).toMatchObject({
+      requestedDays: 1,
+      confirmedDays: 0,
+      unconfirmedDays: 1,
+      notSentDays: 0,
+    });
+    expect(partialHistoryBody.import?.summary?.landed).toEqual({});
+    expect(partialHistoryBody.import?.summary?.landed?.days).toBeUndefined();
+    expect(partialHistoryBody.import?.summary?.followUp?.[0]).toMatch(
+      /Reload the schedule and inspect each unconfirmed date before deciding whether to retry/,
+    );
+    await expect(page.getByText("Schedule result not confirmed", { exact: true })).toBeVisible();
+    await expect(uncertainImport).toBeHidden();
+    await page.unroute((url) => url.pathname === `/api/sync/${uncertainDate}`);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    for (const [path, expectedName] of [
+      ["/api/brand-profiles", brand],
+      ["/api/mixes", premixRecipe],
+      ["/api/cheese-recipes", cheeseRecipe],
+    ]) {
+      const response = await api.get(`${API_BASE}${path}`, { headers: account.cookieHeader });
+      expect(response.status(), `Reloaded ${path} should be readable`).toBe(200);
+      const body = await response.json() as {
+        items?: Array<{
+          brand?: string;
+          flavor?: string;
+          values?: Record<string, unknown>;
+        }>;
+      };
+      expect(JSON.stringify(body)).toContain(expectedName);
+      if (path === "/api/brand-profiles") {
+        const profile = body.items?.find(
+          (item) => item.brand === brand && item.flavor?.toLowerCase() === flavor.toLowerCase(),
+        );
+        expect(profile).toBeDefined();
+        expect(profile?.values).toMatchObject({
+          frontlineRecipeName: "Guide Sauce",
+          sauceOzPerPizza: 0.75,
+          doughRecipeName: "Guide Dough",
+          pizzasPerCase: 16,
+          casesPerSkid: 40,
+        });
+      }
+    }
+    const today = await page.evaluate(() =>
+      new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date()),
+    );
+    const scheduleResponse = await api.get(`${API_BASE}/api/sync/${scheduledDate}?today=${today}`, {
+      headers: account.cookieHeader,
+    });
+    expect(scheduleResponse.status(), "Reloaded imported schedule should be readable").toBe(200);
+    const savedSchedule = await scheduleResponse.json() as {
+      dayState?: { runs?: Array<{ id: string; brand: string; flavor: string; imported?: boolean }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+    };
+    expect(savedSchedule.dayState?.runs).toHaveLength(1);
+    const scheduledRun = savedSchedule.dayState?.runs?.[0];
+    expect(scheduledRun).toMatchObject({ brand, flavor, imported: true });
+    expect(savedSchedule.runValues?.[scheduledRun!.id]?.casesNeeded).toBe(3);
+
+    const uncertainScheduleResponse = await api.get(`${API_BASE}/api/sync/${uncertainDate}?today=${today}`, {
+      headers: account.cookieHeader,
+    });
+    expect(uncertainScheduleResponse.status()).toBe(200);
+    const savedUncertainSchedule = await uncertainScheduleResponse.json() as {
+      dayState?: { runs?: Array<{ id: string; brand: string; flavor: string; imported?: boolean }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+    };
+    expect(uncertainPutRequests, "Reload must not retry an unconfirmed schedule write").toBe(1);
+    expect(savedUncertainSchedule.dayState?.runs).toHaveLength(1);
+    const uncertainRun = savedUncertainSchedule.dayState?.runs?.[0];
+    expect(uncertainRun).toMatchObject({ brand, flavor, imported: true });
+    expect(savedUncertainSchedule.runValues?.[uncertainRun!.id]?.casesNeeded).toBe(3);
+  } finally {
     await api.dispose();
     await fixtures.cleanup();
   }

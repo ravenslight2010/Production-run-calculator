@@ -9,10 +9,16 @@ export function releaseBrowserBaseUrl(fallback: string): string {
     : fallback;
 }
 
-export function releaseBrowserWebServers():
+export function releaseBrowserWebServers(mode: "preview" | "source" = "preview"):
   | PlaywrightTestConfig["webServer"]
   | undefined {
   if (process.env.RELEASE_BROWSER_LOCAL_SERVERS !== "1") return undefined;
+  const webCommand = mode === "source"
+    ? `VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} exec ./node_modules/.bin/vite ` +
+      `--config vite.config.ts --host 0.0.0.0 --port ${process.env.RELEASE_BROWSER_WEB_PORT ?? "18084"}`
+    : `BUILD_IDENTITY_MODE=development VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} pnpm run build && ` +
+      `VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} exec ./node_modules/.bin/vite ` +
+      `preview --config vite.config.ts --host 0.0.0.0 --port ${process.env.RELEASE_BROWSER_WEB_PORT ?? "18084"}`;
   return [
     {
       command:
@@ -24,10 +30,7 @@ export function releaseBrowserWebServers():
       timeout: 300_000,
     },
     {
-      command:
-        `BUILD_IDENTITY_MODE=development VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} pnpm run build && ` +
-        `VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} exec ./node_modules/.bin/vite ` +
-        `preview --config vite.config.ts --host 0.0.0.0 --port ${process.env.RELEASE_BROWSER_WEB_PORT ?? "18084"}`,
+      command: webCommand,
       url: RELEASE_BROWSER_BASE_URL,
       reuseExistingServer: false,
       timeout: 300_000,

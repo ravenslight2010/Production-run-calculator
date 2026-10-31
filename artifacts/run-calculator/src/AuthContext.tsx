@@ -33,6 +33,7 @@ function setDirectorySession(user: StaffMember | null): void {
 const AUTH_SESSION_PROBE_TIMEOUT_MS = 8_000;
 const AUTH_SESSION_PROBE_MAX_ATTEMPTS = 2;
 const AUTH_SESSION_PROBE_RETRY_DELAY_MS = 250;
+const AUTH_ROLE_REFRESH_INTERVAL_MS = 60_000;
 const AUTH_SESSION_PROBE_TIMEOUT_MESSAGE =
   "The staff session check timed out before the server responded.";
 
@@ -160,6 +161,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     retryDelay: AUTH_SESSION_PROBE_RETRY_DELAY_MS,
     staleTime: 60_000,
+    refetchInterval: (query) =>
+      query.state.data ? AUTH_ROLE_REFRESH_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
   });
 
   const me = data ?? null;

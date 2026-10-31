@@ -9,6 +9,7 @@ import sourceLibraryReconciliationCaptureRouter, {
   publicSourceLibraryReconciliationCaptureRouter,
 } from "./sourceLibraryReconciliationCapture";
 import masterDataHealthRouter from "./masterDataHealth";
+import backgroundOperationDiagnosticsRouter from "./backgroundOperationDiagnostics";
 import runTemplatesRouter from "./runTemplates";
 import coreSyncRunsRouter from "./capabilities/coreSyncRuns";
 import masterDataImportsRouter from "./capabilities/masterDataImports";
@@ -70,6 +71,10 @@ export const directAuthorizationCoverageRouters = [
       "POST /run-templates",
       "DELETE /run-templates",
     ],
+  },
+  {
+    name: "background operation diagnostics",
+    router: backgroundOperationDiagnosticsRouter,
   },
 ] as const;
 
@@ -133,6 +138,10 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/profile-data/health-check", "/profile-data/health-workspace",
     "/ai-memory/health-check", "/background-operations/diagnostics",
     "/import-gold/config", "/import-gold/cases", "/import-gold/export.jsonl",
+    "/import-gold/synthetic-review",
+  ]),
+  ...reads(["manage-staff", "manage-qc"], "any", "scoped", [
+    "/import-gold/approvals", "/import-gold/retention",
   ]),
   ...reads(["manage-staff"], "all", "live-only", ["/sync/health", "/health/diagnostics"]),
   ...reads(["manage-inventory"], "all", "scoped", [
@@ -148,7 +157,8 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ]),
   ...reads(["record-qc", "manage-qc"], "any", "scoped", ["/qc/recipe-review-statuses"]),
   ...reads(["manage-qc"], "all", "scoped", [
-    "/qc/history.csv", "/qc/recipe-reviews", "/qc/recipe-reviews/:captureId",
+    "/qc/history.csv", "/qc/intelligence", "/qc/intelligence.csv",
+    "/qc/recipe-reviews", "/qc/recipe-reviews/:captureId",
     "/qc/import-reviews", "/qc/import-reviews/:operationId",
     "/qc/intelligence", "/qc/intelligence.csv",
   ]),
@@ -160,6 +170,9 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/master-data-operations"]),
+  ...reads(["manage-factory-settings"], "all", "scoped", [
+    "/sync/schedule-swap-eligibility",
+  ]),
   ...reads(["review-incidents"], "all", "scoped", [
     "/incidents", "/incidents/unreviewed-count", "/incidents/actionable-count",
     "/incidents/assignees", "/incidents/:id", "/field-checks",
@@ -195,6 +208,7 @@ export const authenticatedCapabilityFamilies = [
   { name: "administration", router: administrationRouter },
   { name: "retained-ai", router: retainedAiRouter },
   { name: "server-jobs", router: serverJobsRouter },
+  { name: "background-operation-diagnostics", router: backgroundOperationDiagnosticsRouter },
 ] as const;
 
 // Stale-data protection runs first, including public health/auth routes.
@@ -241,6 +255,25 @@ const writes = (
 });
 
 export const mutationAuthorizationInventory: readonly MutationAuthorization[] = [
+  {
+    method: "POST", path: "/import-gold/retention/:caseId/verification", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  },
+  {
+    method: "DELETE", path: "/import-gold/cleanup-cases/:id", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed", capabilities: ["manage-staff"], capabilityMatch: "all",
+  },
+  {
+    method: "POST", path: "/import-gold/approvals", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  },
+  ...["verification", "revocation"].map((operation): MutationAuthorization => ({
+    method: "POST", path: `/import-gold/approvals/:id/${operation}`, ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  })),
   ...["preview", "apply", "undo"].map((action): MutationAuthorization => ({
     method: "POST", path: `/master-data-operations/:operationId/${action}`,
     ownership: "manager-only", scope: "scoped", sandbox: "allowed", managerRole: true,
@@ -287,7 +320,8 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("capability-gated", "scoped", "allowed", "manage-staff", [
     "PATCH /import-gold/cases/:id/exclusion",
     "DELETE /import-gold/cases/:id",
-    "POST /import-gold/score",
+    "POST /import-gold/score", "PATCH /import-gold/local-scoring",
+    "POST /import-gold/synthetic-apply",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-inventory", [
     "POST /cheese-recipes", "DELETE /cheese-recipes", "POST /cycle-count-schedules", "DELETE /cycle-count-schedules",
@@ -295,6 +329,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /dough-recipes", "DELETE /dough-recipes", "POST /ingredients", "DELETE /ingredients", "POST /ingredients/merge",
     "POST /freezer-pull-items", "DELETE /freezer-pull-items", "POST /freezer-surplus", "PUT /freezer-surplus/allocations/:runId",
     "POST /freezer-surplus/lots/:lotId/adjustments", "POST /freezer-surplus/confirmations",
+    "POST /freezer-surplus/confirmations/:runId/corrections",
     "POST /ingredient-batch-weights", "POST /mixes", "DELETE /mixes", "POST /photo-aliases",
     "POST /premix-sheets", "DELETE /premix-sheets/:id", "POST /cheese-sheets", "DELETE /cheese-sheets/:id",
     "POST /sauce-recipes", "DELETE /sauce-recipes", "PATCH /inventory/items/:id/production-link",
@@ -337,6 +372,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-factory-settings", [
     "PUT /factory-data", "POST /runs", "DELETE /runs/:id", "PUT /sync/:date", "DELETE /sync/:date",
+    "POST /sync/schedule-move", "POST /sync/schedule-swap",
   ]),
   ...writes("manager-only", "live-only", "denied", "manage-staff", [
     "POST /roles", "PUT /roles/:name", "DELETE /roles/:name", "PUT /users/:userId/role",
@@ -470,13 +506,28 @@ export function validateMutationAuthorizationInventory(
         const managerRoleIndex = layer.route.stack.findIndex(({ handle }) => isRequireManagerRole(handle));
         const matches = entries.some((entry) => {
           const expected = entry.capabilities ?? [];
-          const capabilityMatches = required.length === (expected.length ? 1 : 0) &&
-            (expected.length === 0 || required.some(({ capabilities, match, index }) =>
-              index < layer.route!.stack.length - 1 &&
-              match === (entry.capabilityMatch ?? "all") &&
-              capabilities.length === expected.length &&
-              expected.every((capability) => capabilities.includes(capability)),
-            ));
+          const expectedMatch = entry.capabilityMatch ?? "all";
+          const handlerIndex = layer.route!.stack.length - 1;
+          const actualCapabilities = required.flatMap(({ capabilities }) => [...capabilities]);
+          const actualCapabilitySet = new Set(actualCapabilities);
+          const singleGate = required.length === 1 ? required[0] : undefined;
+          const capabilityMatches = expected.length === 0
+            ? required.length === 0
+            : expectedMatch === "all"
+              ? required.length > 0 &&
+                required.every(({ capabilities, match, index }) =>
+                  index < handlerIndex &&
+                  match === "all" &&
+                  capabilities.length > 0 &&
+                  capabilities.every((capability) => expected.includes(capability)),
+                ) &&
+                actualCapabilities.length === expected.length &&
+                expected.every((capability) => actualCapabilitySet.has(capability))
+              : singleGate !== undefined &&
+                singleGate.index < handlerIndex &&
+                singleGate.match === "any" &&
+                singleGate.capabilities.length === expected.length &&
+                expected.every((capability) => singleGate.capabilities.includes(capability));
           const mustBeLiveOnly = entry.scope === "live-only" && entry.sandbox === "denied" && entry.ownership !== "public";
           const liveScopeMatches = mustBeLiveOnly
             ? liveScopeIndex >= 0 && liveScopeIndex < layer.route!.stack.length - 1

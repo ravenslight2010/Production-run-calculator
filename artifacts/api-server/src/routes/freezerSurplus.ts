@@ -383,16 +383,16 @@ export function toApiConfirmation(row: FreezerSurplusConfirmationRow) {
 
 async function listLedger(executor: { select: typeof db.select } = db): Promise<FreezerSurplusLedger> {
   const scope = currentScope();
-  const [lots, allocations] = await Promise.all([
-    executor
-      .select()
-      .from(freezerSurplusLotsTable)
-      .where(eq(freezerSurplusLotsTable.scope, scope)),
-    executor
-      .select()
-      .from(freezerSurplusAllocationsTable)
-      .where(eq(freezerSurplusAllocationsTable.scope, scope)),
-  ]);
+  // `executor` may be a transaction-scoped client. Keep its queries sequential:
+  // node-postgres does not support overlapping queries on one transaction client.
+  const lots = await executor
+    .select()
+    .from(freezerSurplusLotsTable)
+    .where(eq(freezerSurplusLotsTable.scope, scope));
+  const allocations = await executor
+    .select()
+    .from(freezerSurplusAllocationsTable)
+    .where(eq(freezerSurplusAllocationsTable.scope, scope));
   return {
     lots: lots.map(toApiLot),
     allocations: allocations.map(toApiAllocation),

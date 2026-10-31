@@ -39,12 +39,21 @@ import {
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { consumeForegroundRecoveryResponse, isRetryableRecoveryStatus } from "../foregroundRecoveryResponse";
-import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
+import {
+  describeServerWinsConflictOutcome,
+  rebaseStaleSyncIntent,
+  selectUnchangedRunValueIdsForRecovery,
+  shouldResetLiveFormForSync,
+} from "../syncStaleBaseRecovery";
 import {
   clearPendingSyncIntent,
   loadPendingSyncIntent,
+  pendingSyncRecoveryCopyNotice,
+  saveRebasedPendingSyncIntent,
   savePendingSyncIntent,
+  type PendingSyncRecoveryCopyStatus,
 } from "../syncPendingIntent";
+import { shouldSendDistinctQueuedSyncWork } from "../syncPushQueue";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
@@ -82,6 +91,7 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
+import { hasUnsavedFormValueChanges } from "../domain/runSyncPolicy";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
@@ -323,16 +333,18 @@ import {
   selectInboundRunLifecycles,
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
+  shouldKeepLocalSeedPlaceholder,
   shouldHealFormFromStored,
   shouldKeepLocalRunLifecycle,
   shouldResetFormOnRunSwitch,
 } from "../domain/runSyncPolicy";
+import { getStockClaimScheduleAfterRebase } from "../domain/autoTrackClaimSchedule";
 import {
   getEqualPackagingProgress,
   loadPackagingProgress,
   overlayPackagingProgress,
   overlayPackagingProgressForRun,
-  reconcilePackagingProgress,
+  reconcilePackagingProgressSnapshot,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
   savePackagingProgress,
@@ -502,7 +514,10 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
-import { fetchImportGoldConfig, makeImportGoldInput } from "../importGold";
+import {
+  REAL_SOURCE_CAPTURE_UI_AVAILABLE,
+  fetchImportGoldRetentionReminderCounts,
+} from "../importGold";
 import {
   clearPendingImportOperation,
   createImportOperationId,
@@ -548,7 +563,7 @@ import { DialogLayerProvider } from "../components/ui/dialog";
 import { RunEstimateBasis } from "../components/RunEstimateBasis";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
-import { moveEntries, relocateValues } from "@workspace/schedule-move";
+import { moveEntries } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
 import {
   dismissSauceAutoTrackFailure as dismissSauceAutoTrackFailureState,
@@ -720,6 +735,7 @@ import {
 } from "@workspace/production-rules";
 import { saveProductionRules, deleteProductionRules } from "../productionRules";
 import { useMe } from "../useRole";
+import { hasRoleSurfaceAccess } from "../roleSurfaceAccess";
 import { getImportAccess } from "../importAccess";
 import {
   Factory,
@@ -906,6 +922,8 @@ const loadDoughGuideImportDialog = () =>
   }));
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
 const loadImportGoldLabCard = () => import("@/components/ImportGoldLabCard");
+const loadImportGoldRetentionCard = () => import("@/components/ImportGoldRetentionCard");
+const loadImportGoldApprovalsCard = () => import("@/components/ImportGoldApprovalsCard");
 const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
 const loadScreenModeView = () => import("../components/ScreenModeView");
 const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
@@ -1930,6 +1948,7 @@ export default function Home() {
   // callers — e.g. the mergeUniverse memo via collectMergeSurfaces() — run
   // before the sync-ref block and would hit a TDZ ReferenceError otherwise.
   const dayStateRef = useRef(dayState);
+  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
   // One identity adapter feeds autosave, packaging progress, rollover, and
@@ -1944,7 +1963,16 @@ export default function Home() {
     if (!section) return;
     const owner = currentRunIdRef.current ? `local:${currentRunIdRef.current}` : "local";
     if (!claimManualSectionLock(runId, section, owner)) return;
-    const allBaseline = (baselineOverride ?? loadRunValues(runId) ?? {}) as unknown as Record<string, number>;
+    const canonicalRunValues = run.endedAt
+      ? adoptedCanonicalSnapshotRef.current?.runValues?.[runId]
+      : undefined;
+    // Prior-run tunnel drain is local until an operator explicitly changes a
+    // count. Rebase that manual correction on the last accepted server values,
+    // not the locally advanced drain counters, so the server's section fence
+    // can distinguish this edit from a concurrent remote change.
+    const allBaseline = (
+      canonicalRunValues ?? baselineOverride ?? loadRunValues(runId) ?? {}
+    ) as unknown as Record<string, number>;
     const baseline = Object.fromEntries(
       MANUAL_SECTION_FIELDS[section].map((field) => [field, Number(allBaseline[field] ?? 0)]),
     );
@@ -3242,18 +3270,28 @@ export default function Home() {
   const canRecordQc = hasCapability("record-qc");
   const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
-  const { data: importGoldConfig } = useQuery({
-    queryKey: ["import-gold-config"],
-    queryFn: fetchImportGoldConfig,
-    enabled: canManageStaff,
+  const importGoldRetentionReminders = useQuery({
+    queryKey: ["import-gold-retention-reminder-counts", me?.userId, me?.sandbox],
+    queryFn: fetchImportGoldRetentionReminderCounts,
+    enabled: (canManageStaff || canManageQc) && screenMode === null,
     staleTime: 30_000,
+    refetchInterval: 60_000,
     retry: false,
   });
-  const goldCaptureEnabled = canManageStaff && importGoldConfig?.enabled === true;
+  const goldCaptureEnabled = canManageStaff && REAL_SOURCE_CAPTURE_UI_AVAILABLE;
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
   const canReviewIncidents = hasCapability("review-incidents");
   const canManageFactorySettings = hasCapability("manage-factory-settings");
+  const canAccessQcWorkflow = hasRoleSurfaceAccess(
+    "qcWorkflow",
+    me?.capabilities ?? [],
+  );
+  useEffect(() => {
+    if (me && !canAccessQcWorkflow && activeTab === "quality") {
+      setActiveTab("run");
+    }
+  }, [activeTab, canAccessQcWorkflow, me, setActiveTab]);
   // Keep import/export controls aligned to their server-authorized commit paths,
   // rather than relying on the broad manage-staff-derived `isManager` alias.
   const {
@@ -3311,7 +3349,13 @@ export default function Home() {
   // name and hydrate their rows from the chosen recipe. We keep a name (case-
   // insensitive) → rows map for hydration and a sorted name list for the run-form
   // dropdowns.
-  const { items: doughRecipesList } = useNamedRecipes("dough");
+  const {
+    items: doughRecipesList,
+    hasData: hasDoughRecipesData,
+    isStale: areDoughRecipesStale,
+    ensureLoaded: ensureDoughRecipesLoaded,
+  } = useNamedRecipes("dough");
+  const profileApplyGenerationRef = useRef(0);
   const { items: sauceRecipesList } = useNamedRecipes("sauce");
   const serverDoughRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
@@ -3769,7 +3813,10 @@ export default function Home() {
   // queued candidate can finish its POST and fan its stale value into the
   // profile/run fan-out after the newer manager edit has already succeeded.
   const queueBatchWeightChanges = useCallback(
-    (entries: { name: string; lbs: number }[]): Promise<void> => {
+    (
+      entries: { name: string; lbs: number }[],
+      refreshBeforeWrite = false,
+    ): Promise<void> => {
       if (screenMode !== null) return Promise.resolve();
       const changes = normalizeBatchWeightChanges(entries);
       if (changes.length === 0) return batchWeightSaveChainRef.current;
@@ -3779,6 +3826,17 @@ export default function Home() {
       batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
         .then(async () => {
           const submitted = [...pendingBatchWeightChangesRef.current.values()];
+          if (refreshBeforeWrite) {
+            // Manager edits can follow another shared-data action that advanced
+            // the write epoch while this page's five-minute query stayed cached.
+            // Refresh immediately before the explicit write; the server fence
+            // still rejects any change that races after this canonical read.
+            const latest = await fetchIngredientBatchWeights();
+            cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+              ["ingredientBatchWeights"],
+              latest,
+            );
+          }
           const canonical = await saveIngredientBatchWeights(submitted);
           cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
             ["ingredientBatchWeights"],
@@ -4615,6 +4673,66 @@ export default function Home() {
   // ── Manage Lists dialog ────────────────────────────────────────────────────
   const mergeFormRef = useRef<HTMLDivElement | null>(null);
   const [showManageDialog, setShowManageDialog] = useState(false);
+  const manageDialogRef = useRef<HTMLDivElement | null>(null);
+  const manageDialogFocusables = useCallback((dialog: HTMLElement) =>
+    Array.from(dialog.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, [tabindex]',
+    )).filter((element) =>
+      element.tabIndex >= 0
+      && !element.matches(":disabled")
+      && !element.closest('[aria-hidden="true"], [inert], [hidden]')
+      && element.getClientRects().length > 0
+      && window.getComputedStyle(element).visibility !== "hidden",
+    ), []);
+  useEffect(() => {
+    if (!showManageDialog) return;
+    const dialog = manageDialogRef.current;
+    if (!dialog) return;
+    (manageDialogFocusables(dialog)[0] ?? dialog).focus();
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const active = document.activeElement;
+      const activeDialog = active instanceof Element
+        ? active.closest<HTMLElement>('[role="dialog"][aria-modal="true"]')
+        : null;
+      // A nested modal owns its own keyboard focus while it is open.
+      if (activeDialog && activeDialog !== dialog) return;
+      const focusables = manageDialogFocusables(dialog);
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      if (!dialog.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const keepFocusInside = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || dialog.contains(target)) return;
+      const targetDialog = target.closest<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      const targetPopup = target.closest(
+        '[role="menu"], [role="listbox"], [role="tree"], [role="grid"], [data-radix-popper-content-wrapper]',
+      );
+      if ((targetDialog && targetDialog !== dialog) || targetPopup) return;
+      (manageDialogFocusables(dialog)[0] ?? dialog).focus();
+    };
+    document.addEventListener("keydown", trapTab, true);
+    document.addEventListener("focusin", keepFocusInside, true);
+    return () => {
+      document.removeEventListener("keydown", trapTab, true);
+      document.removeEventListener("focusin", keepFocusInside, true);
+    };
+  }, [manageDialogFocusables, showManageDialog]);
   const [manageCategory, setManageCategory] = useState("brands");
   const [manageBrandFilter, setManageBrandFilter] = useState("");
   const [manageInput, setManageInput] = useState("");
@@ -6508,6 +6626,13 @@ export default function Home() {
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  useEffect(() => {
+    if (!canManageFactorySettings && showScheduleDialog) {
+      setShowScheduleDialog(false);
+    }
+  }, [canManageFactorySettings, showScheduleDialog]);
+  // Automatic blank placeholders are device-local, not shared planned runs.
+  const todayPlannedRunCount = dayState.runs.filter((run) => !isPristineSeedRun(run)).length;
   const {
     showImportDialog, setShowImportDialog, importResult, setImportResult, importInputRef, scheduleImportInputRef,
     showSpecImport, setShowSpecImport, specImportLoading, setSpecImportLoading, specImportApplying, setSpecImportApplying, specImportError, setSpecImportError, specImportPrepared, setSpecImportPrepared, specImportProgress, setSpecImportProgress, specImportInputRef,
@@ -6573,11 +6698,16 @@ export default function Home() {
   const [scheduleMove, setScheduleMove] = useState<{ from: string; runId: string | null } | null>(null);
   const [scheduleMoveDate, setScheduleMoveDate] = useState("");
   const [scheduleMoving, setScheduleMoving] = useState(false);
-  const scheduleMoveCleanupRef = useRef<{
-    fromDate: string;
-    toDate: string;
-    movedIds: string[];
+  const [scheduleSwapAvailability, setScheduleSwapAvailability] = useState<{
+    from: string;
+    to: string;
+    sourceScheduled: boolean;
+    destinationScheduled: boolean;
+    canSwap: boolean;
+    reason: string | null;
+    checking?: boolean;
   } | null>(null);
+  const scheduleSwapCheckRef = useRef(0);
 
   // ── Back-button trap (Android / PWA) ──────────────────────────────────────
   // Priority: close any open overlay first, then unwind tab history, then stay.
@@ -6845,6 +6975,7 @@ export default function Home() {
     payload: SyncPayload | null;
     available: boolean;
     snapshotId?: string;
+    revision?: number;
   }> {
     try {
       const res = date === todayStr()
@@ -6852,10 +6983,12 @@ export default function Home() {
         : await fetchWithTimeout(`/api/sync/${date}?today=${todayStr()}`, { cache: "no-store" }, 10_000);
       if (!res.ok) return { payload: null, available: false };
       const payload = await res.json() as SyncPayload | null;
+      const parsedRevision = Number(res.headers.get("X-Sync-Canonical-Revision") ?? 0);
       return {
         payload: payload?.dayState ? payload : null,
         available: true,
         snapshotId: res.headers.get("X-Sync-Snapshot") ?? undefined,
+        revision: Number.isSafeInteger(parsedRevision) && parsedRevision >= 0 ? parsedRevision : 0,
       };
     } catch {
       return { payload: null, available: false };
@@ -6867,18 +7000,71 @@ export default function Home() {
       setScheduledDays(normalizeScheduledDays(d));
     } catch {}
   }
-  // Move a whole scheduled day (sel "all") or a single run (sel.runId) to
-  // another future date or today's live plan. The live target is read from the
-  // canonical today row, then written through the normal today endpoint so its
-  // additive/tombstone/LWW protections and SSE peers remain in the loop.
-  // Target is written before the source is trimmed/deleted: a partial failure
-  // leaves the source intact and the move panel actionable instead of losing it.
+  async function refreshScheduleAfterMutation(fromDate: string, toDate: string) {
+    await refreshScheduledDays();
+    const today = todayStr();
+    if (fromDate === today || toDate === today) {
+      const canonicalToday = await fetchSchedulePayload(today);
+      if (canonicalToday.payload) applySyncCallbackRef.current(canonicalToday.payload);
+    }
+  }
+  async function checkScheduleSwapEligibility(from: string, to: string) {
+    const checkId = ++scheduleSwapCheckRef.current;
+    setScheduleSwapAvailability(null);
+    if (!from || !to || from === to) return;
+    const localToday = todayStr();
+    const localSourceExists = from === localToday || scheduledDays.some((day) => day.date === from);
+    const localDestinationExists = to === localToday || scheduledDays.some((day) => day.date === to);
+    setScheduleSwapAvailability({
+      from,
+      to,
+      sourceScheduled: localSourceExists,
+      destinationScheduled: localDestinationExists,
+      canSwap: false,
+      reason: null,
+      checking: true,
+    });
+    try {
+      const query = new URLSearchParams({ sourceDate: from, destinationDate: to });
+      const response = await fetch(`/api/sync/schedule-swap-eligibility?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("swap eligibility unavailable");
+      const result = await response.json() as {
+        sourceScheduled?: boolean;
+        destinationScheduled?: boolean;
+        canSwap?: boolean;
+        reason?: string | null;
+      };
+      if (checkId !== scheduleSwapCheckRef.current) return;
+      setScheduleSwapAvailability({
+        from,
+        to,
+        sourceScheduled: result.sourceScheduled === true,
+        destinationScheduled: result.destinationScheduled === true,
+        canSwap: result.canSwap === true,
+        reason: typeof result.reason === "string" ? result.reason : null,
+        checking: false,
+      });
+    } catch {
+      if (checkId !== scheduleSwapCheckRef.current) return;
+      setScheduleSwapAvailability({
+        from,
+        to,
+        sourceScheduled: localSourceExists,
+        destinationScheduled: localDestinationExists,
+        canSwap: false,
+        reason: "eligibility-unavailable",
+        checking: false,
+      });
+    }
+  }
+  // Run moves and swaps use server transactions: a lost response can be
+  // reconciled by reloading canonical dates without replaying a second write.
   async function performScheduleMove(fromDate: string, sel: "all" | { runId: string }, toDate: string): Promise<boolean> {
     setScheduleError(null);
     const today = todayStr();
     if (!toDate || toDate === fromDate) return false;
-    if (fromDate <= today || toDate < today) {
-      setScheduleError("Choose a future scheduled day and today or a future date.");
+    if (fromDate < today || toDate < today) {
+      setScheduleError("Choose today or a future date.");
       return false;
     }
     const sourceFetch = await fetchSchedulePayload(fromDate);
@@ -6891,6 +7077,12 @@ export default function Home() {
       setScheduleError("That scheduled day is no longer available. Refresh and try again.");
       return false;
     }
+    const targetResult = await fetchSchedulePayload(toDate);
+    if (!targetResult.available) {
+      setScheduleError("Couldn't load the destination plan. The source is unchanged; check your connection and try again.");
+      return false;
+    }
+    const destinationRuns = targetResult.payload?.dayState?.runs ?? [];
     let ids: string[] | "all";
     if (sel === "all") ids = "all";
     else {
@@ -6900,13 +7092,7 @@ export default function Home() {
       }
       ids = [sel.runId];
     }
-    const targetResult = await fetchSchedulePayload(toDate);
-    if (!targetResult.available) {
-      setScheduleError("Couldn't load the destination plan. The source is unchanged; check your connection and try again.");
-      return false;
-    }
-    const tgt = targetResult.payload;
-    const { source, target, idMap } = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId);
+    const { idMap } = moveEntries(src.dayState.runs, destinationRuns, ids, genId);
     if (idMap.length === 0) {
       setScheduleError("There were no runs to move. Refresh and try again.");
       return false;
@@ -6927,121 +7113,90 @@ export default function Home() {
       );
       return false;
     }
-    const vals = relocateValues(
-      (src.runValues ?? {}) as Record<string, FormValues>,
-      (tgt?.runValues ?? {}) as Record<string, FormValues>,
-      idMap,
-    );
-    const stamps = relocateValues(
-      src.runValuesUpdatedAt ?? {},
-      tgt?.runValuesUpdatedAt ?? {},
-      idMap,
-    );
-    const packaging = relocateValues(
-      src.packagingProgress ?? {},
-      tgt?.packagingProgress ?? {},
-      idMap,
-    );
-    const base = tgt ?? src;
-    const targetPayload: SyncPayload = {
-      ...base,
-      // A move is built from a canonical read, so send it as a complete
-      // merge. Reusing a cached partial-sync baseSnapshotId makes an otherwise
-      // valid move fall back when the normal live sync advances that snapshot
-      // between the read and this write.
-      syncVersion: 1,
-      completeness: "complete",
-      baseSnapshotId: targetResult.snapshotId,
-      dayState: {
-        ...(base.dayState ?? src.dayState),
-        runs: target,
-        date: toDate,
-        resetAt: writeDayResetAt(toDate, today, (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()),
-      },
-      runValues: vals.target,
-      runValuesUpdatedAt: stamps.target,
-      packagingProgress: packaging.target,
-    };
-    const selectedIds = idMap.map(({ from }) => from);
-    const pendingCleanup = scheduleMoveCleanupRef.current;
-    const retryingCleanup = !!pendingCleanup &&
-      pendingCleanup.fromDate === fromDate &&
-      pendingCleanup.toDate === toDate &&
-      pendingCleanup.movedIds.length === selectedIds.length &&
-      pendingCleanup.movedIds.every((id) => selectedIds.includes(id));
-    if (!retryingCleanup) {
-      let canonicalTarget: { body: unknown; stale: boolean };
-      try {
-        const tRes = await fetch(
-          toDate === today
-            ? `/api/sync/today?today=${today}&epoch=${getStoredResetEpoch()}`
-            : `/api/sync/${toDate}?today=${today}&epoch=${getStoredResetEpoch()}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: targetPayload }),
-          },
-        );
-        canonicalTarget = await consumeCanonicalSyncWriteResponse(tRes, toDate === today);
-        const canonicalTargetBody = canonicalTarget.body as { data?: unknown; partialFallback?: boolean } | null;
-        if (!tRes.ok || canonicalTarget.stale || canonicalTargetBody?.partialFallback || !canonicalTargetBody?.data) {
-          setScheduleError(
-            canonicalTarget.stale
-              ? "The destination was reset before the move completed. Refresh and try again."
-              : "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
-          );
-          return false;
-        }
-      } catch {
-        setScheduleError(
-          "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
-        );
+    try {
+      const response = await fetch("/api/sync/schedule-move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceDate: fromDate,
+          destinationDate: toDate,
+          sourceRevision: sourceFetch.revision ?? 0,
+          destinationRevision: targetResult.revision ?? 0,
+          resetEpoch: getStoredResetEpoch(),
+          runIds: ids,
+          senderId: clientId.current,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { code?: string };
+      if (!response.ok) {
+        setScheduleError(response.status >= 500
+          ? "The move result is uncertain. Refresh both dates before retrying; do not repeat it until confirmed."
+          : result.code === "SCHEDULE_REVISION_CONFLICT"
+            ? "A schedule changed before the move was saved. No changes were made; refresh and choose again."
+            : result.code === "SCHEDULE_RUN_ID_COLLISION"
+              ? "A run with the same ID is already on the destination date. The source was left unchanged."
+              : result.code === "SCHEDULE_RUN_ALREADY_STARTED"
+                ? "A run that has started cannot be moved."
+                : "The move was rejected. No changes were made; refresh and try again.");
+        await refreshScheduleAfterMutation(fromDate, toDate);
         return false;
       }
-      // If the second write fails, the next click can finish source cleanup
-      // without writing the already-canonical destination a second time.
-      scheduleMoveCleanupRef.current = { fromDate, toDate, movedIds: selectedIds };
-    }
-    try {
-      if (source.length === 0) {
-        const deleteRes = await fetch(`/api/sync/${fromDate}?today=${today}`, { method: "DELETE" });
-        if (!deleteRes.ok) {
-          setScheduleError("The run was added to today's plan, but the future source could not be removed. Retry Move to finish.");
-          return false;
-        }
-      } else {
-        const sourcePayload: SyncPayload = {
-          ...src,
-          dayState: {
-            ...src.dayState,
-            runs: source,
-            date: fromDate,
-          },
-          syncVersion: 1,
-          completeness: "complete",
-          baseSnapshotId: sourceFetch.snapshotId,
-          runValues: vals.source,
-          runValuesUpdatedAt: stamps.source,
-          packagingProgress: packaging.source,
-        };
-        const sRes = await fetch(`/api/sync/${fromDate}?today=${today}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ payload: sourcePayload }),
-        });
-        const sourceResult = await consumeCanonicalSyncWriteResponse(sRes, false);
-        const sourceResultBody = sourceResult.body as { partialFallback?: boolean } | null;
-        if (!sRes.ok || sourceResult.stale || sourceResultBody?.partialFallback) {
-          setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
-          return false;
-        }
-      }
     } catch {
-      setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
+      setScheduleError("The move could not be confirmed. Refresh both dates before trying again.");
+      await refreshScheduleAfterMutation(fromDate, toDate);
       return false;
     }
-    scheduleMoveCleanupRef.current = null;
-    await refreshScheduledDays();
+    await refreshScheduleAfterMutation(fromDate, toDate);
+    setScheduleSwapAvailability(null);
+    setScheduleError(null);
+    return true;
+  }
+
+  async function performScheduleSwap(fromDate: string, toDate: string): Promise<boolean> {
+    setScheduleError(null);
+    const sourceResult = await fetchSchedulePayload(fromDate);
+    const destinationResult = await fetchSchedulePayload(toDate);
+    if (
+      !sourceResult.available || !destinationResult.available
+      || !sourceResult.payload || !destinationResult.payload
+    ) {
+      setScheduleError("Both scheduled days must still be available. No changes were made; refresh and try again.");
+      await refreshScheduledDays();
+      return false;
+    }
+    try {
+      const response = await fetch("/api/sync/schedule-swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceDate: fromDate,
+          destinationDate: toDate,
+          sourceRevision: sourceResult.revision ?? 0,
+          destinationRevision: destinationResult.revision ?? 0,
+          resetEpoch: getStoredResetEpoch(),
+          senderId: clientId.current,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { code?: string };
+      if (!response.ok) {
+        setScheduleError(response.status >= 500
+          ? "The swap result is uncertain. Refresh both dates before retrying; do not repeat it until confirmed."
+          : result.code === "TODAY_SWAP_NOT_ELIGIBLE"
+          ? "Today's plan can no longer be swapped. You can append the runs or cancel."
+          : result.code === "SCHEDULE_REVISION_CONFLICT"
+            ? "A schedule changed before the swap. No changes were made; refresh and choose again."
+            : "The swap was not saved. No changes were made; refresh and try again.");
+        await refreshScheduleAfterMutation(fromDate, toDate);
+        await checkScheduleSwapEligibility(fromDate, toDate);
+        return false;
+      }
+    } catch {
+      setScheduleError("The swap could not be confirmed. Refresh both dates before trying again.");
+      await refreshScheduleAfterMutation(fromDate, toDate);
+      return false;
+    }
+    await refreshScheduleAfterMutation(fromDate, toDate);
+    setScheduleSwapAvailability(null);
     setScheduleError(null);
     return true;
   }
@@ -7119,6 +7274,7 @@ export default function Home() {
         peerReceivedAt?: number;
         peerResponseBytes?: number;
         allowForegroundCanonicalFormReset?: boolean;
+        acceptCanonicalRunValueIds?: string[];
       },
     ) => void
   >(() => {});
@@ -7148,9 +7304,6 @@ export default function Home() {
   // can loop against the missing-row fallback and lifecycle commands can race
   // a row that does not exist yet.
   const completeSyncEstablishedRef = useRef(false);
-  // Exact server snapshot used as the base for peer partial frames. Never
-  // substitute the locally merged React state here.
-  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
@@ -7571,6 +7724,12 @@ export default function Home() {
           };
         })
       : claim.mutations;
+    const claimSchedule = getStockClaimScheduleAfterRebase({
+      channel: claim.channel,
+      dueAt: claim.dueAt,
+      nextDueAt: claim.nextDueAt,
+      mutations: rebasedMutations,
+    });
     const response = await fetch(
       `/api/sync/auto-track/claim?today=${encodeURIComponent(date)}&epoch=${epoch}`,
       {
@@ -7580,6 +7739,7 @@ export default function Home() {
           senderId: clientId.current,
           claim: {
             ...claim,
+            ...claimSchedule,
             baseUpdatedAt: currentBaseUpdatedAt,
             mutations: rebasedMutations,
             ...(claim.channel === "case"
@@ -7767,6 +7927,7 @@ export default function Home() {
         peerReceivedAt?: number;
         peerResponseBytes?: number;
         allowForegroundCanonicalFormReset?: boolean;
+        acceptCanonicalRunValueIds?: string[];
       },
     ) => {
       let queuedIntentReapplied = false;
@@ -7821,17 +7982,23 @@ export default function Home() {
                 baseline: canonical,
                 payload: recovery.payload,
               });
+              const conflictOutcome = describeServerWinsConflictOutcome(
+                recovery.retainedServerConflicts,
+              );
               recordSyncEvent(
                 "merge",
-                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${saved ? "" : " (recovery copy could not be updated)"}.`,
+                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes${conflictOutcome ? `; ${conflictOutcome}` : ""}${saved ? "" : " (recovery copy could not be updated)"}.`,
                 "stale-base-recovered",
               );
             } else {
               clearPendingSyncIntent(scope, pending.date, pending.id);
               if (recovery.retainedServerConflicts > 0) {
+                const conflictOutcome = describeServerWinsConflictOutcome(
+                  recovery.retainedServerConflicts,
+                );
                 recordSyncEvent(
                   "merge",
-                  `Kept ${recovery.retainedServerConflicts} newer server values during queued sync recovery`,
+                  `Queued sync recovery ${conflictOutcome}.`,
                   "stale-base-conflicts",
                 );
               }
@@ -7878,12 +8045,15 @@ export default function Home() {
       const localPackaging = loadPackagingProgress();
       // Date/reset acceptance fences packaging exactly like day/run values. A
       // stale payload from another day must never advance this independent map.
-      const packagingMerge = acceptRemoteDay
-        ? reconcilePackagingProgress(
-            {},
-            payload.packagingProgress,
-          )
-        : reconcilePackagingProgress(localPackaging, undefined);
+      // Within the same reset epoch, however, an omitted remote run is not a
+      // deletion: retain its newer local progress until the peer receives it.
+      const packagingMerge = reconcilePackagingProgressSnapshot({
+        local: localPackaging,
+        remote: payload.packagingProgress,
+        acceptRemoteDay,
+        resetBoundaryChanged:
+          atomicSeedSnapshot || remoteResetAt > localResetAt,
+      });
       if (acceptRemoteDay) savePackagingProgress(packagingMerge.merged);
       if (packagingMerge.rejectedRemoteIds.size > 0) rejectedStale = true;
       const packagingRunAtApplyStart =
@@ -7927,6 +8097,9 @@ export default function Home() {
             rTs,
             lTs,
             runValueServerNow,
+          ) || (
+            options?.acceptCanonicalRunValueIds?.includes(id) === true
+            && !isEmptyOverPopulated(vals as FormValues, localVals)
           );
           let acceptedVals = localVals;
           if (!acceptWholeRun) {
@@ -7952,7 +8125,13 @@ export default function Home() {
               // arrives via SSE would otherwise display with decimals on screen.
               casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
             };
-            if (
+            if (options?.acceptCanonicalRunValueIds?.includes(id) === true) {
+              // An explicit stale-base rebase already resolved this run
+              // against the canonical server snapshot. Align its local stamp
+              // with that canonical value instead of letting the older
+              // queued edit's stamp reject the server-wins result.
+              mergedUpd[id] = rTs;
+            } else if (
               rTs > lTs
               || isRunValueStampAheadOfServerTime(lTs, runValueServerNow)
             ) mergedUpd[id] = rTs;
@@ -8119,6 +8298,8 @@ export default function Home() {
                     ? canonicalOperationalRun(run, remote) : run;
                 });
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
+                const hasRecentLocalEdit = Date.now() - lastLocalEditRef.current < 2000;
+                const hasDirtyForm = form.formState.isDirty;
                 const localOnly = prev.runs.filter(r => {
                   if (remoteIds.has(r.id)) return false;
                   // Drop our untouched auto-created placeholder run once the
@@ -8126,20 +8307,15 @@ export default function Home() {
                   // buildSyncPayload), and keeping it would leave a stray blank
                   // "Unnamed Run" appended to the adopted day on THIS device.
                   // Guards: never drop while the user might be mid-typing into
-                  // it (recent local edit, or the live form already holds
-                  // non-default values for it).
-                  if (
-                    remoteRuns.length > 0 &&
-                    isPristineSeedRun(r) &&
-                    !(
-                      r.id === currentLocalId &&
-                      (Date.now() - lastLocalEditRef.current < 2000 ||
-                        !deepEqual(form.getValues(), DEFAULT_VALUES))
-                    )
-                  ) {
-                    return false;
-                  }
-                  return true;
+                  // it (recent local edit or dirty form). Profile-loaded
+                  // defaults are not edits and must not retain this placeholder.
+                  return shouldKeepLocalSeedPlaceholder({
+                    run: r,
+                    remoteRunCount: remoteRuns.length,
+                    isCurrentRun: r.id === currentLocalId,
+                    hasRecentLocalEdit,
+                    hasDirtyForm,
+                  });
                 });
                 return [...mergedRemote, ...localOnly].filter(
                   r => !deletedRunSet.has(r.id.trim().toLowerCase()),
@@ -8312,27 +8488,22 @@ export default function Home() {
           !!currentId &&
           !!currentRunValues &&
           isEmptyOverPopulated(currentRunValues, loadRunValues(currentId));
-        const canResetLiveForm = Boolean(
-          currentId &&
-          (currentRunValues || adoptedPackaging) &&
-          (
-            adoptedPackaging ||
-            (
-              curLocalTs <= curRemoteTs &&
-              // A successful foreground pull has already resolved this run's
-              // LWW merge. Its canonical value may bypass the ordinary quiet/
-              // acknowledgment guard, but a strictly newer local edit remains.
-              (
-                options?.allowForegroundCanonicalFormReset ||
-                (
-                  localEditQuietMs > 2000 &&
-                  pushAcknowledgedRef.current
-                )
-              )
-            )
-          ) &&
-          !emptyOverPopulatedFormReset,
-        );
+        const explicitCanonicalRunAdoption =
+          !!currentId
+          && options?.acceptCanonicalRunValueIds?.includes(currentId) === true;
+        const canResetLiveForm = shouldResetLiveFormForSync({
+          currentRunId: currentId,
+          hasCurrentRunValues: !!currentRunValues,
+          adoptedPackaging,
+          explicitRebaseAdoption: explicitCanonicalRunAdoption,
+          localUpdatedAt: curLocalTs,
+          remoteUpdatedAt: curRemoteTs,
+          allowForegroundCanonicalFormReset:
+            options?.allowForegroundCanonicalFormReset === true,
+          localEditQuietMs,
+          pushAcknowledged: pushAcknowledgedRef.current,
+          emptyOverPopulated: emptyOverPopulatedFormReset,
+        });
         if (canResetLiveForm) {
           // Read the already-reconciled durable copy rather than the raw payload:
           // the whole-run LWW and packaging register may have selected different
@@ -8380,14 +8551,18 @@ export default function Home() {
           }
         }
         if (currentId && payload.runValues[currentId]) {
+          const localApp1Values = form.getValues();
           const app1Progress = serverOwnedApp1BatchProgress(
             payload,
             currentId,
-            form.getValues(),
+            localApp1Values,
           );
           if (app1Progress) {
             for (const [field, value] of Object.entries(app1Progress)) {
-              const key = field as "app1BatchesMade" | "app1BatchCorrectionGeneration";
+              const key = field as
+                | "app1BatchesMade"
+                | "app1BatchCorrectionGeneration"
+                | "app1StockLbs";
               if (form.getValues(key) !== value) {
                 form.setValue(key, value, {
                   shouldDirty: false,
@@ -8516,9 +8691,7 @@ export default function Home() {
         if (!res.ok) return;
         const { epoch, rollover } = (await res.json()) as { epoch: number; rollover?: boolean };
         if (typeof epoch === "number" && epoch > getStoredResetEpoch()) {
-          const generation = synchronizationStateMachineRef.current.beginReset(epoch);
-          if ((rollover ? applyRolloverEpoch(epoch) : applyResetWipe(epoch))) window.location.reload();
-          else synchronizationStateMachineRef.current.completeReset(generation);
+          adoptClientResetEpoch(epoch, rollover === true);
         }
       } catch {}
     })();
@@ -8528,9 +8701,9 @@ export default function Home() {
   // Best-effort call to POST /inventory/consume-day-start on first load. The
   // server is idempotent per date (runId = "day-start:{today}"), so subsequent
   // calls within the same day return applied=false with zero side-effects.
-  // Managers-only gate on the server; non-managers get a harmless 403.
+  // Only managers need the daily stock pass; the server capability check remains authoritative.
   useEffect(() => {
-    if (screenMode !== null) return;
+    if (screenMode !== null || !canManageInventory) return;
     (async () => {
       try {
         await fetch("/api/inventory/consume-day-start", {
@@ -8542,7 +8715,7 @@ export default function Home() {
         /* best-effort — daily reset will retry next boot if needed */
       }
     })();
-  }, [screenMode]);
+  }, [screenMode, canManageInventory]);
 
     // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
@@ -8929,12 +9102,7 @@ export default function Home() {
         if ((msg.reset || msg.rollover) && typeof msg.resetEpoch === "number") {
           recordSyncEvent("reset", "Server reset received; local data will reload");
           if (initialResetRequiresReload(msg.resetEpoch, getStoredResetEpoch())) {
-            const generation = synchronizationStateMachineRef.current.beginReset(msg.resetEpoch);
-            const adopted = msg.rollover
-              ? applyRolloverEpoch(msg.resetEpoch)
-              : applyResetWipe(msg.resetEpoch);
-            if (adopted) window.location.reload();
-            else synchronizationStateMachineRef.current.completeReset(generation);
+            adoptClientResetEpoch(msg.resetEpoch, msg.rollover === true);
             return false;
           }
           // The server repeats its current reset marker on reconnect. Once this
@@ -9107,6 +9275,7 @@ export default function Home() {
       return (async () => {
         let reconciled = false;
         let permanentHttpFailure = false;
+        let failurePhase = "request";
         try {
           const snapshot = syncSnapshotIdRef.current;
           // Capture the facility-local production date once for this recovery
@@ -9119,6 +9288,7 @@ export default function Home() {
             { ...syncTodayRequest.init, signal },
             10_000,
             async (res, requestSignal) => {
+          failurePhase = "response-validation";
           permanentHttpFailure = !res.ok && !isRetryableRecoveryStatus(res.status);
           if (permanentHttpFailure) classify("non-retryable-http");
           return consumeForegroundRecoveryResponse({
@@ -9126,20 +9296,13 @@ export default function Home() {
             expectedDate: clientDate,
             requestedSnapshotId: snapshot,
             adoptReset: ({ resetEpoch, rollover }) => {
+              failurePhase = "reset-adoption";
               if (resetEpoch <= getStoredResetEpoch()) return false;
-              const generation = synchronizationStateMachineRef.current.beginReset(resetEpoch);
-              const adopted = rollover
-                ? applyRolloverEpoch(resetEpoch)
-                : applyResetWipe(resetEpoch);
-              if (adopted) {
-                window.location.reload();
-                return true;
-              }
-              synchronizationStateMachineRef.current.completeReset(generation);
-              return false;
+              return adoptClientResetEpoch(resetEpoch, rollover);
             },
             isCurrent: () => isCurrentRecovery() && !requestSignal.aborted,
             adoptUnchanged: (body) => {
+              failurePhase = "unchanged-response-adoption";
               if (typeof body.canonicalRevision === "number" && body.canonicalRevision < currentOperationalRevision()) {
                 throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
               }
@@ -9154,6 +9317,7 @@ export default function Home() {
               pushAcknowledgedRef.current = true;
             },
             adoptCanonical: (payload, responseSnapshot) => {
+              failurePhase = "canonical-response-adoption";
               if (typeof payload.canonicalRevision === "number" && payload.canonicalRevision < currentOperationalRevision()) {
                 throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
               }
@@ -9185,6 +9349,7 @@ export default function Home() {
           // offline work here. The normal stamped push path will seed it.
           if (!isCurrentRecovery()) return false;
           if (payload) {
+            failurePhase = "canonical-state-adoption";
             // Preserve ordinary screen-off catch-up when the live row is
             // unchanged. Re-baselining every successful wake would erase the
             // legitimate production delta accumulated while the display slept.
@@ -9202,6 +9367,7 @@ export default function Home() {
             coordinateForegroundAdoption({
               payload,
               prepareLifecycle: () => {
+                failurePhase = "lifecycle-prepare";
                 const lifecycleAdoption = acceptsRemoteLifecycle
                   ? adoptStrictlyNewerRemoteLifecycles(
                       durableLocalDay,
@@ -9214,6 +9380,7 @@ export default function Home() {
                 };
               },
               persistLifecycle: (adoptedDayState) => {
+                failurePhase = "lifecycle-persist";
                 setAutoTrackWakeRebaseReason("lifecycle-replacement");
                 saveDayState(adoptedDayState, { stampMeta: false });
                 dayStateRef.current = adoptedDayState;
@@ -9221,6 +9388,7 @@ export default function Home() {
                 lastSyncSigRef.current = "";
               },
               applyGeneralMerge: (canonicalPayload) => {
+                failurePhase = "sync-merge";
                 applySyncCallbackRef.current(canonicalPayload, {
                   allowForegroundCanonicalFormReset: true,
                 });
@@ -9266,7 +9434,7 @@ export default function Home() {
            recordSyncEvent(
              "failure",
              "Foreground recovery failed; local work and lifecycle writes remain fenced",
-             "foreground-recovery",
+              `foreground-recovery:${failurePhase}`,
              foregroundStopIntentRef.current?.runId,
            );
            setSyncFailedCount((count) => count + 1);
@@ -9560,13 +9728,52 @@ export default function Home() {
   // its response through this handler. A stale rejection means this device
   // hasn't honoured the latest data reset: adopt it (wipe + reload) so we stop
   // pushing pre-reset data. Returns true when the write was rejected as stale.
+  function cancelPendingSyncWritesForReset(): void {
+    // A callback already queued for animation-frame/timer execution could run
+    // after applyResetWipe records the new epoch and then publish the stale
+    // local day with that new epoch. Raise the same barrier used by wake
+    // reconciliation before changing the stored epoch.
+    foregroundSyncBarrierRef.current = true;
+    foregroundPushPendingRef.current = false;
+    syncApplyPushPendingRef.current = false;
+    syncPushGenerationRef.current += 1;
+    if (syncRetryTimerRef.current) {
+      clearTimeout(syncRetryTimerRef.current);
+      syncRetryTimerRef.current = null;
+    }
+    setSyncRetryWaiting(false);
+    syncPushTimingRef.current = null;
+    for (const controller of syncPushAbortControllersRef.current) controller.abort();
+    syncPushAbortControllersRef.current.clear();
+    if (pushTimerRef.current) {
+      clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = null;
+    }
+    syncPushQueueRef.current.reset();
+  }
+
+  function adoptClientResetEpoch(epoch: number, rollover = false): boolean {
+    const generation = synchronizationStateMachineRef.current.beginReset(epoch);
+    // A wake recovery that began before this reset must not release the
+    // barrier or replay its queued write after the new epoch is stored.
+    foregroundRecoveryOwnerRef.current = generation;
+    cancelPendingSyncWritesForReset();
+    const adopted = rollover
+      ? applyRolloverEpoch(epoch)
+      : applyResetWipe(epoch);
+    if (adopted) {
+      window.location.reload();
+      return true;
+    }
+    synchronizationStateMachineRef.current.completeReset(generation);
+    return false;
+  }
+
   function handleStaleSyncWrite(body: unknown): boolean {
     const b = body as { stale?: boolean; epoch?: number; rollover?: boolean } | null;
     if (!b?.stale) return false;
     if (typeof b.epoch === "number" && b.epoch > getStoredResetEpoch()) {
-      const generation = synchronizationStateMachineRef.current.beginReset(b.epoch);
-      if ((b.rollover ? applyRolloverEpoch(b.epoch) : applyResetWipe(b.epoch))) window.location.reload();
-      else synchronizationStateMachineRef.current.completeReset(generation);
+      adoptClientResetEpoch(b.epoch, b.rollover === true);
     }
     return true;
   }
@@ -9990,19 +10197,30 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount(0);
         setSyncRetryWaiting(false);
+        if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
         const queued = syncPushQueueRef.current.finish({ drainQueued: true });
         if (queued) {
           const freshPayload = buildSyncPayload(dayStateRef.current);
-          pushAcknowledgedRef.current = false;
-          setSyncPendingCount(1);
-          doFetch(
-            freshPayload,
-            3,
-            JSON.stringify(freshPayload),
-            syncPushGenerationRef.current,
-            false,
-            queued,
-          );
+          const freshSig = JSON.stringify(freshPayload);
+          if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
+            pushAcknowledgedRef.current = false;
+            setSyncPendingCount(1);
+            doFetch(
+              freshPayload,
+              3,
+              freshSig,
+              syncPushGenerationRef.current,
+              false,
+              queued,
+            );
+          } else {
+            recordSyncEvent(
+              "merge",
+              "Queued change already matches the confirmed server state; no duplicate write was sent",
+              "duplicate-suppressed",
+              currentRunId,
+            );
+          }
         }
         return;
       }
@@ -10071,14 +10289,14 @@ export default function Home() {
       clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
-       if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
-       if (payload.history !== undefined) {
-         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
-         if (work.payload.history !== payload.history) {
-           lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
-         }
-       } else if (work.payload.history !== undefined) {
-         lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
+      if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
+      if (payload.history !== undefined) {
+        lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+        if (work.payload.history !== payload.history) {
+          lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
+        }
+      } else if (work.payload.history !== undefined) {
+        lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
       }
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
@@ -10091,17 +10309,33 @@ export default function Home() {
         if (replayedAfterPartialFallback) {
           const freshPayload = buildSyncPayload(dayStateRef.current);
           const freshSig = JSON.stringify(freshPayload);
-          pushAcknowledgedRef.current = false;
-          doFetch(
-            freshPayload,
-            3,
-            freshSig,
-            syncPushGenerationRef.current,
-            false,
-            queued,
-          );
-        } else {
+          if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
+            pushAcknowledgedRef.current = false;
+            doFetch(
+              freshPayload,
+              3,
+              freshSig,
+              syncPushGenerationRef.current,
+              false,
+              queued,
+            );
+          } else {
+            recordSyncEvent(
+              "merge",
+              "Queued change already matches the confirmed server state; no duplicate write was sent",
+              "duplicate-suppressed",
+              currentRunId,
+            );
+          }
+        } else if (shouldSendDistinctQueuedSyncWork(queued.sig, work.sig)) {
           doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        } else {
+          recordSyncEvent(
+            "merge",
+            "Queued change already matches the confirmed server state; no duplicate write was sent",
+            "duplicate-suppressed",
+            currentRunId,
+          );
         }
       }
     }).catch(() => {
@@ -10475,6 +10709,9 @@ export default function Home() {
       if (!work.baseSnapshot) throw new Error("Stale sync write has no captured canonical baseline");
       if (!snapshotId) throw new Error("Stale sync response omitted its canonical snapshot identity");
 
+      // Preserve the exact request that received the stale-base response; work.payload
+      // is replaced with the rebased result below.
+      const sentRunValues = work.payload.runValues ?? {};
       const canonical = persistedSyncPayload(canonicalInput);
       const recovery = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, canonical, {
         snapshotId,
@@ -10493,10 +10730,10 @@ export default function Home() {
       const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
       const date = recovery.payload.dayState.date ?? todayStr();
       const pending = loadPendingSyncIntent(scope, date);
-      let durable = false;
-      if (recovery.reappliedChanges > 0 && scope && work.pendingIntentId) {
-        if (!pending || pending.id === work.pendingIntentId) {
-          durable = savePendingSyncIntent({
+      let recoveryCopyStatus: PendingSyncRecoveryCopyStatus | null = null;
+      if (recovery.reappliedChanges > 0) {
+        recoveryCopyStatus = saveRebasedPendingSyncIntent(
+          scope && work.pendingIntentId ? {
             version: 1,
             id: work.pendingIntentId,
             scope,
@@ -10505,24 +10742,53 @@ export default function Home() {
             baseSnapshotId: snapshotId,
             baseline: canonical,
             payload: recovery.payload,
-          });
-        }
+          } : null,
+          pending,
+        );
       } else if (scope && work.pendingIntentId) {
         clearPendingSyncIntent(scope, date, work.pendingIntentId);
       }
 
+      const currentPayload = buildSyncPayload(dayStateRef.current);
+      const canonicalRunValueIds = selectUnchangedRunValueIdsForRecovery(
+        sentRunValues,
+        recovery.payload.runValues ?? {},
+        currentPayload.runValues ?? {},
+      );
+      const applyRecoveryPayload = () => applySyncCallbackRef.current(
+        recovery.payload,
+        {
+          acceptCanonicalRunValueIds: canonicalRunValueIds,
+          allowForegroundCanonicalFormReset: canonicalRunValueIds.includes(currentRunId),
+        },
+      );
+
       if (recovery.reappliedChanges > 0) {
-        applySyncCallbackRef.current(recovery.payload);
+        applyRecoveryPayload();
+        const recoveryCopyNotice = recoveryCopyStatus
+          ? pendingSyncRecoveryCopyNotice(recoveryCopyStatus)
+          : "";
+        const conflictOutcome = describeServerWinsConflictOutcome(
+          recovery.retainedServerConflicts,
+        );
         recordSyncEvent(
           "merge",
-          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${durable ? "" : " (reload recovery copy unavailable)"}.`,
+          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes${conflictOutcome ? `; ${conflictOutcome}` : ""}${recoveryCopyNotice ? `; ${recoveryCopyNotice}` : ""}.`,
           "stale-base-recovered",
           currentRunId,
         );
       } else if (recovery.retainedServerConflicts > 0) {
+        // Conflict-only recovery must still adopt the canonical payload. The
+        // server-wins merge has discarded the local conflicting values; leaving
+        // the form untouched would show a value that no longer exists on the
+        // server and that the operator explicitly chose not to retain.
+        applyRecoveryPayload();
+        const conflictOutcome = describeServerWinsConflictOutcome(
+          recovery.retainedServerConflicts,
+        );
         recordSyncEvent(
           "merge",
-          `Kept ${recovery.retainedServerConflicts} newer server values during stale-base recovery`,
+          `Stale-base recovery ${conflictOutcome}.`,
           "stale-base-conflicts",
           currentRunId,
         );
@@ -10661,6 +10927,24 @@ export default function Home() {
     const persistedDay = loadDayState();
     const persistedRun = persistedDay.runs.find((run) => run.id === liveRun.id);
     if (liveRun.startedAt || liveRun.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
+    const savedSubTab = loadProfileSubTab(brand, flavor);
+    if (savedSubTab && liveRun.subTab !== savedSubTab) {
+      const nextDayState = {
+        ...liveDay,
+        runs: liveDay.runs.map((run) =>
+          run.id === liveRun.id ? { ...run, subTab: savedSubTab } : run,
+        ),
+      };
+      setDayState(nextDayState);
+      saveDayState(nextDayState);
+      setDoughSubTab(savedSubTab);
+      try {
+        const ack = await pushTodayCanonical(buildSyncPayload(nextDayState));
+        if (!ack.ok) return;
+      } catch {
+        return;
+      }
+    }
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
     await runSharedRecipeRefresh(liveRun, async () => {
@@ -11094,6 +11378,10 @@ export default function Home() {
     initiatingRunId?: string,
   ) {
     if (screenMode !== null) return;
+    const backgroundGenerationIsCurrent = () =>
+      backgroundGeneration === undefined
+      || backgroundGeneration === sharedRecipeRefreshGenerationRef.current;
+    if (!backgroundGenerationIsCurrent()) return;
     const refreshRunId =
       initiatingRunId ?? dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     const onNamedProfileSaved = (brand: string, flavor: string) => {
@@ -11104,7 +11392,7 @@ export default function Home() {
       // make an acknowledged recipe edit look already propagated.
       if (acknowledgedNames && acknowledgedNames.size > 0) {
         const key = canonicalProfileKey(brand, flavor);
-        markProfileForceEdited(key);
+        markProfileForceEdited(key, { brand, flavor });
         propagateSigRef.current.delete(key);
       }
       return handleSetupProfileSaved(brand, flavor, undefined, backgroundGeneration);
@@ -11141,32 +11429,48 @@ export default function Home() {
         ...(variants.length > 0 ? { doughballVariants: variants } : {}),
       });
     }
+    const refreshLinkedProfiles = async (
+      patches: Parameters<typeof refreshNamedRecipeProfilesAndPropagate>[1],
+    ) => {
+      const acknowledged = patches.filter((patch) =>
+        acknowledgedNames?.has(normalizeSelectableName(patch.name).toLowerCase()),
+      );
+      const passive = patches.filter((patch) =>
+        !acknowledgedNames?.has(normalizeSelectableName(patch.name).toLowerCase()),
+      );
+      const touched = new Map<string, { brand: string; flavor: string }>();
+      for (const [selected, options] of [
+        [acknowledged, undefined],
+        [passive, { emptyRowsOnly: true }],
+      ] as const) {
+        if (selected.length === 0) continue;
+        const refreshed = await refreshNamedRecipeProfilesAndPropagate(
+          kind,
+          selected,
+          options,
+          onNamedProfileSaved,
+        );
+        for (const profile of refreshed) {
+          touched.set(
+            `${profile.brand.trim().toLowerCase()}__${profile.flavor.trim().toLowerCase()}`,
+            profile,
+          );
+        }
+      }
+      return [...touched.values()];
+    };
     const prev = namedPoolSnapRef.current[kind];
     namedPoolSnapRef.current[kind] = snap;
     if (prev === null) {
-      // First load: run a one-time full heal so profiles whose rows are wrong
-      // or empty (e.g. from a pre-fix recipe merge) are corrected immediately.
-      // After the marker is set on this device, subsequent page loads only fill
-      // profiles with empty rows (the fast ongoing-safe path).
+      // A pool snapshot observed during boot or from another browser is
+      // passive evidence. It may backfill missing rows, but populated profile
+      // rows remain authoritative; only an acknowledged manager save may
+      // replace them. This prevents an older peer bootstrap from undoing a
+      // newer recipe edit.
       const patches = [...byKey.values()].filter((p) => p.rows.length > 0);
       if (patches.length > 0) {
-        const markerKey = `run-calc-${kind}-row-heal-v1`;
-        if (!localStorage.getItem(markerKey)) {
-          await refreshNamedRecipeProfilesAndPropagate(
-            kind,
-            patches,
-            undefined,
-            onNamedProfileSaved,
-          );
-          localStorage.setItem(markerKey, "1");
-        } else {
-          await refreshNamedRecipeProfilesAndPropagate(
-            kind,
-            patches,
-            { emptyRowsOnly: true },
-            onNamedProfileSaved,
-          );
-        }
+        await refreshLinkedProfiles(patches);
+        if (!backgroundGenerationIsCurrent()) return;
       }
       return;
     }
@@ -11184,13 +11488,9 @@ export default function Home() {
     const touched = await orchestrateSharedRecipeRefresh({
       getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
       initiatingRunId: refreshRunId,
-        refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
-        kind,
-        changed,
-        undefined,
-        onNamedProfileSaved,
-      ),
+      refreshProfiles: () => refreshLinkedProfiles(changed),
       refreshOpenForm: async () => {
+        if (!backgroundGenerationIsCurrent()) return;
         const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
         if (!liveRun || liveRun.id !== refreshRunId) return;
         const persistedRun = liveRun
@@ -11232,12 +11532,14 @@ export default function Home() {
           formUpdated = true;
         }
         if (Object.keys(openRunUpdates).length > 0) {
+          if (!backgroundGenerationIsCurrent()) return;
           await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
             expectedRunId: refreshRunId,
           });
         }
       },
     });
+    if (!backgroundGenerationIsCurrent()) return;
     for (const recipe of changed) {
       await propagateRecipeRowsToPendingRuns(
         recipe.name,
@@ -11292,25 +11594,15 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sauceRecipesList, screenMode]);
 
-  // Cheese / mix recipe rows — parallel one-time boot heal + ongoing empty-row
-  // healing. Cheese and mix pools don't have a diff-and-update watcher like
-  // dough/sauce, so profiles whose rows are wrong or empty from a past merge
-  // would never self-correct without this. Strategy mirrors applyNamedPoolChange:
-  //   • First load after the fix: full heal (any stale rows corrected), set marker.
-  //   • Subsequent loads: empty-rows-only pass so a profile with no rows still
-  //     gets filled even after the marker is set.
-  // Heal saved profiles + the open form so mix recipe rows show the imported
-  // oz/pizza amounts from the premix sheet rather than all-zero placeholders.
+  // Passive cheese/mix pool observations only fill empty or all-zero linked
+  // profile rows. A pool snapshot can lag an acknowledged profile edit, so it
+  // must not replace populated saved rows. Explicit manager saves/imports keep
+  // their authoritative full-replacement path.
   //
-  // Two-tier strategy:
-  //   • First-time full heal (marker not yet set): runs once when at least one
-  //     pool has data, overwrites ALL rows so stale pre-import zeros are fixed.
-  //     Protected by cheeseMixFullHealDoneRef so it fires exactly once per mount.
-  //   • Ongoing emptyRowsOnly heal (marker already set): runs every time the
-  //     mixes/cheese pool changes (e.g. after a fresh premix import while the
-  //     app is open) WITHOUT the ref guard, so newly imported amounts are
-  //     picked up immediately without a page reload.
-  const cheeseMixFullHealDoneRef = useRef(false);
+  // The initial pass waits for pool data and runs once per mount; later pool
+  // changes repeat the same empty-only repair so new profiles can be filled
+  // without overwriting existing recipe data.
+  const cheeseMixInitialPassDoneRef = useRef(false);
   const acknowledgedCheeseSaveFingerprintRef = useRef<string | null>(null);
   const acknowledgedMixSaveFingerprintRef = useRef<string | null>(null);
   async function applyAcknowledgedMixSave(
@@ -11352,7 +11644,10 @@ export default function Home() {
         // row helper has already written the linked profile locally; upgrade
         // its queued operation before flushing so an older profile stamp cannot
         // prevent the pending-run fan-out.
-        markProfileForceEdited(canonicalProfileKey(profile.brand, profile.flavor));
+        markProfileForceEdited(canonicalProfileKey(profile.brand, profile.flavor), {
+          brand: profile.brand,
+          flavor: profile.flavor,
+        });
         // A recipe edit must always publish its dependent pending-run snapshot,
         // even if an earlier same-session profile propagation recorded an
         // identical signature before the manager acknowledgement completed.
@@ -11446,40 +11741,40 @@ export default function Home() {
         }
       };
       if (markerSet) {
-        // Ongoing pass — recipe edits are authoritative for linked pending work,
-        // not just for profiles whose rows happened to be empty.
+        // Passive pool observations are not authoritative over populated
+        // profile rows; fill only missing/all-zero slots.
         for (const r of cheeseRecipesList) {
           const name = normalizeSelectableName(r.name);
           if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         for (const m of mixes) {
           const name = normalizeSelectableName(m.name);
           if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
       } else {
-        // First-time full heal — wait for pool data, run once per mount.
+        // First passive pass — wait for pool data, run once per mount.
         if (cheeseRecipesList.length === 0 && mixes.length === 0) return;
-        if (cheeseMixFullHealDoneRef.current) return;
-        cheeseMixFullHealDoneRef.current = true;
+        if (cheeseMixInitialPassDoneRef.current) return;
+        cheeseMixInitialPassDoneRef.current = true;
         for (const r of cheeseRecipesList) {
           const name = normalizeSelectableName(r.name);
           if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         for (const m of mixes) {
           const name = normalizeSelectableName(m.name);
           if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         localStorage.setItem(markerKey, "1");
       }
@@ -11897,36 +12192,76 @@ export default function Home() {
     schedulePush(newDs, 0);
   }
 
-  // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
-  // target brand+flavor and make it current, in one dayState computation, so
-  // the existing current run is never renamed/clobbered. Saves the outgoing
-  // run's values/profile exactly like addRun, then loads the target profile
-  // into the form exactly like setRunBrandFlavor (single-tick sequencing of
-  // addRun()+setRunBrandFlavor() would work off a stale dayState closure and
-  // drop the new run). Returns false at the run cap — caller must fall back
-  // without touching anything.
-  function addRunWithIdentity(brand: string, flavor: string): boolean {
-    if (dayState.runs.length >= MAX_RUNS) return false;
+  function loadDoughRecipesForProfile(
+    profile: ReturnType<typeof loadProfile>,
+  ): typeof doughRecipesList | Promise<typeof doughRecipesList | null> {
+    if (!normalizeSelectableName(profile?.doughRecipeName ?? "")) {
+      return doughRecipesList;
+    }
+    if (hasDoughRecipesData && !areDoughRecipesStale) return doughRecipesList;
+    toast({
+      title: "Checking shared recipe status",
+      description: "This profile will be applied after recipe data loads.",
+    });
+    return ensureDoughRecipesLoaded().catch(() => {
+      toast({
+        title: "Profile not applied",
+        description: "Shared recipe details could not be loaded. No profile values or run mode were changed. Check your connection and select the profile again.",
+        variant: "destructive",
+      });
+      return null;
+    });
+  }
+
+  function commitAddRunWithIdentity(
+    brand: string,
+    flavor: string,
+    recipes: typeof doughRecipesList,
+    targetRunId: string | null,
+    requestGeneration: number,
+  ): boolean {
+    if (requestGeneration !== profileApplyGenerationRef.current) return false;
+    if (targetRunId !== currentRunIdRef.current) {
+      toast({
+        title: "Setup changed",
+        description: "The active run changed while recipe data was loading. Select the profile again.",
+        variant: "destructive",
+      });
+      return false;
+    }
     flushPendingHomeFormWrites();
+    if (targetRunId !== currentRunIdRef.current) return false;
+    const outgoingDay = dayStateRef.current;
+    const outgoingRun = outgoingDay.runs[outgoingDay.currentIndex] ?? outgoingDay.runs[0];
+    if (targetRunId && outgoingRun?.id !== targetRunId) return false;
+    if (outgoingDay.runs.length >= MAX_RUNS) return false;
     const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    if (outgoingRun) saveRunValues(outgoingRun.id, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+    if (canManageProfiles && outgoingRun && (outgoingRun.brand || outgoingRun.flavor)) {
+      if (saveProfile(outgoingRun.brand, outgoingRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(outgoingRun.brand, outgoingRun.flavor);
       }
     }
     const newId = genId();
-    const preferredSubTab = loadProfileSubTab(brand, flavor);
+    const profile = loadProfile(brand, flavor);
+    const profileDoughName = normalizeSelectableName(profile?.doughRecipeName ?? "").toLowerCase();
+    const linkedDoughRecipe = recipes.find(
+      (recipe) =>
+        recipe.enabled !== false &&
+        normalizeSelectableName(recipe.name).toLowerCase() === profileDoughName,
+    );
+    const preferredSubTab = linkedDoughRecipe?.isPremadeCrust
+      ? "crusts"
+      : loadProfileSubTab(brand, flavor);
     const newDs = {
-      runs: [...dayState.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
-      currentIndex: dayState.runs.length,
+      runs: [...outgoingDay.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
+      currentIndex: outgoingDay.runs.length,
     };
     setDayState(newDs);
     saveDayState(newDs);
     if (preferredSubTab) setDoughSubTab(preferredSubTab);
-    const profile = loadProfile(brand, flavor);
     if (profile) {
       // Strip mix recipe names from sauce fields — they belong in the applicator mix field
       if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
@@ -11943,42 +12278,92 @@ export default function Home() {
     return true;
   }
 
-  function setRunBrandFlavor(brand: string, flavor: string) {
+  // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
+  // target brand+flavor and make it current, in one dayState computation, so
+  // the existing current run is never renamed/clobbered. It resolves false at
+  // the run cap and waits for linked shared recipe data before applying a profile.
+  function addRunWithIdentity(brand: string, flavor: string): boolean | Promise<boolean> {
+    if (dayStateRef.current.runs.length >= MAX_RUNS) return false;
+    const requestGeneration = ++profileApplyGenerationRef.current;
+    const targetRunId = currentRunIdRef.current;
+    const recipes = loadDoughRecipesForProfile(loadProfile(brand, flavor));
+    if (Array.isArray(recipes)) {
+      return commitAddRunWithIdentity(brand, flavor, recipes, targetRunId, requestGeneration);
+    }
+    return recipes.then((loadedRecipes) =>
+      loadedRecipes
+        ? commitAddRunWithIdentity(brand, flavor, loadedRecipes, targetRunId, requestGeneration)
+        : false,
+    );
+  }
+
+  function commitRunBrandFlavor(
+    brand: string,
+    flavor: string,
+    recipes: typeof doughRecipesList,
+    targetRunId: string | null,
+    requestGeneration: number,
+  ): void {
+    if (requestGeneration !== profileApplyGenerationRef.current) return;
+    if (targetRunId !== currentRunIdRef.current) {
+      toast({
+        title: "Setup changed",
+        description: "The active run changed while recipe data was loading. Select the profile again.",
+        variant: "destructive",
+      });
+      return;
+    }
     flushPendingHomeFormWrites();
-    // Save current values to old profile
+    if (targetRunId !== currentRunIdRef.current) return;
+    const liveDay = dayStateRef.current;
+    const liveRun = liveDay.runs[liveDay.currentIndex] ?? liveDay.runs[0];
+    if (!liveRun || (targetRunId && liveRun.id !== targetRunId)) return;
+    // Save current values to old profile.
     const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    saveRunValues(liveRun.id, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+    if (canManageProfiles && (liveRun.brand || liveRun.flavor)) {
+      if (saveProfile(liveRun.brand, liveRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(liveRun.brand, liveRun.flavor);
       }
     }
 
     // Update run meta — also carry the saved line-type preference so the run
     // starts in Dough or Crust mode automatically, without needing the user to
     // toggle it every time they assign this brand+flavor.
-    const preferredSubTab = loadProfileSubTab(brand, flavor);
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
-        ? { ...r, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }
-        : r
+    const profile = loadProfile(brand, flavor);
+    const profileDoughName = normalizeSelectableName(profile?.doughRecipeName ?? "").toLowerCase();
+    const linkedDoughRecipe = recipes.find(
+      (recipe) =>
+        recipe.enabled !== false &&
+        normalizeSelectableName(recipe.name).toLowerCase() === profileDoughName,
     );
-    const newDs = { ...dayState, runs: newRuns };
+    const currentRunHasStarted = Boolean(liveRun.startedAt || liveRun.endedAt);
+    const preferredSubTab = currentRunHasStarted
+      ? undefined
+      : linkedDoughRecipe?.isPremadeCrust
+        ? "crusts"
+        : loadProfileSubTab(brand, flavor);
+    const newRuns = liveDay.runs.map((run, index) =>
+      index === liveDay.currentIndex
+        ? { ...run, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }
+        : run,
+    );
+    const newDs = { ...liveDay, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
     if (preferredSubTab) setDoughSubTab(preferredSubTab);
 
-    // Load profile for new brand+flavor if it exists
-    const profile = loadProfile(brand, flavor);
+    // Load profile for new brand+flavor if it exists.
     if (profile) {
-      // Strip mix recipe names from sauce fields — they belong in the applicator mix field
+      // Strip mix recipe names from sauce fields — they belong in the applicator mix field.
       if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
         profile.frontlineRecipeName = "";
         profile.frontlineRecipe = [];
       }
-      form.reset(profile); resetFieldArrays(profile);
+      form.reset(profile);
+      resetFieldArrays(profile);
     } else {
       // No saved profile for the new identity — reset to defaults. Keeping the
       // OLD run's values here silently rebrands them as the new brand/flavor,
@@ -11989,6 +12374,21 @@ export default function Home() {
       resetFieldArrays(DEFAULT_VALUES);
     }
     schedulePush(newDs, 0);
+  }
+
+  function setRunBrandFlavor(brand: string, flavor: string): void {
+    const requestGeneration = ++profileApplyGenerationRef.current;
+    const targetRunId = currentRunIdRef.current;
+    const recipes = loadDoughRecipesForProfile(loadProfile(brand, flavor));
+    if (Array.isArray(recipes)) {
+      commitRunBrandFlavor(brand, flavor, recipes, targetRunId, requestGeneration);
+      return;
+    }
+    void recipes.then((loadedRecipes) => {
+      if (loadedRecipes) {
+        commitRunBrandFlavor(brand, flavor, loadedRecipes, targetRunId, requestGeneration);
+      }
+    });
   }
 
   function addBrand(name: string) {
@@ -13519,7 +13919,7 @@ export default function Home() {
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
     destructiveChangesAcknowledged = false,
     destructiveReviewSignature?: string,
-    captureGoldCase = false,
+    _captureGoldCase = false,
   ) {
     if (!specImportPrepared) return;
     // The commit spans profile and inventory master-data writes after an AI
@@ -13561,13 +13961,13 @@ export default function Home() {
     const operationId = specImportOperationRef.current ?? createImportOperationId();
     specImportOperationRef.current = operationId;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
         await (await loadWorkbookWorkflow()).specImport.commitSpecImport(
           toCommit,
           forceUpdateProfileKeys,
           acceptedNewMixIngredientNames,
           operationId,
-          captureGoldCase ? { input: makeImportGoldInput({ profiles: editedParsed.profiles, recipes: editedParsed.recipes }) } : undefined,
+          undefined, // Capture stays unavailable until a verified approval can be selected.
         );
       mixedImportQueue.outcome("spec", aliasSaveFailed || toCommit.note?.includes("could not be read") ? "partial" : "applied",
         "Server confirmed this import. Any Undo remains scoped to this operation in Import history.");
@@ -13697,7 +14097,12 @@ export default function Home() {
             t.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
         );
         const profile = touched ? loadProfile(liveRun.brand, liveRun.flavor) : null;
-        if (profile) {
+        const persistedLiveRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+        const liveRunAlreadyStarted = Boolean(
+          liveRun.startedAt || liveRun.endedAt ||
+          persistedLiveRun?.startedAt || persistedLiveRun?.endedAt,
+        );
+        if (profile && !liveRunAlreadyStarted) {
           // Strip mix recipe names from sauce fields — they belong in the applicator mix field
           if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
             profile.frontlineRecipeName = "";
@@ -13709,21 +14114,22 @@ export default function Home() {
           lastLocalEditRef.current = now;
           form.reset(profile);
           resetFieldArrays(profile);
-          // If this profile is a purchased-crust product (no die type, crust-named
-          // doughName), automatically switch the run's Line Type to "Crust" so the
-          // operator doesn't have to toggle it manually. Mirrors the manual button
-          // handler at the "Crust" toggle (resolveCrustLineDefaults + subTab update).
-          const isImportedCrust = crustProfiles.some(
-            (c) =>
-              c.brand.toLowerCase() === (liveRun.brand ?? "").toLowerCase() &&
-              c.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
+          // Only an explicit manager classification on the linked shared recipe
+          // selects Crust mode. Workbook names and empty formulas are not proof.
+          const importedDoughName = normalizeSelectableName(profile.doughRecipeName ?? "").toLowerCase();
+          const linkedPremadeCrust = doughRecipesList.some(
+            (recipe) =>
+              recipe.enabled !== false &&
+              recipe.isPremadeCrust === true &&
+              normalizeSelectableName(recipe.name).toLowerCase() === importedDoughName,
           );
-          if (isImportedCrust && doughSubTab !== "crusts") {
+          if (linkedPremadeCrust && doughSubTab !== "crusts") {
             setDoughSubTab("crusts");
-            const updatedRuns = dayStateRef.current.runs.map((r: any, i: any) =>
-              i === dayStateRef.current.currentIndex ? { ...r, subTab: "crusts" as const } : r,
+            const currentDay = dayStateRef.current;
+            const updatedRuns = currentDay.runs.map((r) =>
+              r.id === liveRun.id ? { ...r, subTab: "crusts" as const } : r,
             );
-            const updatedDs = { ...dayStateRef.current, runs: updatedRuns };
+            const updatedDs = { ...currentDay, runs: updatedRuns };
             setDayState(updatedDs);
             saveDayState(updatedDs);
             const fills = resolveCrustLineDefaults(form.getValues());
@@ -14194,7 +14600,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     mixesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
-    captureGoldCase = false,
+    _captureGoldCase = false,
   ) {
     if (!premixImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -14226,7 +14632,7 @@ export default function Home() {
         newAliases,
         mixesToRemove,
         operationId,
-        captureGoldCase ? { input: makeImportGoldInput({ candidates: premixImportPrepared.candidates.map(({ mix }) => mix) }) } : undefined,
+        undefined, // Never submit the former input-only capture payload.
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
@@ -14710,7 +15116,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     recipesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
-    captureGoldCase = false,
+    _captureGoldCase = false,
   ) {
     if (!cheeseImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -14742,7 +15148,7 @@ export default function Home() {
         newAliases,
         recipesToRemove,
         operationId,
-        captureGoldCase ? { input: makeImportGoldInput({ recipes: cheeseImportPrepared.candidates.map(({ recipe }) => recipe) }) } : undefined,
+        undefined, // Never submit the former input-only capture payload.
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
@@ -15059,7 +15465,8 @@ export default function Home() {
     const byDate = payload.byDate ?? [];
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
-    let failed = 0;
+    let notSentDays = 0;
+    let unconfirmedDays = 0;
     let confirmedDays = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
@@ -15081,7 +15488,7 @@ export default function Home() {
         }
       } catch {}
       if (!existingSnapshotId) {
-        failed++;
+        notSentDays++;
         done++;
         lastErrorDetail = `Couldn't load the latest ${date} plan before saving it.`;
         setImportProgress({ done, total: byDate.length });
@@ -15166,7 +15573,7 @@ export default function Home() {
         setImportProgress(null);
         if (done > 0) {
           mixedImportQueue.outcome("schedule", "partial",
-            `${confirmedDays} days confirmed saved; ${failed} requests unconfirmed. Cancelled and remaining days were not sent. Earlier saves were not undone.`);
+            `${confirmedDays} days confirmed saved; ${unconfirmedDays} requests unconfirmed and ${notSentDays} days not sent. Cancelled and remaining days were not sent. Earlier saves were not undone.`);
           // Days are independently acknowledged. Cancelling a later proposal
           // cannot roll back earlier writes or claim the whole file was cancelled.
           void recordImportHistory({
@@ -15175,9 +15582,14 @@ export default function Home() {
             sourceLabel: "Schedule workbook",
             status: "partial",
             summary: {
-              counts: { confirmedDays, unconfirmedDays: failed, processedDays: done },
-              warnings: [`Stopped after ${done} processed days; ${confirmedDays} were confirmed saved. Earlier unconfirmed requests may still have reached the server.`],
-              followUp: ["Reload the schedule before importing again. The cancelled day and remaining days were not sent; earlier saves were not undone."],
+              counts: { confirmedDays, unconfirmedDays, notSentDays, processedDays: done },
+              warnings: [
+                `Stopped after ${done} processed days; ${confirmedDays} were confirmed saved, ${unconfirmedDays} requests were unconfirmed, and ${notSentDays} days were not sent.`,
+                ...(unconfirmedDays > 0 ? ["An unconfirmed request may have reached the server."] : []),
+              ],
+              followUp: [unconfirmedDays > 0
+                ? "Reload the schedule and inspect each unconfirmed day before deciding whether to retry. The cancelled day and remaining days were not sent; earlier saves were not undone."
+                : "The cancelled day and remaining days were not sent. Review the saved schedule before resuming; earlier acknowledged saves were not undone."],
             },
           }).catch(() => {});
           void fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(async (response) => {
@@ -15191,7 +15603,7 @@ export default function Home() {
           setImportIntoEditor(false);
           toast({
             title: "Schedule import stopped partway through",
-            description: `${confirmedDays} days were confirmed saved; ${failed} day requests were not confirmed. The cancelled day and remaining days were not sent. Earlier saves were not undone.`,
+            description: `${confirmedDays} days were confirmed saved; ${unconfirmedDays} requests were unconfirmed and ${notSentDays} days were not sent. The cancelled day and remaining days were not sent. Earlier saves were not undone.`,
           });
         }
         return;
@@ -15256,7 +15668,7 @@ export default function Home() {
       } catch (err) {
         if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
       }
-      if (!dayOk) failed += 1;
+      if (!dayOk) unconfirmedDays += 1;
       else {
         confirmedDays += 1;
         if (appliedValues) appliedScheduleRows.push(...appliedValues.runs);
@@ -15271,7 +15683,7 @@ export default function Home() {
     setImportIntoEditor(false);
     // Tell the user why today's run count may be lower than the file's.
     const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
-    if (failed === 0) {
+    if (unconfirmedDays === 0 && notSentDays === 0) {
       mixedImportQueue.outcome("schedule", skippedToday > 0 ? "partial" : "applied",
         `${byDate.length} day requests acknowledged separately; ${skippedToday} already-started rows skipped.`);
       payload.onApplied?.();
@@ -15297,25 +15709,51 @@ export default function Home() {
         description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.${skippedNote}`,
       });
     } else {
-      mixedImportQueue.outcome("schedule", "partial",
-        `${byDate.length - failed} day requests acknowledged; ${failed} unconfirmed. Earlier saves were not undone. Check current days before another review.`);
+      const sourceRunCount = byDate.reduce((n, day) => n + day.runs.length, 0);
+      const outcomeStatus = confirmedDays > 0 || unconfirmedDays > 0 ? "partial" : "failed";
+      const recoveryAction = unconfirmedDays > 0
+        ? "Reload the schedule and inspect each unconfirmed date before deciding whether to retry. The server may already have saved an unconfirmed request; do not resend without reviewing the current day."
+        : confirmedDays > 0
+          ? "The confirmed days are saved. The other days were not sent because their latest plans could not be loaded; restore the connection before reviewing those source rows again."
+          : "No schedule write was sent because the latest day could not be loaded. Restore the connection, then review the source again.";
+      mixedImportQueue.outcome("schedule", outcomeStatus,
+        `${confirmedDays} day requests acknowledged; ${unconfirmedDays} unconfirmed and ${notSentDays} not sent. Earlier saves were not undone. Reload and inspect current days before another review.`);
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
-        status: "failed",
+        status: outcomeStatus,
         summary: {
-          phases: { parse: "deterministic multi-day parse", linking: "completed", commit: "partially saved" },
-          source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
-          landed: { days: byDate.length - failed, runs: 0 },
-          counts: { parsed: byDate.length, landedDays: byDate.length - failed, failedDays: failed, skipped: skippedToday },
-          mismatches: [`${failed} schedule day(s) could not be saved.`],
-          followUp: ["Retry the import after checking the failed day(s)."],
+          phases: {
+            parse: "deterministic multi-day parse",
+            linking: "completed",
+            commit: unconfirmedDays > 0 ? "some day requests have no confirmed reply" : "no day write was sent",
+          },
+          source: { days: byDate.length, runs: sourceRunCount },
+          counts: {
+            requestedDays: byDate.length,
+            confirmedDays,
+            unconfirmedDays,
+            notSentDays,
+            skippedToday,
+          },
+          mismatches: [
+            ...(unconfirmedDays > 0 ? [`${unconfirmedDays} schedule day request(s) ended without a confirmed reply; server state may have changed.`] : []),
+            ...(notSentDays > 0 ? [`${notSentDays} schedule day(s) were not sent because the latest plan could not be loaded.`] : []),
+          ],
+          followUp: [recoveryAction],
         },
       }).catch(() => {});
+      const resultNotConfirmed = unconfirmedDays > 0;
+      const resultPartlySaved = confirmedDays > 0 && notSentDays > 0;
       toast({
         variant: "destructive",
-        title: failed === byDate.length ? "Import failed" : "Import partly failed",
-        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Please try again.${skippedNote}`,
+        title: unconfirmedDays > 0
+          ? confirmedDays > 0 ? "Schedule import partly confirmed" : "Schedule result not confirmed"
+          : resultPartlySaved ? "Schedule import partly saved" : "Schedule was not saved",
+        description: resultNotConfirmed
+          ? `${confirmedDays} of ${byDate.length} day requests were confirmed; ${unconfirmedDays} did not receive a confirmed reply${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. An unconfirmed day may already have been saved. Reload and inspect affected dates before deciding whether to retry.${skippedNote}`
+          : `${confirmedDays} of ${byDate.length} day requests were confirmed; ${notSentDays} were not sent${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Restore the connection before reviewing those source rows again.${skippedNote}`,
       });
     }
     // OFFER (never auto-apply) new case counts for in-progress runs whose
@@ -15376,8 +15814,12 @@ export default function Home() {
     : "pending";
 
   const hasActiveRun = dayState.runs.some((run) => run.startedAt && !run.endedAt);
-  const hasUnsavedForm =
-    Boolean(currentRunId) && !deepEqual(v, loadRunValues(currentRunId));
+  const savedCurrentRunValues = currentRunId ? loadRunValues(currentRunId) : undefined;
+  const hasUnsavedForm = Boolean(currentRunId)
+    && hasUnsavedFormValueChanges(
+      v as unknown as Record<string, unknown>,
+      savedCurrentRunValues as unknown as Record<string, unknown> | undefined ?? {},
+    );
   // Keep every Home-owned modal/full-screen interaction in one named inventory.
   // Locally owned surfaces (for example Ingredient Detail inside Summary) use
   // useAutomaticUpdateReloadBlocker and are aggregated by the external store.
@@ -15454,7 +15896,6 @@ export default function Home() {
     hasPendingSync: syncPendingCount > 0 || !pushAcknowledgedRef.current,
     hasFailedSync: syncPushFailed || syncRetryWaiting,
   });
-
   useEffect(() => {
     reportAutomaticUpdateReloadSafety(automaticUpdateReloadSafe);
     return () => reportAutomaticUpdateReloadSafety(false);
@@ -16540,7 +16981,7 @@ export default function Home() {
 
         const settingsTabs: { key: string; label: string }[] = [
           { key: "import", label: "Import" },
-          ...(isSupervisor ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
+          ...(canManageProfiles ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
           ...(canManageInventory ? [{ key: "mixes", label: "Mix Recipes" }] : []),
@@ -16549,6 +16990,9 @@ export default function Home() {
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
            ...(canManageStaff ? [{ key: "audit", label: "Data Health & Audit" }] : []),
+           ...(canManageStaff || canManageQc ? [{ key: "gold-retention", label: "Gold Lab Retention" }] : []),
+          ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
+            ? [{ key: "gold-approvals", label: "Gold Lab Approvals" }] : []),
           ...(canManageStaff ? [{ key: "ai-corrections", label: "AI Memory" }] : []),
         ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -16562,7 +17006,8 @@ export default function Home() {
           brands: "Brands", flavors: "Flavors", ingredientTypes: "Applicator Types",
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
-           cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", pin: "Change PIN",
+            cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", "gold-retention": "Gold Lab Retention", pin: "Change PIN",
+          "gold-approvals": "Gold Lab Approvals",
           allergens: "Allergen Mappings",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
           "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
@@ -16593,6 +17038,9 @@ export default function Home() {
               ...(canManageInventory ? ["dieDefaults", "freezer", "cycleCount"] : []),
               ...(canManageStaff || canApproveResets ? ["staff"] : []),
               ...(canManageStaff ? ["audit", "ai-corrections"] : []),
+              ...(canManageStaff || canManageQc ? ["gold-retention"] : []),
+              ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
+                ? ["gold-approvals"] : []),
               "pin",
               ...(isSupervisor ? ["runs"] : []),
             ],
@@ -16600,7 +17048,7 @@ export default function Home() {
           {
             key: "tools",
             label: "Tools",
-            subTabs: ["import", ...(isSupervisor ? ["setupProfiles"] : []), "merge"],
+            subTabs: ["import", ...(canManageProfiles ? ["setupProfiles"] : []), "merge"],
           },
         ] as { key: string; label: string; subTabs: string[] }[]).filter(s => s.subTabs.length > 0);
         const sectionForTab: Record<string, string> = {};
@@ -16690,9 +17138,11 @@ export default function Home() {
             onClick={() => setShowManageDialog(false)}
           >
             <div
+              ref={manageDialogRef}
               role="dialog"
               aria-modal="true"
               aria-labelledby="manage-lists-dialog-title"
+              tabIndex={-1}
               className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col`}
               onClick={e => e.stopPropagation()}
             >
@@ -16736,7 +17186,7 @@ export default function Home() {
               </div>
 
               {/* Content */}
-              <fieldset aria-busy={undoBusy} disabled={undoBusy || (!directoryReady && !["pin", "staff", "audit", "rules", "runs", "ai-corrections", "cycleCount", "freezer"].includes(manageCategory))}
+              <fieldset aria-busy={undoBusy} disabled={undoBusy || (!directoryReady && !["pin", "staff", "audit", "gold-retention", "rules", "runs", "ai-corrections", "cycleCount", "freezer"].includes(manageCategory))}
                 className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
                 {!directoryReady && <p role="status" className="mb-3 text-sm text-amber-500">Operational lists unavailable. Connect online and use Retry operational lists above.</p>}
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
@@ -17389,7 +17839,7 @@ export default function Home() {
                       items={weightItems}
                       learnedWeights={learnedBatchWeights}
                       onSave={(entries) => {
-                        queueBatchWeightChanges(entries);
+                        queueBatchWeightChanges(entries, true);
                       }}
                     />
                   );
@@ -17400,7 +17850,7 @@ export default function Home() {
                 )}
 
                 {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
-                {manageCategory === "setupProfiles" && isSupervisor && (
+                {manageCategory === "setupProfiles" && canManageProfiles && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">
                       Edit the saved setup for any brand &amp; flavor — line settings, recipes, and packaging — without touching the current run. New runs auto-load these saved profiles.
@@ -17815,12 +18265,29 @@ export default function Home() {
                     />
                   </div>
                 )}
+                {manageCategory === "gold-retention" && (canManageStaff || canManageQc) && (
+                  <DeferredSurface
+                    label="Gold Lab retention"
+                    load={loadImportGoldRetentionCard}
+                    componentProps={{ standalone: true }}
+                  />
+                )}
+                {manageCategory === "gold-approvals" &&
+                  (serverRole === "manager" || serverRole === "qc-manager") &&
+                  (canManageStaff || canManageQc) && (
+                    <DeferredSurface
+                      key={`gold-approvals:${me?.userId}:${me?.sandbox}`}
+                      label="Gold Lab approvals"
+                      load={loadImportGoldApprovalsCard}
+                      componentProps={{}}
+                    />
+                )}
 
                 {/* AI corrections memory — manager-only view + delete */}
                 {manageCategory === "ai-corrections" && canManageStaff && <AiCorrectionsCard />}
 
                 {/* Manage runs — supervisor-only panel to remove individual or blank runs */}
-                {manageCategory === "runs" && isSupervisor && <ManageRunsPanel />}
+                {manageCategory === "runs" && canManageFactorySettings && <ManageRunsPanel />}
 
                 {confirmationDialog}
                 {serverRole === "manager" && canManageFactorySettings && !["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
@@ -18148,7 +18615,7 @@ export default function Home() {
                     <ClipboardList className="w-4 h-4 mr-2" /> Manager action queue
                   </DropdownMenuItem>
                 )}
-                {(canRecordQc || isManager) && (
+                {canAccessQcWorkflow && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
                     <ShieldCheck className="w-4 h-4 mr-2" /> QC workflows &amp; history
                   </DropdownMenuItem>
@@ -18163,7 +18630,7 @@ export default function Home() {
                     <Users className="w-4 h-4 mr-2" /> Staff roster
                   </DropdownMenuItem>
                 )}
-                {isSupervisor && (
+                {canManageFactorySettings && (
                   <DropdownMenuItem onClick={() => { fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
                     {scheduledDays.length > 0 && (
@@ -18222,6 +18689,77 @@ export default function Home() {
 
         <Form {...form}>
           <form>
+            {activeTab === "run" && screenMode === null && (canManageStaff || canManageQc) && (
+              importGoldRetentionReminders.isError ? (
+                <div
+                  className="mb-3 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  role="status"
+                  data-testid="gold-retention-reminder-error"
+                >
+                  <span>Gold Lab deadline reminders are unavailable. Open the retention register to retry.</span>
+                  <button
+                    type="button"
+                    className="min-h-11 shrink-0 rounded border border-border px-3 py-2 text-sm font-medium"
+                    onClick={() => {
+                      setManageCategory("gold-retention");
+                      setManageInput("");
+                      setPinChangeMsg("");
+                      setShowManageDialog(true);
+                    }}
+                  >
+                    Open retention register
+                  </button>
+                </div>
+              ) : (
+                (importGoldRetentionReminders.data?.dueSoonCount ?? 0) +
+                  (importGoldRetentionReminders.data?.overdueCount ?? 0) > 0 && (
+                  <section
+                    className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+                    aria-label="Gold Lab retention reminders"
+                    data-testid="gold-retention-reminders"
+                  >
+                    <p className="mb-2 text-sm font-medium">Gold Lab retention reminders</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      {Boolean(importGoldRetentionReminders.data?.dueSoonCount) && (
+                        <button
+                          type="button"
+                          className="min-h-11 rounded border border-border px-3 py-2 text-left text-sm font-medium"
+                          data-testid="gold-retention-due-soon-reminder"
+                          onClick={() => {
+                            setManageCategory("gold-retention");
+                            setManageInput("");
+                            setPinChangeMsg("");
+                            setShowManageDialog(true);
+                          }}
+                        >
+                          {importGoldRetentionReminders.data!.dueSoonCount} deadline
+                          {importGoldRetentionReminders.data!.dueSoonCount === 1 ? "" : "s"} due within 7 days
+                        </button>
+                      )}
+                      {Boolean(importGoldRetentionReminders.data?.overdueCount) && (
+                        <button
+                          type="button"
+                          className="min-h-11 rounded border border-destructive/40 px-3 py-2 text-left text-sm font-medium text-destructive"
+                          data-testid="gold-retention-overdue-reminder"
+                          onClick={() => {
+                            setManageCategory("gold-retention");
+                            setManageInput("");
+                            setPinChangeMsg("");
+                            setShowManageDialog(true);
+                          }}
+                        >
+                          {importGoldRetentionReminders.data!.overdueCount} overdue deadline
+                          {importGoldRetentionReminders.data!.overdueCount === 1 ? "" : "s"}
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Manual reminders only; no case details or customer data are shown here.
+                    </p>
+                  </section>
+                )
+              )
+            )}
             {(syncPushFailed || writeError) && (
               <div className="print:hidden mb-3 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
@@ -18397,7 +18935,7 @@ export default function Home() {
                 {isManager && <QcDowntimeSurface days={downtimeDays} />}
               </TabsContent>
 
-              <TabsContent value="quality">
+              {canAccessQcWorkflow && <TabsContent value="quality">
                 <QcQualitySurface
                   runId={currentRunId}
                   runStartedAt={currentRun?.startedAt ?? null}
@@ -18411,7 +18949,7 @@ export default function Home() {
                   canManageQc={canManageQc}
                   canViewPhotos={canManageInventory}
                 />
-              </TabsContent>
+              </TabsContent>}
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
@@ -19286,7 +19824,7 @@ export default function Home() {
         )}
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
-        {showScheduleDialog && (
+        {showScheduleDialog && canManageFactorySettings && (
           <DialogLayerProvider value={80}>
           <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScheduleDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md flex flex-col`} onClick={e => e.stopPropagation()}>
@@ -19341,7 +19879,7 @@ export default function Home() {
                           <p className="text-sm font-semibold truncate">
                             Today — {new Date(todayStr() + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
                           </p>
-                          <p className="text-xs text-muted-foreground">{dayState.runs.length} run{dayState.runs.length !== 1 ? "s" : ""} on today's plan</p>
+                          <p className="text-xs text-muted-foreground">{todayPlannedRunCount} run{todayPlannedRunCount !== 1 ? "s" : ""} on today's plan</p>
                         </div>
                         <button
                           type="button"
@@ -19365,6 +19903,14 @@ export default function Home() {
                       </div>
                     ) : scheduledDays.map(day => {
                       const isExpanded = expandedScheduleDay === day.date;
+                      const moveChoice = scheduleSwapAvailability?.from === day.date
+                        && scheduleSwapAvailability.to === scheduleMoveDate
+                        ? scheduleSwapAvailability
+                        : null;
+                      const destinationAlreadyScheduled = !!moveChoice
+                        && !moveChoice.checking
+                        && moveChoice.sourceScheduled
+                        && moveChoice.destinationScheduled;
                       return (
                         <div key={day.date} data-testid={`schedule-day-${day.date}`} className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
                           {/* ── Header row ── */}
@@ -19393,9 +19939,12 @@ export default function Home() {
                                 setScheduleError(null);
                                   if (scheduleMove?.from === day.date && scheduleMove.runId === null) {
                                     setScheduleMove(null);
+                                    setScheduleSwapAvailability(null);
                                   } else {
                                     setScheduleMove({ from: day.date, runId: null });
-                                    setScheduleMoveDate(tomorrowStr());
+                                    const nextDate = tomorrowStr();
+                                    setScheduleMoveDate(nextDate);
+                                    void checkScheduleSwapEligibility(day.date, nextDate);
                                   }
                                 }}
                                 className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
@@ -19429,35 +19978,153 @@ export default function Home() {
                           {scheduleMove?.from === day.date && scheduleMove.runId === null && (
                             <div className="border-t border-border/40 px-3 py-2.5 bg-primary/5">
                               <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Move all runs to</label>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <input
                                   type="date"
                                   value={scheduleMoveDate}
-                                   min={todayStr()}
-                                  onChange={e => setScheduleMoveDate(e.target.value)}
-                                  className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
-                                  onClick={async () => {
-                                    setScheduleMoving(true);
-                                   const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
-                                   setScheduleMoving(false);
-                                   if (moved) setScheduleMove(null);
+                                  min={todayStr()}
+                                  onChange={e => {
+                                    const nextDate = e.target.value;
+                                    setScheduleMoveDate(nextDate);
+                                    void checkScheduleSwapEligibility(day.date, nextDate);
                                   }}
-                                  className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                                >
-                                  {scheduleMoving ? "Moving…" : "Move"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setScheduleMove(null)}
-                                  className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                                >
-                                  Cancel
-                                </button>
+                                  className="w-full sm:flex-1 h-10 sm:h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
+                                />
                               </div>
+                              {moveChoice?.checking ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs text-muted-foreground" role="status">Checking destination options…</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : moveChoice && !moveChoice.sourceScheduled ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs text-muted-foreground" role="status">The source schedule is no longer available. Refresh before moving it.</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : destinationAlreadyScheduled ? (
+                                <div className="mt-2 space-y-2">
+                                  <p className="text-xs text-muted-foreground">
+                                    This date already has a schedule. Choose to swap the day schedules, append these runs, or cancel without changes.
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {moveChoice.canSwap ? (
+                                      <button
+                                        type="button"
+                                        disabled={scheduleMoving}
+                                        onClick={async () => {
+                                          setScheduleMoving(true);
+                                          const swapped = await performScheduleSwap(day.date, scheduleMoveDate);
+                                          setScheduleMoving(false);
+                                          if (swapped) setScheduleMove(null);
+                                        }}
+                                        className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                      >
+                                        {scheduleMoving ? "Saving…" : "Swap day schedules"}
+                                      </button>
+                                    ) : (
+                                      <p className="w-full text-xs text-muted-foreground" role="status">
+                                        {moveChoice.reason === "today-started-after-6am"
+                                          ? "Today’s plan has started; swaps are unavailable after 6:59 a.m. Append or cancel instead."
+                                          : "Swap availability could not be confirmed. Append runs or cancel instead."}
+                                      </p>
+                                    )}
+                                    <button
+                                      type="button"
+                                      disabled={scheduleMoving}
+                                      onClick={async () => {
+                                        setScheduleMoving(true);
+                                        const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                        setScheduleMoving(false);
+                                        if (moved) setScheduleMove(null);
+                                      }}
+                                      className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-foreground hover:bg-muted/80 disabled:opacity-50"
+                                    >
+                                      {scheduleMoving ? "Saving…" : "Append runs"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={scheduleMoving}
+                                      onClick={() => {
+                                        setScheduleMove(null);
+                                        setScheduleSwapAvailability(null);
+                                      }}
+                                      className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : moveChoice ? (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <button
+                                    type="button"
+                                    disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                    onClick={async () => {
+                                      setScheduleMoving(true);
+                                      const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                      setScheduleMoving(false);
+                                      if (moved) setScheduleMove(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                  >
+                                    {scheduleMoving ? "Moving…" : "Move"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <button
+                                    type="button"
+                                    disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                    onClick={async () => {
+                                      setScheduleMoving(true);
+                                      const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                      setScheduleMoving(false);
+                                      if (moved) setScheduleMove(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                  >
+                                    {scheduleMoving ? "Moving…" : "Move"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                           {/* ── Expandable run list ── */}
@@ -19497,10 +20164,12 @@ export default function Home() {
                                       onClick={() => {
                                         if (scheduleMove?.from === day.date && scheduleMove.runId === run.id) {
                                           setScheduleMove(null);
+                                          setScheduleSwapAvailability(null);
                                         } else {
                                           setScheduleError(null);
                                           setScheduleMove({ from: day.date, runId: run.id });
                                           setScheduleMoveDate(tomorrowStr());
+                                          setScheduleSwapAvailability(null);
                                         }
                                       }}
                                       className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"

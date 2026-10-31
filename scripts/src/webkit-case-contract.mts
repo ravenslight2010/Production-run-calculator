@@ -7,8 +7,12 @@ export const WEBKIT_EXPECTED_CASE_IDENTITIES: readonly string[] = [
 ];
 
 export const WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES: readonly string[] = [
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: phone-webkit › Import Gold manager panel fits and remains reviewable at this browser viewport",
+  "artifacts/run-calculator/e2e/report-issue-confirmation.spec.ts :: phone-webkit › staff can retry a failed issue report without retyping and sees its diagnostic reference",
   "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts :: phone-webkit › authenticates and preserves current-run start, pause, resume, and reload",
   "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts :: phone-webkit › manager can preview an authoritative operational report",
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: tablet-webkit › Import Gold manager panel fits and remains reviewable at this browser viewport",
+  "artifacts/run-calculator/e2e/report-issue-confirmation.spec.ts :: tablet-webkit › staff can retry a failed issue report without retyping and sees its diagnostic reference",
   "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts :: tablet-webkit › authenticates and preserves current-run start, pause, resume, and reload",
   "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts :: tablet-webkit › manager can preview an authoritative operational report",
 ];

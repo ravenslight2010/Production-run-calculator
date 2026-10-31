@@ -257,6 +257,62 @@ class ProxyForwardingTests(unittest.TestCase):
         self.assertEqual(second_result.get("status"), 429)
         self.assertEqual(first_result.get("status"), 200)
 
+    def test_health_probe_remains_available_during_single_inference(self):
+        entered_upstream = threading.Event()
+        release_upstream = threading.Event()
+        completion_result: dict[str, int] = {}
+
+        def delayed_forward(_body: bytes) -> tuple[int, bytes]:
+            entered_upstream.set()
+            release_upstream.wait(timeout=2)
+            return 200, b'{"ok":true}'
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), proxy.EndpointHandler)
+        server.daemon_threads = True
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+
+        def post() -> None:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            connection.request(
+                "POST",
+                "/v1/chat/completions",
+                body=valid_body(),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            completion_result["status"] = response.status
+            response.read()
+            connection.close()
+
+        try:
+            with (
+                patch.object(proxy, "forward_completion", side_effect=delayed_forward),
+                patch.object(proxy, "forward_health", return_value=(200, b'{"status":"healthy"}')),
+            ):
+                completion = threading.Thread(target=post)
+                completion.start()
+                self.assertTrue(entered_upstream.wait(timeout=1))
+
+                health_connection = http.client.HTTPConnection(
+                    "127.0.0.1", server.server_port, timeout=3
+                )
+                health_connection.request("GET", "/healthz")
+                health_response = health_connection.getresponse()
+                self.assertEqual(health_response.status, 200)
+                self.assertEqual(health_response.read(), b'{"status":"healthy"}')
+                health_connection.close()
+
+                release_upstream.set()
+                completion.join(timeout=3)
+        finally:
+            release_upstream.set()
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=3)
+
+        self.assertEqual(completion_result.get("status"), 200)
+
 
 if __name__ == "__main__":
     unittest.main()

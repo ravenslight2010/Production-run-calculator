@@ -15,10 +15,10 @@ paths = [ "/" ]
 localPort = 26038
 
 [services.development]
-run = "pnpm --filter @workspace/run-calculator run dev"
+run = "bash ../../scripts/src/run-project-pnpm.sh --filter @workspace/run-calculator run dev"
 
 [services.production]
-build = [ "pnpm", "--filter", "@workspace/run-calculator", "run", "build" ]
+build = [ "bash", "scripts/src/run-project-pnpm.sh", "--filter", "@workspace/run-calculator", "run", "build" ]
 publicDir = "artifacts/run-calculator/dist/public"
 serve = "static"
 

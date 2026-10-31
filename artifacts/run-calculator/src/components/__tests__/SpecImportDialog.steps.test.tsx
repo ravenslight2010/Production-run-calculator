@@ -113,6 +113,65 @@ function renderDialog(
 }
 
 describe("SpecImportDialog two-step wizard", () => {
+  it("preserves edits but clears confirmation for a refreshed comparison, and resets for a new parse", () => {
+    const prepared = makePrepared(
+      [{ brand: "Original Bakery", flavor: "Original Flavor", applicators: [], pepperonis: [] }],
+      [{ kind: "dough", name: "Original Dough", rows: [{ ingredient: "Flour", lbs: 10 }] }],
+    );
+    prepared.importReview!.requiresExplicitConfirmation = true;
+    prepared.importReview!.counts.removed = 1;
+    prepared.importReview!.changes = [{
+      kind: "removed",
+      entity: 'dough "Original Dough"',
+      message: 'Removes "Sugar" from the existing dough.',
+      requiresConfirmation: true,
+    }];
+    const onConfirm = vi.fn();
+    const props = {
+      onClose: () => {},
+      loading: false,
+      error: null,
+      applying: false,
+      onConfirm,
+      onUseAiFallback: () => {},
+      existingRecipeNamesByKind: { dough: [], sauce: [], cheese: [], mix: [] },
+    };
+    const view = render(<SpecImportDialog open={true} {...props} prepared={prepared} />);
+    fireEvent.change(screen.getByPlaceholderText("Brand"), { target: { value: "Reviewed Bakery" } });
+    fireEvent.change(screen.getByPlaceholderText("Flavor"), { target: { value: "Reviewed Flavor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(screen.getByTestId("spec-recipe-name-rk0"), { target: { value: "Reviewed Dough" } });
+    fireEvent.click(screen.getByTestId("spec-import-destructive-confirmation"));
+
+    const refreshed = {
+      ...prepared,
+      importReview: {
+        ...prepared.importReview!,
+        confirmationReasons: ["The server comparison was refreshed."],
+      },
+    };
+    view.rerender(<SpecImportDialog open={true} {...props} prepared={refreshed} />);
+    expect((screen.getByTestId("spec-recipe-name-rk0") as HTMLInputElement).value).toBe("Reviewed Dough");
+    expect((screen.getByTestId("spec-import-destructive-confirmation") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("button", { name: /Apply 2 items/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("spec-import-destructive-confirmation"));
+    fireEvent.click(screen.getByRole("button", { name: /Apply 2 items/ }));
+    expect(onConfirm.mock.calls[0]?.[0]).toMatchObject({
+      profiles: [{ brand: "Reviewed Bakery", flavor: "Reviewed Flavor" }],
+      recipes: [{ name: "Reviewed Dough" }],
+    });
+
+    const nextSource = makePrepared(
+      [{ brand: "Different Source", flavor: "New Flavor", applicators: [], pepperonis: [] }],
+      [{ kind: "dough", name: "Different Dough", rows: [{ ingredient: "Flour", lbs: 20 }] }],
+    );
+    view.rerender(<SpecImportDialog open={true} {...props} prepared={nextSource} />);
+    expect((screen.getByPlaceholderText("Brand") as HTMLInputElement).value).toBe("Different Source");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect((screen.getByTestId("spec-recipe-name-rk0") as HTMLInputElement).value).toBe("Different Dough");
+    expect(onConfirm).toHaveBeenCalledOnce();
+  });
+
   it("keeps an ambiguous changed review locked and offers an exact retry", () => {
     const retry = vi.fn();
     const { container } = renderDialog(
@@ -683,7 +742,7 @@ describe("SpecImportDialog two-step wizard", () => {
     expect(screen.queryByTestId("spec-source-preview")).toBeNull();
   });
 
-  it("sends the gold opt-in only after the final reviewed Apply is selected", () => {
+  it("keeps unbound gold capture unavailable even when legacy configuration enables it", () => {
     const onConfirm = vi.fn();
     renderDialog(
       makePrepared([{ brand: "Aldo Foods", flavor: "Classic", applicators: [], pepperonis: [] }]),
@@ -695,8 +754,8 @@ describe("SpecImportDialog two-step wizard", () => {
     );
     expect(screen.queryByTestId("spec-import-gold-opt-in")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(screen.getByTestId("spec-import-gold-opt-in"));
+    expect(screen.queryByTestId("spec-import-gold-opt-in")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Apply 1 item/ }));
-    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(true);
+    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(false);
   });
 });

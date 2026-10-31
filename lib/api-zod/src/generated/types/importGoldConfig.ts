@@ -8,7 +8,13 @@
 
 export interface ImportGoldConfig {
   enabled: boolean;
+  /** True only when explicitly configured and source approvals are disabled */
+  cleanupEnabled: boolean;
   localConfigured: boolean;
+  localAvailable: boolean;
+  localScoringSwitchAvailable: boolean;
+  localScoringEnabled: boolean;
+  syntheticFixtureAvailable: boolean;
   geminiConfigured: boolean;
   retention: string;
   persistsAcrossFactoryPurge: boolean;

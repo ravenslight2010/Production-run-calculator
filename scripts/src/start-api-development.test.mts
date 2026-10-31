@@ -32,7 +32,7 @@ test("does not treat REPLIT_ENVIRONMENT=production alone as a deployment", () =>
   );
 });
 
-test("runs schema synchronization before the development server", async () => {
+test("applies audit protections without schema sync before the development server", async () => {
   const calls: string[] = [];
   await startApiDevelopment(
     { REPLIT_ENVIRONMENT: "development" },
@@ -41,7 +41,7 @@ test("runs schema synchronization before the development server", async () => {
     },
   );
   assert.deepEqual(calls, [
-    "pnpm --filter @workspace/db run push-force",
+    "pnpm --filter @workspace/db run apply-audit-log-protection",
     "pnpm --filter @workspace/api-server run dev:without-schema-push",
   ]);
 });

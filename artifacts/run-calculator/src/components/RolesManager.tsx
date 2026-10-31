@@ -118,7 +118,7 @@ export default function RolesManager() {
     }) =>
       mode === "new"
         ? createRoleRequest(name, caps)
-        : updateRoleRequest(prevName, caps, name),
+        : updateRoleRequest(prevName, caps, name, editing && editing !== "new" ? editing : undefined),
     onSuccess: () => {
       closeRoleEditor();
       qc.invalidateQueries({ queryKey: ["roles"] });
@@ -229,6 +229,18 @@ export default function RolesManager() {
         </div>
       </CardHeader>
       <CardContent className="px-4 pb-4 space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span role="status" aria-live="polite">
+            {rolesQuery.isFetching ? "Checking shared roles…" : rolesQuery.dataUpdatedAt
+              ? `Roles last loaded ${new Date(rolesQuery.dataUpdatedAt).toLocaleTimeString()}`
+              : "Roles have not loaded yet."}
+          </span>
+          <Button type="button" variant="outline" size="sm" disabled={rolesQuery.isFetching}
+            onClick={() => void rolesQuery.refetch()}>
+            Refresh roles
+          </Button>
+          {rolesQuery.isError && <span role="alert">Role refresh failed. Previously loaded roles may be out of date.</span>}
+        </div>
         <p className="text-xs text-muted-foreground">
           Create roles, choose what each one can do, and assign staff to them.
           Built-in roles can't be renamed or deleted.
@@ -389,7 +401,8 @@ export default function RolesManager() {
               </DialogTitle>
               <DialogDescription>
                 Name the role and choose the capabilities it grants. You can only
-                grant capabilities you have yourself.
+                grant or remove capabilities you have yourself. A newer change
+                by another manager will not be overwritten by this draft.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-2">
@@ -427,9 +440,15 @@ export default function RolesManager() {
                       <Checkbox
                         checked={roleCaps.includes(cap)}
                         disabled={!actorHas || lockManageStaff}
+                        aria-describedby={!actorHas ? `role-restriction-${cap}` : undefined}
                         onCheckedChange={() => toggleRoleCap(cap)}
                       />
                       <span>{CAPABILITY_LABELS[cap]}</span>
+                      {!actorHas && (
+                        <span id={`role-restriction-${cap}`} className="text-[10px] text-muted-foreground">
+                          You cannot grant or remove a permission you do not hold.
+                        </span>
+                      )}
                       {lockManageStaff && (
                         <span className="text-[10px] text-muted-foreground">
                           (required for manager)
@@ -443,9 +462,33 @@ export default function RolesManager() {
                 <p className="text-xs text-red-500">{roleClientError}</p>
               )}
               {saveRoleMutation.isError && (
-                <p className="text-xs text-red-500">
-                  {serverMessage(saveRoleMutation.error, "Could not save role.")}
-                </p>
+                <div role="alert" className="space-y-2 text-xs text-red-500">
+                  <p>{serverMessage(saveRoleMutation.error, "Could not save role.")}</p>
+                  {editing !== "new" && (
+                    <Button type="button" variant="outline" size="sm"
+                      disabled={rolesQuery.isFetching}
+                      onClick={async () => {
+                        if (!window.confirm("Discard this unsaved role draft and load the latest shared role?")) return;
+                        try {
+                          const result = await rolesQuery.refetch({ throwOnError: true });
+                          const latest = result.data?.find((role) => role.name === originalName);
+                          if (!latest) {
+                            setRoleClientError("This role was removed or renamed. Close this editor and review the shared role list.");
+                            return;
+                          }
+                          setEditing(latest);
+                          setRoleName(latest.name);
+                          setRoleCaps([...latest.capabilities]);
+                          setRoleClientError(null);
+                          saveRoleMutation.reset();
+                        } catch {
+                          setRoleClientError("The latest role could not be loaded. Your unsaved draft is still here.");
+                        }
+                      }}>
+                      Discard draft and load latest
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
             <DialogFooter>

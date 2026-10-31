@@ -10,6 +10,7 @@
 
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
@@ -156,7 +157,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
   const runId = await seedPendingRun(page);
 
   await dismissOnboarding(page);
-  await page.getByTestId("tab-run").click();
+  await selectCanonicalFixtureRun(page, runId);
   await expect(page.getByTestId("button-start-run")).toBeVisible();
   await page.getByTestId("button-start-run").click();
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();

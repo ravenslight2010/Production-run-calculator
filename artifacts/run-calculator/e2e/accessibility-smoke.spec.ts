@@ -6,6 +6,7 @@ import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
+  AuthorizedBrowserFixtures,
 } from "./isolation";
 import {
   dismissOnboardingIfPresent,
@@ -13,6 +14,8 @@ import {
 } from "./onboarding";
 
 const testUsernames = new Set<string>();
+const canonicalSeedDates = new Set<string>();
+let authorizedFixtures: AuthorizedBrowserFixtures;
 const DOCUMENT_SHELL_RULES = ["landmark-one-main", "region"] as const;
 const SCREEN_RULES: Record<string, readonly string[]> = {
   "sign-in": [],
@@ -404,6 +407,7 @@ async function signUp(
 }
 
 test.afterAll(async () => {
+  await authorizedFixtures?.cleanup({ syncDates: [...canonicalSeedDates] });
   if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   try {
@@ -414,8 +418,14 @@ test.afterAll(async () => {
   }
 });
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ playwright }) => {
   await requireIsolatedTestDatabase("accessibility smoke browser check");
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    process.env.PLAYWRIGHT_API_BASE_URL ?? process.env.PLAYWRIGHT_BASE_URL
+      ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+    process.env.STAFF_SIGNUP_CODE ?? "",
+  );
 });
 
 async function seedPendingRun(page: Page): Promise<string> {
@@ -482,6 +492,19 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.removeItem("run-calc-day");
   });
+  const token = (await page.context().cookies(page.url()))
+    .find((cookie) => cookie.name === "rc_auth")?.value;
+  if (!token) throw new Error("Accessibility fixture requires an authenticated browser.");
+  // Stop the app before privileged, disposable-database initialization.
+  // Stoppage history is command-owned and must not be forged by a normal PUT.
+  await page.goto("about:blank");
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
+    token,
+    senderId: `a11y-${runId}`,
+    date,
+    payload,
+  });
+  canonicalSeedDates.add(date);
   await page.addInitScript((seed: { payload: typeof payload; runId: string }) => {
     // Init scripts run before every navigation, including reloads triggered by
     // authenticated startup (for example, a sandbox refresh). Keep the seed
@@ -499,45 +522,7 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.setItem("run-calc-day", JSON.stringify(seed.payload.dayState));
   }, { payload, runId });
-  // Seed the canonical server snapshot as well as browser storage. The app's
-  // initial SSE reconciliation can otherwise replace this local-only fixture
-  // with the server's empty day state before the workflow reaches its checks.
-  const serverSeed = await page.evaluate(async ({ date, payload, senderId }) => {
-    const epochResponse = await fetch("/api/sync/reset-epoch", {
-      credentials: "same-origin",
-    });
-    if (!epochResponse.ok) {
-      return {
-        ok: false,
-        step: "reading the sync reset epoch",
-        status: epochResponse.status,
-        body: await epochResponse.text(),
-      };
-    }
-
-    const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
-    const response = await fetch(
-      `/api/sync/today?today=${encodeURIComponent(date)}&epoch=${encodeURIComponent(String(epoch))}`,
-      {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId, payload }),
-      },
-    );
-    return {
-      ok: response.ok,
-      step: "writing the canonical today sync snapshot",
-      status: response.status,
-      body: response.ok ? "" : await response.text(),
-    };
-  }, { date, payload, senderId: `a11y-${runId}` });
-  if (!serverSeed.ok) {
-    throw new Error(
-      `Fixture ${serverSeed.step} failed (HTTP ${serverSeed.status}): ${serverSeed.body.slice(0, 300)}`,
-    );
-  }
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect
     .poll(
@@ -1114,7 +1099,20 @@ test.describe("accessibility smoke", () => {
         navigationPaths.add(new URL(request.url()).pathname);
       }
     };
-    page.on("pageerror", error => errors.push(error.message));
+    page.on("pageerror", error => {
+      const cancelledPath = cancelledDocumentMessage({
+        webkit: test.info().project.name.endsWith("webkit"),
+        text: error.message,
+        successfulOrigins,
+        navigationPaths,
+        duringReload: requestPhase === "persistence reload",
+      });
+      if (cancelledPath) {
+        expectedWebKitNavigationMessages.push(`cancelled page error: ${cancelledPath}`);
+      } else {
+        errors.push(error.message);
+      }
+    });
     page.on("console", message => {
       if (message.type() === "error") {
         const source = message.location().url;
@@ -1162,6 +1160,7 @@ test.describe("accessibility smoke", () => {
           ((requestPhase === "persistence reload" || navigationRequests.has(request)) && (
             (request.method() === "GET" && pathname === "/api/sync/events")
             || (pathname === "/api/factory-data" && ["GET", "PUT"].includes(request.method()))
+            || (request.method() === "GET" && pathname === "/api/incidents/actionable-count")
           ))
           || (requestPhase === "summary navigation"
             && request.method() === "GET"

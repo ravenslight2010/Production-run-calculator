@@ -829,12 +829,13 @@ useEffect(() => {
       }
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
-    if (authoritativeServerAutoTrack) {
-      // Do not queue a browser claim or apply its optimistic mutation. The
-      // server tick engine applies the canonical row under lock and SSE/sync
-      // adoption updates every display. This also defines the offline policy:
-      // counters stay at their last canonical value instead of accumulating a
-      // replayable local delta that could duplicate work after reconnect.
+    if (
+      authoritativeServerAutoTrack
+      && (typeof navigator === "undefined" || !navigator.onLine)
+    ) {
+      // When disconnected, do not queue or optimistically apply a mutation that
+      // the server could not fence. Online, the fresh per-channel schedule
+      // decides whether the server or this client owns the next write.
       return;
     }
     if (!claimAutoTrackEvent) {
@@ -1244,13 +1245,22 @@ useEffect(() => {
       }
       if (control.generation !== coordinationIdentityRef.current) return;
       if (!Number.isFinite(control.pausedAt ?? 0) || !Number.isFinite(control.resumeAt ?? 0)) return;
-      if ((control.pausedAt ?? 0) > 0) {
+      const pausedAt = control.pausedAt ?? 0;
+      const resumeAt = control.resumeAt ?? 0;
+      const timedPauseExpired = pausedAt > 0
+        && resumeAt > 0
+        && resumeAt <= Date.now() + serverClockOffsetRef.current;
+      if (pausedAt > 0 && !timedPauseExpired) {
         doughTimerPausedRef.current = control.pausedAt! - serverClockOffsetRef.current;
         doughTimerResumeAtRef.current = (control.resumeAt ?? 0) > 0
           ? control.resumeAt! - serverClockOffsetRef.current : 0;
         setIsDoughTimerPaused(true);
       } else if (doughTimerPausedRef.current > 0) {
         rearmDoughTimers(Date.now());
+      } else {
+        // A delayed canonical frame can repeat an already-expired timed hold.
+        // Never revive it just because the displayed projection clock lags.
+        setIsDoughTimerPaused(false);
       }
     };
     window.addEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);

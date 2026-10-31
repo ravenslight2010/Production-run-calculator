@@ -30,10 +30,19 @@ explicitly for Docker/Caddy: use the local `chromium` path in Replit and Playwri
 - [Loopback probes](release-runner-loopback-probes.md) — bypass only local readiness probes, not TLS guards.
 - [Browser routing](local-browser-suite-routing.md) — offline installs and scoped loopback exceptions.
 - [Test CA subjects](openssl-test-ca-subject-uniqueness.md) — certificate subjects must be unique per fixture.
+- [Local PostgreSQL](local-postgres-socket-dir.md), [ARM64](local-arm64-toolchain.md), [disposable DB](disposable-database-test-startup.md) — use private sockets; wait for test schemas.
+- [WebKit GIO TLS](webkit-gio-tls-runtime.md), [IPv6 loopback](ipv6-loopback-test-environment.md) — keep trust enabled; load Nix TLS modules and fence unsupported IPv6 probes.
+- [WebKit push tests](local-browser-suite-routing.md) — WPE can hang on push APIs; use active registrations and clearly scoped empty-subscription fixtures.
 
 ## Workspace-wide typecheck failures
 
 When the full `pnpm run typecheck` fails outside the changed package, isolate the named package before attributing the failure to the current task. A TypeScript 6.0.3 check of `artifacts/mockup-sandbox` has reproduced the compiler assertion `parameter should have errors when reporting errors` even when run alone, while the calculator package typecheck passes. Do not silently skip the root check or treat the isolated calculator result as a full pass.
+
+If a workspace-wide typecheck exceeds its shell time limit while another lock-heavy suite is active, record it as incomplete rather than as a compiler failure. Run the changed package's declared typecheck for focused evidence, and wait until the shared validation runner is clear before retrying the root check.
+
+**Why:** A five-minute root check was cut off while the calculator suite was running; the calculator package typecheck completed successfully afterward, but that did not establish a root pass.
+
+**How to apply:** Check the runner lock and active validation workflows before retrying; report focused package results and workspace-wide status separately.
 
 Generated API checks can fail earlier if Orval output drifts from the OpenAPI source. Compare temporary generated output with the tracked files; regenerate only when the source contract supports the difference, then rerun the full check to reveal later failures.
 

@@ -31,6 +31,7 @@ export * from "./savedCheeseSheets";
 export * from "./importHistory";
 export * from "./importOperations";
 export * from "./importGold";
+export * from "./importGoldApprovals";
 export * from "./mergeAliases";
 export * from "./deniedMerges";
 export * from "./duplicateReviewGroups";

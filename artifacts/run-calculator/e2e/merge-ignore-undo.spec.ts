@@ -5,6 +5,7 @@ import {
   DEFAULT_MANAGER_CAPABILITIES,
   requireIsolatedTestDatabase,
   uniqueTestId,
+  freshMasterDataSeedHeaders,
 } from "./isolation";
 import { signUpAndHandleOnboarding } from "./onboarding";
 
@@ -193,6 +194,7 @@ test("manager can undo a flavor ignore without changing other scopes or aliases"
 
     for (const scopedBrand of [brand, otherBrand]) {
       const response = await page.request.post("/api/merge-aliases", {
+        headers: await freshMasterDataSeedHeaders(page.request, "/api/brand-profiles"),
         data: {
           category: "flavor",
           brand: scopedBrand,
@@ -206,6 +208,7 @@ test("manager can undo a flavor ignore without changing other scopes or aliases"
       ["dough", undefined],
     ] as const) {
       const response = await page.request.post("/api/denied-merges", {
+        headers: await freshMasterDataSeedHeaders(page.request, "/api/brand-profiles"),
         data: { pairs: [pair], category, ...(scopedBrand ? { brand: scopedBrand } : {}) },
       });
       expect(response.status()).toBe(200);

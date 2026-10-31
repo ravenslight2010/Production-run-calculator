@@ -79,3 +79,29 @@ it("keeps update states and actions in normal page flow instead of a fixed overl
     }
   }
 });
+
+it("shows a neutral development notice without published-update actions", () => {
+  const check = vi.fn();
+  const update = vi.fn();
+  const cancelUpdate = vi.fn();
+  render(
+    <AppUpdateControl
+      state={{ phase: "failed", running: "local", stage: "identity" }}
+      check={check}
+      update={update}
+      cancelUpdate={cancelUpdate}
+      developmentPreview
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "App updates · Development preview" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toContain(
+    "Published updates are not checked in this development preview",
+  );
+  expect(screen.queryByText(/Update failed/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Update app" })).toBeNull();
+  expect(check).not.toHaveBeenCalled();
+  expect(update).not.toHaveBeenCalled();
+  expect(cancelUpdate).not.toHaveBeenCalled();
+});

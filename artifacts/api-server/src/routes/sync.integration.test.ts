@@ -4108,6 +4108,7 @@ describe("POST /sync/auto-track/claim", () => {
     const bodies = await Promise.all([a.json(), b.json()]) as Array<{
       outcome: string;
       values: Record<string, number>;
+      data: Record<string, any>;
     }>;
     expect(bodies.map(({ outcome }) => outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every(({ values }) =>
@@ -4115,6 +4116,13 @@ describe("POST /sync/auto-track/claim", () => {
       && values.app1StockAnchorNetSec === 15
       && values.app1BatchesMade === 9
     )).toBe(true);
+    const accepted = bodies.find(({ outcome }) => outcome === "accepted")!;
+    expect(accepted.data.autoTrackServerState.netOwnership[RUN]["app1-stock"]).toMatchObject({
+      generation: `${RUN}:2`,
+      sequence: 1,
+    });
+    expect(accepted.data.autoTrackServerState.netOwnership[RUN]["app1-stock"].updatedAt)
+      .toEqual(expect.any(Number));
     expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
   });
 
@@ -4324,6 +4332,319 @@ describe("GET /sync/scheduled — client-local-date filtering", () => {
     expect(days[0].date).toBe("2030-03-12");
     expect(days[0].runCount).toBe(1);
     expect(days[0].runs).toHaveLength(1);
+  });
+});
+
+describe("POST /sync/schedule-swap — atomic date-scoped schedule exchange", () => {
+  const sourceDate = "2030-03-10";
+  const destinationDate = "2030-03-11";
+  const originalSource = {
+    dayState: { date: sourceDate, runs: [{ id: "source-run", brand: "Source" }], breaks: { break1: 20 } },
+    runValues: { "source-run": { casesNeeded: 12 } },
+    runValuesUpdatedAt: { "source-run": 101 },
+    packagingProgress: { "source-run": { casesOnCurrentSkid: 3 } },
+    doughTimerControls: { "source-run": { generation: "source-generation" } },
+    brands: ["Source-only factory list"],
+    templates: [{ id: "source-template" }],
+  };
+  const originalDestination = {
+    dayState: { date: destinationDate, runs: [{ id: "destination-run", brand: "Destination" }], breaks: { break1: 40 } },
+    runValues: { "destination-run": { casesNeeded: 24 } },
+    runValuesUpdatedAt: { "destination-run": 202 },
+    packagingProgress: { "destination-run": { casesOnCurrentSkid: 6 } },
+    autoTrackCoordination: { version: 1, runs: { "destination-run": { case: { sequence: 2 } } } },
+    brands: ["Destination-only factory list"],
+    templates: [{ id: "destination-template" }],
+  };
+
+  async function seedPair() {
+    await seedCanonicalSync(sourceDate, originalSource, 4);
+    await seedCanonicalSync(destinationDate, originalDestination, 8);
+  }
+
+  function swapRequest(revisions = { sourceRevision: 4, destinationRevision: 8 }) {
+    return fetch(`${baseUrl}/api/sync/schedule-swap`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate,
+        destinationDate,
+        ...revisions,
+        resetEpoch: 0,
+        senderId: "schedule-swap-test",
+      }),
+    });
+  }
+
+  it("atomically swaps runs, values, stamps, packaging, breaks and run state, preserving factory data", async () => {
+    await seedPair();
+    const response = await swapRequest();
+    expect(response.status).toBe(200);
+    const result = await response.json() as { swapped: boolean; sourceRevision: number; destinationRevision: number };
+    expect(result).toMatchObject({ swapped: true, sourceRevision: 5, destinationRevision: 9 });
+
+    const rows = await db.select().from(dailySyncTable)
+      .where(inArray(dailySyncTable.date, [sourceDate, destinationDate]));
+    const source = rows.find((row) => row.date === sourceDate)!;
+    const destination = rows.find((row) => row.date === destinationDate)!;
+    expect(source.canonicalRevision).toBe(5);
+    expect(destination.canonicalRevision).toBe(9);
+    expect(source.data).toMatchObject({
+      dayState: { date: sourceDate, runs: [{ id: "destination-run" }], breaks: { break1: 40 } },
+      runValues: originalDestination.runValues,
+      runValuesUpdatedAt: originalDestination.runValuesUpdatedAt,
+      packagingProgress: originalDestination.packagingProgress,
+      autoTrackCoordination: originalDestination.autoTrackCoordination,
+      brands: originalSource.brands,
+      templates: originalSource.templates,
+    });
+    expect(destination.data).toMatchObject({
+      dayState: { date: destinationDate, runs: [{ id: "source-run" }], breaks: { break1: 20 } },
+      runValues: originalSource.runValues,
+      runValuesUpdatedAt: originalSource.runValuesUpdatedAt,
+      packagingProgress: originalSource.packagingProgress,
+      doughTimerControls: originalSource.doughTimerControls,
+      brands: originalDestination.brands,
+      templates: originalDestination.templates,
+    });
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"));
+    expect(events.filter((event) => event.kind === "day-state").map((event) => event.date).sort())
+      .toEqual([sourceDate, destinationDate]);
+  });
+
+  it("rejects stale revisions without changing either date", async () => {
+    await seedPair();
+    const response = await swapRequest({ sourceRevision: 3, destinationRevision: 8 });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "SCHEDULE_REVISION_CONFLICT" });
+    const rows = await db.select().from(dailySyncTable)
+      .where(inArray(dailySyncTable.date, [sourceDate, destinationDate]));
+    expect(rows.find((row) => row.date === sourceDate)).toMatchObject({
+      canonicalRevision: 4,
+      data: originalSource,
+    });
+    expect(rows.find((row) => row.date === destinationDate)).toMatchObject({
+      canonicalRevision: 8,
+      data: originalDestination,
+    });
+    expect(await db.select().from(syncOutboxEventsTable)).toEqual([]);
+  });
+
+  it("serializes concurrent swaps so only one request can apply a given revision pair", async () => {
+    await seedPair();
+    const responses = await Promise.all([swapRequest(), swapRequest()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    const rows = await db.select().from(dailySyncTable)
+      .where(inArray(dailySyncTable.date, [sourceDate, destinationDate]));
+    expect(rows.find((row) => row.date === sourceDate)?.canonicalRevision).toBe(5);
+    expect(rows.find((row) => row.date === destinationDate)?.canonicalRevision).toBe(9);
+  });
+
+  it("requires schedule authority and applies the server facility-local 7 a.m. boundary", async () => {
+    await seedPair();
+    const denied = await fetch(`${baseUrl}/api/sync/schedule-swap`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate, destinationDate, sourceRevision: 4, destinationRevision: 8, resetEpoch: 0,
+      }),
+    });
+    expect(denied.status).toBe(403);
+    const deniedSwap = await fetch(`${baseUrl}/api/sync/schedule-swap`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate, destinationDate, sourceRevision: 4, destinationRevision: 8, resetEpoch: 0,
+      }),
+    });
+    expect(deniedSwap.status).toBe(403);
+    const deniedEligibility = await fetch(
+      `${baseUrl}/api/sync/schedule-swap-eligibility?sourceDate=${sourceDate}&destinationDate=${destinationDate}`,
+      { headers: authHeaders() },
+    );
+    expect(deniedEligibility.status).toBe(403);
+
+    const originalTimeZone = process.env.FACILITY_TIME_ZONE;
+    const now = vi.spyOn(Date, "now");
+    process.env.FACILITY_TIME_ZONE = "UTC";
+    try {
+      await seedCanonicalSync(sourceDate, {
+        ...originalSource,
+        dayState: { ...originalSource.dayState, runs: [{ id: "started-run", startedAt: 100 }] },
+      }, 4);
+      now.mockReturnValue(Date.parse("2030-03-10T07:00:00Z"));
+      const afterBoundary = await fetch(
+        `${baseUrl}/api/sync/schedule-swap-eligibility?sourceDate=${sourceDate}&destinationDate=${destinationDate}`,
+        { headers: managerAuthHeaders() },
+      );
+      expect(await afterBoundary.json()).toMatchObject({
+        sourceScheduled: true,
+        destinationScheduled: true,
+        canSwap: false,
+        reason: "today-started-after-6am",
+      });
+      const tooLate = await swapRequest();
+      expect(tooLate.status).toBe(409);
+      expect(await tooLate.json()).toMatchObject({ code: "TODAY_SWAP_NOT_ELIGIBLE" });
+
+      now.mockReturnValue(Date.parse("2030-03-10T06:59:00Z"));
+      const beforeBoundaryEligibility = await fetch(
+        `${baseUrl}/api/sync/schedule-swap-eligibility?sourceDate=${sourceDate}&destinationDate=${destinationDate}`,
+        { headers: managerAuthHeaders() },
+      );
+      expect(await beforeBoundaryEligibility.json()).toMatchObject({ canSwap: true });
+      const beforeBoundary = await swapRequest();
+      expect(beforeBoundary.status).toBe(200);
+    } finally {
+      now.mockRestore();
+      if (originalTimeZone === undefined) delete process.env.FACILITY_TIME_ZONE;
+      else process.env.FACILITY_TIME_ZONE = originalTimeZone;
+    }
+  });
+});
+
+describe("POST /sync/schedule-move — atomic run relocation", () => {
+  const sourceDate = "2030-03-10";
+  const destinationDate = "2030-03-11";
+  const sourceData = {
+    dayState: {
+      date: sourceDate,
+      runs: [
+        { id: "move-run", brand: "Move", metaUpdatedAt: 10 },
+        { id: "stay-run", brand: "Stay", metaUpdatedAt: 11 },
+      ],
+      breaks: { break1: 20 },
+      stagedItems: { "move-run::Flour__lbs": true, "stay-run::Cheese__lbs": true },
+    },
+    runValues: {
+      "move-run": { casesNeeded: 18 },
+      "stay-run": { casesNeeded: 7 },
+    },
+    runValuesUpdatedAt: { "move-run": 101, "stay-run": 102 },
+    packagingProgress: {
+      "move-run": { casesOnCurrentSkid: 3 },
+      "stay-run": { casesOnCurrentSkid: 1 },
+    },
+    doughTimerControls: { "move-run": { generation: "move-generation" } },
+    autoTrackCoordination: { version: 1, runs: { "move-run": { case: { sequence: 1 } } } },
+    autoTrackServerState: {
+      version: 1,
+      wallClockBookkeeping: {
+        "move-run": { lifecycleGeneration: "move-run:1", caseNextDueMs: 1_900_000_000_000 },
+        "stay-run": { lifecycleGeneration: "stay-run:1", caseNextDueMs: 1_900_000_000_100 },
+      },
+    },
+    brands: ["Source factory list"],
+  };
+  const destinationData = {
+    dayState: { date: destinationDate, runs: [{ id: "destination-run", brand: "Destination" }], breaks: { break1: 40 } },
+    runValues: { "destination-run": { casesNeeded: 6 } },
+    runValuesUpdatedAt: { "destination-run": 202 },
+    packagingProgress: { "destination-run": { casesOnCurrentSkid: 2 } },
+    brands: ["Destination factory list"],
+  };
+
+  function moveRequest(
+    runIds: string[] | "all" = ["move-run"],
+    revisions = { sourceRevision: 4, destinationRevision: 8 },
+    headers: Record<string, string> = managerAuthHeaders(),
+  ) {
+    return fetch(`${baseUrl}/api/sync/schedule-move`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate,
+        destinationDate,
+        ...revisions,
+        resetEpoch: 0,
+        runIds,
+        senderId: "schedule-move-test",
+      }),
+    });
+  }
+
+  async function seedPair() {
+    await seedCanonicalSync(sourceDate, sourceData, 4);
+    await seedCanonicalSync(destinationDate, destinationData, 8);
+  }
+
+  it("moves one run once, retains source runs, and carries run-bound values and progress", async () => {
+    await seedPair();
+    const responses = await Promise.all([moveRequest(), moveRequest()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+
+    const source = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, sourceDate))).then((rows) => rows[0]);
+    const destination = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate))).then((rows) => rows[0]);
+    expect((source.data as any).dayState.runs.map((run: any) => run.id)).toEqual(["stay-run"]);
+    expect((source.data as any).runValues).toEqual({ "stay-run": { casesNeeded: 7 } });
+    expect((source.data as any).dayState.stagedItems).toEqual({ "stay-run::Cheese__lbs": true });
+    expect((source.data as any).autoTrackServerState.wallClockBookkeeping).toEqual({
+      "stay-run": { lifecycleGeneration: "stay-run:1", caseNextDueMs: 1_900_000_000_100 },
+    });
+    expect((destination.data as any).dayState.runs.map((run: any) => run.id)).toEqual(["destination-run", "move-run"]);
+    expect((destination.data as any).runValues["move-run"]).toEqual({ casesNeeded: 18 });
+    expect((destination.data as any).runValuesUpdatedAt["move-run"]).toBe(101);
+    expect((destination.data as any).packagingProgress["move-run"]).toEqual({ casesOnCurrentSkid: 3 });
+    expect((destination.data as any).doughTimerControls["move-run"]).toEqual({ generation: "move-generation" });
+    expect((destination.data as any).autoTrackCoordination.runs["move-run"]).toEqual({ case: { sequence: 1 } });
+    expect((destination.data as any).autoTrackServerState.wallClockBookkeeping["move-run"]).toEqual({
+      lifecycleGeneration: "move-run:1",
+      caseNextDueMs: 1_900_000_000_000,
+    });
+    expect((destination.data as any).dayState.stagedItems).toEqual({ "move-run::Flour__lbs": true });
+    expect((source.data as any).brands).toEqual(sourceData.brands);
+    expect((destination.data as any).brands).toEqual(destinationData.brands);
+    expect(source.canonicalRevision).toBe(5);
+    expect(destination.canonicalRevision).toBe(9);
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"));
+    expect(events.filter((event) => event.kind === "day-state").map((event) => event.date).sort())
+      .toEqual([sourceDate, destinationDate]);
+  });
+
+  it("rolls back stale requests and does not leave an empty destination row", async () => {
+    await seedCanonicalSync(sourceDate, sourceData, 4);
+    await db.delete(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ));
+    const stale = await moveRequest(["move-run"], { sourceRevision: 3, destinationRevision: 0 });
+    expect(stale.status).toBe(409);
+    expect(await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ))).toEqual([]);
+    expect((await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, sourceDate),
+    )))[0].canonicalRevision).toBe(4);
+  });
+
+  it("moves a whole day onto a new date and removes the empty source", async () => {
+    await seedCanonicalSync(sourceDate, sourceData, 4);
+    await db.delete(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ));
+    const response = await moveRequest("all", { sourceRevision: 4, destinationRevision: 0 });
+    expect(response.status).toBe(200);
+    expect((await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, sourceDate),
+    )))).toEqual([]);
+    const [destination] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ));
+    expect((destination.data as any).dayState).toMatchObject({
+      date: destinationDate,
+      runs: [{ id: "move-run" }, { id: "stay-run" }],
+      breaks: { break1: 20 },
+    });
+    expect((destination.data as any).runValues).toEqual(sourceData.runValues);
+  });
+
+  it("denies operators without schedule-management capability", async () => {
+    await seedPair();
+    const response = await moveRequest(["move-run"], undefined, authHeaders());
+    expect(response.status).toBe(403);
   });
 });
 

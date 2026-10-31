@@ -8,3 +8,69 @@ Never collect or score customer workbook content for Import Gold until source-ow
 **Why:** A server enablement flag is only an operator attestation and cannot substitute for a reviewable authorization record or privacy decision.
 
 **How to apply:** Keep the lab disabled while any approval is missing or pending. Preserve synthetic fixtures for implementation checks, and do not store customer workbook content or private approval evidence in the repository.
+
+The project owner stated “Manager and qc manager share all roles” in the Gold
+Lab approval workflow. Either role may handle authorization, privacy review,
+deletion, and deletion verification; do not impose separate duties on the two
+roles. This is an organizational responsibility rule, not authorization to
+change application permissions or bypass source-specific handling requirements.
+
+**Why:** The owner clarified shared responsibility after proposed guidance
+assigned deletion and verification to separate roles. Organizational authority
+and an explicit decision about particular sources and handling requirements
+remain separate facts.
+
+**How to apply:** Seek the actual use, retention, and privacy decisions through
+the authorized roles; keep the real-source boundary closed while any required
+decision or verification is unresolved.
+
+The project owner approved a maximum 30-day retention policy for Gold Lab
+evaluation cases and working copies, with earlier deletion on source-owner
+request. Either authorized role may delete and verify completion. Avoid exports
+unless needed and approved; keep original business records under their existing
+policy. Actual backup retention must be documented separately, not represented
+as proven 30-day erasure.
+
+**Why:** The approved policy deliberately relies on manual deletion rather than
+assuming automatic expiry or deletion of external copies.
+
+**How to apply:** Before real-source work, verify that the private source-specific
+approval and actual handling can meet this policy. Policy approval is not proof
+of implementation or permission to enable real-source capture.
+
+The owner selected a seven-day reminder window before the 30-day deadline. This
+is an in-app due-soon status, not an external notification or automated deletion.
+
+**Why:** The owner approved a visible advance reminder while keeping the
+application's deletion process manual.
+
+**How to apply:** Keep the due-soon boundary at seven days, show overdue cases
+explicitly, and do not imply push/email delivery or automated erasure.
+
+The owner selected metadata-only approval records in the application database.
+Full approval documents, workbook content, source locations, and private source
+mapping remain outside the repository and outside this metadata ledger.
+
+**Why:** The owner initially expected the app database to hold approvals, then
+explicitly chose the metadata-only approach rather than copying full evidence.
+This avoids creating another store of sensitive approval documents while
+preserving an accountable verification record.
+
+**How to apply:** Use opaque references to restricted evidence and source-bound
+metadata. Creating a record or recording a human attestation does not itself
+authorize enablement, replace actual evidence review, or establish backup
+erasure. Keep real-source use blocked until all source-specific prerequisites
+are genuinely satisfied.
+
+Approval metadata readiness and real-source UI availability are separate.
+Until the manager workflow can select a verified source-bound approval, keep
+capture unavailable rather than showing an opt-in that cannot satisfy the
+server contract.
+
+**Why:** Tightening source authorization can otherwise turn an optional
+capture selection into a failure of the entire ordinary import. Synthetic
+server fixtures that inject approval IDs do not prove the human workflow works.
+
+**How to apply:** Trace approval-contract changes through each human import
+consumer. Preserve ordinary imports without capture and verify client behavior
+without enabling capture or using private customer sources.

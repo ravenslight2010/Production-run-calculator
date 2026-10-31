@@ -3,6 +3,7 @@ import {
   fetchFactoryData, flushFactoryQueue, getShiftStartTime, getProductionStartTime, getStopReasons, getPackagingSettings, hydrateFromServer,
   putFactoryKey, resetFactoryDataSyncForTests, setFactoryDataIdentity,
   runFactoryKvMigration, legacyDirectoryReviews, resolveLegacyDirectoryReview,
+  managerPendingFactoryDataWriteCount,
 } from "./factoryDataSync";
 import { BRANDS_KEY, DOUGH_RECIPE_NAMES_KEY, DOUGH_RECIPE_PRESETS_KEY, SHIFT_START_TIME_KEY,
   STOP_REASONS_KEY, CIRCLES_KEY, SHIPPER_KEY, SKID_STACKING_KEY, GRIP_SHEETS_KEY, PRODUCTION_START_TIME_KEY } from "./types";
@@ -26,6 +27,43 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("memory directory and scoped durable commands", () => {
+  it("notifies count subscribers after durable enqueue and each acknowledgment, retaining the unacknowledged remainder", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({}, 503)));
+    const counts: Array<number | null> = [];
+    const unsubscribe = subscribeFactoryDirectory(() => counts.push(managerPendingFactoryDataWriteCount()));
+    try {
+      putFactoryKey(STOP_REASONS_KEY, ["Pending stop"]);
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(1);
+      putFactoryKey(CIRCLES_KEY, ["Pending circle"]);
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(2);
+      vi.stubGlobal("fetch", vi.fn(async (_url, init) =>
+        JSON.parse(String(init?.body)).key === STOP_REASONS_KEY ? ack(init) : response({}, 503)));
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(1);
+      expect(pending()).toHaveLength(1);
+      expect(pending()[0].key).toBe(CIRCLES_KEY);
+      vi.stubGlobal("fetch", vi.fn(async (_url, init) => ack(init)));
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(0);
+    } finally { unsubscribe(); }
+  });
+
+  it("keeps unreadable-count projection pure and does not expose it without write permission", () => {
+    localStorage.setItem(queueKey(), "{bad");
+    const listener = vi.fn();
+    const unsubscribe = subscribeFactoryDirectory(listener);
+    try {
+      expect(managerPendingFactoryDataWriteCount()).toBeNull();
+      expect(listener).not.toHaveBeenCalled();
+      expect(factoryDirectoryState().status).toBe("ready");
+      setFactoryDataIdentity("live:manager", false);
+      expect(managerPendingFactoryDataWriteCount()).toBe(0);
+      expect(localStorage.getItem(queueKey())).toBe("{bad");
+    } finally { unsubscribe(); }
+  });
+
   it("loads manager-configured operational settings for fresh staff and across scope changes, without defaults or caches", async () => {
     const values = (scope: string) => ({
       [STOP_REASONS_KEY]: [`${scope} custom stop`],
@@ -208,6 +246,20 @@ describe("memory directory and scoped durable commands", () => {
     await flushFactoryQueue();
     expect(pending()).toEqual([]);
   });
+  it("retries a retained facility edit when browser connectivity returns", async () => {
+    const fetcher = vi.fn()
+      .mockImplementationOnce(async () => response({}, 503))
+      .mockImplementation(async (_url: RequestInfo | URL, init?: RequestInit) => ack(init));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(BRANDS_KEY, ["Reconnect delivery"]);
+    await flushFactoryQueue();
+    expect(pending()).toHaveLength(1);
+
+    window.dispatchEvent(new Event("online"));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(pending()).toEqual([]);
+    expect(JSON.parse(directoryRaw(BRANDS_KEY)!)).toEqual(["Reconnect delivery"]);
+  });
   it("coalesces a newer edit without an earlier in-flight acknowledgment dropping it", async () => {
     let release!: () => void;
     let count = 0;
@@ -230,6 +282,84 @@ describe("memory directory and scoped durable commands", () => {
       expect(pending()).toHaveLength(1);
     },
   );
+  it.each(["malformed", "invalid-json", "stale"] as const)(
+    "delivers independent settings on reconnect while retaining a %s acknowledgment's command", async (failure) => {
+      vi.stubGlobal("fetch", vi.fn(async () => response({}, 503)));
+      putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+      putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+      await flushFactoryQueue();
+      const original = pending();
+      const fetcher = vi.fn(async (_url, init?: RequestInit) => {
+        const op = JSON.parse(String(init?.body));
+        if (op.key !== SHIFT_START_TIME_KEY) return ack(init);
+        if (failure === "invalid-json") return new Response("{", { status: 200 });
+        return response(failure === "malformed" ? {} : {
+          value: "06:00", updatedAt: new Date(op.updatedAt - 1).toISOString(),
+        });
+      });
+      vi.stubGlobal("fetch", fetcher);
+      window.dispatchEvent(new Event("online"));
+      await vi.waitFor(() => expect(pending()).toEqual([original[0]]));
+      expect(fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).key))
+        .toEqual([SHIFT_START_TIME_KEY, PRODUCTION_START_TIME_KEY]);
+      expect(getShiftStartTime()).toBe("08:15");
+      expect(getProductionStartTime()).toBe("08:30");
+      // A later retry uses the original payload, stamp, generation and epoch.
+      vi.stubGlobal("fetch", vi.fn(async (_url, init) => ack(init)));
+      await flushFactoryQueue();
+      expect(pending()).toEqual([]);
+      await flushFactoryQueue();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)))
+        .toEqual({ key: original[0].key, value: original[0].value, updatedAt: original[0].updatedAt });
+    },
+  );
+  it("defers a same-key replacement after a rejected in-flight acknowledgment but sends an independent key", async () => {
+    let release!: (res: Response) => void;
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }))
+      .mockImplementation(async (_url, init) => ack(init));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+    await settle();
+    putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+    putFactoryKey(SHIFT_START_TIME_KEY, "09:15");
+    const replacement = pending().find((op: { key: string }) => op.key === SHIFT_START_TIME_KEY);
+    release(response({}));
+    await flushFactoryQueue();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body)).key).toBe(PRODUCTION_START_TIME_KEY);
+    expect(pending()).toEqual([replacement]);
+    expect(getShiftStartTime()).toBe("09:15");
+    await flushFactoryQueue();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(pending()).toEqual([]);
+  });
+  it.each([401, 403, 409, 429, 503])("stops the pass on HTTP %i without delivering later keys", async (status) => {
+    const fetcher = vi.fn(async () => response({}, status));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+    putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+    await flushFactoryQueue();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(pending()).toHaveLength(2);
+  });
+  it("does not continue a rejected pass into a different scope", async () => {
+    let release!: (res: Response) => void;
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { release = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+    putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+    const request = flushFactoryQueue();
+    await settle();
+    const original = pending();
+    setFactoryDataIdentity("sandbox:other", true); hydrateFromServer({});
+    release(response({}));
+    await request;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(pending()).toEqual(original);
+    expect(localStorage.getItem(queueKey("sandbox:other"))).toBeNull();
+  });
   it("adopts a canonical stale-write rejection only after valid acknowledgment", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({}, 503)));
     putFactoryKey(BRANDS_KEY, ["Old"]); await flushFactoryQueue();
