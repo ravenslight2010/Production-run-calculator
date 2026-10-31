@@ -3,6 +3,7 @@
 param(
   [Parameter(Mandatory=$true)][string]$StateDirectory,
   [switch]$InitializeFresh,
+  [switch]$CheckOnly,
   [string]$Site,
   [string]$TimeZone,
   [string]$Manager
@@ -22,13 +23,25 @@ if ($state.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
     $state.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Use a private state directory outside the checkout'
 }
-Invoke-Checked 'docker' @('info', '--format', '{{.OSType}}')
-$os = & docker info --format '{{.OSType}}'
-if ($LASTEXITCODE -ne 0 -or $os -ne 'linux') { throw 'Docker Linux containers / WSL2 are required' }
 $version = & node --version
 if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne ('v' + (Get-Content (Join-Path $root '.nvmrc')).Trim())) {
   throw 'Install the exact Node version in .nvmrc'
 }
+# Build/setup checks must precede ACL changes, generated secrets, downloads or
+# DB creation. Restart intentionally does not need private build-time inputs.
+if ($InitializeFresh -or $CheckOnly) {
+  if ($InitializeFresh -and $CheckOnly) { throw 'Choose InitializeFresh or CheckOnly, not both' }
+  $preflight = @((Join-Path $PSScriptRoot 'preflight.mjs'), '--root', $root)
+  if ($InitializeFresh) { $preflight += @('--site', $Site, '--time-zone', $TimeZone, '--manager', $Manager) }
+  Invoke-Checked 'node' $preflight
+  if ($CheckOnly) {
+    Write-Output 'Source prerequisites only; Docker, LAN, certificates and deployment readiness were not assessed.'
+    return
+  }
+}
+Invoke-Checked 'docker' @('info', '--format', '{{.OSType}}')
+$os = & docker info --format '{{.OSType}}'
+if ($LASTEXITCODE -ne 0 -or $os -ne 'linux') { throw 'Docker Linux containers / WSL2 are required' }
 $envFile = Join-Path $state 'self-host.env'
 if ($InitializeFresh) {
   if ((Test-Path $state) -and ((Get-Item -LiteralPath $state).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
