@@ -278,5 +278,15 @@
     "path": "attached_assets/source-library/audits/source-library-manifest-2026-08-26.json",
     "sha256": "def4f820d563eacd26499cbe043d2251d8c48a31993d36fc57553fa69ac0baf9",
     "revision": "4757ed542872129d6ff2ccad31cd71051ba7f9a5"
+  },
+  {
+    "path": "attached_assets/source-library/AUDIT-REPORT-2026-07-18.md",
+    "sha256": "7d2913f7b6a14aff33927f26c50d0fab5d0bcc7218b55794f4feea05eb2948bc",
+    "revision": "06139bc9783c2a44592b41f855718d6cf0de4aec"
+  },
+  {
+    "path": "attached_assets/source-library/AUDIT-REPORT-2026-07-21.md",
+    "sha256": "2c014bf42c0cf458bd07351848409cd8b8ee9cea7f9f29355fa9b4bf1bbc78d0",
+    "revision": "55baefd655a052adab195cf0e1a9a1d2c9d05c16"
   }
 ]

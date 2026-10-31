@@ -1496,3 +1496,14 @@ a JSON comparator plus synthetic tests to normalize only added CAP_ prefixes
 while rejecting extra/missing/wrong/duplicate capabilities, wrong UID and drop
 sets. Runtime permissions unchanged. Hosted rollback/build/browser/fresh lanes
 passed; broad revalidation remains pending.
+
+21e7395f follow-up: strict comparison snapshot includes two Markdown audit
+members in addition to its 51 workbooks. Later versions' bytes do not match;
+located/pinned exact older SHA-verified blobs, bringing PR-only delivery to 58
+payloads. No guard/fixture data was weakened. Web assertions all passed but one
+run exceeded unchanged150s budget (157.4s versus prior116.8s); moved thirteen
+DOM-independent library/static-source suites to Node environment only (105
+focused tests PASS), preserving every assertion, UI DOM environment, isolation,
+worker ceiling and timing limit. Root typecheck +23 input contracts PASS locally;
+full hosted rerun required. API passed at21e7395f. Main-only inputs still await
+separate user approval; no merge or main environment mutation.

@@ -567,3 +567,34 @@ defaults; focused input contracts and authoritative root typecheck PASS locally
 preceding ac14df3e run completed PASS. Full release remains pending behind the
 superseded release job's cancellation/always-evidence cleanup; neither a
 cancelled nor an unexecuted release is a pass. Main remains unchanged.
+
+### Third hosted run and bounded corrections — 21e7395f
+
+Original production build/Docker/rollback, department/reduced-motion browser and
+fresh foundation remain PASS. Web assertions all passed (3800 +1 existing skip)
+but the suite took 157.4s and correctly FAILED its unchanged 150s gate. The prior
+full pass was 116.8s; neither result is hidden. Thirteen pure-library or static
+source/CSS contract files unnecessarily created jsdom environments. Marked those
+files as Node-only; no case/assertion, UI DOM suite, isolation, worker count or
+budget changed. Focused and full hosted revalidation remain required.
+
+The source-comparison CLI now reached its strict snapshot-member count and
+refused partial inputs: the immutable snapshot lists two historical Markdown
+audit members as well as the 51 workbooks. Their current-at-4629 bytes do NOT
+match the snapshot; did not substitute those. Located exact older matching
+revisions, pinned both paths/SHA-256s (58 payloads total), and kept the guard
+unchanged. This closes the inventory of every immutable snapshot member and
+every directly referenced default audit file; no production access or payload
+publication is authorized. The repeatedly missing-input condition has now
+recurred three hosted iterations and is explicitly BLOCKED until the complete
+58-input hosted run proves it; not reported as resolved from local contracts.
+
+Main-only CI input delivery remains awaiting the owner's specific approval,
+asked in chat; the existing PR grant must not be silently broadened.
+
+Fourth repair pre-push: all 105 tests in the thirteen Node-only pure/static
+suites PASS, 23 private-input/boundary contracts PASS, authoritative root
+typecheck PASS (exit0). No assertion was dropped and no DOM-driven suite was
+converted. Exact missing Markdown hashes were verified against the immutable
+snapshot before pinning. API at21e7395f completed PASS. All new/current hosted
+gates still require execution; no main-only authorization has been inferred.

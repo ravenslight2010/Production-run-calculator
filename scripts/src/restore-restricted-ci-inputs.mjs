@@ -28,7 +28,7 @@ function checksumEntry() {
 }
 
 function safePath(root, relative, create) {
-  if (!/^attached_assets\/(?:source-library\/)?(?:[A-Za-z0-9_' ,.()-]+\/)*[A-Za-z0-9_' ,.()-]+\.(?:xlsx|json|sha256)$/.test(relative) ||
+  if (!/^attached_assets\/(?:source-library\/)?(?:[A-Za-z0-9_' ,.()-]+\/)*[A-Za-z0-9_' ,.()-]+\.(?:xlsx|json|sha256|md)$/.test(relative) ||
       relative.split("/").some((part) => part === "." || part === "..")) throw new Error("Invalid reviewed input path.");
   let current = realpathSync(root);
   const components = relative.split("/");
