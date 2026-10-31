@@ -52,7 +52,7 @@ describe("ImportGoldLabCard cleanup-only mode", () => {
     expect(api.fetchImportGoldCleanupCases).toHaveBeenLastCalledWith("opaque-next");
     await screen.findByText(/cheese · #1$/i);
     await user.click(screen.getByRole("button", { name: "Newest cases" }));
-    await screen.findByRole("alert");
+    await screen.findByText("Previously loaded cases are shown. Refresh successfully before deleting.");
     expect(screen.queryByText("No retained cases are available for cleanup in this scope.")).toBeNull();
     expect((screen.getByRole("button", { name: "Delete case and scores" }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole("button", { name: "Newest cases" }));

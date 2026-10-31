@@ -11,3 +11,38 @@ Aggregate metrics: 7 requests, latency p95 335.4 ms, 4xx 0; 5xx and application-
 **Access gaps —** Supported production `executeSql` aggregate access remains denied with `Production database access requires an authenticated user.` No primary/replica flag, backend/lock aggregates, provider connection-setup timing, or server SQL timing was obtained; app telemetry cannot distinguish pool wait from connection setup. Historical baseline values are not treated as current evidence, and neither this capture nor the historical symptoms establishes causation. No files/config/data were changed; no jobs, notifications, restarts, or publish actions were performed.
 
 This observation does not certify the repaired workspace revision or identify a causal fix. No deployment or infrastructure trial was enabled.
+
+## Additional same-day serving-log slice
+
+**Capture —** Published deployment logs read at 2026-10-31; revision still has
+no Git/source mapping in deployment metadata. A sanitized, structured-log-only
+rollup covers **2026-10-31 01:24:46–01:34:46 UTC**. The output below excludes
+correlation IDs, host/process identifiers, requests and response bodies, and
+record-level data.
+
+**Observed —** The 107 structured rows in this window include 56 sampled
+database-phase records for four bounded-queue/outbox stages: 30 successes and
+26 connection- or checkout-timeout outcomes. `outbox_scope_list` had 5
+connection timeouts and 1 checkout timeout among 23 samples; `outbox_cursor_read`
+had 1 checkout timeout among 17 samples; `status_aggregate` had 3 connection
+timeouts among 10 samples. Successful post-checkout phase times reached 30.1 s,
+while measured acquisition phases reached 22.6 s. These are logger-observed
+client/runtime phases, not isolated database execution time.
+
+In the most recent capacity interval, the pool was at its 10-client limit at
+the 95th percentile, waiters reached 15, and 20 pool acquisition errors were
+recorded in that 60-second sample. Scheduled-queue snapshots separately logged
+multiple 9.8–11.3 s slow samples; the displayed aggregate and duplicate-group
+query durations together account for the measured snapshot. This supports pool
+contention and slow queue/outbox work as **current contributing symptoms**.
+It does not show which workload initiated contention, prove that database
+execution rather than connection setup or application scheduling was the
+primary cause, or establish whether each sync intent failed or later recovered.
+
+**Decision —** Continue to treat the 30-second sync/recovery symptoms as a
+production investigation, not as a confirmed single-code defect. Do not
+increase pool size, add concurrency, raise timeouts, drop/rewrite queues, or
+enable a production trial on this evidence alone. The separate authenticated
+production aggregate-query gate remains blocked. No live writes, app restart,
+provider changes, database changes, or publish action were performed for this
+log review.
