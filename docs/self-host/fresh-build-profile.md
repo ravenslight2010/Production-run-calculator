@@ -378,3 +378,21 @@ readable true). This is a local filesystem capability limitation, not evidence
 that the checker mishandles an actual EACCES. Do not change the checker, fake an
 error, or skip this required test. Hosted Ubuntu verification remains required;
 later routine commands were not reached in this local full-suite attempt.
+
+Second hosted runtime attempt (41211566547, `f8282f65`) passed both native safety
+jobs and again built/started the isolated fresh schema/runtime. The next probe
+failure exposed another overly broad expectation: the existing **global CORS**
+middleware answers protocol-only OPTIONS with empty 204 before any operational
+router. This does not create a capture/receipt or grant repair authority. Preserve
+that normal global behavior; require empty 204 for OPTIONS and 409/no-store/exact
+unavailable body for every tested operational method. The direct disabled router
+still rejects all methods when reached. Added a DB-free CORS-mounted regression
+that proves the empty preflight is followed by a refused POST for both endpoints.
+This clarifies the earlier "all methods refuse" statement: operational capture
+requests are unavailable; protocol preflight is not an operation. No production
+CORS/auth/order/security policy was changed to satisfy a test.
+
+After the protocol correction: focused fresh API + legacy build-info regressions
+**23 PASS** (includes the added CORS-mounted test), authoritative root typecheck
+**PASS, exit 0**. Hosted runtime re-run is required to finish the remaining probes;
+no workspace/signup/restart result is inferred from unit tests.

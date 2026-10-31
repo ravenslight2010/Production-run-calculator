@@ -164,6 +164,8 @@ try {
     assert.equal(info.platformIdentitySource,'unavailable');
     for(const endpoint of ['capture','diagnostics']) for(const method of ['GET','POST','PUT','DELETE','OPTIONS','HEAD']) {
       const response=await fetch(base+'/profile-data/source-library-reconciliation/'+endpoint,{method});
+      // Global CORS answers protocol-only OPTIONS before operational routers.
+      if(method==='OPTIONS') { assert.equal(response.status,204); assert.equal(await response.text(),''); continue; }
       assert.equal(response.status,409);
       assert.ok(response.headers.get('cache-control')?.split(',').map(value=>value.trim()).includes('no-store'));
       if(method!=='HEAD') assert.deepEqual(await response.json(),{status:'not-applicable',buildProfile:'self-host-fresh',reason:'legacy-production-audit-not-packaged'});

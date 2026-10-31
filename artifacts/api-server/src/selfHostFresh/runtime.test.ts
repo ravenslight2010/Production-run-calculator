@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import express from "express";
+import cors from "cors";
 import { noStoreMiddleware } from "../lib/cacheControl";
 import { once } from "node:events";
 import type { Server } from "node:http";
@@ -22,6 +23,32 @@ afterAll(() => {
   }
 });
 describe("fresh compiled runtime authority", () => {
+  it("preserves global CORS preflight without granting capture authority", async () => {
+    const app = express();
+    app.use(cors());
+    app.use(noStoreMiddleware);
+    app.use("/api", publicSourceLibraryReconciliationCaptureRouter);
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Missing test port");
+    for (const endpoint of ["capture", "diagnostics"]) {
+      const url = `http://127.0.0.1:${address.port}/api/profile-data/source-library-reconciliation/${endpoint}`;
+      const preflight = await fetch(url, { method: "OPTIONS" });
+      expect(preflight.status).toBe(204);
+      expect(await preflight.text()).toBe("");
+      const operation = await fetch(url, { method: "POST" });
+      expect(operation.status).toBe(409);
+      expect(await operation.json()).toEqual({
+        status: "not-applicable",
+        buildProfile: "self-host-fresh",
+        reason: "legacy-production-audit-not-packaged",
+      });
+    }
+  });
+
   it("does not execute/claim historical repairs or manufacture marker results", async () => {
     await heals.runDataHeals();
     expect(heals.AUTOMATIC_DATA_HEAL_IDS).toEqual([]);
