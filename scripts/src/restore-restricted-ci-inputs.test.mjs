@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, linkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { authorize, materialize, cleanup, manifest, archiveManifest, verifyArchivePointer } from "./restore-restricted-ci-inputs.mjs";
+import { authorize, authorizeMain, materialize, cleanup, manifest, archiveManifest, verifyArchivePointer } from "./restore-restricted-ci-inputs.mjs";
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const cap = "synthetic-capability-not-a-secret";
 const head = "a".repeat(40);
@@ -25,6 +25,22 @@ test("only exact reviewed same-repo PR context and capability are authorized", (
     const e = structuredClone(event); edit(e); assert.throws(() => authorize(context, e, head, cap, sha(cap)));
   }
   for (const [approved, value] of [[undefined, cap], ["", cap], [head, ""], [head, "wrong"]]) assert.throws(() => authorize(context, event, approved, value, sha(cap)));
+});
+
+test("separate main capability permits only main pushes or main manual runs", () => {
+  const mainContext = { ...context, GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main", GITHUB_SHA: head };
+  const mainEvent = { repository: { full_name: repository }, ref: "refs/heads/main", after: head, deleted: false };
+  assert.doesNotThrow(() => authorizeMain(mainContext, mainEvent, cap, sha(cap)));
+  assert.doesNotThrow(() => authorizeMain({ ...mainContext, GITHUB_EVENT_NAME: "workflow_dispatch" }, { repository: { full_name: repository } }, cap, sha(cap)));
+  for (const change of [{ GITHUB_ACTIONS: "false" }, { GITHUB_REPOSITORY: "fork/repo" }, { GITHUB_REF: "refs/heads/feature" }, { GITHUB_REF: "refs/tags/main" }, { GITHUB_REF: "refs/pull/142/merge" }, { GITHUB_EVENT_NAME: "pull_request" }, { GITHUB_EVENT_NAME: "pull_request_target" }, { GITHUB_EVENT_NAME: "schedule" }, { GITHUB_SHA: "invalid" }]) {
+    assert.throws(() => authorizeMain({ ...mainContext, ...change }, mainEvent, cap, sha(cap)));
+  }
+  for (const change of [{ repository: { full_name: "fork/repo" } }, { ref: "refs/heads/feature" }, { after: "b".repeat(40) }, { deleted: true }]) {
+    assert.throws(() => authorizeMain(mainContext, { ...mainEvent, ...change }, cap, sha(cap)));
+  }
+  for (const value of [undefined, "", "PR-only-capability"]) assert.throws(() => authorizeMain(mainContext, mainEvent, value, sha(cap)));
+  assert.throws(() => authorizeMain(context, event, cap, sha(cap)));
+  assert.throws(() => authorize(mainContext, mainEvent, head, cap, sha(cap)));
 });
 
 test("exact bytes materialize privately, idempotently, and clean only allowlisted files", (t) => {
@@ -76,8 +92,11 @@ test("workflows retain both protected main and narrowly restricted PR lanes with
   for (const file of ["ci.yml", "department-navigation.yml", "release-check.yml"]) {
     const text = readFileSync(new URL(`../../.github/workflows/${file}`, import.meta.url), "utf8");
     assert.doesNotMatch(text, /pull_request_target/); assert.match(text, /github\.event\.pull_request\.number == 142/); assert.match(text, /head\.repo\.full_name == github\.repository/); assert.match(text, /vars\.REVIEWED_PR_HEAD_SHA/);
-    assert.match(text, /if: always\(\) && steps\.restricted-inputs\.outcome != 'skipped'/);
-    assert.match(text, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: \$\{\{ secrets\.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 \}\}/);
+    assert.match(text, /if: always\(\) && \(steps\.restricted-inputs\.outcome != 'skipped' \|\| steps\.main-inputs\.outcome != 'skipped'\)/);
+    assert.doesNotMatch(text, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64/);
+    assert.match(text, /CI_MAIN_INPUT_AUTHORIZATION: \$\{\{ secrets\.CI_MAIN_INPUT_AUTHORIZATION \}\}/);
+    assert.match(text, /if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\)/);
+    assert.match(text, /main-reviewed-test-inputs/);
   }
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   const docker = ci.slice(ci.indexOf("  docker:\n"), ci.indexOf("  build:\n")); assert.doesNotMatch(docker, /cache-to:|cache-from:/); assert.match(docker, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
@@ -97,6 +116,7 @@ test("opaque archive manifest is exact, bounded, unique and restricted to routin
   }
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.equal(ci.match(/restore-restricted-ci-inputs\.mjs --with-archives/g)?.length, 1);
+  assert.equal(ci.match(/restore-restricted-ci-inputs\.mjs --main --with-archives/g)?.length, 1);
   const department = readFileSync(new URL("../../.github/workflows/department-navigation.yml", import.meta.url), "utf8");
   assert.doesNotMatch(department, /--with-archives/);
 });

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { cancelledDocumentMessage } from "../e2e/breakPlanningEvidence";
+import { cancelledDocumentMessage, cancelledJourneyRead } from "../e2e/breakPlanningEvidence";
 
 describe("bounded browser navigation evidence classification", () => {
   const input = {
@@ -32,5 +32,20 @@ describe("bounded browser navigation evidence classification", () => {
       "404 GET /api/factory-data",
       "Save failed",
     ]) expect(cancelledDocumentMessage({ ...input, text })).toBeUndefined();
+  });
+});
+
+describe("exact navigation-cancelled reads requiring fresh recovery evidence", () => {
+  const read = { method: "GET", pathname: "/api/me", code: "net::ERR_ABORTED", knownOrigin: true, duringNavigation: true };
+  it("recognizes only the observed exact routes and cancellation codes", () => {
+    for (const pathname of ["/api/me", "/api/qc/import-review-badges", "/api/sync/operational-intents/cursor", "/api/background-operations/diagnostics", "/api/reports/operational-view"]) {
+      expect(cancelledJourneyRead({ ...read, pathname })).toBe(true);
+      expect(cancelledJourneyRead({ ...read, pathname, code: "Load request cancelled" })).toBe(true);
+    }
+  });
+  it("refuses writes, normal failures, other origins/routes and non-navigation errors", () => {
+    for (const change of [{ method: "PUT" }, { method: "POST" }, { method: "DELETE" }, { knownOrigin: false }, { duringNavigation: false }, { pathname: "/api/me-extra" }, { pathname: "/api/sync/today" }, { code: "net::ERR_CONNECTION_REFUSED" }, { code: "HTTP 500" }]) {
+      expect(cancelledJourneyRead({ ...read, ...change })).toBe(false);
+    }
   });
 });

@@ -3,7 +3,6 @@ import {
   buildSourceRecord, completeBuildStage, PROJECT_ROOT, readBoundedJson, validateSourceRecord, writeRecord,
 } from "./build-source-identity.mjs";
 
-import { buildFreshSourceRecord, completeFreshBuildStage, validateFreshSourceRecord } from "../self-host/build-identity.mjs";
 const fresh = process.env.BUILD_IDENTITY_MODE === "self-host-fresh";
 const startFile = path.join(PROJECT_ROOT, fresh ? ".local/build-identity/self-host-web-stage-start.json" : ".local/build-identity/web-stage-start.json");
 try {
@@ -12,6 +11,8 @@ try {
   if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish" && identityMode !== "self-host-fresh") {
     throw new Error("Invalid web build identity mode.");
   }
+  const { buildFreshSourceRecord, completeFreshBuildStage, validateFreshSourceRecord } = fresh
+    ? await import("../self-host/build-identity.mjs") : {};
   if (process.argv[2] === "--start") {
     writeRecord(startFile, fresh ? buildFreshSourceRecord(PROJECT_ROOT) : buildSourceRecord(PROJECT_ROOT, identityMode ?? "publish"));
   } else if (process.argv[2] === "--complete") {

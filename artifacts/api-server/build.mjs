@@ -6,8 +6,6 @@ import esbuildPluginPino from "esbuild-plugin-pino";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { buildSourceRecord, completeBuildStage } from "../../scripts/src/build-source-identity.mjs";
-import { buildFreshSourceRecord, completeFreshBuildStage } from "../../scripts/self-host/build-identity.mjs";
-import { freshRuntimePlugin, assertFreshRuntimeGraph, FRESH_RUNTIME_BUILD_CONTRACT } from "../../scripts/self-host/runtime-build-policy.mjs";
 import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "../../scripts/src/source-library-pool-approval-assets.mjs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
@@ -23,6 +21,10 @@ async function buildAll() {
   }
   const mode = identityMode ?? (process.env.NODE_ENV === "development" ? "development" : "publish");
   const fresh = mode === "self-host-fresh";
+  const { buildFreshSourceRecord, completeFreshBuildStage } = fresh
+    ? await import("../../scripts/self-host/build-identity.mjs") : {};
+  const { freshRuntimePlugin, assertFreshRuntimeGraph, FRESH_RUNTIME_BUILD_CONTRACT } = fresh
+    ? await import("../../scripts/self-host/runtime-build-policy.mjs") : {};
   const sourceRecord = fresh ? buildFreshSourceRecord(root) : buildSourceRecord(root, mode);
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });

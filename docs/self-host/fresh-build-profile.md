@@ -661,3 +661,92 @@ web full-suite timing PASS was94.4s (unchanged150s limit); all3800 assertions
 and shared libraries PASS. Latest API PASS; native macOS/Windows metadata PASS.
 Real LFS fixture retrieval and final ZIP inventory still require hosted proof.
 No archive member was extracted/executed locally or added to Git.
+
+
+### Approved separate main-only CI delivery and release failure closure
+
+## Agent-owned execution
+
+Owner: Notion AI, same Windows LAN fresh-install objective. Donald explicitly
+approved a separate main-only CI input path after PR-only verification. Created
+`main-reviewed-test-inputs`, restricted to the exact main branch with owner
+review required and admin bypass disabled, holding a new independent encrypted
+`CI_MAIN_INPUT_AUTHORIZATION` capability. The original
+`docker-caddy-reviewed-inputs` environment, branch policy and report secret
+metadata were read before/after and are unchanged. Its protected Docker/Caddy
+workflow is unchanged. No new repository-wide secret or fork/PR access exists.
+
+The three ordinary CI/browser/release workflows select the separate environment
+on main; its fixed-pin transport supplies the same canonical report plus
+supplemental sources/opaque archives instead of exposing the original report
+secret in this second environment. PR142 keeps its independent reviewed-head
+capability and cannot use --main. Main requires push or manual dispatch,
+exact repository/ref, a valid run SHA, matching push after/ref and checked-out
+HEAD, and the separate capability. Other events/refs, fork identities, deleted
+refs and mismatched checkouts fail closed. No raw input/hash policy, file budget,
+private mode, no-extraction policy or exact allowlist cleanup was relaxed.
+
+## Applicable safeguards and verification
+
+Main post-merge delivery is NOT YET RUN; no main push or deployment is claimed.
+Local authorization and workflow isolation contracts cover main push/manual
+positive cases and wrong event/ref/repository/SHA/capability negatives. The
+original main-only report restoration and protected browser cases stay tested.
+Root typecheck, workflow policy/actionlint and hosted required/release checks
+must pass from the next pushed revision before any merge. Live branch protection
+also requires one independent approving review; PR142 currently has none and
+cannot be self-approved by its author. No admin bypass or policy relaxation is
+authorized. Obtain a genuine review rather than exploiting unenforced-admin
+settings. Replit remains the only current publisher; a GitHub merge is not a
+production GO or installed update.
+
+Latest prior head `7fec8d26`: required CI run41221117247 PASS, actual58source and
+9archive delivery PASS, all22ZIP inventory tests PASS, desktop/phone navigation,
+Windows/macOS metadata, self-host foundation and Node advisory PASS. Standard
+release run41221117195 FAIL (all12API shards and WebKit smoke passed). Earlier
+cancelled-run evidence retrieval returned a signed-blob404; the completed current
+run supplied usable logs, so no failure is inferred solely from cancellation.
+
+Failure ledger additions (all remain subject to hosted closure):
+
+- Isolated real legacy API/web producer FAIL: fresh-only helpers were imported
+  unconditionally but intentionally absent from the legacy sealed-copy source
+  set. Load fresh helpers only for explicit self-host-fresh mode; retain fresh
+  graph assertions and production fingerprint/validators unchanged. Integration
+  now explicitly asserts absence of the fresh-only tree before building.
+- WebKit compatibility identity contract FAIL: approved-config discovery found
+  16 cases while the retained inventory had8. Reviewed the additional synthetic
+  cleanup/QC-retention/reminder and issue-review cases, added all8 exact identities;
+  no case removed/skipped and additions/removals/substitutions still fail closed.
+- Accessibility supervisor test FAIL: its purportedly authorized disposable
+  supervisor lacked manage-factory-settings. Grant that capability only to this
+  explicit fixture, keep ordinary supervisor defaults and product permissions
+  unchanged, and add a denied-supervisor browser case at every a11y viewport.
+- Accessibility reload/summary diagnostics FAIL: five observed read-only paths
+  were cancelled at deliberate navigation boundaries. Classify only exact GETs,
+  known origins, cancellation codes and navigation phases; require a successful
+  fresh authenticated read of each exact cancelled URL afterward. HTTP errors,
+  writes, other origins/paths and normal-operation failures remain failures.
+  The already-retained unmounted diagnostics404 stays separately identified,
+  never represented as successful route availability.
+- Release evidence allowlist FAIL was downstream of failed Playwright error
+  contexts. Do not expand the artifact allowlist or upload raw contexts; require
+  the corrected uninterrupted release run and unchanged evidence privacy guard.
+
+Compatibility applicability: rerun all four automated Chromium a11y viewports
+(desktop, phone, tablet portrait/landscape), existing department journeys and
+WebKit smoke on the new revision. Inventory discovery is not runtime evidence
+for optional/full WebKit compatibility lanes. Physical Android/iOS and actual
+Windows installation remain NOT RUN/BLOCKED as previously documented; none is
+relabeled PASS. All remaining original qualification exclusions are retained.
+
+Pre-push focused results: 27 input/isolation contracts PASS;79 production/fresh
+identity, graph and validator contracts PASS; WebKit authoritative identity
+inventory checks PASS;5 navigation-cancellation classification tests PASS.
+
+Authoritative root typecheck PASS (exit0) and all15 workflow policy/actionlint
+checks PASS before push. An obsolete workflow-contract expectation initially
+failed after the deliberately separate environment change; updated it to require
+the new exact main guard/capability and continued original protected-lane test,
+then all27 input contracts passed. Git diff whitespace check PASS after removing
+a trailing blank line. No private input or secret was staged.

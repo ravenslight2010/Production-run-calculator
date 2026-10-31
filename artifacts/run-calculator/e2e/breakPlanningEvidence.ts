@@ -25,3 +25,21 @@ export function cancelledDocumentMessage(input: {
     if (path && (input.duringReload || input.navigationPaths.has(path))) return path;
   }
 }
+
+/** Exact observed read cancellations at deliberate navigation boundaries only.
+ * Every accepted URL must be freshly read and verified by the caller afterward.
+ * Write failures, HTTP errors, other routes/origins and normal-operation errors
+ * are never classified as expected cancellation.
+ */
+export function cancelledJourneyRead(input: {
+  method: string;
+  pathname: string;
+  code: string;
+  knownOrigin: boolean;
+  duringNavigation: boolean;
+}): boolean {
+  return input.knownOrigin && input.duringNavigation && input.method === "GET"
+    && ["net::ERR_ABORTED", "Load request cancelled"].includes(input.code)
+    && ["/api/me", "/api/qc/import-review-badges", "/api/sync/operational-intents/cursor",
+      "/api/background-operations/diagnostics", "/api/reports/operational-view"].includes(input.pathname);
+}

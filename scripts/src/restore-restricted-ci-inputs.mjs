@@ -7,6 +7,7 @@ import { restoreReviewedBuildInputsFromDirectory } from "./restore-reviewed-buil
 
 const repository = "ravenslight2010/Production-run-calculator";
 const capabilityHash = "b1675a82fb76e091811eaa336642a70e7695f57a5c7f54d8551084c47b233ed3";
+const mainCapabilityHash = "837ccd959aa818cdb163e6a1763bdc37ede875d56965437f6c3f27110d6aa279";
 export const manifest = JSON.parse(readFileSync(new URL("./reviewed-ci-input-manifest.json", import.meta.url), "utf8"));
 export const archiveManifest = JSON.parse(readFileSync(new URL("./reviewed-ci-archive-manifest.json", import.meta.url), "utf8"));
 const SOURCE_BUDGET = { perFile: 4 * 1024 * 1024, total: 12 * 1024 * 1024 };
@@ -22,6 +23,20 @@ export function authorize(context, event, approvedHead, capability, expectedCapa
       event.number !== 142 || pr?.head?.repo?.full_name !== repository || pr?.head?.ref !== "feat/windows-lan-self-hosting" ||
       pr?.base?.ref !== "main" || !/^[a-f0-9]{40}$/.test(approvedHead ?? "") || pr?.head?.sha !== approvedHead) {
     throw new Error("Only the explicitly reviewed same-repository PR revision is authorized.");
+  }
+}
+
+// This independent capability is available only in the owner-reviewed main-only
+// environment. PR authorization above deliberately cannot authorize main.
+export function authorizeMain(context, event, capability, expectedCapabilityHash = mainCapabilityHash) {
+  if (context.GITHUB_ACTIONS !== "true" || context.GITHUB_REPOSITORY !== repository ||
+      context.GITHUB_REF !== "refs/heads/main" ||
+      !["push", "workflow_dispatch"].includes(context.GITHUB_EVENT_NAME) ||
+      event?.repository?.full_name !== repository ||
+      !/^[a-f0-9]{40}$/.test(context.GITHUB_SHA ?? "") ||
+      (context.GITHUB_EVENT_NAME === "push" && (event.ref !== "refs/heads/main" || event.after !== context.GITHUB_SHA || event.deleted === true)) ||
+      digest(capability ?? "") !== expectedCapabilityHash) {
+    throw new Error("Only an owner-reviewed main revision is authorized by the separate main capability.");
   }
 }
 
@@ -95,21 +110,29 @@ export function cleanup(root, entries = [...manifest, checksumEntry()]) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const capability = process.env.CI_REVIEWED_INPUT_AUTHORIZATION;
+  const mainCapability = process.env.CI_MAIN_INPUT_AUTHORIZATION;
   const token = process.env.CI_REVIEWED_GITHUB_TOKEN;
   delete process.env.CI_REVIEWED_INPUT_AUTHORIZATION;
   delete process.env.CI_REVIEWED_GITHUB_TOKEN;
+  delete process.env.CI_MAIN_INPUT_AUTHORIZATION;
   try {
     if (process.argv[2] === "--cleanup" && process.argv.length === 3) cleanup(process.cwd(), [...manifest, checksumEntry(), ...archiveManifest]);
     else if (process.argv[2] === "--copy-report" && process.argv.length === 4) {
       // Rollback's disposable worktrees consume the same canonical pair as the outer build.
       restoreReviewedBuildInputsFromDirectory(process.argv[3], path.join(process.cwd(), reportDirectory));
-    } else if (process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === "--with-archives")) {
-      authorize(process.env, JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")), process.env.REVIEWED_PR_HEAD_SHA, capability);
+    } else if (process.argv.length === 2 || (process.argv.length === 3 && ["--with-archives", "--main"].includes(process.argv[2])) ||
+               (process.argv.length === 4 && process.argv[2] === "--main" && process.argv[3] === "--with-archives")) {
+      const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+      if (process.argv[2] === "--main") {
+        authorizeMain(process.env, event, mainCapability);
+        const actualHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+        if (actualHead !== process.env.GITHUB_SHA) throw new Error("Main checkout differs from the authorized run revision.");
+      } else authorize(process.env, event, process.env.REVIEWED_PR_HEAD_SHA, capability);
       const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/false" };
       if (!token) throw new Error("Read-only repository transport unavailable.");
       const header = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
       Object.assign(gitEnv, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: header });
-      const withArchives = process.argv[2] === "--with-archives";
+      const withArchives = process.argv.slice(2).includes("--with-archives");
       const selected = withArchives ? [...manifest, ...archiveManifest] : manifest;
       for (const revision of new Set(selected.map((entry) => entry.revision))) {
         execFileSync("git", ["-c", "credential.helper=", "fetch", "--no-tags", "--depth=1", `https://github.com/${repository}.git`, revision], { env: gitEnv, stdio: "ignore", timeout: 120_000 });

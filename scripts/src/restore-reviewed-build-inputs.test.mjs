@@ -157,7 +157,7 @@ test("offline CLI cannot override the production pin or expose source paths and 
   }
 });
 
-test("all CI consumers keep the existing protected secret main-only, with no lost checks", () => {
+test("CI consumers use the separate main-only capability without exposing the original secret or losing checks", () => {
   const consumers = [
     ["ci.yml", ["typecheck", "reduced-motion-browser", "test-db", "build"]],
     ["department-navigation.yml", ["department-navigation"]],
@@ -170,18 +170,19 @@ test("all CI consumers keep the existing protected secret main-only, with no los
     for (const job of jobs) {
       const section = workflow.match(new RegExp(`^  ${job}:\\n[\\s\\S]*?(?=^  [a-zA-Z][\\w-]*:|$(?![\\s\\S]))`, "m"))?.[0];
       assert.ok(section, `${file}/${job} must remain present`);
-      assert.ok(section.includes(`${guard} && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}`));
+      assert.ok(section.includes(`${guard} && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}`));
       assert.ok(section.includes("github.event.pull_request.number == 142"));
       assert.ok(section.includes("pr-142-reviewed-test-inputs"));
-      const restore = section.indexOf("      - name: Restore protected main build inputs");
+      const restore = section.indexOf("      - name: Restore separate main-only reviewed CI inputs");
       assert.ok(restore >= 0);
       const nextStep = section.indexOf("\n      - ", restore + 1);
       const step = section.slice(restore, nextStep < 0 ? undefined : nextStep);
-      assert.ok(step.includes(`if: ${guard}`));
-      assert.ok(step.includes("SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}"));
-      assert.match(step, /run: node scripts\/src\/restore-reviewed-build-inputs\.mjs(?:\n|$)/);
-      assert.match(section, /if: always\(\) && steps\.reviewed-inputs\.outcome != 'skipped'\s+run: node scripts\/src\/restore-reviewed-build-inputs\.mjs --cleanup/);
-      assert.equal(section.match(/secrets\.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64/g)?.length, 1);
+      assert.ok(step.includes("if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"));
+      assert.ok(step.includes("CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}"));
+      assert.match(step, /run: node scripts\/src\/restore-restricted-ci-inputs\.mjs --main(?: --with-archives)?(?:\n|$)/);
+      assert.match(section, /steps\.main-inputs\.outcome != 'skipped'\)\s+run: node scripts\/src\/restore-restricted-ci-inputs\.mjs --cleanup/);
+      assert.doesNotMatch(section, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64/);
+      assert.equal(section.match(/secrets\.CI_MAIN_INPUT_AUTHORIZATION/g)?.length, 1);
       const header = section.slice(0, section.indexOf("    steps:"));
       if (job === "release-check-full")
         assert.match(header, /if:.*github\.event_name.*workflow_dispatch.*inputs\.run_full/);

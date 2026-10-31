@@ -1534,3 +1534,28 @@ file modes, exact cleanup and original-main secrecy preserved.26 local
 contracts/workflow syntax/serialized root typecheck PASS; real hosted LFS and
 ZIP inventory verification pending. Overlapping local typechecks caused one
 137/SIGKILL; serialized rerun PASS, killed run not hidden.
+
+
+### Separate main CI input approval and remaining standard release defects
+
+Owner approved a separate main-only path. New owner-reviewed main-only
+environment/capability is independent of PR142; original protected report secret,
+environment/policy and Docker/Caddy workflow unchanged. Exact main push/manual
+context, repository/ref/runSHA/push-after/checkout and capability checks precede
+fixed historical transport; PRs/forks/other refs refuse. Three CI workflows use
+this separate main transport; no secret copied, raw artifacts or broader data
+permissions.27 input/isolation contracts PASS. Hosted main path awaits merge.
+
+Standard release41221117195 exposed unconditional fresh-only imports in legacy
+isolated producers, an8-vs16 WebKit compatibility inventory, an authorized
+supervisor fixture missing scheduling capability, and exact read cancellations
+at reload/navigation. Lazy-load fresh helpers only in explicit fresh mode;
+assert legacy isolated copy excludes fresh tree; inventory all16 reviewed cases;
+grant only the explicit disposable supervisor fixture and add denied-supervisor
+browser case; classify only observed exact GET cancels at known-origin deliberate
+navigation, requiring fresh authenticated reads afterward. All writes/HTTP and
+unrelated-path/origin failures remain failures. Existing unmounted diagnostic404
+stays separately retained. No artifact allowlist expansion to hide failed
+Playwright contexts.79 identity/graph tests and5 cancellation tests PASS; hosted
+release closure pending. Main requires a genuine independent approving review,
+not author self-review/admin bypass. See owning task ledger for full evidence.

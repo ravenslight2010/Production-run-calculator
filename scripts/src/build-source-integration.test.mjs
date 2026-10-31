@@ -169,6 +169,8 @@ test("real API/web producers, finalized PWA and bundled public getter share one 
     const root = mkdtempSync(path.join(os.tmpdir(), "build-source-integration-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     isolateSources(root);
+    assert.equal(existsSync(path.join(root, "scripts/self-host")), false,
+      "legacy producers must build without importing the fresh-only module tree");
     const api = path.join(root, "artifacts/api-server");
     const web = path.join(root, "artifacts/run-calculator");
     const apiInfo = path.join(api, "dist/build-info.json");

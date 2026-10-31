@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Locator, type Page, type Request } from "@playwright/test";
 import { Client } from "pg";
-import { cancelledDocumentMessage } from "./breakPlanningEvidence";
+import { cancelledDocumentMessage, cancelledJourneyRead } from "./breakPlanningEvidence";
 import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
@@ -338,6 +338,7 @@ async function signUp(
   page: Page,
   role: "manager" | "supervisor" | "operator" = "manager",
   username = uniqueTestId("a11y"),
+  scheduleAccess = false,
 ): Promise<void> {
   testUsernames.add(username);
   await signUpAndHandleOnboarding(page, username, "AccessibilitySmoke123!", {
@@ -389,7 +390,7 @@ async function signUp(
         } else if (role === "supervisor") {
           await db.query(
             "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'supervisor'",
-            [JSON.stringify(["review-incidents", "edit-production-rules"])],
+            [JSON.stringify(["review-incidents", "edit-production-rules", ...(scheduleAccess ? ["manage-factory-settings"] : [])])],
           );
         }
       } finally {
@@ -1068,6 +1069,7 @@ test.describe("accessibility smoke", () => {
     const knownManagerDiagnosticsConsole: string[] = [];
     const unexpectedRequestFailures: string[] = [];
     const expectedNavigationAborts: string[] = [];
+    const cancelledReadsToVerify = new Map<string, string>();
     const expectedWebKitNavigationMessages: string[] = [];
     const inFlight = new Set<Request>();
     const navigationRequests = new WeakSet<Request>();
@@ -1166,7 +1168,13 @@ test.describe("accessibility smoke", () => {
             && request.method() === "GET"
             && pathname === "/api/sync/events")
         );
-      if (expectedAbort) {
+      const cancelledRead = cancelledJourneyRead({
+        method: request.method(), pathname, code,
+        knownOrigin: successfulOrigins.has(new URL(request.url()).origin),
+        duringNavigation: navigationRequests.has(request) || ["persistence reload", "summary navigation"].includes(requestPhase),
+      });
+      if (cancelledRead) cancelledReadsToVerify.set(request.url(), pathname);
+      if (expectedAbort || cancelledRead) {
         expectedNavigationAborts.push(`${requestPhase}: ${record}`);
       } else {
         unexpectedRequestFailures.push(`${requestPhase}: ${record}`);
@@ -1307,6 +1315,17 @@ test.describe("accessibility smoke", () => {
     requestPhase = "post-auth journey";
     if (test.info().project.name === "android-touch") {
       await page.getByTestId("day-timeline").screenshot({ path: "../../.local/evidence/break-planning/break-summary.png" });
+    }
+
+    // Cancellation is not a success receipt. Require fresh authenticated reads
+    // of every exact cancelled URL after reload/navigation; actual HTTP errors
+    // still fail, except the separately retained known unmounted diagnostic.
+    for (const [url, pathname] of cancelledReadsToVerify) {
+      const recovery = await page.request.get(url);
+      if (pathname === "/api/background-operations/diagnostics") {
+        expect(recovery.status()).toBe(404);
+        knownManagerDiagnostics404.push("404 GET /api/background-operations/diagnostics");
+      } else expect(recovery.ok(), `fresh read after navigation: ${pathname}`).toBe(true);
     }
 
     console.log("known out-of-scope manager diagnostics 404s:", {
@@ -1469,11 +1488,20 @@ test.describe("accessibility smoke", () => {
     await reopened.close();
   });
 
+  test("supervisors without scheduling capability cannot open Schedule", async ({ page }) => {
+    await signUp(page, "supervisor");
+    await page.getByRole("button", { name: "More" }).click();
+    await expect(page.getByRole("menuitem", { name: "Schedule", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Staff roster", exact: true })).toHaveCount(0);
+  });
+
   test("authorized supervisors can save all break slots without manager-only controls", async ({
     page,
   }) => {
     test.setTimeout(120_000);
-    await signUp(page, "supervisor");
+    // This test's explicitly authorized supervisor is granted only scheduling
+    // access in the disposable fixture, not manager/staff administration.
+    await signUp(page, "supervisor", uniqueTestId("a11y_schedule_supervisor"), true);
     await seedBreakSchedule();
     await page.evaluate(() => {
       for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {

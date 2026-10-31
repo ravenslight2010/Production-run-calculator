@@ -219,7 +219,7 @@ const compatibilityIdentities = collectWebKitCaseIdentities(
   requiredCompatibilityProjects,
   true,
 );
-assert.equal(WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.length, 8);
+assert.equal(WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.length, 16);
 assert.equal(
   new Set(WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES).size,
   WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.length,
