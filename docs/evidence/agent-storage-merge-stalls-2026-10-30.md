@@ -132,3 +132,45 @@ any cleanup change.
   <https://docs.replit.com/features/agent/task-board>,
   <https://docs.replit.com/core-concepts/agent/task-system>, and
   <https://docs.replit.com/features/agent/task-lifecycle>.
+
+## Post-investigation evidence: Developer → Resources screenshot
+
+The owner supplied a Resources screenshot after the investigation was completed.
+The findings and verification above describe the original inspection; this
+addition records later-supplied evidence without reopening that investigation.
+
+**Source:** user-provided
+`attached_assets/Screenshot_20261030_155333_Replit_1793393641142.jpg`,
+visually inspected. The screen identifies **Developer → Resources**, for a
+cloud development environment; it is not production-storage evidence.
+**Capture date:** 2026-10-30, taken from the filename.
+**Visible clock:** 3:53; AM/PM and timezone are unknown. No seconds or UTC
+conversion are established by the visible clock.
+**Source Git revision:** unknown; neither the incident revision nor the local
+inspection revision above is attributed to this screenshot.
+
+| Visible storage label | Displayed usage |
+|---|---|
+| This App | 67.8 GiB (27%) |
+| Workspace | 6.3 GiB |
+| Nix packages | 3.6 GiB |
+| Scratch disk | 0 MiB (0%) |
+
+**Supported conclusion:** overall app storage was not near its displayed limit
+at capture time. The rounded 27% reading does not establish a precise quota.
+These app-level figures are not measurements of any separate per-user,
+per-workspace, inode/file-count, or task-state quota involved in the reported
+`start.lock` write failure.
+
+**Limits:** this screenshot does not rule out a narrower quota, a file-count
+limit, or a transient platform issue. It does not identify the cause of
+`Unknown system error -122`, reproduce the failing operation, establish any
+relationship to merge waits, or prove that the error was fixed or resolved.
+Its unknown timezone prevents reliable correlation with the original incident
+window. Hidden quota counters and historical task-run/lock events remain
+unavailable; the original unresolved findings and evidence gaps still stand.
+This is not the missing incident-time Workspace Settings → Usage measurement.
+
+**Evidence minimization:** only the necessary storage readings and provenance
+are transcribed here. The raw screenshot and its unrelated personal image are
+not embedded or copied into this report.
