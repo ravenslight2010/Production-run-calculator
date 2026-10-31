@@ -1964,6 +1964,80 @@ describe("atomic import operations", () => {
     expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, sandboxCase!.id))).toHaveLength(1);
   });
 
+  it("returns safe JSON and leaves deletion unverified when verification persistence fails", async () => {
+    const [goldCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "live",
+      operationId: "retention-verification-failure",
+      importType: "spec",
+      sourceLabel: "Synthetic fixture",
+      evaluatedInput: { synthetic: true },
+      expectedResult: { synthetic: true },
+    }).returning({ id: tables.importGoldCasesTable.id });
+    expect(goldCase).toBeDefined();
+    const caseId = goldCase!.id;
+    // Direct fixture inserts bypass capture's retention registration. Let the
+    // register backfill this case while it still exists, before deleting it.
+    const registered = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    expect(registered.status).toBe(200);
+    expect((await registered.json() as { records: Array<{ caseId: number }> }).records)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ caseId })]));
+    const deleted = await fetch(`${baseUrl}/api/import-gold/cases/${caseId}`, {
+      method: "DELETE", headers: headers(),
+    });
+    expect(deleted.status).toBe(204);
+    const before = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    expect(before.status).toBe(200);
+    expect((await before.json() as { records: Array<{ caseId: number }> }).records)
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        caseId, status: "verification_needed", verifiedAt: null, verifiedBy: null,
+      })]));
+
+    await pool.query(`
+      CREATE FUNCTION fail_import_gold_verification_for_test() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'SYNTHETIC_PRIVATE UPDATE import_gold_retention SECRET_STACK_TRACE';
+      END;
+      $$
+    `);
+    try {
+      await pool.query(`
+        CREATE TRIGGER fail_import_gold_verification_for_test
+        BEFORE UPDATE OF verified_at, verified_by ON import_gold_retention
+        FOR EACH ROW EXECUTE FUNCTION fail_import_gold_verification_for_test()
+      `);
+      const failed = await fetch(`${baseUrl}/api/import-gold/retention/${caseId}/verification`, {
+        method: "POST", headers: headers("qc-reviewer"),
+      });
+      expect(failed.status).toBe(500);
+      expect(failed.headers.get("content-type")).toContain("application/json");
+      const body = await failed.json();
+      expect(body).toEqual({
+        error: "Something went wrong on the server. Our team has been notified. Please try again later.",
+      });
+      expect(JSON.stringify(body)).not.toMatch(/SYNTHETIC_PRIVATE|UPDATE|import_gold_retention|SECRET_STACK_TRACE|\\n\s+at\s/i);
+    } finally {
+      await pool.query("DROP TRIGGER IF EXISTS fail_import_gold_verification_for_test ON import_gold_retention");
+      await pool.query("DROP FUNCTION fail_import_gold_verification_for_test()");
+    }
+
+    const after = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    expect(after.status).toBe(200);
+    expect((await after.json() as { records: Array<{ caseId: number }> }).records)
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        caseId, status: "verification_needed", verifiedAt: null, verifiedBy: null,
+      })]));
+    const [stored] = await db.select().from(tables.importGoldRetentionTable)
+      .where(eq(tables.importGoldRetentionTable.caseId, caseId));
+    expect(stored).toMatchObject({ verifiedAt: null, verifiedBy: null });
+
+    const retried = await fetch(`${baseUrl}/api/import-gold/retention/${caseId}/verification`, {
+      method: "POST", headers: headers("qc-reviewer"),
+    });
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ caseId, verifiedAt: expect.any(String), verifiedBy: "qc-reviewer" });
+  });
+
   it("tracks scoped deadlines and records manual deletion verification for either manager role", async () => {
     const capturedAt = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
     const [liveCase] = await db.insert(tables.importGoldCasesTable).values({
