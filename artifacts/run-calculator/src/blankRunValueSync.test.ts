@@ -1,3 +1,4 @@
+// @vitest-environment node
 // ── Source guard: CURRENT_BLANK_RUN_VALUE must stay in sync with DEFAULT_VALUES ─
 //
 // Background: `CURRENT_BLANK_RUN_VALUE` in protectRunValues.ts is the server's

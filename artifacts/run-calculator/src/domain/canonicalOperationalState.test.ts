@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { DEFAULT_VALUES } from "../types";
 import { canonicalOperationalRun, canonicalOperationalValues, canonicalOperationalSnapshotForPublish } from "./canonicalOperationalState";

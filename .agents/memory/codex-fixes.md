@@ -1559,3 +1559,12 @@ stays separately retained. No artifact allowlist expansion to hide failed
 Playwright contexts.79 identity/graph tests and5 cancellation tests PASS; hosted
 release closure pending. Main requires a genuine independent approving review,
 not author self-review/admin bypass. See owning task ledger for full evidence.
+
+
+Same-head hosted timing `a459d7c8`:3802 assertions PASS/1 existing skip but153.5s
+FAIL vs150s. Further scoped AST/runtime-import graph review found29 pure/static
+suites with no DOM/JSX dependency, including checking transitive cycles. Add only
+Node annotations (315 focused assertions PASS), preserving explicit jsdom/UI
+suites, isolation/four-worker ceiling/150s budget and real-clock tests. First
+local repeat lacked ShellCheck PATH and exited127; corrected-toolpath full
+verification must pass before push. No timed gate is waived or retried as proof.

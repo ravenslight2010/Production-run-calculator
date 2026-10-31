@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { canStartMixedImport, cancelQueuedMixedImports, isSupportedReviewWorkbook, isSupportedReviewFile, type MixedImportItem } from "./mixedImportQueue";
 describe("mixed workbook boundaries", () => {

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { allergenSequenceWarnings } from "@workspace/allergen";
 import { DEFAULT_VALUES } from "./types";

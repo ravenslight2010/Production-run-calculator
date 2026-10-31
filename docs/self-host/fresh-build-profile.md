@@ -750,3 +750,35 @@ failed after the deliberately separate environment change; updated it to require
 the new exact main guard/capability and continued original protected-lane test,
 then all27 input contracts passed. Git diff whitespace check PASS after removing
 a trailing blank line. No private input or secret was staged.
+
+
+### Same-head timing regression and further setup-only repair
+
+Hosted head `a459d7c8`: Typecheck/routine, all API tests, security audit, Docker,
+build, rollback, browser previews/navigation and native metadata checks PASS.
+Web assertions all3802 PASS with1 existing skip, but full-suite elapsed153.5s
+FAILS the unchanged150s gate. Do not rerun until lucky or call passing assertions
+an overall pass. Standard release remains running on this older revision.
+
+A conservative TypeScript AST/symbol/import-graph review found29 additional
+DOM-independent pure/static suites. Resolve local names such as history/screen
+instead of treating them as browser globals; inspect every reachable runtime
+module, propagating any DOM/JSX/unknown external dependency through cycles. Keep
+all UI/DOM suites and an existing explicit jsdom declaration untouched. Only
+add the Node-environment annotation; no assertions/cases, isolation, workers,
+real-clock scheduling proof or150s gate changed. All29 suites/315 unchanged
+assertions PASS locally. A first annotation guard stopped at an explicit jsdom
+suite and left it unchanged; the remaining allowlist was completed deliberately.
+
+A first local verification repeat FAILed with127 because this command omitted
+the already-installed ShellCheck directory from PATH. No TypeScript/product
+failure was found; rerun with the pinned Node24.21.0 and ShellCheck tool path.
+The earlier successful full typecheck remains historical, not a pass for that
+failed command. Latest complete hosted timing and release evidence is required.
+Local computer exposes2CPU workers, so full150s validation is intentionally left
+to the supported hosted4-worker lane rather than overriding the capacity guard.
+
+Corrected pinned-toolpath root typecheck PASS (exit0), workflow policy/actionlint
+PASS, diff whitespace/privacy checks PASS. Confirmed programmatically that every
+one of the29 test diffs is exactly one added Node-environment annotation. No
+assertion or UI/browser project was changed by this timing follow-up.

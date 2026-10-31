@@ -1,3 +1,4 @@
+// @vitest-environment node
 // ── Source guard: every run-value WRITE in home.tsx must stamp itself ───────
 //
 // The per-run LWW merge (server protectRunValues + both clients' receive
