@@ -447,6 +447,18 @@ try {
     );
     assert.equal(fs.readFileSync(activeRecoveryHolder.recoveryPath, "utf8"), interruptedRecoveryContents);
     assert.equal(fs.existsSync(interruptedRecoveryLockPath), false);
+    // Fill more than a pipe buffer while the native gate is held. The losing
+    // flock/Python process can close stdin before Node has written the request.
+    const beforeContendedPipe = fs.readFileSync(interruptedRecoveryDecisionPath);
+    assert.throws(
+      () => appendMetadataMaintenanceEntryFile(interruptedRecoveryDecisionPath, {
+        ...syntheticLockEntry, note: "Synthetic busy-gate pipe probe.".repeat(150_000),
+      }),
+      /metadata lock recovery is already in progress/u,
+    );
+    assert.deepEqual(fs.readFileSync(interruptedRecoveryDecisionPath), beforeContendedPipe);
+    assert.equal(fs.readFileSync(activeRecoveryHolder.recoveryPath, "utf8"), interruptedRecoveryContents);
+    assert.equal(fs.existsSync(interruptedRecoveryLockPath), false);
   } finally {
     activeRecoveryHolder.child.kill("SIGKILL");
     await new Promise<void>((resolve, reject) => {

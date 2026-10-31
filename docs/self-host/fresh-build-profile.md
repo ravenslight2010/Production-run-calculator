@@ -598,3 +598,32 @@ typecheck PASS (exit0). No assertion was dropped and no DOM-driven suite was
 converted. Exact missing Markdown hashes were verified against the immutable
 snapshot before pinning. API at21e7395f completed PASS. All new/current hosted
 gates still require execution; no main-only authorization has been inferred.
+
+### Fourth hosted run — a7cdc3c4: complete inputs verified
+
+The complete 58-file channel successfully passed source-comparison, source
+manifest, reconciliation and source-heal tests: the repeated missing-input
+blocker is now CLOSED by hosted evidence. The scripts routine reached a new
+real native metadata race: a nonblocking flock contender can close stdin before
+Node finishes writing, yielding spawnSync EPIPE. Preserve refusal and all locks;
+classify that specific closed-input refusal as busy/unavailable rather than
+pretending the lock operation succeeded. Added a native held-gate/large-request
+regression that requires decision/recovery/update-lock bytes remain unchanged.
+Other launch errors keep their original fail-closed diagnostics. Native macOS
+and Windows checks remain required and their supported paths are preserved.
+
+All 3800 web assertions again passed, but 155.7s still FAILED the unchanged150s
+budget. Thirteen suites removed too little setup overhead. Runtime syntax/import
+graph inspection found 41 additional DOM-independent pure/static suites; move
+only those to Node and require all their assertions plus complete hosted suites.
+No browser-driven suite, assertion, worker limit, isolation or budget changed.
+Earlier timing failures remain in this ledger; neither retries nor green test
+assertions alone close the timing gate. Docker/build/rollback/browser/fresh
+checks PASS; current API/release results still need final verification.
+
+Fifth pre-push checkpoint: added41 pure/static suites all284 tests PASS (with
+the earlier105, total389 focused unchanged assertions). Complete metadata
+backfill/export/dataset regression suite PASS; three further native Linux
+recovery/race reruns PASS, including large busy-gate input refusal without writes.
+Root typecheck PASS, exit0. Latest broad/native-host/timing/release checks must
+run from the pushed head. Main-only data access has not been approved or changed.

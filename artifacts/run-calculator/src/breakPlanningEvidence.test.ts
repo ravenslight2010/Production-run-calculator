@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { cancelledDocumentMessage } from "../e2e/breakPlanningEvidence";
 

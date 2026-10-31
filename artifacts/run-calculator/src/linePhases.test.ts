@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Unit tests for computeLinePhases covering all phase transitions:
 //   • Filling sequence (Stage 1 → 2 → 3 in virtual elapsed order)
 //   • Persisted-policy pause sequence (safe stop-tunnel or normal line drain)

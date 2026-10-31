@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { adoptGuardedPendingReferences } from "./guardedMasterDataAdoption";
 const values = { doughRecipeName: "New", cases: 55, doughBatches: 8, totalSkids: 2 };

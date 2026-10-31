@@ -582,6 +582,14 @@ export function appendMetadataMaintenanceEntryFile(
     },
   );
 
+  // A nonblocking gate may reject the contender before consuming stdin. Node
+  // can surface that race as EPIPE rather than a normal child exit. It is still
+  // a refusal, never permission to touch locks or retry a write automatically.
+  if (isRecord(result.error) && result.error.code === "EPIPE") {
+    throw new Error(
+      "metadata lock recovery is already in progress or the gate worker closed its input pipe; leave existing locks untouched and retry after checking the recovery gate",
+    );
+  }
   if (result.error) {
     throw new Error(
       `metadata recovery gate could not start (${result.error.message}); leave existing locks untouched and retry after checking ${process.platform === "darwin" ? "Python 3" : "the local flock utility"}`,

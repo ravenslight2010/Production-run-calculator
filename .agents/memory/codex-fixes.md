@@ -1507,3 +1507,18 @@ focused tests PASS), preserving every assertion, UI DOM environment, isolation,
 worker ceiling and timing limit. Root typecheck +23 input contracts PASS locally;
 full hosted rerun required. API passed at21e7395f. Main-only inputs still await
 separate user approval; no merge or main environment mutation.
+
+Native metadata EPIPE contention: distill-backfill.mts now treats a closed gate
+stdin pipe as a refused/busy-or-unavailable recovery, never success or automatic
+retry. A held-native-gate large synthetic request proves decision/recovery-lock
+bytes and update-lock absence are preserved. Complete distill-backfill/export/
+dataset suite PASS plus three extra native Linux recovery/race runs PASS;
+macOS/Windows hosted checks remain required. No identity/inode/lock recovery
+condition weakened. Source audit inputs all58 passed hosted comparison/manifest/
+reconciliation/heal gates.
+
+Timing repair expanded to41 additional syntax/import-graph-confirmed pure/static
+suites (284 focused tests PASS), total54 Node suites with unchanged assertions,
+DOM-driven tests, isolation, four workers and150s guard. Authoritative root
+typecheck PASS; latest full hosted timing/suites pending. Main inputs still
+await specific owner approval, so main merge remains blocked.

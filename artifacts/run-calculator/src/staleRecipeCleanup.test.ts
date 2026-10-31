@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Stale recipe references on the merge screen (all four recipe-name tabs):
 // collectStaleRecipeLinkNames finds names referenced by values objects (runs,
 // profiles, templates, history) that match NO server pool name, per category's
