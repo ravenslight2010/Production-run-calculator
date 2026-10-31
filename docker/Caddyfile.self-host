@@ -1,0 +1,26 @@
+# Private LAN HTTPS only. Provision public root CA trust on every client.
+{$SITE_ADDRESS} {
+	# Private LAN CA: provision its root on every client before production use.
+	tls internal
+	# Caddy is the TLS terminator for named SITE_ADDRESS values. HSTS is only
+	# attached to HTTPS responses; local SITE_ADDRESS=:80 remains plain HTTP.
+	@https protocol https
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'"
+	}
+	header @https Strict-Transport-Security "max-age=31536000"
+
+	# API + live-updates stream go to the Node server container.
+	handle /api/* {
+		reverse_proxy api:5000
+	}
+	# Everything else is the built web app (a single-page app).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -27,7 +27,7 @@ export default defineConfig({
   },
   projects: [
     ...[
-      { name: "desktop-chromium", viewport: { width: 1280, height: 800 } },
+      { name: "desktop-chromium", viewport: { width: 1440, height: 900 } },
       { name: "phone-chromium", viewport: { width: 390, height: 844 } },
       { name: "tablet-portrait-chromium", viewport: { width: 768, height: 1024 } },
       { name: "tablet-landscape-chromium", viewport: { width: 1024, height: 768 } },
@@ -40,7 +40,7 @@ export default defineConfig({
       },
     })),
     ...[
-      { name: "desktop-webkit", viewport: { width: 1280, height: 800 } },
+      { name: "desktop-webkit", viewport: { width: 1440, height: 900 } },
       { name: "phone-webkit", viewport: { width: 390, height: 844 } },
       { name: "tablet-portrait-webkit", viewport: { width: 768, height: 1024 } },
       { name: "tablet-landscape-webkit", viewport: { width: 1024, height: 768 } },

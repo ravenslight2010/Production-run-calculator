@@ -6,10 +6,16 @@
 
 set -euo pipefail
 
-# Replit's system trust store contains the certificates needed for verified
-# HTTPS requests from the pinned Node runtime. Keep certificate verification on;
-# do not replace this with NODE_TLS_REJECT_UNAUTHORIZED=0.
-export NODE_USE_SYSTEM_CA=1
+# macOS uses its bundled Bash without GNU stat/date/sha256sum or flock.
+# Require the pinned Node/pnpm already installed; preserve the Linux path below.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  exec python3 "$(dirname "${BASH_SOURCE[0]}")/run-release-darwin.py" "$@"
+fi
+
+# The pinned Node build selects OpenSSL's CA store; enabling Node's separate
+# system-CA mode conflicts with it and exits with code 9. Keep OpenSSL's verified
+# trust enabled, using the readable host bundle selected below.
+export NODE_USE_SYSTEM_CA=0
 
 # The pinned Node/OpenSSL build can have a default CA directory inside an
 # immutable Nix store path that is not present in this workspace. Point OpenSSL
@@ -124,7 +130,8 @@ record_lock_wait_event() {
   exec {history_lock_fd}>&-
 }
 
-# shellcheck disable=SC2317
+# Invoked by traps (or their cleanup callback); covered by signal/cleanup tests.
+# shellcheck disable=SC2317,SC2329
 handle_lock_wait_signal() {
   local signal="$1"
   local exit_code="$2"
@@ -330,7 +337,8 @@ mkdir -m 700 -- "$fallback_npm_cache"
 trap 'rm -rf "$fallback_marker_dir"' EXIT
 active_child_pid=""
 
-# shellcheck disable=SC2317
+# Invoked by traps (or their cleanup callback); covered by signal/cleanup tests.
+# shellcheck disable=SC2317,SC2329
 stop_active_child() {
   local signal="$1"
   local process_group="$active_child_pid"
@@ -351,7 +359,8 @@ stop_active_child() {
   done
 }
 
-# shellcheck disable=SC2317
+# Invoked by traps (or their cleanup callback); covered by signal/cleanup tests.
+# shellcheck disable=SC2317,SC2329
 handle_signal() {
   local signal="$1"
   local exit_code="$2"

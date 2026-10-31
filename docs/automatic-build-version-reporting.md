@@ -95,6 +95,30 @@ An `app-build:…` identifier belongs to this application's artifact set; it is
 **not** Replit's internal Build UUID. Optional runtime-reported platform IDs are
 not provider-verified proof.
 
+### When platform status and runtime identity disagree
+
+Keep three facts separate: the application's prepared/sealed source identity,
+the platform labels reported by a running process, and the official publication
+status. Sealing happens before platform promotion; `buildMode: release` means
+both application outputs were sealed, not that Replit marked publication
+successful. The static `/build-info.json` retains null platform IDs; the API
+adds runtime-reported labels without changing the sealed source identity.
+
+If the API reports a platform build that official history marks failed, retain
+that failure even when the URL is ready or aggregate deployment metadata says
+`hasSuccessfulBuild: true`. Compare the exact build's official prepared/sealed
+log fields with API and static source fields, and inspect the preceding
+successful build rather than assuming it is serving. These comparisons do not
+replace the independent expected-source check above or establish a missing Git
+revision. Do not derive an expectation from the live response, relabel a failed
+record, or republish a task copy just to remove the discrepancy.
+
+Record missing promotion/status-transition evidence with the publishing/platform
+operator as owner. The bounded
+[2026-10-26 reconciliation](evidence/published-identity-reconciliation-2026-10-26.md)
+shows matching prepared/sealed/serving source fields alongside unresolved
+platform status; it is not release approval or proof of a stall's cause.
+
 A source-match receipt always says `productionGo: false`. The generated handoff,
 readiness, and reconciliation records support the release preparation flow;
 they do not replace the expiry, browser, or standard/full release gates. Missing

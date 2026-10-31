@@ -9,6 +9,7 @@ import {
 import { genId, todayStr } from "../utils";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 import { defaultDayBreaks } from "../dayTimeline";
+import type { OperationalControl } from "@workspace/sync-contract";
 import {
   APPLICATOR_STOCK_CHANNELS,
   APPLICATOR_STOCK_REGISTERS,
@@ -35,6 +36,19 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     );
   }
   return false;
+}
+
+/**
+ * Form watchers may materialize optional top-level fields as `undefined`,
+ * while JSON-backed saved values omit them. Treat those representations as
+ * equal, but keep deep value and array-order comparisons for actual edits.
+ */
+export function hasUnsavedFormValueChanges(
+  current: Record<string, unknown>,
+  saved: Record<string, unknown>,
+): boolean {
+  const keys = new Set([...Object.keys(current), ...Object.keys(saved)]);
+  return [...keys].some((key) => !deepEqual(current[key], saved[key]));
 }
 
 export function freshDayState(): DayState {
@@ -69,6 +83,18 @@ export function isBlankRemovableRun(run: RunMeta): boolean {
 export function isPristineSeedRun(run: RunMeta): boolean {
   return !!run.seeded && isBlankRemovableRun(run);
 }
+
+export function shouldKeepLocalSeedPlaceholder(args: {
+  run: RunMeta;
+  remoteRunCount: number;
+  isCurrentRun: boolean;
+  hasRecentLocalEdit: boolean;
+  hasDirtyForm: boolean;
+}): boolean {
+  if (!isPristineSeedRun(args.run) || args.remoteRunCount === 0) return true;
+  return args.isCurrentRun && (args.hasRecentLocalEdit || args.hasDirtyForm);
+}
+
 export function shouldAtomicallyAdoptFirstSnapshot(args: {
   initialSnapshot?: boolean; localRuns: RunMeta[]; hasLocalUserEdit?: boolean;
 }): boolean {
@@ -207,7 +233,9 @@ export function serverOwnedApp1BatchProgress(
   payload: Pick<SyncPayload, "runValues" | "runValuesUpdatedAt" | "autoTrackCoordination" | "autoTrackServerState">,
   runId: string,
   localValues: FormValues,
-): Partial<Pick<FormValues, "app1BatchesMade" | "app1BatchCorrectionGeneration">> | null {
+): Partial<Pick<FormValues,
+  "app1BatchesMade" | "app1BatchCorrectionGeneration" | "app1StockLbs"
+>> | null {
   const remoteValues = payload.runValues[runId];
   const remoteStamp = Number(payload.runValuesUpdatedAt?.[runId]);
   const coordination = payload.autoTrackCoordination?.runs?.[runId]?.["app1-batch"];
@@ -246,12 +274,38 @@ export function serverOwnedApp1BatchProgress(
     || remoteCount <= localCount
   ) return null;
 
-  return {
+  const progress: Partial<Pick<FormValues,
+    "app1BatchesMade" | "app1BatchCorrectionGeneration" | "app1StockLbs"
+  >> = {
     app1BatchesMade: remoteCount,
     ...(remoteGeneration > localGeneration
       ? { app1BatchCorrectionGeneration: remoteGeneration }
       : {}),
   };
+  // An accepted App 1 batch claim also creates on-line stock. Merge that
+  // increase only under the same server ownership proof and only when no
+  // newer manual stock correction is present on this device.
+  const remoteStock = Number(remoteValues.app1StockLbs);
+  const localStock = Number(localValues.app1StockLbs);
+  const remoteStockGeneration = Number(remoteValues.app1StockCorrectionGeneration);
+  const localStockGeneration = Number(localValues.app1StockCorrectionGeneration);
+  const remoteStockCapacity = computeApplicatorStockCapacityLbs(
+    remoteValues as unknown as Record<string, unknown>,
+    "app1",
+  );
+  if (
+    remoteValues.applicatorStockInitialized === true
+    && Number.isFinite(remoteStock)
+    && remoteStock >= localStock
+    && remoteStock <= remoteStockCapacity
+    && Number.isFinite(localStock)
+    && Number.isSafeInteger(remoteStockGeneration)
+    && Number.isSafeInteger(localStockGeneration)
+    && remoteStockGeneration === localStockGeneration
+  ) {
+    progress.app1StockLbs = remoteStock;
+  }
+  return progress;
 }
 
 /** Adopt only server-proven stock claims, or a newer operator correction generation. */
@@ -297,6 +351,15 @@ export function serverOwnedApplicatorStockProgress(
     const localAnchor = Number(localValues[fields.anchor as keyof FormValues]);
     const remoteGeneration = Number(remoteValues[fields.correctionGeneration as keyof FormValues]);
     const localGeneration = Number(localValues[fields.correctionGeneration as keyof FormValues]);
+    const consumedField = register.startsWith("app")
+      ? `${register}StockConsumedLbs` as keyof FormValues
+      : null;
+    const remoteConsumed = consumedField
+      ? Number(remoteValues[consumedField] ?? 0)
+      : null;
+    const localConsumed = consumedField
+      ? Number(localValues[consumedField] ?? 0)
+      : null;
     if (
       cap <= 0
       || !Number.isFinite(remoteStock)
@@ -310,6 +373,13 @@ export function serverOwnedApplicatorStockProgress(
       || remoteGeneration < 0
       || !Number.isSafeInteger(localGeneration)
       || localGeneration < 0
+      || (remoteConsumed !== null && (
+        !Number.isFinite(remoteConsumed)
+        || remoteConsumed < 0
+        || !Number.isFinite(localConsumed)
+        || localConsumed! < 0
+        || remoteConsumed < localConsumed!
+      ))
       || remoteGeneration < localGeneration
       || (remoteGeneration === localGeneration && remoteStock > localStock)
       || (remoteGeneration === localGeneration && remoteAnchor < localAnchor)
@@ -317,6 +387,9 @@ export function serverOwnedApplicatorStockProgress(
     (result as Record<string, unknown>)[fields.stock] = remoteStock;
     (result as Record<string, unknown>)[fields.anchor] = remoteAnchor;
     (result as Record<string, unknown>)[fields.correctionGeneration] = remoteGeneration;
+    if (consumedField && remoteConsumed !== null) {
+      (result as Record<string, unknown>)[consumedField] = remoteConsumed;
+    }
     result.applicatorStockInitialized = true;
   }
   const sauceCoordination = payload.autoTrackCoordination?.runs?.[runId]?.["sauce-stock"];
@@ -371,7 +444,8 @@ export function serverOwnedApplicatorStockProgress(
 
 type OperationalCanonicalIntent = {
   runId: string;
-  action: "pause" | "resume" | "lifecycle" | "correction";
+  action: "pause" | "resume" | "lifecycle" | "correction" | "control";
+  control?: OperationalControl;
   lifecycle?: "start" | "end";
   values?: Record<string, number>;
 };
@@ -389,10 +463,10 @@ const OPERATIONAL_CORRECTION_FIELDS = new Set<keyof FormValues>([
   "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
   "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
   "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
-  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
-  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
-  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
-  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration", "app1StockConsumedLbs",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration", "app2StockConsumedLbs",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration", "app3StockConsumedLbs",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration", "app4StockConsumedLbs",
   "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
   "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
   "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
@@ -418,26 +492,12 @@ export function reconcileOperationalIntentCanonical(args: {
   lifecycleChanged: boolean;
   valueFields: Array<keyof FormValues>;
 } {
-  const unchanged = {
-    dayState: args.dayState,
-    runValues: args.runValues,
-    runValuesUpdatedAt: args.runValuesUpdatedAt,
-    lifecycleChanged: false,
-    valueFields: [] as Array<keyof FormValues>,
-  };
-  // Accepted finalization is special: the server owns the completion stamp and
-  // committed inventory in the same transaction. Adopt that exact lifecycle
-  // before the outbox drops its snapshot fence. Other accepted commands already
-  // match their optimistic local projection.
-  const acceptedStockStart = args.intent.action === "lifecycle"
-    && args.intent.lifecycle === "start"
+  // Every accepted lifecycle uses server-issued anchors, not the optimistic
+  // browser clock. Start/Pause/Resume are just as authoritative as atomic End.
+  const acceptedStockStart = args.outcome === "accepted"
+    && args.intent.action === "lifecycle" && args.intent.lifecycle === "start"
     && (args.payload.runValues[args.intent.runId]?.applicatorStockInitialized === true
       || args.payload.runValues[args.intent.runId]?.sauceStockInitialized === true);
-  if (args.outcome === "accepted"
-    && args.intent.action !== "correction"
-    && !acceptedStockStart
-    && !(args.intent.action === "lifecycle" && args.intent.lifecycle === "end")) return unchanged;
-
   let dayState = args.dayState;
   let lifecycleChanged = false;
   if (args.intent.action !== "correction") {
@@ -453,6 +513,8 @@ export function reconcileOperationalIntentCanonical(args: {
         endedAt: canonical.endedAt,
         stoppages: canonical.stoppages,
         metaUpdatedAt: canonical.metaUpdatedAt,
+        ...(args.intent.action === "control" && args.intent.control?.kind === "auto-track"
+          ? { autoTrackDisabled: canonical.autoTrackDisabled } : {}),
       };
       if (!deepEqual(local, restored)) {
         const runs = [...args.dayState.runs];

@@ -14,3 +14,15 @@ For no-document-scroll checks on dialogs, bring the trigger into view before rec
 **Why:** A setup form may need to scroll to reveal a lower trigger. Comparing against the pre-tap position can mistake this automation scroll for a dialog-induced jump.
 
 **How to apply:** Call `scrollIntoViewIfNeeded()` on the trigger, record `window.scrollY`, then tap and compare the page position while the dialog is open and after it closes.
+
+Scope incident assertions to a stable incident identity before checking its guidance text; separate records can legitimately share the same explanation.
+
+**Why:** Page-wide text assertions became ambiguous on responsive incident lists even though each individual card was correct.
+
+**How to apply:** Locate the incident card by its bounded correlation reference, then assert within that card rather than relying on globally unique prose.
+
+WPE can project network-console messages as `pageerror`, splitting the URL's first colon between the error name and message. Do not equate that format with an uncaught application exception, or broadly ignore access-control messages.
+
+**Why:** Explicit reloads produced this browser-specific format while the application continued to render; recording phase names alone hid the distinction.
+
+**How to apply:** Retain bounded network diagnostics separately, recognize only exact expected same-origin routes during deliberate navigation, and require successful fresh reads afterward. Unexpected routes, normal-operation failures, and actual JavaScript exceptions must still fail.

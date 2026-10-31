@@ -6,11 +6,13 @@ import {
   type Request,
   type Route,
 } from "@playwright/test";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
   uniqueTestId,
 } from "./isolation";
+import { DEFAULT_VALUES } from "../src/types";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
@@ -313,8 +315,7 @@ function waitForBatchWeightWrite(page: Page, ingredient: string, lbs: number) {
   return page.waitForResponse((response) => {
     if (
       !response.url().endsWith("/api/ingredient-batch-weights") ||
-      response.request().method() !== "POST" ||
-      response.status() !== 200
+      response.request().method() !== "POST"
     ) {
       return false;
     }
@@ -327,6 +328,12 @@ function waitForBatchWeightWrite(page: Page, ingredient: string, lbs: number) {
           row.name?.trim().toLowerCase() === key && Number(row.lbs) === lbs,
       ) ?? false
     );
+  }).then((response) => {
+    expect(
+      response.status(),
+      `Save ingredient batch weight should be acknowledged (HTTP ${response.status()})`,
+    ).toBe(200);
+    return response;
   });
 }
 async function setNamedRecipeLbs(
@@ -357,8 +364,12 @@ async function setNamedRecipeLbs(
     : undefined;
   await input.fill(lbs);
   await input.blur();
-  if (waitForSave) await saved;
-  if (waitForSave) {
+  if (saved) {
+    const response = await saved;
+    expect(
+      response.status(),
+      `Save ${kind} recipe should be acknowledged (HTTP ${response.status()})`,
+    ).toBe(200);
     await expect(input).toBeEnabled({ timeout: 45_000 });
   }
   await dialog
@@ -503,6 +514,66 @@ async function readServerRunValue(page: Page, runId: string): Promise<string> {
   return JSON.stringify(payload.runValues?.[runId] ?? null);
 }
 
+async function expectServerNamedRecipeRowsAtLbs(
+  page: Page,
+  runId: string,
+  kind: "dough" | "sauce",
+  expectedLbs: number,
+): Promise<void> {
+  const field = kind === "dough" ? "doughRecipe" : "frontlineRecipe";
+  await expect.poll(async () => {
+    const values = JSON.parse(await readServerRunValue(page, runId)) as
+      | Record<string, unknown>
+      | null;
+    const rows = values?.[field];
+    return Array.isArray(rows)
+      ? rows.map((row) => Number((row as { lbs?: unknown }).lbs))
+      : null;
+  }, {
+    timeout: 45_000,
+    message: `Canonical ${kind} recipe rows should acknowledge ${expectedLbs} lbs`,
+  }).toEqual([expectedLbs]);
+}
+
+async function readBrowserNamedRecipeRowsAtLbs(
+  page: Page,
+  runId: string,
+  kind: "dough" | "sauce",
+): Promise<number[] | null> {
+  const field = kind === "dough" ? "doughRecipe" : "frontlineRecipe";
+  return page.evaluate(({ storageKey, fieldName }) => {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const values = JSON.parse(raw) as Record<string, unknown>;
+    const rows = values[fieldName];
+    return Array.isArray(rows)
+      ? rows.map((row) => Number((row as { lbs?: unknown }).lbs))
+      : null;
+  }, {
+    storageKey: `run-calc-run-${runId}`,
+    fieldName: field,
+  });
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function canonicalRunValue(serialized: string): string {
+  const value = JSON.parse(serialized) as unknown;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return stableJson(value);
+  }
+  return stableJson({ ...DEFAULT_VALUES, ...(value as Record<string, unknown>) });
+}
+
 async function reloadAfterMasterBootstrap(page: Page): Promise<void> {
   const masterReady = page.waitForResponse(
     (response) =>
@@ -633,7 +704,7 @@ test.skip("@focused-only remembered plain ingredient batch weights rehydrate in 
     values,
     updatedAt: now,
   });
-  await fixtures.seedTodaySync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `recipe-freeze-${username}`,
     date: TODAY,
@@ -823,7 +894,7 @@ test("a delayed shared recipe refresh stays with its original run after a rapid 
       values: originalValues,
       updatedAt: now,
     });
-    await fixtures.seedTodaySync({
+    await fixtures.seedCanonicalTodaySnapshot({
       token: account.token,
       senderId: `${scenario.label}-recipe-switch-${username}`,
       date: TODAY,
@@ -924,7 +995,7 @@ test.skip("@focused-only a delayed shared recipe refresh stays with its original
     values: originalValues,
     updatedAt: now,
   });
-  await fixtures.seedTodaySync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `${scenario.label}-recipe-switch-${username}`,
     date: TODAY,
@@ -1047,7 +1118,7 @@ test("a delayed learned batch weight reaches future pending runs but preserves s
     values: activeValues,
     updatedAt: now,
   });
-  await fixtures.seedTodaySync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `batch-weight-future-${username}`,
     date: TODAY,
@@ -1081,10 +1152,10 @@ test("a delayed learned batch weight reaches future pending runs but preserves s
       packagingProgress: {},
     },
   });
-  await fixtures.seedScheduledSync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
+    senderId: uniqueTestId("scheduled-lifecycle-fixture"),
     date: TOMORROW,
-    today: TODAY,
     payload: {
       dayState: {
         date: TOMORROW,
@@ -1425,7 +1496,7 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       values,
       updatedAt: now,
     });
-    await fixtures.seedTodaySync({
+    await fixtures.seedCanonicalTodaySnapshot({
       token: account.token,
       senderId: `${scenario.label}-recipe-freeze-${username}`,
       date: TODAY,
@@ -1477,6 +1548,36 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       { name: "rc_auth", value: account.token, url: API_BASE },
     ]);
     const peer = await peerContext.newPage();
+    const runValueStorageKey = `run-calc-run-${upcomingRunId}`;
+    await Promise.all([page, peer].map((targetPage) =>
+      targetPage.addInitScript((storageKey) => {
+        const writes: Array<{ at: number; rows: number[] | null }> = [];
+        Object.defineProperty(window, "__e2eRecipeRowWrites", {
+          configurable: true,
+          value: writes,
+        });
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+          if (key === storageKey) {
+            try {
+              const parsed = JSON.parse(value) as {
+                frontlineRecipe?: Array<{ lbs?: unknown }>;
+              };
+              writes.push({
+                at: Date.now(),
+                rows: Array.isArray(parsed.frontlineRecipe)
+                  ? parsed.frontlineRecipe.map((row) => Number(row.lbs))
+                  : null,
+              });
+              if (writes.length > 12) writes.shift();
+            } catch {
+              writes.push({ at: Date.now(), rows: null });
+            }
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      }, runValueStorageKey),
+    ));
 
     const sourceEventsReady = page.waitForRequest(
       (request) => request.url().includes("/api/sync/events"),
@@ -1534,6 +1635,39 @@ for (const scenario of sharedRecipeFreezeScenarios) {
         upcomingRunId,
         serverBeforeFirstEdit,
       );
+      if (scenario.kind === "dough" || scenario.kind === "sauce") {
+        await expectServerNamedRecipeRowsAtLbs(
+          page,
+          upcomingRunId,
+          scenario.kind,
+          Number(scenario.firstLbs),
+        );
+        try {
+          await expect.poll(async () => Promise.all([
+            readBrowserNamedRecipeRowsAtLbs(page, upcomingRunId, scenario.kind),
+            readBrowserNamedRecipeRowsAtLbs(peer, upcomingRunId, scenario.kind),
+          ]), {
+            timeout: 20_000,
+            message: "source and peer run-value caches should adopt the canonical recipe rows",
+          }).toEqual([
+            [Number(scenario.firstLbs)],
+            [Number(scenario.firstLbs)],
+          ]);
+        } catch (error) {
+          const [sourceWrites, peerWrites] = await Promise.all([page, peer].map(
+            (targetPage) => targetPage.evaluate(() =>
+              (window as typeof window & {
+                __e2eRecipeRowWrites?: Array<{ at: number; rows: number[] | null }>;
+              }).__e2eRecipeRowWrites ?? [],
+            ),
+          ));
+          const cause = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `${cause}\nSanitized pending-run storage writes: ${JSON.stringify({ sourceWrites, peerWrites })}`,
+            { cause: error },
+          );
+        }
+      }
       const [pendingAfterFirstEdit, peerPendingAfterFirstEdit] =
         await Promise.all([
           expectIngredientDetailChanged(page, upcomingRunId, pendingBefore),
@@ -1581,6 +1715,14 @@ for (const scenario of sharedRecipeFreezeScenarios) {
         upcomingRunId,
         serverAfterFirstEdit,
       );
+      if (scenario.kind === "dough" || scenario.kind === "sauce") {
+        await expectServerNamedRecipeRowsAtLbs(
+          page,
+          upcomingRunId,
+          scenario.kind,
+          Number(scenario.secondLbs),
+        );
+      }
       const [pendingAfterSecondEdit, peerPendingAfterSecondEdit] =
         await Promise.all([
           expectIngredientDetailChanged(
@@ -1697,7 +1839,7 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       values: originalValues,
       updatedAt: now,
     });
-    await fixtures.seedTodaySync({
+    await fixtures.seedCanonicalTodaySnapshot({
       token: account.token,
       senderId: `${scenario.label}-recipe-switch-${username}`,
       date: TODAY,
@@ -1755,7 +1897,9 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     const originalBefore = await readIngredientDetail(page, originalRunId);
     const switchedBefore = await readIngredientDetail(page, switchedRunId);
     const originalServerBefore = await readServerRunValue(page, originalRunId);
-    const switchedServerBefore = await readServerRunValue(page, switchedRunId);
+    const switchedServerBefore = canonicalRunValue(
+      await readServerRunValue(page, switchedRunId),
+    );
     let saveGate:
       { observed: Promise<void>; release: () => Promise<void> } | undefined;
     let refreshGate:
@@ -1840,7 +1984,9 @@ for (const scenario of sharedRecipeFreezeScenarios) {
         .not.toBe(originalServerBefore);
       await expectIngredientDetailChanged(page, originalRunId, originalBefore);
       await expect
-        .poll(() => readServerRunValue(page, switchedRunId), {
+        .poll(async () => canonicalRunValue(
+          await readServerRunValue(page, switchedRunId),
+        ), {
           timeout: 20_000,
           message: "The delayed refresh mutated the unrelated unprofiled run",
         })
@@ -1910,7 +2056,7 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
     values: pendingValues,
     updatedAt: now,
   });
-  await fixtures.seedTodaySync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `pep-batch-${account.username}`,
     date: TODAY,
@@ -1980,7 +2126,13 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
   );
 
   const activeFreezeSignature = (raw: string) => {
-    const values = JSON.parse(raw) as Record<string, unknown>;
+    // Canonical server snapshots may expand omitted fields with the normal
+    // form defaults. Compare the same effective values on both sides rather
+    // than treating omitted and defaulted fields as a manager edit.
+    const values = {
+      ...DEFAULT_VALUES,
+      ...JSON.parse(raw) as Record<string, unknown>,
+    };
     return JSON.stringify({
       pep1Type: values.pep1Type,
       pep1Sticks: values.pep1Sticks,
@@ -2126,7 +2278,7 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
     values: pendingValues,
     updatedAt: now,
   });
-  await fixtures.seedTodaySync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `batch-weight-sign-in-${username}`,
     date: TODAY,
@@ -2189,11 +2341,10 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
     .getByTestId("tab-run")
     .waitFor({ state: "attached", timeout: 25_000 });
 
+  await selectCanonicalFixtureRun(page, activeRunId);
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Sauce & Applicator Weights" })
-    .click();
+  await page.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
   await expect(
     page.getByTestId("input-app1BatchLbs"),
     "active profile batch weight did not hydrate",
@@ -2307,6 +2458,7 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
 test("manager weight edits acknowledge, propagate, clear, and remain retryable across devices", async ({
   browser,
   page,
+  baseURL,
 }) => {
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -2343,6 +2495,7 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
     password: PASSWORD,
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
+  await fixtures.assignManagerRole(account);
 
   await fixtures.seedBrandProfile(account, {
     brand,
@@ -2350,7 +2503,7 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
     values: baseValues,
     updatedAt: now,
   });
-  await fixtures.seedTodaySync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `weight-sync-${account.username}`,
     date: TODAY,
@@ -2397,10 +2550,10 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
       packagingProgress: {},
     },
   });
-  await fixtures.seedScheduledSync({
+  await fixtures.seedCanonicalTodaySnapshot({
     token: account.token,
+    senderId: uniqueTestId("scheduled-lifecycle-fixture"),
     date: TOMORROW,
-    today: TODAY,
     payload: {
       dayState: {
         date: TOMORROW,
@@ -2459,13 +2612,20 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
     },
     { ingredientName: ingredient },
   );
+  const pageOrigin = baseURL ? new URL(baseURL).origin : new URL(API_BASE).origin;
   await page
     .context()
-    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    .addCookies([{ name: "rc_auth", value: account.token, url: pageOrigin }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page
     .getByTestId("tab-run")
     .waitFor({ state: "attached", timeout: 25_000 });
+  const authenticatedIdentity = await page.request.get("/api/me", {
+    failOnStatusCode: true,
+  });
+  expect(
+    (await authenticatedIdentity.json() as { role?: string }).role,
+  ).toBe("manager");
   await page.getByTestId("tab-run").click();
   // The tab and run count can appear before today's canonical run values have
   // been adopted. Weight propagation scans loaded runs, so wait for the
@@ -2773,10 +2933,14 @@ async function ensureSauceWeightsOpen(
   inputTestId: string,
 ): Promise<void> {
   const input = page.getByTestId(inputTestId);
-  if (!(await input.isVisible().catch(() => false))) {
-    await page
-      .getByRole("button", { name: "Sauce & Applicator Weights" })
-      .click();
-  }
-  await expect(input).toBeVisible();
+  // Fresh-session/run hydration can reset the accordion after the first click.
+  // Retry only this non-mutating navigation, within the existing 5-second bound.
+  await expect(async () => {
+    if (!(await input.isVisible())) {
+      await page
+        .getByRole("button", { name: "Sauce & Applicator Weights" })
+        .click({ timeout: 500 });
+    }
+    await expect(input).toBeVisible({ timeout: 200 });
+  }).toPass({ timeout: 5_000, intervals: [250] });
 }

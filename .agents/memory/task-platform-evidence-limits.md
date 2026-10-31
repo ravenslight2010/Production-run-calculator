@@ -9,6 +9,28 @@ Assignment and mode are also separate evidence questions. A read-only task recor
 
 A task record's `updatedAt` is not a task-run transition timestamp, and a state label alone cannot establish why a run waited. Attribute a platform-managed wait only from task-run logs or other platform-owned diagnostics; keep repository filesystem-lock evidence separate. If the authorized session exposes records but not run logs, state that exact evidence gap and ask Replit to inspect the task-run history rather than inferring causality.
 
+Public status history is evidence of broad incidents only: a matching incident can establish that a platform issue was reported, but cannot tie it to one user's run; an all-clear page cannot rule out account-, region-, client-, or run-specific faults. Correlate an exact task/thread/run identifier and local-time window with platform-owned start/end, queue/wait, apply/lock, cancellation, and error records before assigning a platform cause.
+
+**Why:** Public Agent/task incidents have occurred, while an individual session's task-run and client records may remain private to the Replit UI or support systems.
+
+**How to apply:** Use public status for service context, not root-cause attribution. Preserve the exact missing run evidence and hand it to the platform owner rather than inferring from task-card update times or current service status.
+
+## Workspace write-quota evidence
+
+Do not use free space reported by `df` to rule out an Agent/workspace quota.
+Shrinking regenerable caches can reduce the live project tree without restoring
+atomic file writes or durable tool execution. Keep that failure distinct from
+application defects and platform-managed merge-lock waits.
+
+**Why:** Workspace writes returned system error `-122` despite substantial
+filesystem free space, and the error persisted after safe cache cleanup.
+The session could not inspect filesystem quota groups.
+
+**How to apply:** Measure before and after cleanup, preserve source, uploads,
+installed dependencies, saved history, and managed Agent state, and retry the
+affected write after each coherent cleanup batch. Do not delete managed state
+or infer a shared cause for stalled tasks merely because the symptoms overlap.
+
 A client-side queue read followed by creation is not an atomic acceptance snapshot. Retrofitting dependencies after submission can race with acceptance and launch. Explicit manual dependency support also does not establish that the generated-follow-up path accepts the same inputs or retains the same hierarchy metadata.
 
 ## Genuine dependencies, not global sequencing
@@ -80,3 +102,15 @@ Do not assume a task's automatic code checkpoint includes its operational eviden
 **Why:** The completion checkpoint omitted eligible audit artifacts while Git still considered them changes. Ignoring the whole metadata directory would have overridden the repository's deliberate evidence-retention rules.
 
 **How to apply:** Inspect the exact remaining paths and ignore exceptions. Managed commit hooks may exclude local metadata even when explicitly staged; retain a sanitized, bounded handoff in a normal shared evidence directory and ignore local originals without deleting them. Never sweep all agent metadata into Git, erase artifacts, or bypass managed rebase continuation.
+
+Check the resulting commit, not just the staged diff, before claiming evidence
+survived a completion sync. Keep any shared evidence mirror out of deployment
+inputs while preserving the requested local working captures.
+
+## Revision-bound build evidence during task merges
+
+For performance evidence tied to a Git revision, build only after the production inputs are committed, and compare the build's verified revision with the workspace HEAD before treating the capture as current. If a task merge moves HEAD during preparation, or the build reports an unavailable binding, rebuild on a stable committed tree rather than inferring the revision from its source fingerprint.
+
+**Why:** A task merge advanced HEAD while a local production build was being prepared. The bundle built, but its Git binding was unavailable until the required boundary-check inventory fix was committed and the build repeated.
+
+**How to apply:** Record the verified build ID, source fingerprint, and Git revision together. After the browser run, compare HEAD and the production source fingerprint again; rerun only if production inputs changed, not merely because an unrelated metadata commit advanced HEAD.

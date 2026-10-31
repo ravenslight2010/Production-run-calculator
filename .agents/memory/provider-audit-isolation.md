@@ -26,3 +26,17 @@ A successful tiny synthetic model probe proves basic reachability, not workbook-
 **Why:** A backup answered a one-token probe quickly but still hit upstream deadlines on full structured extraction; a later backup handled that workload successfully.
 
 **How to apply:** Label synthetic probes separately from actual workload evidence. Do not replace source-based readiness checks or source/units review with a successful minimal response.
+
+A configured Gemini gateway can report model unavailability as HTTP 400,
+not only HTTP 404. Do not interpret every 400 as either a malformed customer
+document or an eligible fallback.
+
+**Why:** A bounded synthetic request received a model-availability 400 while
+requests selecting existing backups answered. The status alone hid the
+difference between an unsupported model and an invalid generation request.
+
+**How to apply:** Retain only bounded status and fixed diagnostic categories,
+never raw provider messages. Any routing repair must distinguish confirmed
+model unavailability from unrelated 400 errors and preserve the approved
+ladder, retry/cost limits, and real-source verification requirement. A generic
+model label in a compatibility response is not actual-provider-model evidence.

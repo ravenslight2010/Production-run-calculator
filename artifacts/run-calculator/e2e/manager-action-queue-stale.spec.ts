@@ -855,7 +855,7 @@ test("opens an incident queue item in the matching incident review surface", asy
     "Queue fixture manager (manager)",
   );
   await expect(
-    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+    selectedIncidentCard.getByText("Incident reference:", { exact: true }),
   ).toBeVisible();
   await expect(
     selectedIncidentCard.getByRole("button", {
@@ -874,7 +874,7 @@ test("opens an incident queue item in the matching incident review surface", asy
     "Queue fixture manager (manager)",
   );
   await expect(
-    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+    selectedIncidentCard.getByText("Incident reference:", { exact: true }),
   ).toBeVisible();
   await expect(
     selectedIncidentCard.getByRole("button", {
@@ -934,7 +934,7 @@ test("keeps a direct sync diagnostics panel focused after reload", async ({
     "Queue fixture manager (manager)",
   );
   await expect(
-    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+    selectedIncidentCard.getByText("Incident reference:", { exact: true }),
   ).toBeVisible();
   await expect(
     selectedIncidentCard.getByRole("button", {
@@ -955,7 +955,7 @@ test("keeps a direct sync diagnostics panel focused after reload", async ({
     "Queue fixture manager (manager)",
   );
   await expect(
-    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+    selectedIncidentCard.getByText("Incident reference:", { exact: true }),
   ).toBeVisible();
   await expect(
     selectedIncidentCard.getByRole("button", {

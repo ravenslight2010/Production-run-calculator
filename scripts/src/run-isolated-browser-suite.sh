@@ -22,6 +22,31 @@ while (($#)); do
 done
 readonly PLAYWRIGHT_CONFIG
 
+# Keep diagnostic progress outside Playwright's output/temporary directories.
+# Listing the inventory is not an execution attempt.
+if [[ "$PLAYWRIGHT_CONFIG" == "playwright.config.ts" &&
+      " ${playwright_args[*]} " != *" --list "* &&
+      -z "${RELEASE_BROWSER_ATTEMPT_ID:-}" ]]; then
+  RELEASE_BROWSER_ATTEMPT_ID="$(node scripts/src/browser-attempt-progress.mjs)"
+  export RELEASE_BROWSER_ATTEMPT_ID
+fi
+
+if [[ " ${playwright_args[*]} " != *" --list "* ]]; then
+  case "$PLAYWRIGHT_CONFIG" in
+    playwright.webkit.config.ts) progress_lane="webkit-smoke" ;;
+    playwright.compatibility.config.ts) progress_lane="webkit-compatibility" ;;
+    *) progress_lane="" ;;
+  esac
+  if [[ -n "$progress_lane" && -z "${RELEASE_WEBKIT_ATTEMPT_ID:-}" ]]; then
+    RELEASE_WEBKIT_ATTEMPT_ID="$(node scripts/src/browser-attempt-progress.mjs "$progress_lane")"
+    export RELEASE_WEBKIT_ATTEMPT_ID
+  fi
+  if [[ "$progress_lane" == "webkit-compatibility" && -z "${RELEASE_WEBKIT_DEBUG_ATTEMPT_ID:-}" ]]; then
+    RELEASE_WEBKIT_DEBUG_ATTEMPT_ID="$(node scripts/src/browser-attempt-progress.mjs webkit-compatibility-debug)"
+    export RELEASE_WEBKIT_DEBUG_ATTEMPT_ID
+  fi
+fi
+
 choose_local_port() {
   python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
 }

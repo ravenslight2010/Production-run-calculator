@@ -12,7 +12,7 @@ import {
   LABEL_POSITION_OPTIONS,
   CARTON_SIZE_OPTIONS,
 } from "../types";
-import { loadProfile, saveProfileAndWaitForServer } from "../storage";
+import { loadProfile, loadProfileSubTab, saveProfileAndWaitForServer } from "../storage";
 import { resolveDieLineDefaults, resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import { brandTagLabels } from "@workspace/name-match";
@@ -501,6 +501,16 @@ export default function SetupProfileEditor({
     () => selectableNames([...serverDoughNames, ...doughRecipeNames]),
     [serverDoughNames, doughRecipeNames],
   );
+  const linkedDoughRecipe = doughRecipesList.find(
+    (recipe) =>
+      recipe.enabled !== false &&
+      normalizeSelectableName(recipe.name).toLowerCase() ===
+        normalizeSelectableName(v.doughRecipeName ?? "").toLowerCase(),
+  );
+  const linkedPremadeCrust = linkedDoughRecipe?.isPremadeCrust === true;
+  useEffect(() => {
+    if (open && linkedPremadeCrust) setLineType("crusts");
+  }, [open, linkedPremadeCrust]);
   const frontlineRecipeNameOptions = useMemo(
     () => selectableNames([...serverSauceNames, ...frontlineRecipeNames]),
     [serverSauceNames, frontlineRecipeNames],
@@ -545,7 +555,16 @@ export default function SetupProfileEditor({
     const values = profile ?? DEFAULT_VALUES;
     form.reset(values);
     resetFieldArrays(values);
-    setLineType(Number(values.crustsPerCase) > 0 && (values.doughRecipe ?? []).length === 0 ? "crusts" : "dough");
+    const selectedRecipeName = normalizeSelectableName(values.doughRecipeName ?? "").toLowerCase();
+    const selectedRecipe = doughRecipesList.find(
+      (recipe) =>
+        recipe.enabled !== false &&
+        normalizeSelectableName(recipe.name).toLowerCase() === selectedRecipeName,
+    );
+    setLineType(selectedRecipe?.isPremadeCrust
+      ? "crusts"
+      : loadProfileSubTab(b, f) ??
+        (Number(values.crustsPerCase) > 0 && (values.doughRecipe ?? []).length === 0 ? "crusts" : "dough"));
     setAutofill(null);
     setAutofillError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -581,7 +600,7 @@ export default function SetupProfileEditor({
     setSaveError("");
     let serverAcknowledged = false;
     try {
-      const result = await saveProfileAndWaitForServer(b, f, values);
+      const result = await saveProfileAndWaitForServer(b, f, values, { subTab: lineType });
       if (result === "unchanged") {
         toast({ title: `No changes to save for ${b} — ${f}` });
         return;
@@ -1034,7 +1053,7 @@ export default function SetupProfileEditor({
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Line Type</label>
                       <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit">
-                        <button type="button" onClick={() => setLineType("dough")} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Dough</button>
+                        <button type="button" aria-pressed={lineType === "dough"} onClick={() => setLineType("dough")} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Dough</button>
                         <button type="button" onClick={() => {
                           setLineType("crusts");
                           // Pre-fill crust-run line settings — blank-fill only,
@@ -1043,7 +1062,7 @@ export default function SetupProfileEditor({
                           for (const [k, fv] of Object.entries(fills)) {
                             form.setValue(k as keyof typeof fills, fv, { shouldDirty: true });
                           }
-                        }} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Crust</button>
+                        }} aria-pressed={lineType === "crusts"} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Crust</button>
                       </div>
                     </div>
                     {lineType !== "crusts" && (
@@ -1087,7 +1106,7 @@ export default function SetupProfileEditor({
                       </div>
                     </div>
                     {lineType === "crusts" ? (
-                      <NumField control={form.control} name="approxLineSpeed" label="Approximate Line Speed (ppm)" step="0.1" />
+                      <NumField control={form.control} name="approxLineSpeed" label="Approximate Line Speed (pizzas/min)" step="0.1" />
                     ) : (
                       <div className="grid grid-cols-2 gap-3">
                         <NumField control={form.control} name="crustsPerCycle" label="Crusts Per Cycle" step="1" />
@@ -1279,6 +1298,18 @@ export default function SetupProfileEditor({
                     }
                   }}
                 />
+                {linkedPremadeCrust && (
+                  <div
+                    className="rounded-lg border border-primary/40 bg-muted/30 px-3 py-2"
+                    role="status"
+                    data-testid="setup-profile-premade-crust"
+                  >
+                    <p className="text-xs font-semibold">Premade crust — Crust mode</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      This manager-classified recipe needs no in-house dough formula. Saving this profile selects Crust mode for new runs; an active run is unchanged.
+                    </p>
+                  </div>
+                )}
                 {doughVariantPick && (
                   <div className="flex flex-col gap-1.5 -mt-3 px-1" data-testid="profile-dough-variant-pick">
                     <div className="flex items-center gap-2 text-xs text-amber-500">

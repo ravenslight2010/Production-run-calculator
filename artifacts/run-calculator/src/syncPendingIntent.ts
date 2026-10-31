@@ -1,5 +1,6 @@
 import { browserRecordStore } from "./adapters/browserRecordStore";
 import type { SyncPayload } from "./types";
+import { withoutArchivedSyncHistory, omitArchivedSyncHistory } from "./sharedRecordMigration";
 
 export type PendingSyncIntent = {
   version: 1;
@@ -10,7 +11,15 @@ export type PendingSyncIntent = {
   baseSnapshotId: string;
   baseline: SyncPayload;
   payload: SyncPayload;
+  /** Retained original snapshot evidence; never automatically publish its operational delta. */
+  operationalReviewRequired?: boolean;
 };
+
+export type PendingSyncRecoveryCopyStatus =
+  | "saved"
+  | "different-intent-preserved"
+  | "storage-unavailable"
+  | "identity-unavailable";
 
 const MAX_PENDING_RECORD_CHARS = 2_500_000;
 
@@ -37,6 +46,7 @@ function isPendingIntent(value: unknown): value is PendingSyncIntent {
     && typeof item.date === "string"
     && Number.isFinite(item.epoch)
     && typeof item.baseSnapshotId === "string"
+    && (item.operationalReviewRequired === undefined || typeof item.operationalReviewRequired === "boolean")
     && isSyncPayload(item.baseline)
     && isSyncPayload(item.payload);
 }
@@ -48,11 +58,17 @@ export function loadPendingSyncIntent(scope: string, date: string): PendingSyncI
     () => null,
     { decode: (value) => isPendingIntent(value) ? value : null },
   ).read();
-  return item?.scope === scope && item.date === date ? item : null;
+  if (item?.scope !== scope || item.date !== date) return null;
+  return {
+    ...item,
+    baseline: omitArchivedSyncHistory(item.baseline),
+    payload: withoutArchivedSyncHistory(item.payload, scope),
+  };
 }
 
 export function savePendingSyncIntent(intent: PendingSyncIntent): boolean {
   if (!isPendingIntent(intent)) return false;
+  intent = { ...intent, baseline: omitArchivedSyncHistory(intent.baseline), payload: omitArchivedSyncHistory(intent.payload) };
   try {
     if (JSON.stringify(intent).length > MAX_PENDING_RECORD_CHARS) return false;
   } catch {
@@ -63,6 +79,33 @@ export function savePendingSyncIntent(intent: PendingSyncIntent): boolean {
     () => null,
     { decode: (value) => isPendingIntent(value) ? value : null },
   ).write(intent);
+}
+
+export function saveRebasedPendingSyncIntent(
+  intent: PendingSyncIntent | null,
+  existing: PendingSyncIntent | null,
+): PendingSyncRecoveryCopyStatus {
+  if (!intent?.scope || !intent.date || !intent.id) return "identity-unavailable";
+  if (
+    existing
+    && (existing.scope !== intent.scope || existing.date !== intent.date || existing.id !== intent.id)
+  ) {
+    return "different-intent-preserved";
+  }
+  return savePendingSyncIntent(intent) ? "saved" : "storage-unavailable";
+}
+
+export function pendingSyncRecoveryCopyNotice(status: PendingSyncRecoveryCopyStatus): string {
+  switch (status) {
+    case "saved":
+      return "";
+    case "different-intent-preserved":
+      return "another pending change is already saved; this rebase did not replace it";
+    case "storage-unavailable":
+      return "browser storage did not save this rebase for reload";
+    case "identity-unavailable":
+      return "the recovery identity is unavailable; this rebase was not saved for reload";
+  }
 }
 
 export function clearPendingSyncIntent(

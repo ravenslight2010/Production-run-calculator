@@ -3,11 +3,11 @@ name: Production evidence revision binding
 description: How production reconciliation evidence must bind to the controlled deployed build revision.
 ---
 
-Production reconciliation evidence must use an explicitly controlled full Git revision from the deployment. The operational report is the authoritative handoff; `unknown`, malformed, missing, or mismatched revisions fail release evidence.
+Production reconciliation evidence must use the controlled deployed source identity from the operational handoff; never substitute the release checkout's `HEAD` or a GitHub push SHA. Depending on the report contract, that identity may be a full Git revision or the published `source-sha256:<fingerprint>` value. Missing, malformed, or mismatched identity fails release evidence.
 
 **Why:** A read-only production verifier can prove the heal marker, source report hash, repair boundary, and live row state, but assigning the current repository HEAD as the deployed revision would falsely claim release identity.
 
-**How to apply:** Keep the release runner's checkout revision separate from the deployed production revision. Pass the deployed revision explicitly through capture/import, checkpoint, retained report, promotion, and verification; never replace it with repository HEAD. A current bounded published-deployment handoff may supply that revision, but its expiry and any explicit SHA must be checked before querying production. Treat source-owned pool drift as a real verification failure even when marker, alias, profile, run-history, and stub checks pass.
+**How to apply:** Keep the release runner's checkout revision separate from deployed production identity. Pass the identity required by the evidence contract explicitly through capture/import, checkpoint, retained report, promotion, and verification; never replace it with repository HEAD. A current bounded published-deployment handoff may supply that identity, but its expiry and any explicit Git SHA must be checked before querying production. Treat source-owned pool drift as a real verification failure even when marker, alias, profile, run-history, and stub checks pass.
 
 For published-build matching, compare the production source policy and complete source fingerprint; do not require the prepared and live application build IDs to be equal. Preserve the live build ID as deployment metadata in the resulting handoff.
 

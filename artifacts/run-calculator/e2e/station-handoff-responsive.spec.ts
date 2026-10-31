@@ -7,6 +7,7 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -108,7 +109,7 @@ async function seedScenario(
     skidsCompleted: 0,
   };
 
-  await authorizedFixtures.seedTodaySync({
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
     token,
     senderId,
     date,
@@ -217,6 +218,7 @@ test("keeps Frontline and Packaging handoffs selected once on a phone-sized view
   };
   await seedScenario(frontline, account.token, `frontline-${suffix}`);
   await openAsManager(page, account.token);
+  await selectCanonicalFixtureRun(page, frontline.endedRunId);
   await page.getByTestId("tab-frontline").click();
   // Depending on auth/sync hydration time, the short Stage 1 drain may elapse
   // before the station first mounts. Either way, the durable result must be
@@ -260,6 +262,7 @@ test("keeps Frontline and Packaging handoffs selected once on a phone-sized view
     waitUntil: "domcontentloaded",
   });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 60_000 });
+  await selectCanonicalFixtureRun(page, packaging.endedRunId);
   await page.getByTestId("tab-packaging").click();
   // The full line drain may finish while the page is hydrating. The selected
   // run after the station mounts is the only state that may be persisted.
@@ -306,7 +309,7 @@ test("Summary card keeps an uncommitted note focused across a live timer tick", 
   const now = Date.now();
 
   await authorizedFixtures.removeTodaySync([date]);
-  await authorizedFixtures.seedTodaySync({
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `summary-live-edit-${suffix}`,
     date,
@@ -317,7 +320,7 @@ test("Summary card keeps an uncommitted note focused across a live timer tick", 
           id: runId,
           brand,
           flavor: "Current",
-          startedAt: now - 2 * 60_000,
+          startedAt: now - 60 * 60_000,
           metaUpdatedAt: now,
           seeded: false,
         }],
@@ -336,9 +339,14 @@ test("Summary card keeps an uncommitted note focused across a live timer tick", 
       runValues: {
         [runId]: {
           ...DEFAULT_VALUES,
-          casesNeeded: 150,
+          casesNeeded: 1000,
+          casesPerLayer: 0,
+          casesPerSkid: 12,
           pizzasPerCase: 8,
           approxLineSpeed: 60,
+          crustsPerCycle: 1,
+          cycleSpeed: 60,
+          speedAdjustment: 1,
         },
       },
       runValuesUpdatedAt: { [runId]: now },
@@ -351,6 +359,7 @@ test("Summary card keeps an uncommitted note focused across a live timer tick", 
   // Wait for the active run UI instead of evaluating storage in a document
   // that may be getting replaced.
   await expect(page.getByTestId("tab-run")).toBeVisible();
+  await selectCanonicalFixtureRun(page, runId);
   await expect(
     page.getByRole("button", { name: "STOP RUN", exact: true }),
   ).toBeVisible();
@@ -368,13 +377,31 @@ test("Summary card keeps an uncommitted note focused across a live timer tick", 
   await notes.fill(draft);
   await expect(notes).toBeFocused();
   await expect(notes).toHaveValue(draft);
-  // useClock updates active runs every second. Wait for an actual Time Left
-  // tick — the deterministic event the fixed pause approximated — then verify
-  // the uncommitted editor survives the context update.
+  // Time Left is remaining production work, not a wall-clock countdown.
+  // Reconcile a real, claim-backed production tick while the note is focused.
+  // The large unfinished target keeps this a mid-run update, not finalization.
   const timeLeftValue = summaryCard
     .getByText("Time Left", { exact: true })
     .locator("xpath=following-sibling::div[1]");
   const timeLeftBefore = await timeLeftValue.textContent();
+  const beforeTickResponse = await page.request.get(`/api/sync/today?today=${date}`);
+  expect(beforeTickResponse.ok()).toBe(true);
+  const beforeTick = await beforeTickResponse.json() as {
+    runValues: Record<string, { casesPerSkid: number }>;
+    operationalProjection: { calc: { totalTimeSec: number } };
+  };
+  expect(beforeTick.runValues[runId].casesPerSkid).toBe(12);
+  const tick = await page.request.post(`/api/sync/e2e/auto-track-tick?today=${date}`, {
+    data: { nowMs: Date.now() + 90_000 },
+  });
+  expect(tick.ok(), "the isolated production tick must be accepted").toBe(true);
+  const tickSummary = await tick.json() as {
+    accepted: number;
+    operationalProjection: { calc: { totalTimeSec: number } };
+  };
+  expect(tickSummary.accepted).toBeGreaterThan(0);
+  expect(tickSummary.operationalProjection.calc.totalTimeSec)
+    .toBeLessThan(beforeTick.operationalProjection.calc.totalTimeSec);
   await expect
     .poll(() => timeLeftValue.textContent(), { timeout: 10_000 })
     .not.toBe(timeLeftBefore);

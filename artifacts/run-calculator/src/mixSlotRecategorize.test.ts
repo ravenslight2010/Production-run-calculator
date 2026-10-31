@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // @vitest-environment jsdom
 //
 // One-time mix-slot cleanup migration (approved 2026-07-09). Older spec imports

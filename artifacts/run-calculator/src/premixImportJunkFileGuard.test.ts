@@ -102,6 +102,8 @@ vi.mock("./savedSpecSheets", () => ({
 }));
 
 import { preparePremixImport } from "./premixImport";
+import { buildMixExportGrids } from "@workspace/spec-export";
+import { buildExportWorkbook } from "./specExportWorkbook";
 
 // ---------------------------------------------------------------------------
 // Buffers. The junk ones are exactly what a wrong-type pick produces: the
@@ -151,6 +153,28 @@ beforeEach(() => {
 });
 
 describe("web premix import — junk files are skipped BEFORE parse/AI-matcher", () => {
+  it("prepares two exported recipe blocks on one sheet without reading their headers as amounts", async () => {
+    const grids = buildMixExportGrids([
+      { id: "first", name: "Example Pepper Mix", brand: "Example Customer", flavor: "First",
+        batchSize: 40, daysEarly: 0, amountAlreadyMade: 0, enabled: true,
+        components: [{ ingredient: "Green Pepper", perPizza: 1.5, perBatchLbs: 40 }] },
+      { id: "second", name: "Example Onion Mix", brand: "Example Customer", flavor: "Second",
+        batchSize: 50, daysEarly: 0, amountAlreadyMade: 0, enabled: true,
+        components: [{ ingredient: "Onion", perPizza: 2.25, perBatchLbs: 50 }] },
+    ]);
+    expect(grids).toHaveLength(1);
+    const buffer = XLSX.write(buildExportWorkbook(grids), { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const prepared = await preparePremixImport([buffer], undefined, ["two-recipes.xlsx"]);
+    expect(prepared.note ?? "").not.toContain("could not be read");
+    expect(prepared.mixes).toHaveLength(2);
+    expect(prepared.mixes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Example Pepper Mix", batchSize: 40,
+        components: [expect.objectContaining({ ingredient: "Green Pepper", perPizza: 1.5, perBatchLbs: 40 })] }),
+      expect.objectContaining({ name: "Example Onion Mix", batchSize: 50,
+        components: [expect.objectContaining({ ingredient: "Onion", perPizza: 2.25, perBatchLbs: 50 })] }),
+    ]));
+  });
+
   it("surfaces the skip note with the junk filenames while good files import", async () => {
     const prepared = await preparePremixImport(
       [randomBinaryBuffer(), goodBuffer(), fakePdfBuffer()],

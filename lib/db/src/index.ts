@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./schema";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const { Pool } = pg;
 
@@ -39,6 +40,47 @@ pool.on("error", (err) => {
   console.error("Unexpected idle Postgres client error (pool will recover):", err);
 });
 
-export const db = drizzle(pool, { schema });
+const database = drizzle(pool, { schema });
+type DatabaseTransaction = Parameters<Parameters<typeof database.transaction>[0]>[0];
+type RequestTransaction = { tx: DatabaseTransaction; active: boolean; afterCommit: Array<() => void> };
+const requestTransaction = new AsyncLocalStorage<RequestTransaction>();
+
+/**
+ * Explicitly scoped request transactions only. All other callers retain the
+ * original database behavior, connection budget, and transaction ownership.
+ */
+export const db: typeof database = new Proxy(database, {
+  get(target, property) {
+    const context = requestTransaction.getStore();
+    if (context && !context.active) throw new Error("The request database transaction is closed");
+    const current = context?.active ? context.tx : target;
+    const value = Reflect.get(current, property, current);
+    return typeof value === "function" ? value.bind(current) : value;
+  },
+});
+
+export async function runInRequestDatabaseTransaction<T>(
+  callback: (tx: DatabaseTransaction) => Promise<T>,
+): Promise<T> {
+  const effects: Array<() => void> = [];
+  const result = await database.transaction(async (tx) => {
+    const context: RequestTransaction = { tx, active: true, afterCommit: effects };
+    try { return await requestTransaction.run(context, () => callback(tx)); }
+    finally { context.active = false; }
+  });
+  for (const effect of effects) {
+    try { effect(); }
+    catch { console.error("A committed database refresh notification could not be delivered"); }
+  }
+  return result;
+}
+
+/** Keep cache invalidations and notifications behind the transaction commit. */
+export function deferUntilDatabaseCommit(effect: () => void): boolean {
+  const context = requestTransaction.getStore();
+  if (!context?.active) return false;
+  context.afterCommit.push(effect);
+  return true;
+}
 
 export * from "./schema";

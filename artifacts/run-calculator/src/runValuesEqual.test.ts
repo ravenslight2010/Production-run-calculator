@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { deepEqual, isEmptyOverPopulated } from "./storage";
+import { hasUnsavedFormValueChanges } from "./domain/runSyncPolicy";
 import { DEFAULT_VALUES, type FormValues } from "./types";
 
 describe("deepEqual — autosave edit attribution", () => {
@@ -18,6 +19,21 @@ describe("deepEqual — autosave edit attribution", () => {
     const stored = { casesNeeded: 384, brand: "Costco", flavor: "Three Meat", doughRecipe: [] };
     const reemitted = { flavor: "Three Meat", doughRecipe: [], casesNeeded: 384, brand: "Costco" };
     expect(deepEqual(stored, reemitted)).toBe(true);
+  });
+
+  it("does not treat omitted and undefined optional form fields as unsaved edits", () => {
+    expect(hasUnsavedFormValueChanges(
+      { brand: "", optionalNote: undefined },
+      { brand: "" },
+    )).toBe(false);
+    expect(hasUnsavedFormValueChanges(
+      { optionalNote: null },
+      {},
+    )).toBe(true);
+    expect(hasUnsavedFormValueChanges(
+      { doughRecipe: [{ type: "Flour", lbs: 50 }] },
+      { doughRecipe: [{ type: "Flour", lbs: 30 }] },
+    )).toBe(true);
   });
 
   it("detects a changed scalar (a genuine cases-needed edit)", () => {

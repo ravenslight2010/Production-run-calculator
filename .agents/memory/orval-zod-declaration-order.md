@@ -9,6 +9,12 @@ Generated Zod output must normalize scalar constraint declarations ahead of vali
 
 **How to apply:** Keep the normalization in the API-spec generation hook and validate both fresh output and the generated package typecheck when changing the OpenAPI contract or Orval configuration.
 
+Normalize excess blank lines after hoisting generated scalar declarations.
+
+**Why:** Hoisting leaves variable-sized blank gaps; saved workspace output and fresh temporary generation can otherwise differ only in whitespace and fail the exact freshness comparison.
+
+**How to apply:** Keep the generator's whitespace normalization deterministic and verify normal generation against the isolated freshness check, without weakening the comparison.
+
 Packages exercised by the API-spec toolchain smoke check must be direct
 dev-dependencies, not incidental members of Orval's optional-peer graph.
 

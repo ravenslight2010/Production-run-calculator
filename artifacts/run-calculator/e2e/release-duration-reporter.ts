@@ -1,5 +1,6 @@
 import { captureReleaseIdentity } from "../../../scripts/src/release-source-identity.mjs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { atomicWriteBrowserMetadata, claimBrowserAttempt, startBrowserAttempt } from "../../../scripts/src/browser-attempt-progress.mjs";
+import { mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { relative, resolve } from "node:path";
 import type {
@@ -13,6 +14,7 @@ import type {
 import {
   FULL_BROWSER_EXPECTED_CASES,
   assertFullBrowserCaseContract,
+  assertFullBrowserCaseIdentityContract,
 } from "../../../scripts/src/full-browser-case-contract.mjs";
 
 export { FULL_BROWSER_EXPECTED_CASES as EXPECTED_CASES };
@@ -72,13 +74,6 @@ function reportPath(): string {
   return configured ? resolve(repositoryRoot, configured) : defaultReportPath;
 }
 
-function currentRevision(): string {
-  const configured = process.env.RELEASE_REVISION?.trim();
-  if (configured) return configured;
-
-  return captureReleaseIdentity(repositoryRoot).revision;
-}
-
 function relativeFilePath(file: string): string {
   return relative(repositoryRoot, file).replaceAll("\\", "/");
 }
@@ -135,7 +130,7 @@ function caseStatusLabel(status: CaseRecord["status"]): string {
   switch (status) {
     case "failed":
       return "FAILED";
-    case "timedout":
+    case "timedOut":
       return "TIMEDOUT";
     case "interrupted":
       return "INTERRUPTED";
@@ -520,7 +515,7 @@ async function writeFullBrowserCountSummary(
 
   const path = resolve(repositoryRoot, configuredPath);
   await mkdir(resolve(path, ".."), { recursive: true });
-  await writeFile(
+  atomicWriteBrowserMetadata(
     path,
     formatFullBrowserCountSummary(
       cases,
@@ -529,18 +524,49 @@ async function writeFullBrowserCountSummary(
       runId,
       new Date().toISOString(),
     ),
-    "utf8",
   );
 }
 
 export default class ReleaseDurationReporter implements Reporter {
   private readonly cases = new Map<string, CaseRecord>();
   private startedAt = Date.now();
+  private identity?: ReturnType<typeof captureReleaseIdentity>;
+  private progress?: ReturnType<typeof claimBrowserAttempt>;
 
   onBegin(_config: FullConfig, suite: Suite): void {
     this.startedAt = Date.now();
+    if (!process.argv.includes("--list")) {
+      this.identity = captureReleaseIdentity(repositoryRoot);
+      const configured = process.env.RELEASE_REVISION?.trim();
+      if (configured && configured !== this.identity.revision) {
+        throw new Error("Browser attempt source/test identity differs from the requested revision.");
+      }
+      const attemptId = process.env.RELEASE_BROWSER_ATTEMPT_ID ||
+        startBrowserAttempt({ root: repositoryRoot, identity: this.identity });
+      this.progress = claimBrowserAttempt({
+        root: repositoryRoot, attemptId, identity: this.identity,
+      });
+    }
     const allTests = suite.allTests();
+    if (
+      _config.projects.length !== 1 ||
+      _config.projects[0]?.name !== "chromium"
+    ) {
+      throw new Error("Full browser release inventory requires only the chromium project.");
+    }
     assertFullBrowserCaseContract(allTests.length);
+    assertFullBrowserCaseIdentityContract(
+      allTests.map((testCase) => {
+        if (testCase.parent.project()?.name !== "chromium") {
+          throw new Error("Full browser release case belongs to a non-chromium project.");
+        }
+        // Playwright titlePath starts with root, project, and file suites.
+        return `${relativeFilePath(testCase.location.file)} :: ${testCase
+          .titlePath()
+          .slice(3)
+          .join(" › ")}`;
+      }),
+    );
     for (const testCase of allTests) {
       this.cases.set(testCase.id, {
         file: testCase.location.file,
@@ -550,9 +576,25 @@ export default class ReleaseDurationReporter implements Reporter {
         status: "not-run",
       });
     }
+    this.progress?.begin(allTests.map((testCase) => ({
+      id: testCase.id,
+      identity: `${relativeFilePath(testCase.location.file)} :: ${testCase.titlePath().slice(3).join(" › ")}`,
+      timeoutMs: testCase.timeout,
+      retries: testCase.retries,
+    })), _config);
+  }
+
+  onTestBegin(testCase: TestCase, result: TestResult): void {
+    this.progress?.testBegin(testCase.id, result);
+  }
+
+  onError(): void {
+    // Persist only the occurrence, never Playwright's error/stack/payload.
+    this.progress?.error();
   }
 
   onTestEnd(testCase: TestCase, result: TestResult): void {
+    this.progress?.testEnd(testCase.id, result);
     const existing = this.cases.get(testCase.id) ?? {
       file: testCase.location.file,
       title: testCase.titlePath().join(" › "),
@@ -566,16 +608,35 @@ export default class ReleaseDurationReporter implements Reporter {
     this.cases.set(testCase.id, existing);
   }
 
-  async onEnd(result: FullResult): Promise<void> {
+  async onEnd(result: FullResult): Promise<void | { status: "failed" }> {
     if (process.argv.includes("--list")) {
       return;
     }
-    const revision = currentRevision();
-    await writeFullBrowserCountSummary(
-      this.cases.values(),
-      result.status,
-      revision,
-    );
+    if (!this.identity || !this.progress) {
+      console.error("Browser attempt was not initialized; retained reports unchanged.");
+      return { status: "failed" };
+    }
+    const revision = this.identity.revision;
+    try {
+      if (!this.progress.end(result.status, captureReleaseIdentity(repositoryRoot),
+            canRetainFullBrowserReport(this.cases.values(), result.status))) {
+        console.error("Browser attempt is incomplete or source/test identity changed; retained reports unchanged.");
+        return { status: "failed" };
+      }
+    } catch {
+      console.error("Browser attempt persistence failed; retained reports unchanged.");
+      return { status: "failed" };
+    }
+    try {
+      await writeFullBrowserCountSummary(
+        this.cases.values(),
+        result.status,
+        revision,
+      );
+    } catch {
+      console.error("Browser count-summary persistence failed; retained full report unchanged.");
+      return { status: "failed" };
+    }
     if (!canRetainFullBrowserReport(this.cases.values(), result.status)) {
       console.log(
         `Retained full browser duration report unchanged: run was not a complete passing ${FULL_BROWSER_EXPECTED_CASES}-case suite.`,
@@ -586,21 +647,30 @@ export default class ReleaseDurationReporter implements Reporter {
     let baseline: Map<string, number> | undefined;
     try {
       baseline = parseCompleteFullBrowserBaseline(await readFile(path, "utf8"));
-    } catch {
-      // A first run, or a missing prior report, simply has no baseline.
+    } catch (error) {
+      // Only an absent first-run baseline is optional. A read failure must not
+      // silently authorize replacing retained evidence we could not inspect.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error("Prior browser report could not be read; retained report unchanged.");
+        return { status: "failed" };
+      }
     }
-    await mkdir(resolve(path, ".."), { recursive: true });
-    await writeFile(
-      path,
-      formatFullBrowserReport(
-        this.cases.values(),
-        result.status,
-        Date.now() - this.startedAt,
-        revision,
-        baseline,
-      ),
-      "utf8",
-    );
+    try {
+      await mkdir(resolve(path, ".."), { recursive: true });
+      atomicWriteBrowserMetadata(
+        path,
+        formatFullBrowserReport(
+          this.cases.values(),
+          result.status,
+          Date.now() - this.startedAt,
+          revision,
+          baseline,
+        ),
+      );
+    } catch {
+      console.error("Browser report persistence failed; prior report retained.");
+      return { status: "failed" };
+    }
     console.log(
       `Retained full browser duration report: ${path} (${this.cases.size} cases)`,
     );

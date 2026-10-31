@@ -21,6 +21,9 @@ validateBrowserSpecSyntaxDirectory(
 export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
+  // Match the browser-file boundary, not the default suite's narrower lanes.
+  // Node/Vitest helpers in e2e must not execute even during --list.
+  testMatch: "**/*.spec.ts",
   globalSetup: "./e2e/global-setup.ts",
   timeout: 60_000,
   retries: 0,

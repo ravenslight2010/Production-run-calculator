@@ -156,8 +156,13 @@ describe("SSE sync baseline gate", () => {
       hasLocalUserEdit: false,
     })).toBe(true);
     expect(source).toContain("const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;");
-    expect(source).toContain("applyRolloverEpoch(msg.resetEpoch)");
-    expect(source).toContain("applyResetWipe(msg.resetEpoch)");
+    expect(source).toContain("adoptClientResetEpoch(msg.resetEpoch, msg.rollover === true)");
+    expect(source).toContain("function adoptClientResetEpoch(epoch: number, rollover = false): boolean");
+    expect(source).toContain("cancelPendingSyncWritesForReset();");
+    expect(source).toContain("foregroundSyncBarrierRef.current = true;");
+    expect(source).toContain("syncPushQueueRef.current.reset();");
+    expect(source).toContain("applyRolloverEpoch(epoch)");
+    expect(source).toContain("applyResetWipe(epoch)");
     expect(source).not.toContain("checkDateRollover");
     expect(source).not.toContain("/api/sync/${newDate}");
   });
@@ -283,10 +288,14 @@ describe("SSE sync baseline gate", () => {
     );
     const factory = home.slice(
       home.indexOf("// ── Factory KV: startup fetch"),
-      home.indexOf("// ── Brand+flavor profile pool reconcile"),
+      home.indexOf("const profileRepositoryGeneration = useSyncExternalStore("),
     );
     const profileReconcile = home.slice(
-      home.indexOf("// ── Brand+flavor profile pool reconcile"),
+      home.indexOf("const reconcileConfigurationPass = async ("),
+      home.indexOf("const reconcileConfiguration = ("),
+    );
+    const profileRepositoryReconcile = home.slice(
+      home.indexOf("const profileRepositoryGeneration = useSyncExternalStore("),
       home.indexOf("// Dough pause/resume is immediate"),
     );
     const canonicalPush = home.slice(
@@ -303,19 +312,23 @@ describe("SSE sync baseline gate", () => {
     expect(lifecycle).toContain("if (readOnly) return;");
     expect(liveContext).toContain("disabled: screenMode !== null");
     expect(outbox).toContain("if (screenMode !== null) return;");
-    expect(dayStart).toContain("if (screenMode !== null) return;");
+    expect(dayStart).toContain("if (screenMode !== null || !canManageInventory) return;");
     expect(factory).toContain("if (screenMode !== null) return;");
     expect(factory).toContain("if (screenMode === null) void flushFactoryQueue();");
     expect(factory).toContain("if (screenMode === null) void runFactoryKvMigration(data);");
-    expect(profileReconcile).toContain("if (screenMode !== null) return;");
+    expect(profileReconcile).toMatch(/if \(families\.has\("profiles"\)\) \{\s*if \(screenMode === null\)/);
+    expect(profileReconcile).toContain("await reconcileProfilesFromServerDetailed()");
+    expect(profileRepositoryReconcile).toContain("if (screenMode !== null || !me) return;");
+    expect(profileRepositoryReconcile).toContain("return startProfileReconciliation(");
     expect(canonicalPush).toContain("if (screenMode !== null) throw new Error");
   });
 
-  it("omits unchanged history from hot pushes and records it only after acknowledgement", () => {
+  it("never publishes archived history in new daily-sync snapshots", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
-    expect(source).toContain("lastSyncedHistorySigRef");
-    expect(source).toContain("historySig !== lastSyncedHistorySigRef.current");
-    expect(source).toContain("if (payload.history !== undefined)");
-    expect(source).toContain("lastSyncedHistorySigRef.current = JSON.stringify(payload.history)");
+    const build = source.slice(source.indexOf("const buildSyncPayload"), source.indexOf("const buildSyncPayload") + 15000);
+    expect(build).not.toContain("historySig");
+    expect(build).not.toContain("loadHistory()");
+    expect(build).not.toContain("{ history");
+    expect(source).not.toContain("localStorage.setItem(HISTORY_KEY");
   });
 });

@@ -20,4 +20,25 @@ describe("Home form lifecycle fences", () => {
     const changed = { ...DEFAULT_VALUES, casesNeeded: 20 };
     expect(shouldAutosaveHomeForm(DEFAULT_VALUES, changed, "run-a", "run-a", false, true)).toBe(false);
   });
+
+  it("does not invent an edit when registered optional controls are undefined", () => {
+    const watched = { ...DEFAULT_VALUES, app1BatchesMade: undefined, skidsCompleted: undefined };
+    const persisted = JSON.parse(JSON.stringify(watched));
+    expect(shouldAutosaveHomeForm(persisted, watched, "run-a", "run-a", false)).toBe(false);
+  });
+
+  it("compares optional recipe properties using the actual persistence representation", () => {
+    const watched = {
+      ...DEFAULT_VALUES,
+      doughRecipe: [{ ingredient: "Fixture Flour", lbs: 25, ozPerPizza: undefined }],
+    };
+    const persisted = JSON.parse(JSON.stringify(watched));
+    expect(shouldAutosaveHomeForm(persisted, watched, "run-a", "run-a", false)).toBe(false);
+  });
+
+  it("still persists a real clearing of a previously populated optional control", () => {
+    const stored = { ...DEFAULT_VALUES, casesNeeded: 20, app1BatchesMade: 5 };
+    const cleared = { ...DEFAULT_VALUES, casesNeeded: 20, app1BatchesMade: undefined };
+    expect(shouldAutosaveHomeForm(stored, cleared, "run-a", "run-a", false)).toBe(true);
+  });
 });

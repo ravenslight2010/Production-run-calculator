@@ -1,0 +1,65 @@
+[
+  {
+    "path": "attached_assets/awesome-claude-code-main_1789335929493.zip",
+    "sha256": "be1d0a6e8f26c7d6a999d9f81c13f9a3721faa65f732cfda42873d38b20b013f",
+    "bytes": 2319354,
+    "revision": "b781df4706667af65e5493b0bb98c755b1ee6361",
+    "lfs": false
+  },
+  {
+    "path": "attached_assets/awesome-claude-code-main_1789336705388.zip",
+    "sha256": "be1d0a6e8f26c7d6a999d9f81c13f9a3721faa65f732cfda42873d38b20b013f",
+    "bytes": 2319354,
+    "revision": "66f06c8b98e7408cf594e2d7e0ef6564ceaf8bba",
+    "lfs": false
+  },
+  {
+    "path": "attached_assets/codexskills-main_1788409954395.zip",
+    "sha256": "ba02ca583a68d52cc145f9ad36b9ca3c9180de3072f425169eb82b3d2d7245da",
+    "bytes": 146896,
+    "revision": "c3e1a47c60ee566d688542c118b4d400a9fb80c1",
+    "lfs": false
+  },
+  {
+    "path": "attached_assets/codexskills-main_1789337301209.zip",
+    "sha256": "ba02ca583a68d52cc145f9ad36b9ca3c9180de3072f425169eb82b3d2d7245da",
+    "bytes": 146896,
+    "revision": "1c5e84eb482b318206e83edde6b4c10b68acf0ac",
+    "lfs": false
+  },
+  {
+    "path": "attached_assets/CyberStrike-main_1789345857863.zip",
+    "sha256": "1a36f01616b5ed0dad559d1b7575751d0eaad4d9bd25518e620fa556adf00a12",
+    "bytes": 91148808,
+    "revision": "efac5a50f5836ec70d4db546de9412643bf494be",
+    "lfs": true
+  },
+  {
+    "path": "attached_assets/agent-teams-ai-main_1789345857724.zip",
+    "sha256": "968aab22259087a94362981db27d753a513f3ebce94530634cf3a7a8d4d62405",
+    "bytes": 54995744,
+    "revision": "efac5a50f5836ec70d4db546de9412643bf494be",
+    "lfs": true
+  },
+  {
+    "path": "attached_assets/agentic-awesome-skills-main_1789345857674.zip",
+    "sha256": "60a722c5f3f53ef042bbe5775d0d9dbffb01c81fb88ad9ef5c4e847cca03b15b",
+    "bytes": 134443825,
+    "revision": "efac5a50f5836ec70d4db546de9412643bf494be",
+    "lfs": true
+  },
+  {
+    "path": "attached_assets/claude-code-settings-main_1789345857743.zip",
+    "sha256": "d91d63984dbb16815b868aba2fa6b9fa4e2b63a0a36cccac1d675285957794ab",
+    "bytes": 238718,
+    "revision": "efac5a50f5836ec70d4db546de9412643bf494be",
+    "lfs": false
+  },
+  {
+    "path": "attached_assets/superpowers-main_1789337301193.zip",
+    "sha256": "e5e1c9bd8cdbf1a90c319b237eb433ad7ba46d273321f48bbe50279124eee9ec",
+    "bytes": 670933,
+    "revision": "1c5e84eb482b318206e83edde6b4c10b68acf0ac",
+    "lfs": false
+  }
+]

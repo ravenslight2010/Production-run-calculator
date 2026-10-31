@@ -71,6 +71,29 @@ afterAll(async () => {
 });
 
 describe("central JSON error handler", () => {
+  it.each([
+    ["application/json", JSON.stringify({ fixture: "x".repeat(9 * 1024) })],
+    ["application/x-www-form-urlencoded", `fixture=${"x".repeat(9 * 1024)}`],
+  ])("applies the smaller capture limit before the global parser for %s", async (contentType, payload) => {
+    const res = await fetch(`${baseUrl}/api/profile-data/source-library-reconciliation/capture`, {
+      method: "POST", headers: { "Content-Type": contentType }, body: payload,
+    });
+    expect(res.status).toBe(413);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("content-type")).toMatch(/application\/json/);
+    expect(await res.json()).toHaveProperty("error");
+  });
+
+  it.each(["application/json", "application/x-www-form-urlencoded"])("does not lower the supported day-state transport limit for %s", async (contentType) => {
+    const fixture = "x".repeat(1024 * 1024);
+    const res = await fetch(`${baseUrl}/api/sync/2099-01-01`, {
+      method: "PUT", headers: { "Content-Type": contentType },
+      body: contentType === "application/json" ? JSON.stringify({ fixture }) : `fixture=${fixture}`,
+    });
+    // Parsing succeeds; ordinary authentication still rejects the fixture.
+    expect(res.status).toBe(401);
+  });
+
   it("returns a JSON { error } (not an HTML page) for an oversized body → 413", async () => {
     const huge = JSON.stringify({ payload: { blob: "x".repeat(11 * 1024 * 1024) } });
     const res = await fetch(`${baseUrl}/api/sync/2099-01-01`, {

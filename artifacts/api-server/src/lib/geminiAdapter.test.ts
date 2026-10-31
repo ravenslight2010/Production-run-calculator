@@ -475,6 +475,46 @@ describe("Gemini adapter resilience", () => {
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
+  it("advances only for an HTTP 400 naming the selected unavailable model", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
+    generateContent
+      .mockRejectedValueOnce(transient(
+        400,
+        undefined,
+        "Model gemini-test is not available for generateContent",
+      ))
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    await expect(openai.chat.completions.create(params)).resolves.toMatchObject({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-test",
+      "gemini-3.5-flash",
+    ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+    }))).toEqual([
+      { modelRung: 0, requestResult: "fallback_triggered", fallbackTrigger: null },
+      { modelRung: 1, requestResult: "fallback_success", fallbackTrigger: "retired_model" },
+    ]);
+
+    resetGeminiResilienceForTests();
+    generateContent.mockReset();
+    generateContent.mockRejectedValue(transient(
+      400,
+      undefined,
+      "Model gemini-other is not available for generateContent",
+    ));
+    await expect(openai.chat.completions.create(params))
+      .rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
   it("advances to a fallback after an empty successful response", async () => {
     const metrics: GeminiRequestMetrics[] = [];
     setGeminiMetricsObserver((sample) => metrics.push(sample));

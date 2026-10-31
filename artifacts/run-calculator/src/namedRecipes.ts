@@ -32,6 +32,7 @@ import {
 import { inventoryClientId } from "./inventoryShared";
 import { captureIngredientNamesToCatalog } from "./ingredients";
 import { adoptMasterDataConflict } from "./masterData";
+import { publishRecipeQcReviewAcknowledgement } from "./recipeQcReviewNotice";
 
 export type NamedRecipeKind = "dough" | "sauce";
 
@@ -74,7 +75,7 @@ export async function saveNamedRecipes(
     },
     body: JSON.stringify({ items }),
   });
-  const data = (await res.json()) as { items?: unknown; rejectedIds?: unknown };
+  const data = (await res.json()) as { items?: unknown; rejectedIds?: unknown; recipeQcReview?: unknown };
   if (!res.ok) {
     if (res.status === 409 && Array.isArray(data.items)) {
       const canonicalItems = normalizeNamedRecipes(data.items);
@@ -93,6 +94,7 @@ export async function saveNamedRecipes(
     }
     throw new Error(`Save ${kind} recipes failed (${res.status})`);
   }
+  publishRecipeQcReviewAcknowledgement(data.recipeQcReview);
   // Fire-and-forget: newly typed component names join the factory-wide
   // ingredient catalog so every suggestion list sees them.
   void captureIngredientNamesToCatalog(

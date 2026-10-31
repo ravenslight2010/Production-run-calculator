@@ -62,6 +62,11 @@ function actionBadgeClass(action: string): string {
   return "bg-muted text-muted-foreground";
 }
 
+function actionLabel(action: string): string {
+  if (action === "import_gold_case_deleted") return "Gold Lab case deleted";
+  return action;
+}
+
 // Default date range: last 30 days
 function defaultStartDate(): string {
   const d = new Date();
@@ -284,7 +289,7 @@ export default function AuditLogCard() {
                       <span
                         className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide ${actionBadgeClass(log.action)}`}
                       >
-                        {log.action}
+                        {actionLabel(log.action)}
                       </span>
                     </td>
                     <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">

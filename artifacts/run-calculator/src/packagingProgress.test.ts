@@ -5,6 +5,7 @@ import {
   overlayPackagingProgress,
   overlayPackagingProgressForRun,
   reconcilePackagingProgress,
+  reconcilePackagingProgressSnapshot,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
 } from "./packagingProgress";
@@ -38,6 +39,111 @@ describe("packaging progress register", () => {
 
     expect(result.merged.run1).toEqual(correction);
     expect(result.rejectedRemoteIds.has("run1")).toBe(true);
+  });
+
+  it("retains same-epoch local drain progress when the accepted snapshot omits that run", () => {
+    const local = {
+      "prior-run": {
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 8,
+        correctionGeneration: 0,
+        updatedAt: 300,
+        manualOverrideUntil: 0,
+      },
+    };
+    const selectedRemote = {
+      "selected-run": {
+        skidsCompleted: 1,
+        casesOnCurrentSkid: 4,
+        correctionGeneration: 0,
+        updatedAt: 250,
+        manualOverrideUntil: 0,
+      },
+    };
+
+    const result = reconcilePackagingProgressSnapshot({
+      local,
+      remote: selectedRemote,
+      acceptRemoteDay: true,
+      resetBoundaryChanged: false,
+    });
+
+    expect(result.merged).toEqual({ ...local, ...selectedRemote });
+    expect(result.rejectedRemoteIds.size).toBe(0);
+  });
+
+  it("adopts canonical counters when client and server share a register version", () => {
+    const local = {
+      run1: {
+        skidsCompleted: 1,
+        casesOnCurrentSkid: 0,
+        correctionGeneration: 0,
+        updatedAt: 1_000,
+        manualOverrideUntil: 0,
+      },
+    };
+    const canonical = {
+      run1: {
+        skidsCompleted: 2,
+        casesOnCurrentSkid: 0,
+        correctionGeneration: 0,
+        updatedAt: 1_000,
+        manualOverrideUntil: 0,
+      },
+    };
+
+    const result = reconcilePackagingProgressSnapshot({
+      local,
+      remote: canonical,
+      acceptRemoteDay: true,
+      resetBoundaryChanged: false,
+    });
+
+    expect(result.merged.run1).toEqual(canonical.run1);
+    expect(result.acceptedRemoteIds.has("run1")).toBe(true);
+    expect(result.rejectedRemoteIds.has("run1")).toBe(false);
+  });
+
+  it("discards old local progress at an accepted reset boundary", () => {
+    const oldLocal = {
+      "prior-run": {
+        skidsCompleted: 2,
+        casesOnCurrentSkid: 7,
+        correctionGeneration: 1,
+        updatedAt: 400,
+        manualOverrideUntil: 0,
+      },
+    };
+
+    const result = reconcilePackagingProgressSnapshot({
+      local: oldLocal,
+      remote: undefined,
+      acceptRemoteDay: true,
+      resetBoundaryChanged: true,
+    });
+
+    expect(result.merged).toEqual({});
+  });
+
+  it("does not discard local progress when an incoming day snapshot is rejected", () => {
+    const local = {
+      "prior-run": {
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 8,
+        correctionGeneration: 0,
+        updatedAt: 300,
+        manualOverrideUntil: 0,
+      },
+    };
+
+    const result = reconcilePackagingProgressSnapshot({
+      local,
+      remote: undefined,
+      acceptRemoteDay: false,
+      resetBoundaryChanged: true,
+    });
+
+    expect(result.merged).toEqual(local);
   });
 
   it("uses ordinal correction generations and separate monotonic update timestamps", () => {

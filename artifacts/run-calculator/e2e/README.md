@@ -175,6 +175,26 @@ This matrix verifies deletion tombstones, reload persistence, reset epochs,
 client-date-scoped reads, and conditional unchanged responses in both desktop
 and phone-sized Chromium contexts.
 
+Run the isolated first-daily-baseline reconnect check across Chromium and WebKit
+at desktop and phone sizes:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:sync-baseline
+```
+
+It covers stale local state against a populated server baseline, an explicit
+empty baseline, and an EventSource interruption followed by reconnect. The
+runner creates a disposable PostgreSQL database, verifies persisted server
+state through authenticated API reads, and attaches local-state and
+outgoing-write evidence to each browser result.
+
+Verification on 2026-10-30: all 12 scenarios passed across desktop Chromium,
+phone Chromium, desktop WebKit, and phone WebKit emulation. The populated and
+interrupted cases require an actual app-issued recovery write and inspect the
+adopted local state before that request is allowed through. Tablet emulation:
+**not run**. Physical-device checks: **not run**. No shared development or
+production data was used, and this does not constitute production verification.
+
 Run the bounded WebKit release smoke with an approved disposable database:
 
 ```sh
@@ -203,6 +223,26 @@ This isolated journey exercises the shared IngredientSelect and TypeDropdown
 through Setup Profiles and live Setup, including selection, add/clear behavior,
 accessible labels, and touch-dialog focus restoration. The four WebKit projects
 are browser emulations; they do not provide physical iOS Safari evidence.
+
+Run the isolated Schedule access, nested-picker, and save/reload journeys across desktop,
+phone, and both tablet orientations in Chromium and WebKit:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:schedule-dialog-layering
+```
+
+The picker test creates and removes manager/restricted accounts and two temporary
+brand profiles in a disposable database. Touch-emulated layouts select nested
+Schedule options by pointer and keyboard; desktop checks native-select input.
+Physical Android Chrome and iOS Safari/PWA are not run by this matrix and need
+their separately authorized device services.
+
+The separate save/reload journey chooses a future date and brand, enters a case
+count, and saves through Schedule. It confirms the canonical server record, then
+reloads Home and reopens that day's editor to check the date, brand, and cases.
+Its `@focused-only` tag keeps this matrix-owned regression out of the fixed
+full-browser case inventory. Cleanup removes its planned-day row and profile
+and restores the original brand list before removing the temporary account.
 
 WebKit is intentionally not included by `playwright.config.ts` and does not
 inherit `global-setup.ts`. It is a release signal for the highest-risk

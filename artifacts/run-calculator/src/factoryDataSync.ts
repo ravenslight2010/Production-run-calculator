@@ -1,600 +1,438 @@
-// Factory KV sync glue (web).
-//
-// Migrated master-data keys (name lists, presets, tombstones) are replicated
-// to the server's factory_kv table.  localStorage stays the read cache for
-// those "cached" keys — hydrated on startup from the server and kept in sync
-// via fire-and-forget write-through PUTs on every local mutation.
-//
-// Stop reasons and packaging option lists (circles/shipper/skidStacking/
-// gripSheets) are "server-only" — they have no localStorage copy after
-// migration.  On startup their values land in module-level state (getters
-// below); React state is updated after the startup fetch completes.
-//
-// Pattern (follows profileServerSync.ts):
-//   1. fetchFactoryData()  — GET /api/factory-data → full keyed map
-//   2. hydrateFromServer() — per-key stamp compare; write cached keys into
-//      localStorage, populate server-only module state
-//   3. putFactoryKey()     — fire-and-forget PUT for every local mutation
-//
-// Everything is fail-safe: storage / network errors are swallowed so the app
-// keeps working fully offline.
-
+// Factory directories are read from the authenticated server into memory.
+// Only scoped pending commands, conflict metadata and unresolved legacy evidence
+// are durable. None of those records is used as an offline read cache.
+import { OPERATIONAL_DIRECTORY_KEYS, OPERATIONAL_FACTORY_SETTING_KEYS } from "@workspace/factory-constants";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithDiagnostics } from "./performanceDiagnostics";
+import { masterDataEpochHeaders } from "./masterDataEpoch";
 import {
-  BRANDS_KEY,
-  BRAND_FLAVORS_KEY,
-  INGREDIENT_TYPES_KEY,
-  PEP_TYPES_KEY,
-  DIE_TYPES_KEY,
-  CIRCLES_KEY,
-  SHIPPER_KEY,
-  SKID_STACKING_KEY,
-  GRIP_SHEETS_KEY,
-  CHEESE_INGREDIENTS_KEY,
-  DOUGH_INGREDIENTS_KEY,
-  FRONTLINE_INGREDIENTS_KEY,
-  MIX_INGREDIENTS_KEY,
-  DOUGH_RECIPE_NAMES_KEY,
-  DOUGH_RECIPE_PRESETS_KEY,
-  FRONTLINE_RECIPE_NAMES_KEY,
-  FRONTLINE_RECIPE_PRESETS_KEY,
-  CHEESE_RECIPE_NAMES_KEY,
-  CHEESE_RECIPE_PRESETS_KEY,
-  MIX_RECIPE_NAMES_KEY,
-  MERGED_AWAY_KEY,
-  DELETED_ITEMS_KEY,
-  DELETED_STAMPS_KEY,
-  UNDELETED_STAMPS_KEY,
-  STOP_REASONS_KEY,
-  DEFAULT_STOP_REASONS,
-  DEFAULT_CIRCLES,
-  DEFAULT_SHIPPERS,
-  DEFAULT_SKID_STACKING,
-  DEFAULT_GRIP_SHEETS,
-  SHIFT_START_TIME_KEY,
-  PRODUCTION_START_TIME_KEY,
-  DEFAULT_SHIFT_START_TIME,
-  DEFAULT_PRODUCTION_START_TIME,
+  MEMORY_DIRECTORY_KEYS, directoryRaw, setDirectoryRaw, factoryDirectoryState,
+  setFactoryDirectoryIdentity, setFactoryDirectoryStatus, resetFactoryDirectoryForTests, batchDirectoryUpdates,
+  notifyFactoryDirectory,
+} from "./factoryDirectory";
+import { browserStorage } from "./adapters/browserRecordStore";
+import {
+  STOP_REASONS_KEY, CIRCLES_KEY, SHIPPER_KEY, SKID_STACKING_KEY, GRIP_SHEETS_KEY,
+  SHIFT_START_TIME_KEY, PRODUCTION_START_TIME_KEY, DEFAULT_STOP_REASONS,
+  DEFAULT_CIRCLES, DEFAULT_SHIPPERS, DEFAULT_SKID_STACKING, DEFAULT_GRIP_SHEETS,
+  DEFAULT_SHIFT_START_TIME, DEFAULT_PRODUCTION_START_TIME,
 } from "./types";
 
-// ── Key classification ───────────────────────────────────────────────────────
-
-/** Keys that keep localStorage as a read cache (hydrated from server). */
-export const FACTORY_KV_CACHED_KEYS: ReadonlySet<string> = new Set([
-  BRANDS_KEY,
-  BRAND_FLAVORS_KEY,
-  INGREDIENT_TYPES_KEY,
-  PEP_TYPES_KEY,
-  DIE_TYPES_KEY,
-  CHEESE_INGREDIENTS_KEY,
-  DOUGH_INGREDIENTS_KEY,
-  FRONTLINE_INGREDIENTS_KEY,
-  MIX_INGREDIENTS_KEY,
-  DOUGH_RECIPE_NAMES_KEY,
-  DOUGH_RECIPE_PRESETS_KEY,
-  FRONTLINE_RECIPE_NAMES_KEY,
-  FRONTLINE_RECIPE_PRESETS_KEY,
-  CHEESE_RECIPE_NAMES_KEY,
-  CHEESE_RECIPE_PRESETS_KEY,
-  MIX_RECIPE_NAMES_KEY,
-  MERGED_AWAY_KEY,
-  DELETED_ITEMS_KEY,
-  DELETED_STAMPS_KEY,
-  UNDELETED_STAMPS_KEY,
-]);
-
-/** Keys that are server-only — never written to localStorage after migration. */
-const FACTORY_KV_SERVER_ONLY_KEYS: ReadonlySet<string> = new Set([
-  STOP_REASONS_KEY,
-  CIRCLES_KEY,
-  SHIPPER_KEY,
-  SKID_STACKING_KEY,
-  GRIP_SHEETS_KEY,
-  SHIFT_START_TIME_KEY,
-  PRODUCTION_START_TIME_KEY,
-]);
-
-const FACTORY_RECIPE_NAME_KEYS: ReadonlySet<string> = new Set([
-  DOUGH_RECIPE_NAMES_KEY,
-  FRONTLINE_RECIPE_NAMES_KEY,
-  CHEESE_RECIPE_NAMES_KEY,
-  MIX_RECIPE_NAMES_KEY,
-]);
-
-// ── Stamp tracking ───────────────────────────────────────────────────────────
-// For each cached key we store the server's updatedAt (ms) alongside it in
-// localStorage.  On hydrate: local stamp > server → schedule write-through;
-// server stamp > local → overwrite local.
-
-const STAMP_KEY_PREFIX = "run-calc-fkv-stamp-";
-const QUEUE_KEY = "run-calc-fkv-queue-v1";
-
-function getLocalStamp(key: string): number {
-  try {
-    const v = localStorage.getItem(STAMP_KEY_PREFIX + key);
-    if (v === null) return 0;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
-  }
-}
-function setLocalStamp(key: string, ts: number): void {
-  try {
-    localStorage.setItem(STAMP_KEY_PREFIX + key, String(ts));
-  } catch {}
-}
-/** Stamp a local edit and return the timestamp carried by its durable op. */
-export function stampLocalWrite(key: string): number {
-  const now = Date.now();
-  const cur = getLocalStamp(key);
-  const stamp = Math.max(now, cur + 1);
-  setLocalStamp(key, stamp);
-  return stamp;
-}
-
-type FactoryQueueOp = { key: string; value: unknown; updatedAt: number; g: number };
-let memoryQueue: FactoryQueueOp[] | null = null;
+/** Compatibility name: these keys no longer designate persistent read caches. */
+export const FACTORY_KV_CACHED_KEYS: ReadonlySet<string> = new Set(OPERATIONAL_DIRECTORY_KEYS);
+const settingsKeys: ReadonlySet<string> = new Set(OPERATIONAL_FACTORY_SETTING_KEYS);
+const allKeys = new Set([...FACTORY_KV_CACHED_KEYS, ...settingsKeys]);
+// Legacy server-only settings also need a recovery path. They are not new live
+// caches and must not be silently assigned to the account that first loads.
+const legacyReviewKeys = allKeys;
+const STAMP_PREFIX = "run-calc-fkv-stamp-";
+const QUEUE_PREFIX = "run-calc-fkv-queue-v2:";
+const LEGACY_QUEUE = "run-calc-fkv-queue-v1";
+const UNOWNED_REVIEW_PREFIX = "run-calc-fkv-legacy-review:unowned:";
+let scopeIdentity: string | null = null;
+let canWrite = false;
+let scopeEpoch = 0;
 let generation = 0;
+let readOrder = 0;
+let appliedReadOrder = 0;
+const readReceipts = new WeakMap<object, { epoch: number; order: number; writeEpoch: string }>();
+let adoptedWriteEpoch = "unbound";
+let memoryQueue: FactoryQueueOp[] | null = null;
 let flushInFlight: Promise<void> | null = null;
-
-function readQueue(): FactoryQueueOp[] {
-  if (memoryQueue !== null) return [...memoryQueue];
-  try {
-    const raw = localStorage.getItem(QUEUE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(parsed)) {
-      return parsed.filter(
-        (op): op is FactoryQueueOp =>
-          !!op && typeof op.key === "string" && op.key.length > 0 && typeof op.g === "number",
-      );
-    }
-  } catch {}
-  return [];
-}
-
-function writeQueue(queue: FactoryQueueOp[]): void {
-  try {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
-    memoryQueue = null;
-  } catch {
-    memoryQueue = [...queue];
-  }
-}
-
-function pendingValue(key: string): { found: boolean; value?: unknown; updatedAt?: number; g?: number } {
-  const op = readQueue().find((candidate) => candidate.key === key);
-  return op
-    ? { found: true, value: op.value, updatedAt: Number(op.updatedAt ?? 0), g: op.g }
-    : { found: false };
-}
-
-function applyFactoryValueToModuleState(key: string, value: unknown): void {
-  if (key === STOP_REASONS_KEY) {
-    _stopReasons = Array.isArray(value) ? value as string[] : null;
-    return;
-  }
-  if (key === SHIFT_START_TIME_KEY) {
-    _shiftStartTime = typeof value === "string" ? value : null;
-    return;
-  }
-  if (key === PRODUCTION_START_TIME_KEY) {
-    _productionStartTime = typeof value === "string" ? value : null;
-    return;
-  }
-  const field =
-    key === CIRCLES_KEY ? "circles" :
-    key === SHIPPER_KEY ? "shipper" :
-    key === SKID_STACKING_KEY ? "skidStacking" :
-    key === GRIP_SHEETS_KEY ? "gripSheets" :
-    null;
-  if (field && Array.isArray(value)) {
-    _packagingSettings = { ...getPackagingSettings(), [field]: value as string[] };
-  }
-}
-
-function enqueueFactoryWrite(key: string, value: unknown, updatedAt: number): void {
-  generation = Math.max(generation + 1, Date.now());
-  const queue = readQueue().filter((op) => op.key !== key);
-  queue.push({ key, value, updatedAt, g: generation });
-  writeQueue(queue);
-}
-
-function discardQueuedWrite(key: string, g: number | undefined): void {
-  if (g === undefined) return;
-  writeQueue(readQueue().filter((op) => !(op.key === key && op.g === g)));
-}
-
-// ── Module-level state for server-only keys ──────────────────────────────────
-
-let _stopReasons: string[] | null = null;
-let _packagingSettings: {
-  circles: string[];
-  shipper: string[];
-  skidStacking: string[];
-  gripSheets: string[];
-} | null = null;
-let _shiftStartTime: string | null = null;
-let _productionStartTime: string | null = null;
-
-export function getStopReasons(): string[] {
-  return _stopReasons ?? DEFAULT_STOP_REASONS;
-}
-
-export function setStopReasonsModuleState(list: string[]): void {
-  _stopReasons = list;
-}
-
-/** Returns the factory-wide shift start time as "HH:MM" (defaults to "06:00"). */
-export function getShiftStartTime(): string {
-  return _shiftStartTime ?? DEFAULT_SHIFT_START_TIME;
-}
-
-/** Returns the factory-wide production start time as "HH:MM" (defaults to "07:00"). */
-export function getProductionStartTime(): string {
-  return _productionStartTime ?? DEFAULT_PRODUCTION_START_TIME;
-}
-
-export function setShiftStartTimeModuleState(t: string): void {
-  _shiftStartTime = t;
-}
-
-export function setProductionStartTimeModuleState(t: string): void {
-  _productionStartTime = t;
-}
-
-export interface PackagingSettings {
-  circles: string[];
-  shipper: string[];
-  skidStacking: string[];
-  gripSheets: string[];
-}
-
-export function getPackagingSettings(): PackagingSettings {
-  return (
-    _packagingSettings ?? {
-      circles: DEFAULT_CIRCLES,
-      shipper: DEFAULT_SHIPPERS,
-      skidStacking: DEFAULT_SKID_STACKING,
-      gripSheets: DEFAULT_GRIP_SHEETS,
-    }
-  );
-}
-
-export function setPackagingSettingsModuleState(s: PackagingSettings): void {
-  _packagingSettings = s;
-}
-
-// ── API calls ────────────────────────────────────────────────────────────────
-
+const settings = new Map<string, unknown>();
+type FactoryQueueOp = { key: string; value: unknown; updatedAt: number; g: number; undoEpoch?: string };
 export type FactoryDataEntry = { value: unknown; updatedAt: string };
 export type FactoryDataMap = Record<string, FactoryDataEntry>;
 
-/** GET /api/factory-data — returns the full keyed map. */
-export async function fetchFactoryData(): Promise<FactoryDataMap> {
-  const res = await fetchWithDiagnostics("/api/factory-data", {
-    headers: { "x-client-id": inventoryClientId() },
-  });
-  if (!res.ok) throw new Error(`fetchFactoryData failed (${res.status})`);
-  const body = (await res.json()) as { data?: FactoryDataMap };
-  return body.data ?? {};
+export function setFactoryDataIdentity(identity: string | null, writable: boolean): void {
+  if (identity === scopeIdentity && writable === canWrite) return;
+  scopeIdentity = identity; canWrite = writable; scopeEpoch++; adoptedWriteEpoch = "unbound";
+  memoryQueue = null; flushInFlight = null; settings.clear();
+  setFactoryDirectoryIdentity(identity);
+  notifyFactoryDirectory();
 }
-
-/**
- * Persist the latest value per factory key. The queue survives short outages
- * and is serialized so an older in-flight save cannot remove a newer edit.
- */
+function queueKey(): string | null { return scopeIdentity ? QUEUE_PREFIX + encodeURIComponent(scopeIdentity) : null; }
+function stampKey(key: string): string { return `${STAMP_PREFIX}${scopeIdentity ?? "unbound"}:${key}`; }
+function localStamp(key: string): number {
+  try { return Number(localStorage.getItem(stampKey(key))) || 0; } catch { return 0; }
+}
+function setStamp(key: string, stamp: number): void {
+  try { localStorage.setItem(stampKey(key), String(stamp)); } catch {}
+}
+export function stampLocalWrite(key: string): number {
+  const stamp = Math.max(Date.now(), localStamp(key) + 1);
+  setStamp(key, stamp); return stamp;
+}
+function readQueue(reportError = true): FactoryQueueOp[] {
+  if (memoryQueue) return [...memoryQueue];
+  const key = queueKey();
+  if (!key) return [];
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    if (!Array.isArray(raw) || !raw.every((op): op is FactoryQueueOp =>
+      !!op && allKeys.has(op.key) && validValue(op.key, op.value)
+      && Number.isFinite(op.updatedAt) && op.updatedAt >= 0 && Number.isFinite(op.g))) {
+      throw new Error("Invalid pending command");
+    }
+    return raw;
+  } catch {
+    if (reportError) setFactoryDirectoryStatus("unavailable", "Pending factory edits could not be read. Stored edits were retained; do not clear browser data. Ask a manager to review this device.");
+    throw new Error("Pending factory edits unavailable; stored commands retained.");
+  }
+}
+function writeQueue(queue: FactoryQueueOp[]): void {
+  const key = queueKey();
+  if (!key) return;
+  try { localStorage.setItem(key, JSON.stringify(queue)); memoryQueue = null; }
+  catch {
+    memoryQueue = [...queue];
+    setFactoryDirectoryStatus("unavailable", "This device could not save pending factory edits. Keep this tab open, free browser storage, then retry online before closing it.");
+  }
+  notifyFactoryDirectory();
+}
+function enqueue(key: string, value: unknown, updatedAt: number): void {
+  generation = Math.max(generation + 1, Date.now());
+  const previous = readQueue().find((op) => op.key === key);
+  writeQueue([...readQueue().filter((op) => op.key !== key), { key, value, updatedAt, g: generation,
+    undoEpoch: previous ? previous.undoEpoch ?? "unbound" : adoptedWriteEpoch }]);
+}
+function validValue(key: string, value: unknown): boolean {
+  if (key === SHIFT_START_TIME_KEY || key === PRODUCTION_START_TIME_KEY) return typeof value === "string";
+  if (key.includes("presets") || key.includes("brand-flavors") || key.includes("deleted-")) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const entries = Object.values(value);
+    const strings = (item: unknown) => Array.isArray(item) && item.every((entry) => typeof entry === "string");
+    const rows = (item: unknown) => Array.isArray(item) && item.every((row) =>
+      row && typeof row === "object" && !Array.isArray(row)
+      && typeof row.ingredient === "string" && typeof row.lbs === "number" && Number.isFinite(row.lbs));
+    if (key.includes("brand-flavors") || key === "run-calc-deleted-items") return entries.every(strings);
+    if (key.includes("deleted-stamps")) return entries.every((item) =>
+      item && typeof item === "object" && !Array.isArray(item)
+      && Object.values(item).every((stamp) => typeof stamp === "number" && Number.isFinite(stamp)));
+    return key === "run-calc-dough-recipe-presets"
+      ? entries.every((preset) => preset && typeof preset === "object" && !Array.isArray(preset)
+        && rows((preset as { rows?: unknown }).rows))
+      : entries.every(rows);
+  }
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+function applyValue(key: string, value: unknown): void {
+  if (MEMORY_DIRECTORY_KEYS.has(key)) setDirectoryRaw(key, JSON.stringify(value));
+  else if (settingsKeys.has(key)) settings.set(key, value);
+  else if (FACTORY_KV_CACHED_KEYS.has(key)) {
+    // Conflict/tombstone metadata remains durable, but is not a directory.
+    try { browserStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
+}
+export function getStopReasons(): string[] { return settings.get(STOP_REASONS_KEY) as string[] ?? DEFAULT_STOP_REASONS; }
+export function setStopReasonsModuleState(value: string[]): void { settings.set(STOP_REASONS_KEY, value); }
+export function getShiftStartTime(): string { return settings.get(SHIFT_START_TIME_KEY) as string ?? DEFAULT_SHIFT_START_TIME; }
+export function getProductionStartTime(): string { return settings.get(PRODUCTION_START_TIME_KEY) as string ?? DEFAULT_PRODUCTION_START_TIME; }
+export function setShiftStartTimeModuleState(value: string): void { settings.set(SHIFT_START_TIME_KEY, value); }
+export function setProductionStartTimeModuleState(value: string): void { settings.set(PRODUCTION_START_TIME_KEY, value); }
+export interface PackagingSettings { circles: string[]; shipper: string[]; skidStacking: string[]; gripSheets: string[] }
+export function getPackagingSettings(): PackagingSettings {
+  return {
+    circles: settings.get(CIRCLES_KEY) as string[] ?? DEFAULT_CIRCLES,
+    shipper: settings.get(SHIPPER_KEY) as string[] ?? DEFAULT_SHIPPERS,
+    skidStacking: settings.get(SKID_STACKING_KEY) as string[] ?? DEFAULT_SKID_STACKING,
+    gripSheets: settings.get(GRIP_SHEETS_KEY) as string[] ?? DEFAULT_GRIP_SHEETS,
+  };
+}
+export function setPackagingSettingsModuleState(value: PackagingSettings): void {
+  settings.set(CIRCLES_KEY, value.circles); settings.set(SHIPPER_KEY, value.shipper);
+  settings.set(SKID_STACKING_KEY, value.skidStacking); settings.set(GRIP_SHEETS_KEY, value.gripSheets);
+}
+function validateMap(body: unknown): FactoryDataMap {
+  if (!body || typeof body !== "object" || !("data" in body)) throw new Error("Invalid directory response");
+  const data = body.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid directory response");
+  for (const [key, entry] of Object.entries(data)) {
+    if (!allKeys.has(key)) continue;
+    if (!entry || typeof entry !== "object" || !validValue(key, entry.value)
+      || typeof entry.updatedAt !== "string" || !Number.isFinite(Date.parse(entry.updatedAt))) {
+      throw new Error("Invalid directory entry");
+    }
+  }
+  return Object.fromEntries(Object.entries(data).filter(([key]) => allKeys.has(key))) as FactoryDataMap;
+}
+export async function fetchFactoryData(): Promise<FactoryDataMap> {
+  const epoch = scopeEpoch;
+  const order = ++readOrder;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetchWithDiagnostics(canWrite ? "/api/factory-data" : "/api/factory-data/operational", {
+      headers: { "x-client-id": inventoryClientId() }, cache: "no-store", signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(res.status === 401 ? "Session expired. Sign in again." : `Directory unavailable (${res.status}). Retry online.`);
+    const data = validateMap(await res.json());
+    if (epoch !== scopeEpoch) throw new Error("Directory request superseded by account change");
+    readReceipts.set(data, { epoch, order, writeEpoch: res.headers.get("x-master-data-epoch") ?? "unbound" });
+    return data;
+  } catch (error) {
+    if (epoch === scopeEpoch) setFactoryDirectoryStatus("unavailable", error instanceof Error ? error.message : "Directory unavailable. Retry online.");
+    throw error;
+  } finally { clearTimeout(timer); }
+}
 export function putFactoryKey(key: string, value: unknown): void {
-  const updatedAt = stampLocalWrite(key);
-  applyFactoryValueToModuleState(key, value);
-  enqueueFactoryWrite(key, value, updatedAt);
+  // No defaults, failed bootstrap, signed-out session or staff code path may
+  // manufacture a durable replacement for the real server directory.
+  if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return;
+  if (!allKeys.has(key) || !validValue(key, value)) return;
+  applyValue(key, value);
+  enqueue(key, value, stampLocalWrite(key));
   void flushFactoryQueue();
 }
-
-/** Flush durable writes in order. A failed head remains queued for recovery. */
+export const pendingFactoryDataWriteCount = () => readQueue().length;
+/** Manager-only projection; never mutate the store while React reads it.
+ * Keep the transport/save-guard count above unchanged, including its errors.
+ */
+export function managerPendingFactoryDataWriteCount(): number | null {
+  if (!scopeIdentity || !canWrite) return 0;
+  try { return readQueue(false).length; }
+  catch { return null; }
+}
 export function flushFactoryQueue(): Promise<void> {
+  if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return Promise.resolve();
   if (flushInFlight) return flushInFlight;
-  flushInFlight = (async () => {
+  const epoch = scopeEpoch;
+  const request = Promise.resolve().then(async () => {
+    // A rejected acknowledgment blocks only its key for this pass. Retain the
+    // exact command as evidence, without retrying it (or a replacement for the
+    // same key) in a tight loop while unrelated settings wait behind it.
+    const blockedKeys = new Set<string>();
     try {
-      while (true) {
-        const op = readQueue()[0];
+      while (epoch === scopeEpoch && canWrite) {
+        const op = readQueue().find((candidate) => !blockedKeys.has(candidate.key));
         if (!op) return;
-        const res = await fetchWithDiagnostics("/api/factory-data", {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
+        let res: Response;
+        try { res = await fetchWithDiagnostics("/api/factory-data", {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "x-client-id": inventoryClientId(),
-          },
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json", "x-client-id": inventoryClientId(), ...masterDataEpochHeaders("factory-data", op.undoEpoch ?? "unbound") },
           body: JSON.stringify({ key: op.key, value: op.value, updatedAt: op.updatedAt }),
-        });
-        if (!res.ok) return;
-        try {
-          const body = await res.json() as { updatedAt?: string; value?: unknown };
-          const serverStamp = typeof body.updatedAt === "string" ? new Date(body.updatedAt).getTime() : 0;
-          const current = readQueue();
-          if (current[0]?.g === op.g) {
-            if (Number.isFinite(serverStamp) && serverStamp > 0) {
-              setLocalStamp(op.key, serverStamp);
-              // A newer server write rejected this queued operation. Adopt its
-              // authoritative value rather than leaving a stale setting visible
-              // until the next foreground fetch.
-              if (serverStamp > op.updatedAt && body.value !== undefined) {
-                applyFactoryValueToModuleState(op.key, body.value);
-                if (FACTORY_KV_CACHED_KEYS.has(op.key)) {
-                  try { localStorage.setItem(op.key, JSON.stringify(body.value)); } catch {}
-                }
-              }
-            }
-            writeQueue(current.slice(1));
-          }
-        } catch {
-          // HTTP acknowledgement is sufficient; a later foreground fetch
-          // reconciles a malformed acknowledgement without duplicating writes.
+        }); } finally { clearTimeout(timeout); }
+        if (!res.ok || epoch !== scopeEpoch) return;
+        let body;
+        try { body = await res.json(); }
+        catch { blockedKeys.add(op.key); continue; }
+        if (epoch !== scopeEpoch) return;
+        // HTTP success alone is not an acknowledgment. A canonical timestamp
+        // and valid value are required before retiring the exact generation.
+        if (typeof body?.updatedAt !== "string" || !Number.isFinite(Date.parse(body.updatedAt))
+          || !validValue(op.key, body.value)) {
+          blockedKeys.add(op.key); continue;
         }
+        const current = readQueue();
+        if (!current.some((candidate) => candidate.key === op.key && candidate.g === op.g)) continue;
+        const stamp = Date.parse(body.updatedAt);
+        if (stamp < op.updatedAt && JSON.stringify(body.value) !== JSON.stringify(op.value)) {
+          blockedKeys.add(op.key); continue;
+        }
+        applyValue(op.key, body.value);
+        setStamp(op.key, stamp);
+        writeQueue(current.filter((candidate) => candidate.key !== op.key || candidate.g !== op.g));
+        cleanLegacy(op.key, body.value);
       }
-    } catch {
-      // Leave the durable head intact for foreground/next-write recovery.
-    } finally {
-      flushInFlight = null;
-    }
-  })();
-  return flushInFlight;
+    } catch { /* Durable operation remains pending for reconnect. */ }
+    finally { if (epoch === scopeEpoch) flushInFlight = null; }
+  });
+  flushInFlight = request;
+  return request;
 }
-
-// ── hydrateFromServer ────────────────────────────────────────────────────────
-
-/**
- * Apply the result of fetchFactoryData():
- *
- *   Cached keys (name lists, presets, tombstones):
- *     server newer  → overwrite localStorage + update stamp
- *     local newer   → schedule a write-through PUT (self-heal)
- *     equal / missing → no-op
- *
- *   Server-only keys (stop reasons + packaging):
- *     populate module-level state, delete any stale localStorage copy,
- *     and if local had a value that is newer than the server copy, PUT it up.
- */
-export function hydrateFromServer(data: FactoryDataMap): void {
-  // ── Cached keys ──────────────────────────────────────────────────────────
-  for (const key of FACTORY_KV_CACHED_KEYS) {
-    const entry = data[key];
-    const localTs = getLocalStamp(key);
-    const pending = pendingValue(key);
-
-    if (!entry) {
-      // Server has no value for this key.  If we have a local value, push it up.
-      try {
-        const local = localStorage.getItem(key);
-        if (local !== null) putFactoryKey(key, JSON.parse(local));
-      } catch {}
-      continue;
-    }
-
-    const serverTs = new Date(entry.updatedAt).getTime();
-
-    const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
-    if (localIntentTs > serverTs) {
-      // Local is newer — push our value up.
-      try {
-        const local = localStorage.getItem(key);
-        if (!pending.found && local !== null) putFactoryKey(key, JSON.parse(local));
-      } catch {}
-    } else if (serverTs > localIntentTs) {
-      // Server is newer — overwrite local.
-      if (pending.found) discardQueuedWrite(key, pending.g);
-      const retainLocalRecipeNames =
-        FACTORY_RECIPE_NAME_KEYS.has(key)
-        && Array.isArray(entry.value)
-        && entry.value.length === 0
-        && (() => {
-          try {
-            const local = JSON.parse(localStorage.getItem(key) ?? "null");
-            return Array.isArray(local) && local.some((name) => typeof name === "string" && name.trim());
-          } catch {
-            return false;
-          }
-        })();
-      if (retainLocalRecipeNames) {
-        // A blank server directory can be an incomplete bootstrap while a
-        // device still has usable legacy picker names. Keep those names
-        // rather than making setup unusable; a non-empty server directory
-        // remains authoritative as before.
-        setLocalStamp(key, serverTs);
-      } else {
-        try {
-          localStorage.setItem(key, JSON.stringify(entry.value));
-          setLocalStamp(key, serverTs);
-        } catch {}
-      }
-    }
-    // Equal stamps: no-op (already in sync).
-  }
-
-  // ── Server-only keys ─────────────────────────────────────────────────────
-  // Stop reasons
-  {
-    const entry = data[STOP_REASONS_KEY];
-    const localRaw = (() => {
-      try { return localStorage.getItem(STOP_REASONS_KEY); } catch { return null; }
-    })();
-    const localTs = getLocalStamp(STOP_REASONS_KEY);
-    const pending = pendingValue(STOP_REASONS_KEY);
-
-    if (entry) {
-      const serverTs = new Date(entry.updatedAt).getTime();
-      const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
-      if (localIntentTs > serverTs && (pending.found || localRaw !== null)) {
-        // Local copy is newer — push it up.
-        if (!pending.found) try { putFactoryKey(STOP_REASONS_KEY, JSON.parse(localRaw!)); } catch {}
-        _stopReasons = pending.found && Array.isArray(pending.value) ? pending.value as string[] : (() => {
-          try { const v = JSON.parse(localRaw!); return Array.isArray(v) ? v : null; } catch { return null; }
-        })();
-      } else {
-        if (pending.found && serverTs > localIntentTs) discardQueuedWrite(STOP_REASONS_KEY, pending.g);
-        _stopReasons = Array.isArray(entry.value) ? (entry.value as string[]) : null;
-      }
-    } else if (localRaw !== null) {
-      // Server has nothing — push our local value.
-      try { putFactoryKey(STOP_REASONS_KEY, JSON.parse(localRaw)); } catch {}
-      _stopReasons = (() => {
-        try { const v = JSON.parse(localRaw); return Array.isArray(v) ? v : null; } catch { return null; }
-      })();
-    }
-    // Remove stale localStorage copy.
-    try { localStorage.removeItem(STOP_REASONS_KEY); } catch {}
-  }
-
-  // Packaging settings (4 separate keys)
-  const pkgKeys = [CIRCLES_KEY, SHIPPER_KEY, SKID_STACKING_KEY, GRIP_SHEETS_KEY] as const;
-  const pkgDefaults: PackagingSettings = {
-    circles: DEFAULT_CIRCLES,
-    shipper: DEFAULT_SHIPPERS,
-    skidStacking: DEFAULT_SKID_STACKING,
-    gripSheets: DEFAULT_GRIP_SHEETS,
-  };
-  const pkgFieldMap: Record<string, keyof PackagingSettings> = {
-    [CIRCLES_KEY]: "circles",
-    [SHIPPER_KEY]: "shipper",
-    [SKID_STACKING_KEY]: "skidStacking",
-    [GRIP_SHEETS_KEY]: "gripSheets",
-  };
-  const pkg: PackagingSettings = { ...pkgDefaults };
-  for (const key of pkgKeys) {
-    const field = pkgFieldMap[key];
-    const entry = data[key];
-    const localRaw = (() => {
-      try { return localStorage.getItem(key); } catch { return null; }
-    })();
-    const localTs = getLocalStamp(key);
-    const pending = pendingValue(key);
-
-    if (entry) {
-      const serverTs = new Date(entry.updatedAt).getTime();
-      const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
-      if (localIntentTs > serverTs && (pending.found || localRaw !== null)) {
-        if (!pending.found) try { putFactoryKey(key, JSON.parse(localRaw!)); } catch {}
-        try {
-          const v = pending.found ? pending.value : JSON.parse(localRaw!);
-          if (Array.isArray(v)) pkg[field] = v as string[];
-        } catch {}
-      } else {
-        if (pending.found && serverTs > localIntentTs) discardQueuedWrite(key, pending.g);
-        if (Array.isArray(entry.value)) pkg[field] = entry.value as string[];
-      }
-    } else if (localRaw !== null) {
-      try { putFactoryKey(key, JSON.parse(localRaw)); } catch {}
-      try {
-        const v = JSON.parse(localRaw);
-        if (Array.isArray(v)) pkg[field] = v as string[];
-      } catch {}
-    }
-    // Remove stale localStorage copy.
-    try { localStorage.removeItem(key); } catch {}
-  }
-  _packagingSettings = pkg;
-
-  // Shift start time and production start time (simple string values).
-  for (const [key, setter] of [
-    [SHIFT_START_TIME_KEY, (v: string) => { _shiftStartTime = v; }],
-    [PRODUCTION_START_TIME_KEY, (v: string) => { _productionStartTime = v; }],
-  ] as [string, (v: string) => void][]) {
-    const entry = data[key];
-    const localRaw = (() => {
-      try { return localStorage.getItem(key); } catch { return null; }
-    })();
-    const localTs = getLocalStamp(key);
-    const pending = pendingValue(key);
-
-    if (entry) {
-      const serverTs = new Date(entry.updatedAt).getTime();
-      const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
-      if (localIntentTs > serverTs && (pending.found || localRaw !== null)) {
-        if (!pending.found) try { putFactoryKey(key, JSON.parse(localRaw!)); } catch {}
-        try {
-          const v = pending.found ? pending.value : JSON.parse(localRaw!);
-          if (typeof v === "string") setter(v);
-        } catch {}
-      } else {
-        if (pending.found && serverTs > localIntentTs) discardQueuedWrite(key, pending.g);
-        if (typeof entry.value === "string") setter(entry.value);
-      }
-    } else if (localRaw !== null) {
-      try { putFactoryKey(key, JSON.parse(localRaw)); } catch {}
-      try {
-        const v = JSON.parse(localRaw);
-        if (typeof v === "string") setter(v);
-      } catch {}
-    }
-    // Remove stale localStorage copy.
-    try { localStorage.removeItem(key); } catch {}
-  }
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => { void flushFactoryQueue(); });
 }
-
-/** Test-only: reset module state between test cases. */
-export function resetFactoryDataSyncForTests(): void {
-  _stopReasons = null;
-  _packagingSettings = null;
-  _shiftStartTime = null;
-  _productionStartTime = null;
-  memoryQueue = null;
-  generation = 0;
-  flushInFlight = null;
-}
-
-// ── One-time migration heals ──────────────────────────────────────────────────
-
-/**
- * runFactoryKvMigration — marker-guarded one-time heal.
- * Marker: "run-calc-factory-kv-migrated-v1"
- *
- * For each of the 20 cached factory-KV keys: if the server already has a
- * value, skip; otherwise read from localStorage and PUT to the server.
- * For the 5 server-only keys (stop reasons + packaging settings): same push
- * logic, then remove the stale localStorage copy.
- *
- * Call this AFTER fetchFactoryData() + hydrateFromServer() so serverData
- * reflects the true server state.
- */
-const FACTORY_KV_MIGRATION_MARKER = "run-calc-factory-kv-migrated-v1";
-
-export async function runFactoryKvMigration(serverData: FactoryDataMap): Promise<void> {
+function cleanLegacy(key: string, canonical: unknown): void {
+  if (!MEMORY_DIRECTORY_KEYS.has(key)) return;
   try {
-    if (typeof localStorage === "undefined") return;
-    if (localStorage.getItem(FACTORY_KV_MIGRATION_MARKER)) return;
-
-    // Cached keys (name lists, presets, tombstones): push if server lacks them.
-    for (const key of FACTORY_KV_CACHED_KEYS) {
-      if (serverData[key]) continue; // server already has a value — skip
-      try {
-        const local = localStorage.getItem(key);
-        if (local !== null) putFactoryKey(key, JSON.parse(local));
-      } catch {}
+    const raw = localStorage.getItem(key);
+    // Unresolved legacy evidence is retained separately, never read at boot.
+    if (raw !== null && JSON.stringify(JSON.parse(raw)) !== JSON.stringify(canonical)) {
+      localStorage.setItem(`${UNOWNED_REVIEW_PREFIX}${key}`, raw);
     }
-
-    // Server-only keys (stop reasons + packaging settings): push if absent,
-    // then always remove the stale localStorage copy.
-    const serverOnlyEntries: string[] = [
-      STOP_REASONS_KEY,
-      CIRCLES_KEY,
-      SHIPPER_KEY,
-      SKID_STACKING_KEY,
-      GRIP_SHEETS_KEY,
-    ];
-    for (const key of serverOnlyEntries) {
-      if (!serverData[key]) {
-        try {
-          const local = localStorage.getItem(key);
-          if (local !== null) putFactoryKey(key, JSON.parse(local));
-        } catch {}
-      }
-      // Remove stale localStorage copy whether or not we pushed.
-      try { localStorage.removeItem(key); } catch {}
-    }
-
-    localStorage.setItem(FACTORY_KV_MIGRATION_MARKER, "1");
-  } catch {
-    // Fail safely — marker left unset so the heal retries next load.
+    localStorage.removeItem(key);
+    notifyFactoryDirectory();
+  } catch { /* Preserve source if review storage is unavailable or malformed. */ }
+}
+export function hydrateFromServer(data: FactoryDataMap): void {
+  const receipt = readReceipts.get(data);
+  if (receipt && (receipt.epoch !== scopeEpoch || receipt.order < appliedReadOrder)) {
+    throw new Error("Factory directory read superseded; newer session/data retained.");
   }
+  const validated = validateMap({ data });
+  batchDirectoryUpdates(() => {
+  for (const key of allKeys) {
+    const entry = validated[key];
+    const pending = readQueue().find((op) => op.key === key);
+    // Hydration never acknowledges an outbox item: deliver it and validate its
+    // canonical response, including stale-write rejection.
+    if (pending && (!entry || pending.updatedAt > Date.parse(entry.updatedAt))) {
+      applyValue(key, pending.value);
+    } else if (entry) {
+      if ((directoryRaw(key) !== null || settings.has(key)) && Date.parse(entry.updatedAt) < localStamp(key)) continue;
+      applyValue(key, entry.value);
+      setStamp(key, Date.parse(entry.updatedAt));
+      cleanLegacy(key, entry.value);
+    } else if (MEMORY_DIRECTORY_KEYS.has(key)) {
+      setDirectoryRaw(key, key.includes("presets") || key.includes("brand-flavors") ? "{}" : "[]");
+    }
+  }
+  if (receipt) adoptedWriteEpoch = receipt.writeEpoch;
+  setFactoryDirectoryStatus("ready");
+  if (receipt) appliedReadOrder = receipt.order;
+  });
+}
+export type LegacyDirectoryReview = {
+  id: string;
+  source: string;
+  sourceRaw: string;
+  key: string;
+  value: unknown;
+  queueIndex?: number;
+  problem?: string;
+  canApply: boolean;
+  canRemove: boolean;
+  removeBlockedReason?: string;
+};
+/** Explicit review, never a bootstrap source or an automatically deliverable queue. */
+export function legacyDirectoryReviews(): LegacyDirectoryReview[] {
+  const reviews: LegacyDirectoryReview[] = [];
+  if (!scopeIdentity || !canWrite) return reviews;
+  try {
+    const prefix = `run-calc-fkv-legacy-review:${encodeURIComponent(scopeIdentity)}:`;
+    for (let i = 0; i < localStorage.length; i++) {
+      const source = localStorage.key(i);
+      const matchedPrefix = source?.startsWith(prefix) ? prefix
+        : source?.startsWith(UNOWNED_REVIEW_PREFIX) ? UNOWNED_REVIEW_PREFIX : null;
+      if (!source || !matchedPrefix) continue;
+      const key = source.slice(matchedPrefix.length);
+      const sourceRaw = localStorage.getItem(source);
+      if (sourceRaw === null) continue;
+      try {
+        const value = JSON.parse(sourceRaw);
+        if (legacyReviewKeys.has(key)) reviews.push({ id: `${source}:${key}`, source, sourceRaw, key, value,
+          canApply: true, canRemove: true,
+          ...(!validValue(key, value) ? { problem: "Unrecognized saved format. Retained for manual review; not safe to apply." } : {}) });
+      } catch { reviews.push({ id: `${source}:${key}`, source, sourceRaw, key, value: null,
+        canApply: false, canRemove: true, problem: "Unreadable saved format. Retained for manual review; not safe to apply." }); }
+    }
+    const queueRaw = localStorage.getItem(LEGACY_QUEUE);
+    let queue: unknown;
+    let queueReadable = false;
+    try {
+      queue = JSON.parse(queueRaw ?? "[]");
+      queueReadable = Array.isArray(queue);
+    } catch {}
+    if (queueRaw !== null && !queueReadable) {
+      // Preserve and identify malformed queue evidence, but do not offer an
+      // action that could remove unknown queued commands.
+      reviews.push({
+        id: `${LEGACY_QUEUE}:unreadable`, source: LEGACY_QUEUE, sourceRaw: queueRaw,
+        key: LEGACY_QUEUE, value: null, canApply: false, canRemove: false,
+        removeBlockedReason: "This saved list may contain unsent work and is protected from removal.",
+        problem: "This saved edit list cannot be read. It is preserved; ask a manager for help before changing browser data.",
+      });
+    }
+    if (queueReadable && Array.isArray(queue)) {
+      const malformedItems = queue.filter((op) =>
+        !op || !allKeys.has(op.key) || !validValue(op.key, op.value));
+      if (malformedItems.length) reviews.push({
+        id: `${LEGACY_QUEUE}:unreadable-items`, source: LEGACY_QUEUE, sourceRaw: queueRaw ?? "[]",
+        key: LEGACY_QUEUE, value: null, canApply: false, canRemove: false,
+        removeBlockedReason: "This saved list may contain unsent work and is protected from removal.",
+        problem: `${malformedItems.length} item${malformedItems.length === 1 ? "" : "s"} in this saved edit list could not be identified. The list is preserved; ask a manager for help before changing browser data.`,
+      });
+      for (const [queueIndex, op] of queue.entries()) {
+      if (op && allKeys.has(op.key) && validValue(op.key, op.value)) {
+        reviews.push({
+          id: `${LEGACY_QUEUE}:${queueIndex}:${op.key}`,
+          source: LEGACY_QUEUE, sourceRaw: queueRaw ?? "[]", key: op.key, value: op.value,
+          queueIndex, canApply: true, canRemove: false,
+          removeBlockedReason: "This saved edit may not have been sent to the facility yet. Apply it or leave it saved; it cannot be discarded from this review.",
+        });
+      }
+      }
+    }
+    for (const key of legacyReviewKeys) {
+      const raw = localStorage.getItem(key);
+      if (raw === null) continue;
+      try {
+        const value = JSON.parse(raw);
+        reviews.push({ id: `${key}:${key}`, source: key, sourceRaw: raw, key, value, canApply: true, canRemove: true,
+          ...(!validValue(key, value) ? { problem: "Unrecognized saved format. Retained for manual review; not safe to apply." } : {}) });
+      } catch { reviews.push({ id: `${key}:${key}`, source: key, sourceRaw: raw, key, value: null,
+        canApply: false, canRemove: true, problem: "Unreadable saved format. Retained for manual review; not safe to apply." }); }
+    }
+    const flatFlavors = localStorage.getItem("run-calc-flavors");
+    if (flatFlavors !== null) reviews.push({ source: "run-calc-flavors", key: "run-calc-brand-flavors",
+      id: "run-calc-flavors:run-calc-brand-flavors", sourceRaw: flatFlavors,
+      value: flatFlavors, canApply: false, canRemove: true,
+      problem: "Legacy flavors have no brand assignment. Retained for manual review; assign them to brands in Manage Lists before discarding this copy." });
+  } catch { /* Keep malformed evidence intact; never guess its intent. */ }
+  return reviews;
+}
+
+function removeReviewedLegacySource(review: LegacyDirectoryReview): boolean {
+  const currentRaw = localStorage.getItem(review.source);
+  if (currentRaw === null || currentRaw !== review.sourceRaw) return false;
+  if (review.source === LEGACY_QUEUE) {
+    if (review.queueIndex === undefined) return false;
+    const entries: unknown = JSON.parse(currentRaw);
+    if (!Array.isArray(entries)) return false;
+    const selected = entries[review.queueIndex] as FactoryQueueOp | undefined;
+    if (!selected || selected.key !== review.key
+      || JSON.stringify(selected.value) !== JSON.stringify(review.value)) return false;
+    const remaining = entries.filter((_, index) => index !== review.queueIndex);
+    if (remaining.length) localStorage.setItem(review.source, JSON.stringify(remaining));
+    else localStorage.removeItem(review.source);
+    return localStorage.getItem(review.source) === (remaining.length ? JSON.stringify(remaining) : null);
+  }
+  localStorage.removeItem(review.source);
+  return localStorage.getItem(review.source) === null;
+}
+
+export async function resolveLegacyDirectoryReview(review: LegacyDirectoryReview, apply: boolean): Promise<boolean> {
+  const epoch = scopeEpoch;
+  if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return false;
+  if (!legacyDirectoryReviews().some((item) => item.id === review.id && item.sourceRaw === review.sourceRaw
+    && item.key === review.key && (apply ? item.canApply : item.canRemove))) return false;
+  try {
+    if (apply) {
+      if (review.problem || !validValue(review.key, review.value)) return false;
+      putFactoryKey(review.key, review.value);
+      await flushFactoryQueue();
+      if (epoch !== scopeEpoch || readQueue().some((op) => op.key === review.key)) return false;
+    } else if (readQueue().some((op) => op.key === review.key)) {
+      // Keep is not a hidden cancellation of a manager-authorized command.
+      // Finish its acknowledgment before discarding the original legacy bytes.
+      return false;
+    }
+  } catch { return false; }
+  if (epoch !== scopeEpoch) return false;
+  try {
+    if (!removeReviewedLegacySource(review)) return false;
+    setFactoryDirectoryStatus("ready");
+    return true;
+  } catch { return false; }
+}
+export async function runFactoryKvMigration(serverData: FactoryDataMap): Promise<void> {
+  if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return;
+  // Legacy unpartitioned commands have no trustworthy identity. Keep them for
+  // explicit review, never silently deliver them as the next signed-in person.
+  // Per-key stamps are preserved; unstamped values use revision zero and can
+  // only seed absent rows. No fresh timestamps for stale legacy data.
+  // Old v1 lists and commands carry no authenticated owner/scope. Existing
+  // canonical records reconcile identical values; differences/absent records
+  // require the explicit manager review above rather than a guessed owner.
+  for (const key of MEMORY_DIRECTORY_KEYS) if (serverData[key]) cleanLegacy(key, serverData[key].value);
+  await flushFactoryQueue();
+}
+export function resetFactoryDataSyncForTests(): void {
+  scopeIdentity = null; canWrite = false; scopeEpoch++; generation = 0;
+  adoptedWriteEpoch = "unbound";
+  memoryQueue = null; flushInFlight = null; settings.clear(); resetFactoryDirectoryForTests();
 }

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VALUES, type DayState, type SyncPayload } from "../types";
 import {
@@ -8,6 +9,35 @@ import {
 } from "./runSyncPolicy";
 
 describe("operational intent forced canonical reconciliation", () => {
+  it.each(["start", "pause", "resume"] as const)(
+    "adopts server-issued anchors for accepted %s despite a faster optimistic browser clock", (action) => {
+      const canonical = {
+        id: "run1", brand: "Acme", flavor: "Pep",
+        startedAt: action === "resume" ? 40 : 10,
+        ...(action === "pause" ? { pausedAt: 40, pausedStoppageId: "pause1" } : {}),
+        stoppages: action === "start" ? [] : [{
+          id: "pause1", reason: "", type: "pause" as const, startedAt: 20,
+          ...(action === "resume" ? { endedAt: 40 } : {}),
+        }],
+        metaUpdatedAt: 40,
+      };
+      const result = reconcileOperationalIntentCanonical({
+        dayState: {
+          runs: [{ ...canonical, startedAt: 999, notes: "keep local note", metaUpdatedAt: 1000 }],
+          currentIndex: 0,
+        },
+        runValues: DEFAULT_VALUES, runValuesUpdatedAt: {},
+        payload: { dayState: { runs: [canonical] }, runValues: { run1: DEFAULT_VALUES } },
+        intent: action === "start"
+          ? { runId: "run1", action: "lifecycle", lifecycle: "start" }
+          : { runId: "run1", action },
+        outcome: "accepted",
+      });
+      expect(result.lifecycleChanged).toBe(true);
+      expect(result.dayState.runs[0]).toEqual({ ...canonical, notes: "keep local note" });
+    },
+  );
+
   it("restores a stale correction without overwriting unrelated values", () => {
     const local = {
       ...DEFAULT_VALUES,
@@ -207,6 +237,53 @@ describe("server-owned App 1 batch sync convergence", () => {
       app1BatchesMade: 3,
       app1BatchCorrectionGeneration: 2,
       cheeseOzPerPizza: 6,
+    });
+  });
+
+  it("adopts server-produced App 1 stock without overriding a newer manual stock correction", () => {
+    const payload = {
+      ...canonicalPayload,
+      runValues: {
+        run1: {
+          ...canonicalPayload.runValues.run1,
+          app1Type: "Cheese",
+          app1OzPerPizza: 16,
+          app1BatchLbs: 1,
+          app1CheeseRecipeName: "Fixture Cheese",
+          app1CheeseRecipe: [{ lbs: 1 }],
+          app1StockLbs: 1.5,
+          app1StockCorrectionGeneration: 0,
+          app1StockConsumedLbs: 0,
+          applicatorStockInitialized: true,
+        },
+      },
+    };
+    const local = {
+      ...DEFAULT_VALUES,
+      app1Type: "Cheese",
+      app1OzPerPizza: 16,
+      app1BatchLbs: 1,
+      app1CheeseRecipeName: "Fixture Cheese",
+      app1CheeseRecipe: [{ lbs: 1 }],
+      app1BatchesMade: 2,
+      app1BatchCorrectionGeneration: 2,
+      app1StockLbs: 1,
+      app1StockCorrectionGeneration: 0,
+      app1StockConsumedLbs: 0,
+      applicatorStockInitialized: true,
+    };
+    expect(serverOwnedApp1BatchProgress(payload, "run1", local)).toEqual({
+      app1BatchesMade: 3,
+      app1StockLbs: 1.5,
+    });
+
+    const newerManualCorrection = {
+      ...local,
+      app1StockLbs: 0.5,
+      app1StockCorrectionGeneration: 1,
+    };
+    expect(serverOwnedApp1BatchProgress(payload, "run1", newerManualCorrection)).toEqual({
+      app1BatchesMade: 3,
     });
   });
 

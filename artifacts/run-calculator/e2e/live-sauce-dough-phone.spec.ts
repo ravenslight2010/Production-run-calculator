@@ -8,6 +8,7 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -100,6 +101,10 @@ async function createAuthorizedServerFixture(
     app1BatchesMade: 0,
     app1BatchAnchorNetSec: 0,
     app1BatchCorrectionGeneration: 0,
+    app1StockLbs: 0,
+    app1StockAnchorNetSec: 0,
+    app1StockCorrectionGeneration: 0,
+    app1StockConsumedLbs: 0,
     ...valueOverrides,
   };
   await authorizedFixtures.seedBrandProfile(auth, {
@@ -110,7 +115,7 @@ async function createAuthorizedServerFixture(
     updatedAt: now,
   });
   const date = new Date().toISOString().slice(0, 10);
-  await authorizedFixtures.seedTodaySync({
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
     token: auth.token,
     senderId: `frontline-fixture-${username}`,
     date,
@@ -128,6 +133,7 @@ async function createAuthorizedServerFixture(
           seeded: false,
         }],
         currentIndex: 0,
+        currentRunId: runId,
         resetAt: 0,
         substitutions: [],
         substitutionLog: [],
@@ -169,14 +175,26 @@ async function seedInventoryItem(
   page: Page,
   token: string,
   name: string,
+  preparedSauce = false,
 ): Promise<void> {
+  const key = preparedSauce ? "ingredient:Sauce:batches" : `ingredient:${name}:lbs`;
+  if (preparedSauce) {
+    // Prepared Sauce consumes the shared batch item, not a raw ingredient.
+    // Never take ownership of (or later delete) an existing factory item.
+    const existing = await page.request.get("/api/inventory", {
+      headers: { Cookie: `rc_auth=${token}` },
+    });
+    expect(existing.ok(), "read inventory before owning a fixture item").toBe(true);
+    const items = await existing.json() as Array<{ id: number; key: string }>;
+    if (items.some((item) => item.key === key)) return;
+  }
   const response = await page.request.post("/api/inventory/items", {
     headers: { Cookie: `rc_auth=${token}` },
     data: {
-      key: `ingredient:${name}:lbs`,
+      key,
       category: "ingredient",
       name,
-      unit: "lbs",
+      unit: preparedSauce ? "batches" : "lbs",
     },
   });
   expect(
@@ -191,6 +209,7 @@ async function openAsAuthorizedFixture(
   page: Page,
   username: string,
   capabilities: readonly E2ECapability[] = [],
+  runId?: string,
 ): Promise<void> {
   const account = await authorizedFixtures.createAccount({
     username,
@@ -204,6 +223,7 @@ async function openAsAuthorizedFixture(
   }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  if (runId) await selectCanonicalFixtureRun(page, runId);
 }
 
 async function seedRunningValues(
@@ -289,6 +309,7 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
     sauceOzPerPizza: 2,
     sauceBarrelLbs: 2,
     frontlineRecipeName: sauceName,
+    frontlineRecipe: [{ ingredient: sauceName, lbs: 2 }],
   });
   await seedInventoryItem(page, fixture.token, sauceName);
   await page.context().addCookies([{
@@ -298,6 +319,7 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
   }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await selectCanonicalFixtureRun(page, fixture.runId);
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
 
   await page.getByTestId("tab-sauce").click();
@@ -338,6 +360,7 @@ test("Sauce stock edits sync to a peer and persist after tab changes and reload"
     sauceOzPerPizza: 2,
     sauceBarrelLbs: 2,
     frontlineRecipeName: sauceName,
+    frontlineRecipe: [{ ingredient: sauceName, lbs: 2 }],
   });
   await page.context().addCookies([{
     name: "rc_auth",
@@ -346,6 +369,21 @@ test("Sauce stock edits sync to a peer and persist after tab changes and reload"
   }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await selectCanonicalFixtureRun(page, fixture.runId);
+  // This journey isolates manual stock synchronization; pause automatic
+  // depletion so time spent opening the peer and reloading cannot consume it.
+  await page.getByRole("button", { name: /pause.?run/i }).click();
+  await expect(page.getByRole("button", { name: /resume.?run/i })).toBeVisible();
+  const readCanonicalPausedAt = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await page.request.get(`/api/sync/today?today=${today}`);
+    expect(response.ok(), `canonical pause read failed: ${response.status()}`).toBe(true);
+    const sync = await response.json() as {
+      dayState?: { runs?: Array<{ id: string; pausedAt?: number }> };
+    };
+    return Number(sync.dayState?.runs?.find((run) => run.id === fixture.runId)?.pausedAt) || 0;
+  };
+  await expect.poll(readCanonicalPausedAt, { timeout: 8_000 }).toBeGreaterThan(0);
   await page.getByTestId("tab-sauce").click();
   await expect(page.getByTestId("sauce-stock-on-hand"))
     .toContainText("2.0 / 2.0 barrels");
@@ -368,6 +406,7 @@ test("Sauce stock edits sync to a peer and persist after tab changes and reload"
     const peerPage = await peerContext.newPage();
     await peerPage.goto("/", { waitUntil: "domcontentloaded" });
     await peerPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await selectCanonicalFixtureRun(peerPage, fixture.runId);
     await peerPage.getByTestId("tab-sauce").click();
     await expect(peerPage.getByTestId("sauce-stock-on-hand"))
       .toContainText("1.9 / 2.0 barrels");
@@ -415,11 +454,12 @@ test("Sauce automatic supply stays accurate after the final partial unit", async
     sauceOzPerPizza: 32,
     sauceBarrelLbs: 20,
     frontlineRecipeName: sauceName,
+    frontlineRecipe: [{ ingredient: sauceName, lbs: 20 }],
     sauceBarrelsMade: 2,
     sauceBarrelAnchorNetSec: 0,
     sauceBarrelCorrectionGeneration: 0,
   });
-  await seedInventoryItem(page, fixture.token, sauceName);
+  await seedInventoryItem(page, fixture.token, "Sauce", true);
   await page.context().addCookies([{
     name: "rc_auth",
     value: fixture.token,
@@ -427,6 +467,7 @@ test("Sauce automatic supply stays accurate after the final partial unit", async
   }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await selectCanonicalFixtureRun(page, fixture.runId);
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
   await page.getByTestId("tab-sauce").click();
 
@@ -442,6 +483,7 @@ test("Sauce automatic supply stays accurate after the final partial unit", async
   // 2.5-barrel requirement rather than overshooting the displayed total.
   const tick = await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 600_000);
   expect(tick.accepted, JSON.stringify(tick)).toBeGreaterThan(0);
+  expect(tick.outcomes.sauceConfigurationBlocked ?? 0, "prepared Sauce inventory must be configured").toBe(0);
   await page.waitForTimeout(250);
 
   const expectCompletedSauceCard = async () => {
@@ -500,7 +542,7 @@ test("Dough and Sauce phone quick checks share line-speed feedback across tab sw
   await expect(page.getByTestId("speed-nudge-card")).toContainText("Line Speed Suggestion");
 });
 
-test("Frontline App on-hand stock survives off-tab work, adjustment, pause, and reload", async ({
+test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and reload", async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -514,35 +556,27 @@ test("Frontline App on-hand stock survives off-tab work, adjustment, pause, and 
   }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await selectCanonicalFixtureRun(page, fixture.runId);
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
 
-  const app1Stock = page.getByTestId("stock-app1-lbs");
-  await page.getByTestId("tab-frontline").click();
-  // This fixture seeds a run already in progress, so it deliberately bypasses
-  // the normal Start action that fills a new run's bins. Use the same operator
-  // control as a physical refill before exercising automatic depletion.
-  await expect(app1Stock).toHaveValue("0");
-  await app1Stock.locator("xpath=..").getByRole("button", { name: "Fill to cap" }).click();
-  await expect(app1Stock).toHaveValue("2");
-
-  // Automatic stock depletion is server-owned: App 1 updates while another
-  // station is mounted, then the canonical value is visible on return.
-  await page.getByTestId("tab-dough").click();
-  await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
-  const tick = await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 60_000);
-  expect(tick.accepted, JSON.stringify(tick)).toBeGreaterThan(0);
-
-  const readCanonicalStock = async () => {
+  const readCanonicalApp1Values = async () => {
     const today = new Date().toISOString().slice(0, 10);
     const response = await page.request.get(`/api/sync/today?today=${today}`);
     expect(response.ok(), `canonical stock read failed: ${response.status()}`).toBe(true);
     const sync = await response.json() as {
-      runValues?: Record<string, { app1StockLbs?: number }>;
+      runValues?: Record<string, {
+        app1StockLbs?: number;
+        app1BatchesMade?: number;
+      }>;
     };
-    const stock = sync.runValues?.[fixture.runId]?.app1StockLbs;
-    expect(Number.isFinite(stock), "canonical App 1 stock must be present").toBe(true);
-    return stock as number;
+    const values = sync.runValues?.[fixture.runId];
+    expect(Number.isFinite(values?.app1StockLbs), "canonical App 1 stock must be present").toBe(true);
+    expect(Number.isFinite(values?.app1BatchesMade), "canonical App 1 batch count must be present").toBe(true);
+    return values as { app1StockLbs: number; app1BatchesMade: number };
   };
+  const readCanonicalStock = async () => (await readCanonicalApp1Values()).app1StockLbs;
+  const readCanonicalApp1BatchesMade = async () =>
+    (await readCanonicalApp1Values()).app1BatchesMade;
   const readCanonicalPausedAt = async () => {
     const today = new Date().toISOString().slice(0, 10);
     const response = await page.request.get(`/api/sync/today?today=${today}`);
@@ -552,31 +586,107 @@ test("Frontline App on-hand stock survives off-tab work, adjustment, pause, and 
     };
     return Number(sync.dayState?.runs?.find((run) => run.id === fixture.runId)?.pausedAt) || 0;
   };
-  await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeLessThan(2);
+  const app1OnLine = page.getByTestId("output-app1-batches-on-line");
+  const readApp1BatchesOnLine = async () =>
+    Number.parseFloat((await app1OnLine.textContent()) ?? "");
+  await page.getByTestId("tab-frontline").click();
+  // The server snapshot can hydrate stock after the tab first renders. Wait for
+  // the visible amount to agree with canonical stock before applying a refill,
+  // so this assertion uses the real starting amount rather than a stale zero.
+  await expect.poll(async () => {
+    const [visible, canonical] = await Promise.all([
+      readApp1BatchesOnLine(),
+      readCanonicalStock(),
+    ]);
+    return Math.abs(visible - canonical);
+  }, { timeout: 8_000 }).toBeLessThan(0.005);
+  const stockBeforeRefill = await readCanonicalStock();
+  // Frontline exposes App1 supply in whole batch units; the operator refill
+  // must add exactly one batch to the synchronized starting amount.
+  await page.getByRole("button", { name: "Increase app1 batches on line" }).click();
+  const stockAfterRefill = stockBeforeRefill + 1;
+  await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeCloseTo(stockAfterRefill, 2);
+  await expect.poll(readApp1BatchesOnLine, { timeout: 8_000 }).toBeCloseTo(stockAfterRefill, 2);
+  const batchesBeforeTick = await readCanonicalApp1BatchesMade();
+  // Keep the client tracker from advancing on wall time while the test injects
+  // a future server tick. Freeze Date without replacing timers or SSE callbacks.
+  await page.evaluate(() => {
+    const fixedNow = Date.now();
+    const OriginalDate = window.Date;
+    window.Date = new Proxy(OriginalDate, {
+      construct(target, args) {
+        return args.length === 0
+          ? new target(fixedNow)
+          : Reflect.construct(target, args);
+      },
+      apply(target, _this, args) {
+        return args.length === 0
+          ? new target(fixedNow).toString()
+          : Reflect.apply(target, target, args);
+      },
+      get(target, property, receiver) {
+        if (property === "now") return () => fixedNow;
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  });
+
+  // Automatic stock depletion is server-owned: App 1 updates while another
+  // station is mounted, then the canonical value is visible on return.
+  await page.getByTestId("tab-dough").click();
+  await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
+  const tick = await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 60_000);
+  expect(tick.accepted, JSON.stringify(tick)).toBeGreaterThan(0);
+  await expect.poll(readCanonicalApp1BatchesMade, { timeout: 8_000 })
+    .toBeGreaterThan(batchesBeforeTick);
+
+  await expect.poll(readCanonicalStock, { timeout: 8_000 })
+    .not.toBeCloseTo(stockAfterRefill, 2);
+  const stockAfterTick = await readCanonicalStock();
+  expect(stockAfterTick).toBeGreaterThan(0);
 
   await page.getByTestId("tab-sauce").click();
   await expect(page.getByTestId("output-sauce-batches")).toBeVisible();
   await page.getByTestId("tab-frontline").click();
-  await expect.poll(async () => Number(await app1Stock.inputValue())).toBe(await readCanonicalStock());
-  expect(await readCanonicalStock()).toBeLessThan(2);
+  await expect.poll(async () => {
+    const [visible, canonical] = await Promise.all([
+      readApp1BatchesOnLine(),
+      readCanonicalStock(),
+    ]);
+    return Math.abs(visible - canonical);
+  }, { timeout: 8_000 }).toBeLessThan(0.005);
 
-  await app1Stock.fill("0.5");
-  await app1Stock.locator("xpath=..").getByRole("button", { name: "Save" }).click();
-  await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBe(0.5);
+  // A manual correction removes one batch unit without changing the completed
+  // run's production counters.
+  const stockBeforeCorrection = await readCanonicalStock();
+  await page.getByRole("button", { name: "Decrease app1 batches on line" }).click();
+  const correctedStock = Math.max(0, stockBeforeCorrection - 1);
+  await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeCloseTo(correctedStock, 2);
 
   await page.getByTestId("tab-run").click();
   await page.getByRole("button", { name: /pause.?run/i }).click();
   await expect(page.getByRole("button", { name: /resume.?run/i })).toBeVisible();
   await expect.poll(readCanonicalPausedAt, { timeout: 8_000 }).toBeGreaterThan(0);
+  // An automatic claim already due while the run was still active may settle
+  // before the pause acknowledgement. Compare the paused tick with the stock
+  // at the acknowledged pause, not with the earlier manual correction value.
+  const stockAtPause = await readCanonicalStock();
   await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 65_000);
-  await expect.poll(readCanonicalStock).toBe(0.5);
+  await expect.poll(readCanonicalStock).toBeCloseTo(stockAtPause, 2);
   await page.getByRole("button", { name: /resume.?run/i }).click();
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
-  await expect(app1Stock).toHaveValue("0.5");
+  // Once resumed, normal automatic tracking may advance before the page
+  // reloads. Verify hydration against the canonical value rather than freezing
+  // a running counter at the earlier paused snapshot.
+  await expect.poll(async () =>
+    Math.abs((await readApp1BatchesOnLine()) - (await readCanonicalStock())),
+    { timeout: 15_000 },
+  ).toBeLessThan(0.005);
   await page.getByTestId("tab-packaging").click();
   await expect(page.getByTestId("tab-sauce")).toBeAttached();
   await expect(page.getByTestId("tab-dough")).toBeAttached();

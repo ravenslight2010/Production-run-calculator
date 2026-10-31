@@ -3,11 +3,11 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-build = "pnpm run publish:ready"
-run = ["sh", "-c", "pnpm --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
+build = "bash scripts/src/run-project-pnpm.sh run publish:ready"
+run = ["sh", "-c", "bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
 
 [deployment.postBuild]
-args = ["pnpm", "store", "prune"]
+args = ["bash", "scripts/src/run-project-pnpm.sh", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
@@ -39,7 +39,10 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/run-calculator run test:budget"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/run-calculator run test"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [[workflows.workflow]]
 name = "test:rules"

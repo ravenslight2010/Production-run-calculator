@@ -10,10 +10,16 @@ const checkerPath = join(packageRoot, "src/check-task-policy.mts");
 const contractPath = ".agents/skills/task-execution-rules/SKILL.md";
 const writingPath = ".agents/skills/writing-plans/SKILL.md";
 const pointer = `Read ${contractPath} before authoring or executing tasks and follow-ups.`;
+const coverageInventory =
+  "Before narrowing or splitting a broad objective, inventory material input types, formats/locales, layouts, platforms, lifecycle states, and failure paths; put relevant variants in its acceptance and test matrix.";
+const variantOwnership =
+  "Variants of the same user outcome belong in the owning task, not separate follow-ups. Different tests, false-positive risks, or implementation steps alone do not justify a split. Cover known/common cases within approved access; document genuine exclusions without claiming exhaustive coverage. A separate task still needs an independent user outcome, explicit user deferral, or distinct authorization/safety boundary—not merely a newly written out-of-scope clause.";
 
 // Prose-contract checks, not proof of task-runner compliance or scheduling.
 const commonPolicy = [
   "Use one durable task per objective.",
+  coverageInventory,
+  variantOwnership,
   "Every Draft, accepted task, and follow-up description must include `## Agent-owned execution` and `## Applicable safeguards and verification`. Name task-specific evidence/access paths, user-controlled decisions or permissions, and applicable specialist safety checks and validation matrix.",
   "Before starting, capture the task's scope, affected surfaces, owner, applicable specialist safety checks, and validation matrix.",
   "Triage every error found during work. Record each concrete error in the owning task's failure ledger and fix it there when safe and authorized, even if outside the original scope. Never silently ignore or defer it. If a safe fix requires a user decision/access grant or destructive action, preserve evidence, exact risk/blocker, accountable owner, and next action.",
@@ -33,6 +39,8 @@ const commonPolicy = [
 
 const planContract = [
   "## Agent-owned execution",
+  coverageInventory,
+  variantOwnership,
   "Name objective, owner, affected surfaces, task-specific evidence/access paths, and user-controlled inputs.",
   "Before asking the user, inspect the task record, relevant project evidence, configured workflows, and authorized Replit/deployment/service access.",
   "Ask only for a product decision, approval, or specific access permission the user controls.",
@@ -110,6 +118,35 @@ test("accepts complete project-owned fixtures without platform skills or the ret
     assert.equal(result.stdout, "Task policy check passed.\n");
   });
 });
+
+for (const path of Object.keys(validDocuments)) {
+  for (const [label, anchor] of [
+    ["broad-objective coverage inventory", "inventory material input types"],
+    ["broad-objective coverage inventory", "acceptance and test matrix"],
+    ["same-outcome variant ownership", "Variants of the same user outcome"],
+    ["same-outcome variant ownership", "Different tests, false-positive risks"],
+    ["same-outcome variant ownership", "distinct authorization/safety boundary"],
+  ]) {
+    test(`${path} rejects missing ${label}: ${anchor}`, async () => {
+      await checkFixture({
+        [path]: validDocuments[path].replaceAll(anchor, "removed"),
+      }, result => {
+        assert.equal(result.exitCode, 1);
+        assert.ok(result.stderr.includes(`${path}: missing ${label}`), result.stderr);
+      });
+    });
+  }
+  for (const variant of ["address format", "format variant", "edge case", "test case"]) {
+    test(`${path} rejects a separate task for each ${variant}`, async () => {
+      await checkFixture({
+        [path]: `${validDocuments[path]}\nCreate a separate task for each ${variant}.`,
+      }, result => {
+        assert.equal(result.exitCode, 1);
+        assert.ok(result.stderr.includes(`${path}: contradicts same-outcome variant ownership`), result.stderr);
+      });
+    });
+  }
+}
 
 const globalOmissions = [
   ["discovered-error triage and repair", "outside the original scope"],

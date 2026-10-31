@@ -5,6 +5,44 @@ description: How the web artifact's Vitest suite is wired, and the contention ru
 
 # Run-calculator web Vitest harness
 
+## Browser trace response-body formats
+
+Handle both `_file` and `_sha1` response-body references when inspecting
+Playwright trace archives; check archive members before resolving either.
+An empty inline `text` does not override a referenced body: use non-empty
+inline text or resolve the archive reference. This also applies to request bodies.
+
+**Why:** The available trace recorder used `_file` in network content metadata.
+It can also emit `text: ""` alongside that reference, so testing only whether
+the `text` property exists hides the actual payload.
+An older `_sha1`-only inspection silently skipped all captured API responses,
+which could be mistaken for missing browser evidence.
+
+**How to apply:** Inspect the network schema first, then extract only the
+needed sanitized facts. Do not dump request headers, cookies, or entire bodies.
+
+## WebKit fetch access-control wording
+
+**Rule:** Do not diagnose a WebKit “due to access control checks” message from
+its wording alone. Compare the document and request origins, check whether an
+OPTIONS preflight occurred, inspect the network failure reason, and confirm
+whether protected API responses succeeded. `Load request cancelled` in WebKit
+and `net::ERR_ABORTED` in Chromium can indicate navigation cancellation rather
+than a CORS failure.
+
+**Why:** An authenticated tablet manager journey used same-origin API requests
+without preflight, and protected reads returned 200. WebKit emitted
+access-control wording when an explicit test reload cancelled pending requests.
+Changing server CORS or authorization in response would have weakened the wrong
+layer.
+
+**How to apply:** Reproduce under an authenticated browser context in WebKit
+and Chromium. Assert same-origin requests, expected preflight behavior, and
+successful protected reads; only disregard cancellation errors during a known
+navigation window, and keep other request failures fatal. Include requests that
+start during unload, not only those in flight before navigation was requested:
+unload handlers may flush a final write that is then cancelled by that navigation.
+
 ## Contention is the enemy, not logic
 Validation runs alongside the development workflows, which can starve Vitest.
 Concurrent workers have previously caused "Failed to start forks worker"
@@ -55,6 +93,18 @@ setup file.
 **How to apply:** When adding component coverage, keep assertions compatible
 with the existing Vitest environment or add matcher setup as a deliberate,
 repo-wide harness change.
+
+## Nested modal measurements
+
+**Rule:** Measure an outer modal's visible-layer state before opening a nested
+modal. Modal accessibility behavior may mark the background dialog `aria-hidden`,
+causing role-based Playwright locators to stop matching it while the child is open.
+
+**Why:** A nested picker can be working correctly while a later role-based
+measurement of the now-hidden parent hangs until the test timeout.
+
+**How to apply:** Capture the parent layer before opening the child, then inspect
+the child's visibility, viewport position, and layer while it is open.
 
 ## Dense review surfaces
 
@@ -130,20 +180,28 @@ interrupted before its `finally` cleanup.
 current live date row, then write the fixture snapshot and retain normal
 `finally` cleanup. Never do this against a shared or production database.
 
-## Reserved ingredient names in full-app browser fixtures
+## Shared factory data across browser projects
 
-When checking prototype-sensitive ingredient accumulation, keep reserved names
-in focused accumulator/API tests and use ordinary live-run data for responsive
-full-app browser checks. Seeding `__proto__` as the initial pepperoni type caused
-a live-run startup error before the deferred Mix Plan view mounted.
+**Rule:** Restore any shared factory-data keys changed by an E2E test before
+that test ends, even when the browser matrix runs only against a disposable DB.
 
-**Why:** The full app runs live applicator setup before the Mix Plan view is
-opened, so that unrelated startup path can mask whether the accumulator and
-rendered view handle a reserved ingredient key correctly.
+**Why:** Browser projects in one matrix can reuse that DB sequentially, so one
+variant's unique directory entries can accumulate and change what later
+variants see.
 
-**How to apply:** If browser-level reserved-name coverage is needed, isolate the
-Mix Plan component or exercise the name through its recipe data without placing
-it in the initial live-run form; investigate live-run startup separately.
+**How to apply:** Snapshot the canonical value, write unique fixture entries,
+and restore the snapshot in `finally` using a fresh master-data epoch.
+
+## Focused edge cases and full-app fixtures
+
+Use focused tests for adversarial input domains and representative valid data
+for unrelated full-app journeys.
+
+**Why:** A full-app fixture can fail an earlier invariant before the feature
+under test mounts, masking which boundary actually failed.
+
+**How to apply:** Test the target boundary directly, and investigate earlier
+startup failures separately rather than counting them as target-feature proof.
 
 ## Same-origin request diagnostics
 
@@ -154,12 +212,9 @@ proves a CORS failure. Capture the method, URL origin, safe header names,
 response status, and browser failure separately, and redact cookie,
 authorization, and client-ID values.
 
-**Why:** A browser can report a failed request near a fixture API route even
-when the intended same-origin `GET` succeeded. Distinguishing methods and
-responses exposed a fixture's generic `404` on an operator `PUT`, rather than
-a cross-origin or preflight problem.
+**Why:** A nearby failed request does not identify a CORS failure or show that
+the intended request failed. Method, response and preflight evidence matter.
 
-**How to apply:** For WebKit/PWA fixture errors, first check whether `OPTIONS`
-was actually sent and whether the browser reached the fixture handler. Model
-the endpoint's real authorization status for unsupported fixture writes;
-do not add permissive CORS headers to make the test pass.
+**How to apply:** Check whether preflight occurred and whether the request
+reached its handler. Preserve real authorization behavior in fixtures; do not
+add permissive CORS headers to conceal an unrelated failure.

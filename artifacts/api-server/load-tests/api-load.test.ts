@@ -1,11 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express, { type Express } from "express";
-import type { Server } from "node:http";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { performance } from "node:perf_hooks";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import { signLegacyTokenForTests } from "../src/lib/auth";
+import { collectDatabaseCapacity } from "../src/lib/databaseCapacity";
 
 type DbModule = typeof import("@workspace/db");
 type ExpressRouter = typeof import("../src/routes/index");
@@ -27,20 +31,40 @@ let peakConcurrentRequests = 0;
 
 const MAX_CLIENTS = 4;
 const ROUNDS = 4;
-const MAX_CONCURRENT_REQUESTS = 12;
+const READINESS_PROBES_PER_ROUND = 4;
+const MAX_CONCURRENT_REQUESTS = 16;
 const MAX_SYNC_WRITE_ATTEMPTS_PER_RUN = MAX_CLIENTS;
+const READINESS_INSTANCE_COUNT = 2;
+const READINESS_ROUNDS = 2;
+const READINESS_PROBES_PER_INSTANCE_PER_ROUND = 6;
+const READINESS_PROBE_COUNT =
+  READINESS_INSTANCE_COUNT * READINESS_ROUNDS * READINESS_PROBES_PER_INSTANCE_PER_ROUND;
+const READINESS_SYNC_WRITE_COUNT = READINESS_INSTANCE_COUNT * READINESS_ROUNDS;
+const READINESS_MAX_SYNC_WRITE_ATTEMPTS =
+  READINESS_SYNC_WRITE_COUNT * MAX_SYNC_WRITE_ATTEMPTS_PER_RUN;
+const READINESS_SYNC_SNAPSHOT_READS = READINESS_ROUNDS;
+const READINESS_VERIFY_REQUESTS = 1;
+const READINESS_DRAIN_PROBES = READINESS_INSTANCE_COUNT;
 const MAX_TOTAL_REQUESTS =
   MAX_CLIENTS * ROUNDS * 2 * MAX_SYNC_WRITE_ATTEMPTS_PER_RUN
   + ROUNDS * 2
   + 3
   + MAX_CLIENTS * ROUNDS * 2
-  + MAX_CLIENTS * ROUNDS;
+  + MAX_CLIENTS * ROUNDS
+  + READINESS_PROBES_PER_ROUND * ROUNDS
+  + READINESS_PROBE_COUNT
+  + READINESS_MAX_SYNC_WRITE_ATTEMPTS
+  + READINESS_SYNC_SNAPSHOT_READS
+  + READINESS_VERIFY_REQUESTS
+  + READINESS_DRAIN_PROBES;
 const REQUEST_TIMEOUT_MS = 10_000;
 const DATE = "2032-04-09";
 const SCHEDULED_DATE = "2032-04-10";
 const MANAGER_ID = "api-load-manager";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const METRICS_PATH = resolve(repoRoot, "api-load-workload/metrics.json");
+const API_ENTRY_PATH = resolve(repoRoot, "artifacts/api-server/src/index.ts");
+const TSX_PATH = resolve(repoRoot, "scripts/node_modules/.bin/tsx");
 
 const metrics = {
   schemaVersion: 1,
@@ -53,6 +77,19 @@ const metrics = {
   consumeRequests: 0,
   adjustmentRequests: 0,
   verificationRequests: 0,
+  healthProbeCount: 0,
+  healthProbeElapsedMs: 0,
+  healthProbeP95Ms: 0,
+  readinessInstances: READINESS_INSTANCE_COUNT,
+  readinessProbeCount: 0,
+  readinessProbeElapsedMs: 0,
+  readinessProbeP95Ms: 0,
+  readinessSyncWrites: 0,
+  readinessSyncWriteAttempts: 0,
+  readinessOptionalReadsPerInstance: 0,
+  readinessMaxPoolWaitingCount: 0,
+  readinessPoolWaitersAtDrain: 0,
+  maxPoolWaitingCount: 0,
   totalRequests: 0,
   peakConcurrentRequests: 0,
   syncElapsedMs: 0,
@@ -106,12 +143,12 @@ function authHeaders(): Record<string, string> {
 
 async function requestApi(
   path: string,
-  options: { method?: string; body?: unknown; manager?: boolean } = {},
+  options: { method?: string; body?: unknown; manager?: boolean; baseUrl?: string } = {},
 ): Promise<{ body: unknown; headers: Headers }> {
   inFlightRequests += 1;
   peakConcurrentRequests = Math.max(peakConcurrentRequests, inFlightRequests);
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(`${options.baseUrl ?? baseUrl}${path}`, {
       method: options.method ?? "GET",
       headers: {
         ...(options.manager ? managerHeaders : authHeaders()),
@@ -131,9 +168,25 @@ async function requestApi(
 
 async function requestJson(
   path: string,
-  options: { method?: string; body?: unknown; manager?: boolean } = {},
+  options: { method?: string; body?: unknown; manager?: boolean; baseUrl?: string } = {},
 ): Promise<unknown> {
   return (await requestApi(path, options)).body;
+}
+
+async function probeReadiness(durations: number[], requestBaseUrl = baseUrl): Promise<void> {
+  const startedAt = performance.now();
+  try {
+    const result = await requestJson("/api/readyz", { baseUrl: requestBaseUrl }) as {
+      status?: string;
+      checks?: { database?: string; auditProtection?: string };
+    };
+    expect(result.status).toBe("ok");
+    expect(result.checks?.database).toBe("ok");
+    expect(result.checks?.auditProtection).toBe("ok");
+    metrics.healthProbeCount += 1;
+  } finally {
+    durations.push(Math.max(0, performance.now() - startedAt));
+  }
 }
 
 function buildRunPayload(
@@ -232,12 +285,15 @@ function mergeRunOnCanonical(
   };
 }
 
-async function readSyncSnapshot(date: string): Promise<string> {
+async function readSyncSnapshot(date: string, requestBaseUrl = baseUrl): Promise<string> {
   const path = date === DATE
     ? `/api/sync/today?today=${DATE}`
     : `/api/sync/${date}?today=${DATE}`;
   metrics.syncSnapshotReads += 1;
-  const response = await requestApi(path, { manager: date !== DATE });
+  const response = await requestApi(path, {
+    manager: date !== DATE,
+    baseUrl: requestBaseUrl,
+  });
   const snapshotId = response.headers.get("X-Sync-Snapshot");
   if (!snapshotId || !/^[a-f0-9]{64}$/u.test(snapshotId)) {
     throw new Error("API sync snapshot read returned no valid snapshot identity.");
@@ -251,10 +307,11 @@ async function writeSyncRun(
   client: number,
   round: number,
   initialSnapshotId: string,
+  requestBaseUrl = baseUrl,
 ): Promise<void> {
   const path = date === DATE
-    ? `/api/sync/today?today=${DATE}`
-    : `/api/sync/${date}?today=${DATE}`;
+    ? `/api/sync/today?today=${DATE}&epoch=0`
+    : `/api/sync/${date}?today=${DATE}&epoch=0`;
   let baseSnapshotId = initialSnapshotId;
   let payload: Record<string, any> = buildRunPayload(date, runId, client, round, baseSnapshotId);
   for (let attempt = 0; attempt < MAX_SYNC_WRITE_ATTEMPTS_PER_RUN; attempt += 1) {
@@ -262,9 +319,11 @@ async function writeSyncRun(
     const result = await requestJson(path, {
       method: "PUT",
       manager: date !== DATE,
+      baseUrl: requestBaseUrl,
       body: { senderId: `api-load-client-${client}`, payload },
     }) as {
       ok?: boolean;
+      stale?: boolean;
       partialFallback?: boolean;
       snapshotId?: string;
       data?: {
@@ -272,6 +331,7 @@ async function writeSyncRun(
         runValues?: Record<string, Record<string, number>>;
       };
     };
+    expect(result.stale).not.toBe(true);
     if (result.partialFallback) {
       metrics.syncFallbacks += 1;
       if (!result.snapshotId || !/^[a-f0-9]{64}$/u.test(result.snapshotId) || !result.data) {
@@ -297,6 +357,191 @@ async function writeSyncRun(
   throw new Error("API sync write exceeded its bounded snapshot-retry count.");
 }
 
+type ReadinessWorkerMetrics = {
+  processId: number;
+  databaseChecks: number;
+  auditChecks: number;
+  backgroundReads: number;
+  cacheReads: number;
+  poolWaiters: number;
+};
+
+type ReadinessApiInstance = {
+  child: ChildProcess;
+  baseUrl: string;
+  logs: string;
+  baselineMetrics?: ReadinessWorkerMetrics;
+  startError?: string;
+};
+
+function readinessWorkerMetrics(headers: Headers): ReadinessWorkerMetrics {
+  const readNumber = (name: string): number => {
+    const raw = headers.get(name);
+    const value = Number(raw);
+    if (raw === null || !Number.isInteger(value) || value < 0) {
+      throw new Error(`Readiness worker omitted bounded test metric ${name}.`);
+    }
+    return value;
+  };
+  return {
+    processId: readNumber("x-test-readiness-process"),
+    databaseChecks: readNumber("x-test-readiness-database-checks"),
+    auditChecks: readNumber("x-test-readiness-audit-checks"),
+    backgroundReads: readNumber("x-test-readiness-background-reads"),
+    cacheReads: readNumber("x-test-readiness-cache-reads"),
+    poolWaiters: readNumber("x-test-readiness-pool-waiters"),
+  };
+}
+
+async function reserveLoopbackPort(): Promise<number> {
+  const reservation = createServer();
+  await new Promise<void>((resolve, reject) => {
+    reservation.once("error", reject);
+    reservation.listen(0, "127.0.0.1", resolve);
+  });
+  const address = reservation.address() as AddressInfo;
+  await new Promise<void>((resolve, reject) => {
+    reservation.close((error) => error ? reject(error) : resolve());
+  });
+  return address.port;
+}
+
+function appendBoundedLog(instance: ReadinessApiInstance, chunk: Buffer): void {
+  instance.logs = `${instance.logs}${chunk.toString("utf8")}`.slice(-64 * 1024);
+}
+
+function startReadinessApiInstance(port: number): ReadinessApiInstance {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (/(?:SECRET|PASSWORD|TOKEN|PRIVATE_KEY|SIGNING_KEYS|CREDENTIAL|API_KEY|PRODUCTION|WEBHOOK|(?:SIGNUP|ACCESS|RECOVERY)_?CODE)|^PROD_|^GIT_URL$/iu.test(key)) {
+      delete environment[key];
+    }
+  }
+  for (const key of [
+    "REPLIT_DEPLOYMENT",
+    "REPLIT_ENVIRONMENT",
+    "REPLIT_DEPLOYMENT_ID",
+    "REPLIT_DEPLOYMENT_TYPE",
+    "LOCAL_AI_BASE_URL",
+    "LOCAL_AI_STRICT_READINESS",
+    "IMPORT_GOLD_LOCAL_ENABLED",
+    "IMPORT_GOLD_LOCAL_BASE_URL",
+  ]) {
+    delete environment[key];
+  }
+  const child = spawn(TSX_PATH, [API_ENTRY_PATH], {
+    cwd: repoRoot,
+    env: {
+      ...environment,
+      NODE_ENV: "test",
+      APP_ENV: "test",
+      DATABASE_URL: process.env.DATABASE_URL,
+      AUTH_TOKEN_SECRET: "api-load-workload-test-only",
+      PORT: String(port),
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      API_LOAD_TEST_DISPOSABLE_DB: "1",
+      API_LOAD_TEST_RUNNER: "1",
+      API_LOAD_TEST_METRICS_PATH: METRICS_PATH,
+      API_LOAD_READINESS_INSTRUMENTATION: "1",
+      API_LOAD_READINESS_OPTIONAL_DELAY_MS: "125",
+      DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS: "1",
+      MASTER_DATA_HEALTH_STARTUP_DELAY_MS: "21600000",
+      MASTER_DATA_HEALTH_SCAN_INTERVAL_MS: "21600000",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const instance: ReadinessApiInstance = {
+    child,
+    baseUrl: `http://127.0.0.1:${port}`,
+    logs: "",
+  };
+  child.once("error", () => {
+    instance.startError = "Readiness API child could not be started.";
+  });
+  instance.child.stdout?.on("data", (chunk: Buffer) => appendBoundedLog(instance, chunk));
+  instance.child.stderr?.on("data", (chunk: Buffer) => appendBoundedLog(instance, chunk));
+  return instance;
+}
+
+async function waitForReadinessApiInstance(
+  instance: ReadinessApiInstance,
+  timeoutMs = 60_000,
+): Promise<ReadinessWorkerMetrics> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (instance.startError) throw new Error(instance.startError);
+    if (instance.child.exitCode !== null || instance.child.signalCode !== null) {
+      throw new Error(`Readiness API child exited before becoming ready: ${instance.logs}`);
+    }
+    try {
+      const response = await fetch(`${instance.baseUrl}/api/readyz`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (response.ok) {
+        const body = await response.json() as {
+          checks?: { database?: string; auditProtection?: string };
+        };
+        if (body.checks?.database === "ok" && body.checks.auditProtection === "ok") {
+          return readinessWorkerMetrics(response.headers);
+        }
+      }
+    } catch {
+      // A newly spawned process may not have bound its port yet.
+    }
+    await delay(100);
+  }
+  throw new Error(`Readiness API child did not become ready: ${instance.logs}`);
+}
+
+async function waitForChildClose(
+  child: ChildProcess,
+  timeoutMs: number,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null } | null> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { code: child.exitCode, signal: child.signalCode };
+  }
+  return new Promise((resolve) => {
+    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+      clearTimeout(timer);
+      child.off("close", onClose);
+      resolve({ code, signal });
+    };
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => finish(code, signal);
+    const timer = setTimeout(() => {
+      child.off("close", onClose);
+      resolve(null);
+    }, timeoutMs);
+    child.once("close", onClose);
+  });
+}
+
+async function stopReadinessApiInstances(
+  instances: ReadinessApiInstance[],
+): Promise<Array<{ code: number | null; signal: NodeJS.Signals | null }>> {
+  for (const instance of instances) {
+    if (instance.child.exitCode === null && instance.child.signalCode === null) {
+      instance.child.kill("SIGTERM");
+    }
+  }
+  const results = await Promise.all(instances.map(({ child }) => waitForChildClose(child, 8_000)));
+  const settled: Array<{ code: number | null; signal: NodeJS.Signals | null }> = [];
+  for (let index = 0; index < instances.length; index += 1) {
+    if (results[index] !== null) {
+      settled.push(results[index]!);
+      continue;
+    }
+    const child = instances[index]!.child;
+    child.kill("SIGKILL");
+    settled.push((await waitForChildClose(child, 2_000)) ?? {
+      code: child.exitCode,
+      signal: child.signalCode,
+    });
+  }
+  return settled;
+}
+
 async function writeMetrics(): Promise<void> {
   metrics.peakConcurrentRequests = peakConcurrentRequests;
   metrics.durationMs = Math.max(0, Date.now() - workloadStartedAt);
@@ -305,7 +550,9 @@ async function writeMetrics(): Promise<void> {
     + metrics.syncSnapshotReads
     + metrics.consumeRequests
     + metrics.adjustmentRequests
-    + metrics.verificationRequests;
+    + metrics.verificationRequests
+    + metrics.healthProbeCount
+    + metrics.readinessProbeCount;
   await mkdir(dirname(METRICS_PATH), { recursive: true });
   await writeFile(METRICS_PATH, `${JSON.stringify(metrics, null, 2)}\n`, {
     encoding: "utf8",
@@ -382,11 +629,26 @@ afterAll(async () => {
   }
   if (pool) await pool.end();
   process.env.DATABASE_URL = originalDatabaseUrl;
+  metrics.peakConcurrentRequests = peakConcurrentRequests;
+  metrics.totalRequests =
+    metrics.syncWriteAttempts
+    + metrics.syncSnapshotReads
+    + metrics.consumeRequests
+    + metrics.adjustmentRequests
+    + metrics.verificationRequests
+    + metrics.healthProbeCount
+    + metrics.readinessProbeCount;
+  metrics.durationMs = Math.max(0, Date.now() - workloadStartedAt);
+  await writeMetrics();
 });
 
 describe("bounded API application workload against disposable PostgreSQL", () => {
   it("preserves live and scheduled sync data while inventory mutations remain consistent", async () => {
     workloadStartedAt = Date.now();
+    const healthProbeDurations: number[] = [];
+    const poolWaitSampler = setInterval(() => {
+      metrics.maxPoolWaitingCount = Math.max(metrics.maxPoolWaitingCount, pool.waitingCount);
+    }, 5);
     try {
       const syncStartedAt = Date.now();
       for (let round = 0; round < ROUNDS; round += 1) {
@@ -394,28 +656,44 @@ describe("bounded API application workload against disposable PostgreSQL", () =>
           readSyncSnapshot(DATE),
           readSyncSnapshot(SCHEDULED_DATE),
         ]);
-        await Promise.all(
-          Array.from({ length: MAX_CLIENTS }, (_, client) =>
-            Promise.all([
-              writeSyncRun(
-                DATE,
-                `api-load-live-${client}-${round}`,
-                client,
-                round,
-                liveSnapshotId,
-              ),
-              writeSyncRun(
-                SCHEDULED_DATE,
-                `api-load-scheduled-${client}-${round}`,
-                client,
-                round,
-                scheduledSnapshotId,
-              ),
-            ]),
+        await Promise.all([
+          Promise.all(
+            Array.from({ length: MAX_CLIENTS }, (_, client) =>
+              Promise.all([
+                writeSyncRun(
+                  DATE,
+                  `api-load-live-${client}-${round}`,
+                  client,
+                  round,
+                  liveSnapshotId,
+                ),
+                writeSyncRun(
+                  SCHEDULED_DATE,
+                  `api-load-scheduled-${client}-${round}`,
+                  client,
+                  round,
+                  scheduledSnapshotId,
+                ),
+              ]),
+            ),
           ),
-        );
+          Promise.all(
+            Array.from({ length: READINESS_PROBES_PER_ROUND }, () =>
+              probeReadiness(healthProbeDurations),
+            ),
+          ),
+        ]);
       }
       metrics.syncElapsedMs = Date.now() - syncStartedAt;
+      const sortedHealthProbeDurations = [...healthProbeDurations].sort((a, b) => a - b);
+      metrics.healthProbeElapsedMs = healthProbeDurations.reduce((sum, duration) => sum + duration, 0);
+      metrics.healthProbeP95Ms = Math.ceil(
+        sortedHealthProbeDurations.length * 0.95,
+      ) > 0
+        ? sortedHealthProbeDurations[
+          Math.min(sortedHealthProbeDurations.length - 1, Math.ceil(sortedHealthProbeDurations.length * 0.95) - 1)
+        ]!
+        : 0;
 
       const [live, scheduled, scheduledList] = await Promise.all([
         requestJson(`/api/sync/today?today=${DATE}`),
@@ -512,7 +790,8 @@ describe("bounded API application workload against disposable PostgreSQL", () =>
         + metrics.syncSnapshotReads
         + metrics.consumeRequests
         + metrics.adjustmentRequests
-        + metrics.verificationRequests;
+        + metrics.verificationRequests
+        + metrics.healthProbeCount;
       expect(metrics.syncWrites).toBe(MAX_CLIENTS * ROUNDS * 2);
       expect(metrics.syncWriteAttempts).toBeLessThanOrEqual(
         MAX_CLIENTS * ROUNDS * 2 * MAX_SYNC_WRITE_ATTEMPTS_PER_RUN,
@@ -524,15 +803,255 @@ describe("bounded API application workload against disposable PostgreSQL", () =>
       metrics.assertionFailures = 1;
       throw error;
     } finally {
+      clearInterval(poolWaitSampler);
       metrics.peakConcurrentRequests = peakConcurrentRequests;
       metrics.totalRequests =
         metrics.syncWriteAttempts
         + metrics.syncSnapshotReads
         + metrics.consumeRequests
         + metrics.adjustmentRequests
-        + metrics.verificationRequests;
+        + metrics.verificationRequests
+        + metrics.healthProbeCount;
       metrics.durationMs = Math.max(0, Date.now() - workloadStartedAt);
       await writeMetrics();
     }
   }, 180_000);
+
+  it("keeps readiness coalesced per API process while both processes accept sync writes", async () => {
+    const instances: ReadinessApiInstance[] = [];
+    const readinessDurations: number[] = [];
+    const syncWritesAtStart = metrics.syncWrites;
+    const syncAttemptsAtStart = metrics.syncWriteAttempts;
+    const processIds = new Set<number>();
+    let shutdownResults: Array<{ code: number | null; signal: NodeJS.Signals | null }> = [];
+
+    try {
+      const ports = await Promise.all(
+        Array.from({ length: READINESS_INSTANCE_COUNT }, () => reserveLoopbackPort()),
+      );
+      instances.push(...ports.map(startReadinessApiInstance));
+      const startupMetrics = await Promise.all(
+        instances.map((instance) => waitForReadinessApiInstance(instance)),
+      );
+      for (let index = 0; index < instances.length; index += 1) {
+        instances[index]!.baselineMetrics = startupMetrics[index]!;
+        processIds.add(startupMetrics[index]!.processId);
+      }
+      expect(processIds.size).toBe(READINESS_INSTANCE_COUNT);
+
+      const syncStartedAt = Date.now();
+      for (let round = 0; round < READINESS_ROUNDS; round += 1) {
+        const baseSnapshotId = await readSyncSnapshot(DATE, instances[0]!.baseUrl);
+        const perInstanceProbeMetrics = instances.map((): ReadinessWorkerMetrics[] => []);
+        const probeBatches = instances.map((instance) =>
+          Array.from({ length: READINESS_PROBES_PER_INSTANCE_PER_ROUND }, async () => {
+            const startedAt = performance.now();
+            try {
+              const { body, headers } = await requestApi("/api/readyz", {
+                baseUrl: instance.baseUrl,
+              });
+              const result = body as {
+                status?: string;
+                checks?: { database?: string; auditProtection?: string };
+              };
+              expect(result.status).toBe("ok");
+              expect(result.checks?.database).toBe("ok");
+              expect(result.checks?.auditProtection).toBe("ok");
+              const observed = readinessWorkerMetrics(headers);
+              perInstanceProbeMetrics[instances.indexOf(instance)]!.push(observed);
+              metrics.readinessProbeCount += 1;
+              return observed;
+            } finally {
+              readinessDurations.push(Math.max(0, performance.now() - startedAt));
+            }
+          }),
+        );
+        await Promise.all([
+          ...probeBatches.flat(),
+          ...instances.map((instance, index) =>
+            writeSyncRun(
+              DATE,
+              `api-readiness-instance-${index}-${round}`,
+              index,
+              round,
+              baseSnapshotId,
+              instance.baseUrl,
+            ),
+          ),
+        ]);
+
+        for (let index = 0; index < instances.length; index += 1) {
+          const baseline = instances[index]!.baselineMetrics!;
+          const observed = perInstanceProbeMetrics[index]!;
+          expect(observed).toHaveLength(READINESS_PROBES_PER_INSTANCE_PER_ROUND);
+          expect(observed.every((entry) => entry.processId === baseline.processId)).toBe(true);
+          expect(Math.max(...observed.map((entry) => entry.databaseChecks))).toBe(
+            baseline.databaseChecks +
+              (round + 1) * READINESS_PROBES_PER_INSTANCE_PER_ROUND,
+          );
+          expect(Math.max(...observed.map((entry) => entry.auditChecks))).toBe(
+            baseline.auditChecks +
+              (round + 1) * READINESS_PROBES_PER_INSTANCE_PER_ROUND,
+          );
+          expect(Math.max(...observed.map((entry) => entry.backgroundReads))).toBe(
+            baseline.backgroundReads + round + 1,
+          );
+          expect(Math.max(...observed.map((entry) => entry.cacheReads))).toBe(
+            baseline.cacheReads + round + 1,
+          );
+          metrics.readinessMaxPoolWaitingCount = Math.max(
+            metrics.readinessMaxPoolWaitingCount,
+            ...observed.map((entry) => entry.poolWaiters),
+          );
+        }
+      }
+      metrics.syncElapsedMs += Date.now() - syncStartedAt;
+
+      const verification = await requestApi(`/api/sync/today?today=${DATE}`, {
+        baseUrl: instances[0]!.baseUrl,
+      });
+      metrics.verificationRequests += 1;
+      const canonical = verification.body as {
+        dayState?: { runs?: Array<{ id: string }> };
+        runValues?: Record<string, Record<string, number>>;
+      };
+      const expectedRunIds = Array.from(
+        { length: READINESS_SYNC_WRITE_COUNT },
+        (_, index) =>
+          `api-readiness-instance-${Math.floor(index / READINESS_ROUNDS)}-${index % READINESS_ROUNDS}`,
+      ).sort();
+      const actualRunIds = (canonical.dayState?.runs ?? [])
+        .map(({ id }) => id)
+        .filter((id) => id.startsWith("api-readiness-instance-"));
+      expect(actualRunIds.sort()).toEqual(expectedRunIds);
+      expect(new Set(actualRunIds).size).toBe(READINESS_SYNC_WRITE_COUNT);
+      for (let index = 0; index < READINESS_INSTANCE_COUNT; index += 1) {
+        for (let round = 0; round < READINESS_ROUNDS; round += 1) {
+          expect(
+            canonical.runValues?.[`api-readiness-instance-${index}-${round}`]?.casesNeeded,
+          ).toBe(10 + round);
+        }
+      }
+
+      const drainMetrics = await Promise.all(instances.map(async (instance) => {
+        const startedAt = performance.now();
+        try {
+          const { body, headers } = await requestApi("/api/readyz", {
+            baseUrl: instance.baseUrl,
+          });
+          expect((body as { status?: string }).status).toBe("ok");
+          metrics.readinessProbeCount += 1;
+          const observed = readinessWorkerMetrics(headers);
+          const baseline = instance.baselineMetrics!;
+          expect(observed.processId).toBe(baseline.processId);
+          expect(observed.databaseChecks).toBe(
+            baseline.databaseChecks +
+              READINESS_ROUNDS * READINESS_PROBES_PER_INSTANCE_PER_ROUND + 1,
+          );
+          expect(observed.auditChecks).toBe(
+            baseline.auditChecks +
+              READINESS_ROUNDS * READINESS_PROBES_PER_INSTANCE_PER_ROUND + 1,
+          );
+          expect(observed.backgroundReads).toBe(baseline.backgroundReads + READINESS_ROUNDS + 1);
+          expect(observed.cacheReads).toBe(baseline.cacheReads + READINESS_ROUNDS + 1);
+          return observed;
+        } finally {
+          readinessDurations.push(Math.max(0, performance.now() - startedAt));
+        }
+      }));
+      metrics.readinessOptionalReadsPerInstance = READINESS_ROUNDS + 1;
+      metrics.readinessPoolWaitersAtDrain = Math.max(
+        ...drainMetrics.map((entry) => entry.poolWaiters),
+      );
+      metrics.readinessMaxPoolWaitingCount = Math.max(
+        metrics.readinessMaxPoolWaitingCount,
+        ...drainMetrics.map((entry) => entry.poolWaiters),
+      );
+      expect(metrics.readinessPoolWaitersAtDrain).toBe(0);
+      expect(metrics.readinessProbeCount).toBe(READINESS_PROBE_COUNT + READINESS_DRAIN_PROBES);
+      expect(readinessDurations).toHaveLength(metrics.readinessProbeCount);
+
+      const sortedProbeDurations = [...readinessDurations].sort((left, right) => left - right);
+      metrics.readinessProbeElapsedMs = readinessDurations.reduce((sum, value) => sum + value, 0);
+      metrics.readinessProbeP95Ms = sortedProbeDurations[
+        Math.max(0, Math.ceil(sortedProbeDurations.length * 0.95) - 1)
+      ] ?? 0;
+      metrics.readinessSyncWrites = metrics.syncWrites - syncWritesAtStart;
+      metrics.readinessSyncWriteAttempts = metrics.syncWriteAttempts - syncAttemptsAtStart;
+      expect(metrics.readinessSyncWrites).toBe(READINESS_SYNC_WRITE_COUNT);
+      expect(metrics.readinessSyncWriteAttempts).toBeGreaterThanOrEqual(READINESS_SYNC_WRITE_COUNT);
+      expect(metrics.readinessSyncWriteAttempts).toBeLessThanOrEqual(
+        READINESS_MAX_SYNC_WRITE_ATTEMPTS,
+      );
+      expect(metrics.readinessMaxPoolWaitingCount).toBeLessThanOrEqual(MAX_CONCURRENT_REQUESTS);
+      expect(metrics.readinessProbeP95Ms).toBeLessThan(REQUEST_TIMEOUT_MS);
+    } catch (error) {
+      metrics.assertionFailures = 1;
+      throw error;
+    } finally {
+      shutdownResults = await stopReadinessApiInstances(instances);
+      metrics.totalRequests =
+        metrics.syncWriteAttempts
+        + metrics.syncSnapshotReads
+        + metrics.consumeRequests
+        + metrics.adjustmentRequests
+        + metrics.verificationRequests
+        + metrics.healthProbeCount
+        + metrics.readinessProbeCount;
+      await writeMetrics();
+    }
+
+    expect(shutdownResults).toEqual(
+      Array.from({ length: READINESS_INSTANCE_COUNT }, () => ({ code: 0, signal: null })),
+    );
+  }, 180_000);
+
+  it("attributes a controlled PostgreSQL lock wait without exposing query text", async () => {
+    const blocker = await pool.connect();
+    const waiter = await pool.connect();
+    const lockKey = "3463202610";
+    let lockAcquired = false;
+    let waitingQuery: Promise<unknown> | undefined;
+
+    try {
+      await blocker.query("SELECT pg_advisory_lock($1::bigint)", [lockKey]);
+      lockAcquired = true;
+      waitingQuery = waiter.query("SELECT pg_advisory_lock($1::bigint)", [lockKey]);
+      void waitingQuery.catch(() => undefined);
+
+      const deadline = Date.now() + 2_500;
+      let measurement: Awaited<ReturnType<typeof collectDatabaseCapacity>> | undefined;
+      while (Date.now() < deadline) {
+        measurement = await collectDatabaseCapacity(pool);
+        if (
+          measurement.status === "observed" &&
+          measurement.lockWaitingBackends >= 1 &&
+          measurement.activeWaitingBackends >= 1
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(measurement).toMatchObject({ status: "observed" });
+      expect(measurement?.activeWaitingBackends).toBeGreaterThanOrEqual(1);
+      expect(measurement?.lockWaitingBackends).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(measurement)).not.toMatch(/pg_advisory_lock|3463202610|queryText|pid/i);
+    } finally {
+      try {
+        if (lockAcquired) {
+          await blocker.query("SELECT pg_advisory_unlock($1::bigint)", [lockKey]);
+        }
+      } finally {
+        try {
+          if (waitingQuery) await waitingQuery;
+        } finally {
+          waiter.release();
+          blocker.release();
+        }
+      }
+    }
+
+    expect(pool.waitingCount).toBe(0);
+  }, 15_000);
 });

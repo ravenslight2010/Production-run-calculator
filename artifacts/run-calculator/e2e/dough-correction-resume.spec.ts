@@ -10,6 +10,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import {
+  DEFAULT_MANAGER_CAPABILITIES,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -59,7 +60,10 @@ async function promoteToManager(page: Page): Promise<void> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
-    await db.query("UPDATE roles SET updated_at = NOW() WHERE name = 'manager'");
+    await db.query(
+      "UPDATE roles SET capabilities = $1::jsonb, updated_at = NOW() WHERE name = 'manager'",
+      [JSON.stringify(DEFAULT_MANAGER_CAPABILITIES)],
+    );
     await db.query(
       `INSERT INTO user_roles (user_id, role)
        VALUES ($1, 'manager')
@@ -167,12 +171,93 @@ async function readCanonicalDoughValues(
   const response = await page.request.get(`/api/sync/today?today=${today}`);
   if (!response.ok()) return null;
   const body = await response.json() as {
-    runValues?: Record<string, { traysOnLine?: number; batchesReady?: number }>;
-    data?: {
-      runValues?: Record<string, { traysOnLine?: number; batchesReady?: number }>;
+    operationalProjection?: {
+      runId?: string;
+      counters?: { traysOnLine?: number; batchesReady?: number };
     };
   };
-  return (body.runValues ?? body.data?.runValues)?.[runId] ?? null;
+  const projection = body.operationalProjection;
+  if (projection?.runId !== runId || !projection.counters) return null;
+  return {
+    traysOnLine: projection.counters.traysOnLine,
+    batchesReady: projection.counters.batchesReady,
+  };
+}
+
+async function observeDoughTimerControlEvents(page: Page, runId: string): Promise<void> {
+  await page.evaluate((targetRunId) => {
+    const host = window as typeof window & { __doughTimerControlObservations?: unknown[] };
+    const observations: unknown[] = [];
+    host.__doughTimerControlObservations = observations;
+    const record = (kind: string, detail: Record<string, unknown>, defaultPrevented: boolean) => {
+      const selected = kind === "published"
+        ? detail
+        : (detail[targetRunId] as Record<string, unknown> | undefined);
+      let localControls: Record<string, Record<string, unknown>> = {};
+      try {
+        const parsed: unknown = JSON.parse(localStorage.getItem("run-calculator:dough-timer-controls") ?? "{}");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          localControls = parsed as typeof localControls;
+        }
+      } catch {}
+      let run: { id?: string; metaUpdatedAt?: number; startedAt?: number } | undefined;
+      try {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          runs?: Array<{ id?: string; metaUpdatedAt?: number; startedAt?: number }>;
+        };
+        run = day.runs?.find((candidate) => candidate.id === targetRunId);
+      } catch {}
+      const local = localControls[targetRunId];
+      const expectedGeneration = run
+        ? `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`.slice(0, 160)
+        : "";
+      observations.push({
+        kind,
+        accepted: kind === "published" ? !defaultPrevented : undefined,
+        targetsCurrentRun: kind === "published"
+          ? detail.runId === targetRunId
+          : selected !== undefined,
+        paused: Number(selected?.pausedAt) > 0,
+        generationMatchesLocalRun: !!selected && selected.generation === expectedGeneration,
+        localControlPresent: !!local,
+        localControlPaused: Number(local?.pausedAt) > 0,
+      });
+    };
+    window.addEventListener("run-calculator:dough-timer-control", (event) => {
+      const custom = event as CustomEvent<Record<string, unknown>>;
+      record("published", custom.detail ?? {}, event.defaultPrevented);
+    });
+    window.addEventListener("run-calculator:dough-timer-control-adopt", (event) => {
+      const custom = event as CustomEvent<Record<string, unknown>>;
+      record("adopted", custom.detail ?? {}, event.defaultPrevented);
+    });
+  }, runId);
+}
+
+async function advanceServerToFirstTrayTick(page: Page): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const snapshotResponse = await page.request.get(`/api/sync/today?today=${today}`);
+  expect(snapshotResponse.ok(), "read the current authoritative tray schedule").toBe(true);
+  const snapshot = await snapshotResponse.json() as {
+    serverTime?: number;
+    operationalProjection?: {
+      due?: { entries?: Array<{ channel: string; dueAt: number }> };
+    };
+  };
+  const trayDueAt = snapshot.operationalProjection?.due?.entries
+    ?.find((entry) => entry.channel === "tray-consume")?.dueAt;
+  expect(Number.isFinite(trayDueAt), "authoritative tray-consume due time").toBe(true);
+
+  // Release-browser tests use this test-only endpoint to drive the same
+  // authoritative server tick without relying on background wall-clock timing.
+  const nowMs = Math.max(snapshot.serverTime ?? Date.now(), Math.ceil(trayDueAt!)) + 1;
+  const tick = await page.request.post(`/api/sync/e2e/auto-track-tick?today=${today}`, {
+    data: { nowMs, rearm: true },
+  });
+  expect(tick.ok(), `authoritative tray fixture tick failed: ${tick.status()}`).toBe(true);
+  const result = await tick.json() as { accepted?: number };
+  expect(Number.isInteger(result.accepted), "tick response must report accepted events").toBe(true);
+  expect(result.accepted, "first authoritative tray tick should be accepted").toBeGreaterThan(0);
 }
 
 test.beforeEach(async () => {
@@ -199,8 +284,16 @@ test("manager Dough corrections resume without a catch-up write", async ({
   await page.setViewportSize({ width: 390, height: 844 });
 
   const browserErrors: string[] = [];
+  const todaySyncResponses: Array<{ method: string; status: number }> = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (url.pathname === "/api/sync/today") {
+      todaySyncResponses.push({
+        method: response.request().method(),
+        status: response.status(),
+      });
+    }
     if (response.status() >= 500) {
       browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
     }
@@ -248,16 +341,48 @@ test("manager Dough corrections resume without a catch-up write", async ({
     timeout: 15_000,
   });
 
-  // Wait for the one-shot authoritative tray seed before deriving a manual
+  // Drive the one-shot authoritative tray seed before deriving a manual
   // correction. A full tray seed can legitimately leave batches at zero.
-  await expect.poll(async () => {
+  await advanceServerToFirstTrayTick(page);
+  // The deterministic tick is issued outside the page. Reload to adopt its
+  // canonical revision before sending the manager's next command.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-dough").waitFor({ state: "visible", timeout: 25_000 });
+  await page.getByTestId("tab-dough").click();
+  await observeDoughTimerControlEvents(page, runId);
+  let seedObservation: {
+    ready: boolean;
+    form: { trays: number; batches: number };
+    canonical: { traysOnLine?: number; batchesReady?: number } | null;
+    recentTodaySyncResponses: Array<{ method: string; status: number }>;
+  } = {
+    ready: false,
+    form: { trays: 0, batches: 0 },
+    canonical: null,
+    recentTodaySyncResponses: [],
+  };
+  try {
+    await expect.poll(async () => {
     const trays = await readStepperValue(page, "input-traysOnLine");
     const batches = await readStepperValue(page, "input-batchesReady");
     const canonical = await readCanonicalDoughValues(page, runId);
-    return trays > 0
-      && canonical?.traysOnLine === trays
-      && canonical?.batchesReady === batches;
-  }, { timeout: 15_000 }).toBe(true);
+    seedObservation = {
+      ready: trays > 0
+        && canonical?.traysOnLine === trays
+        && canonical?.batchesReady === batches,
+      form: { trays, batches },
+      canonical,
+      recentTodaySyncResponses: todaySyncResponses.slice(-6),
+    };
+      return seedObservation.ready;
+    }, { timeout: 15_000 }).toBe(true);
+  } catch (error) {
+    await testInfo.attach("dough-seed-diagnostics.json", {
+      body: JSON.stringify(seedObservation, null, 2),
+      contentType: "application/json",
+    });
+    throw error;
+  }
   const currentTrays = await readStepperValue(page, "input-traysOnLine");
   const currentBatches = await readStepperValue(page, "input-batchesReady");
 
@@ -271,8 +396,33 @@ test("manager Dough corrections resume without a catch-up write", async ({
   expect(correctedTrays).toBeLessThan(currentTrays);
   const correctedDough = {
     traysOnLine: correctedTrays,
-    batchesReady: currentBatches > 0 ? currentBatches - 1 : 2,
+    batchesReady: currentBatches > 0 ? Math.max(0, currentBatches - 1) : 2,
   };
+  const doughControlDiagnostics = await page.evaluate((targetRunId) => {
+    const host = window as typeof window & { __doughTimerControlObservations?: unknown[] };
+    let localControls: Record<string, Record<string, unknown>> = {};
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem("run-calculator:dough-timer-controls") ?? "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        localControls = parsed as typeof localControls;
+      }
+    } catch {}
+    const local = localControls[targetRunId];
+    const visibleControlError = [...document.querySelectorAll<HTMLElement>('[role="alert"], [role="status"]')]
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element) => element.textContent?.trim() ?? "")
+      .find((text) => /control is not confirmed|run action is still pending|could not be saved for delivery/i.test(text));
+    return {
+      events: host.__doughTimerControlObservations ?? [],
+      localControlPresent: !!local,
+      localControlPaused: Number(local?.pausedAt) > 0,
+      visibleControlError: visibleControlError ?? null,
+    };
+  }, runId);
+  await testInfo.attach("dough-timer-control-diagnostics.json", {
+    body: JSON.stringify(doughControlDiagnostics, null, 2),
+    contentType: "application/json",
+  });
   await expect(page.getByTestId("dough-timers-paused-banner")).toBeVisible();
   // Each edit starts the same timed Dough-only pause. The second correction
   // becomes its final baseline.
@@ -309,10 +459,17 @@ test("manager Dough corrections resume without a catch-up write", async ({
 
   // Wait for the correction's one-tray pause. Expiry should re-arm the Dough
   // timers, not apply elapsed time as a catch-up write.
-  await expect(page.getByTestId("dough-timers-paused-banner")).toBeHidden({
+  await expect.poll(async () => ({
+    pausedBannerVisible: await page.getByTestId("dough-timers-paused-banner").isVisible().catch(() => false),
+    pauseButtonVisible: await page.getByTestId("btn-pause-dough-timers").isVisible().catch(() => false),
+  }), {
     timeout: MAX_TRAY_PAUSE_MS,
+    intervals: [100, 250, 500],
+    message: "the Dough timer should re-arm after the timed correction pause",
+  }).toEqual({
+    pausedBannerVisible: false,
+    pauseButtonVisible: true,
   });
-  await expect(page.getByTestId("btn-pause-dough-timers")).toBeVisible();
   await page.waitForTimeout(750);
   expect(await readStepperValue(page, "input-traysOnLine"))
     .toBeGreaterThanOrEqual(correctedDough.traysOnLine - 1);

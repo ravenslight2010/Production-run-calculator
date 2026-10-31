@@ -27,6 +27,8 @@ const FIELDS: { key: keyof DieLineDefaults; label: string; step: string; optiona
   { key: "freezerTime", label: "Freeze Tunnel Time (min)", step: "1" },
   { key: "casesPerLayer", label: "Extra Case Buffer", step: "1" },
   { key: "preTunnelMin", label: "Pre-tunnel (min)", step: "0.5", optional: true },
+  { key: "pressOvenMin", label: "Press / Oven (min)", step: "any", optional: true },
+  { key: "frontlineMin", label: "Frontline (min)", step: "any", optional: true },
   { key: "postTunnelMin", label: "Post-tunnel (min)", step: "0.5", optional: true },
 ];
 
@@ -41,6 +43,8 @@ function toDraft(v: DieLineDefaults | null): Draft {
     casesPerLayer: v ? String(v.casesPerLayer) : "",
     // Optional tunnel fields: blank string means "leave at built-in default".
     preTunnelMin: v?.preTunnelMin != null ? String(v.preTunnelMin) : "",
+    pressOvenMin: v?.pressOvenMin != null ? String(v.pressOvenMin) : "",
+    frontlineMin: v?.frontlineMin != null ? String(v.frontlineMin) : "",
     postTunnelMin: v?.postTunnelMin != null ? String(v.postTunnelMin) : "",
   };
 }
@@ -143,9 +147,10 @@ export default function DieLineDefaultsManager({ dieTypes }: { dieTypes: string[
             // Leave the field absent from parsed so the server omits it.
           } else {
             const n = Number(raw);
-            // Optional tunnel fields must be strictly positive (0 is not a valid
-            // dwell time and the server drops ≤0 values; treat 0 the same as blank).
-            if (!Number.isFinite(n) || n < 0 || (f.optional && n === 0)) valid = false;
+            // Split transit durations explicitly allow zero. Legacy outer
+            // fields retain their historical blank/positive semantics.
+            if (!Number.isFinite(n) || n < 0 ||
+              ((f.key === "preTunnelMin" || f.key === "postTunnelMin") && n === 0)) valid = false;
             else parsed[f.key] = n;
           }
         }

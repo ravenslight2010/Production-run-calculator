@@ -1,3 +1,5 @@
+import { prepareMasterDataEpochRequest, masterDataEpochReadReceipt } from "./masterDataEpoch";
+
 const MAX_ENTRIES = 40;
 const SLOW_TRANSITION_MS = 250;
 const SLOW_LOAD_MS = 1500;
@@ -413,9 +415,11 @@ async function fetchWithFailurePolicy(
   const mayBoundRead = failurePolicy.instrumentDeliveryFailures &&
     (method === "GET" || method === "HEAD") && !callerSignal;
   const timeoutController = mayBoundRead ? new AbortController() : null;
+  const epochInit = prepareMasterDataEpochRequest(input, init);
+  const epochReceipt = masterDataEpochReadReceipt(input, init);
   const requestInit = timeoutController
-    ? { ...init, signal: timeoutController.signal }
-    : init;
+    ? { ...epochInit, signal: timeoutController.signal }
+    : epochInit;
   let hiddenObserved = typeof document !== "undefined" && document.visibilityState === "hidden";
   const onVisibilityChange = () => {
     if (document.visibilityState === "hidden") hiddenObserved = true;
@@ -457,6 +461,7 @@ async function fetchWithFailurePolicy(
   try {
     const send = transport ?? apiFetchTransport ?? globalThis.fetch.bind(globalThis);
     const response = await send(input, requestInit);
+    epochReceipt(response);
     if (startedAt !== null && typeof performance !== "undefined") {
       recordPerformance(`api:${operation}:${response.status}`, performance.now() - startedAt, "api");
     }

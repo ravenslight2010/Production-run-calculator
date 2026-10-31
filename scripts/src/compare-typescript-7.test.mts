@@ -7,6 +7,7 @@ import {
   analyzeTypescript7HistoricalReports,
   declarationManifest,
   editorServiceEvidenceFromResult,
+  EDITOR_TYPESCRIPT_CHECK_TIMEOUT_MS,
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
   typescript7ProjectMeasurementCommands,
@@ -14,6 +15,7 @@ import {
   typescript7TrendHistorySummary,
   typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
+  typescript7PromotionGatesMet,
   validateTypescript7ResourceApprovalEvidence,
   TYPESCRIPT_7_DECLARATION_EXTENSIONS,
   TYPESCRIPT_7_SUPPORTED_RUNNERS,
@@ -97,6 +99,7 @@ test("promotion evidence records the editor SDK and smoke outcome", () => {
       sdkVersion: "6.0.3",
       outcome: "PASS",
       exitCode: 0,
+      failureReason: null,
     },
   );
   assert.equal(
@@ -105,6 +108,27 @@ test("promotion evidence records the editor SDK and smoke outcome", () => {
       stderr: "Expected diagnostic TS2322",
     }).outcome,
     "FAIL",
+  );
+  const timedOutEditorCheck = editorServiceEvidenceFromResult({
+    status: null,
+    error: Object.assign(new Error("spawnSync pnpm ETIMEDOUT"), {
+      code: "ETIMEDOUT",
+    }),
+    stderr: "spawnSync pnpm ETIMEDOUT",
+  });
+  assert.equal(EDITOR_TYPESCRIPT_CHECK_TIMEOUT_MS, 5 * 60 * 1_000);
+  assert.deepEqual(timedOutEditorCheck, {
+    command: "pnpm run check:editor-typescript",
+    sdkPath: null,
+    sdkVersion: null,
+    outcome: "FAIL",
+    exitCode: 1,
+    failureReason: "TIMEOUT",
+  });
+  assert.equal(
+    typescript7PromotionGatesMet(true, timedOutEditorCheck, { eligible: true }),
+    false,
+    "a timed-out editor check must block promotion even when compiler gates pass",
   );
 });
 

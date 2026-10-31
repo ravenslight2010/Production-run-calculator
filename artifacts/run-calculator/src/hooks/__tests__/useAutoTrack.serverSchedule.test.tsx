@@ -31,6 +31,7 @@ describe("useAutoTrack server schedule freshness", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -171,14 +172,24 @@ describe("useAutoTrack server schedule freshness", () => {
     expect(claim).toHaveBeenCalled();
   });
 
-  it("never submits or applies an automatic mutation in authoritative server mode", async () => {
+  it("honors per-channel ownership and only falls back to client claims online", async () => {
     const { form, store } = makeForm();
-    const claim = vi.fn();
+    vi.stubGlobal("navigator", { onLine: true });
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: {
+        generation: request.generation,
+        sequence: request.sequence,
+        nextDueAt: request.nextDueAt,
+      },
+      values: Object.fromEntries(request.mutations.map((mutation) => [mutation.field, mutation.to])),
+    }));
     type Props = Parameters<typeof useAutoTrack>[0];
     const base: Props = {
       runId: "passive-client",
       runGeneration: "started",
       runStatus: "running",
+      packagingAutoTrackActive: true,
       nowTime: new Date(T0),
       elapsedBatchSec: 0,
       calc: {
@@ -206,11 +217,20 @@ describe("useAutoTrack server schedule freshness", () => {
     });
 
     await act(async () => {
-      vi.setSystemTime(T0 + 2_000);
+      vi.setSystemTime(T0 + 30_000);
+      window.dispatchEvent(new CustomEvent("run-calculator:auto-track-schedule", {
+        detail: {
+          runId: "passive-client",
+          generation: "passive-client:started",
+          atMs: T0 + 30_000,
+          entries: [{ channel: "case", canonical: true, dueNow: false }],
+        },
+      }));
+      vi.setSystemTime(T0 + 31_001);
       hook.rerender({
         ...base,
-        nowTime: new Date(T0 + 2_000),
-        elapsedBatchSec: 2,
+        nowTime: new Date(T0 + 31_001),
+        elapsedBatchSec: 31.001,
         autoTrackBlocked: false,
       });
       await Promise.resolve();
@@ -219,5 +239,64 @@ describe("useAutoTrack server schedule freshness", () => {
     expect(claim).not.toHaveBeenCalled();
     expect(form.setValue).not.toHaveBeenCalled();
     expect(store.casesOnCurrentSkid).toBe(0);
+
+    hook.unmount();
+    vi.stubGlobal("navigator", { onLine: false });
+    vi.setSystemTime(T0);
+    const offlineHook = renderHook((p: Props) => useAutoTrack(p), {
+      initialProps: { ...base, autoTrackBlocked: true },
+    });
+    await act(async () => {
+      vi.setSystemTime(T0 + 30_000);
+      window.dispatchEvent(new CustomEvent("run-calculator:auto-track-schedule", {
+        detail: {
+          runId: "passive-client",
+          generation: "passive-client:started",
+          atMs: T0 + 30_000,
+          entries: [{ channel: "case", canonical: false, dueNow: true }],
+        },
+      }));
+      vi.setSystemTime(T0 + 31_001);
+      offlineHook.rerender({
+        ...base,
+        nowTime: new Date(T0 + 31_001),
+        elapsedBatchSec: 31.001,
+        autoTrackBlocked: false,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(claim).not.toHaveBeenCalled();
+    expect(form.setValue).not.toHaveBeenCalled();
+    expect(store.casesOnCurrentSkid).toBe(0);
+
+    offlineHook.unmount();
+    vi.stubGlobal("navigator", { onLine: true });
+    vi.setSystemTime(T0);
+    const clientHook = renderHook((p: Props) => useAutoTrack(p), {
+      initialProps: { ...base, autoTrackBlocked: true },
+    });
+    await act(async () => {
+      vi.setSystemTime(T0 + 30_000);
+      window.dispatchEvent(new CustomEvent("run-calculator:auto-track-schedule", {
+        detail: {
+          runId: "passive-client",
+          generation: "passive-client:started",
+          atMs: T0 + 30_000,
+          entries: [{ channel: "case", canonical: false, dueNow: true }],
+        },
+      }));
+      vi.setSystemTime(T0 + 31_001);
+      clientHook.rerender({
+        ...base,
+        nowTime: new Date(T0 + 31_001),
+        elapsedBatchSec: 31.001,
+        autoTrackBlocked: false,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(claim).toHaveBeenCalled();
+    expect(claim.mock.calls[0]?.[0].channel).toBe("case");
   });
 });

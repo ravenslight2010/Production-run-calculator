@@ -74,6 +74,7 @@ export const formSchema = z.object({
   app1StockLbs: z.coerce.number().min(0).default(0),
   app1StockAnchorNetSec: z.coerce.number().min(0).default(0),
   app1StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app1StockConsumedLbs: z.coerce.number().min(0).default(0),
   app2OzPerPizza: z.coerce.number().min(0).default(0),
   app2BatchLbs: z.coerce.number().min(0).default(0),
   app2BatchesMade: z.coerce.number().min(0).default(0),
@@ -82,6 +83,7 @@ export const formSchema = z.object({
   app2StockLbs: z.coerce.number().min(0).default(0),
   app2StockAnchorNetSec: z.coerce.number().min(0).default(0),
   app2StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app2StockConsumedLbs: z.coerce.number().min(0).default(0),
   app3OzPerPizza: z.coerce.number().min(0).default(0),
   app3BatchLbs: z.coerce.number().min(0).default(0),
   app3BatchesMade: z.coerce.number().min(0).default(0),
@@ -90,6 +92,7 @@ export const formSchema = z.object({
   app3StockLbs: z.coerce.number().min(0).default(0),
   app3StockAnchorNetSec: z.coerce.number().min(0).default(0),
   app3StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app3StockConsumedLbs: z.coerce.number().min(0).default(0),
   app4OzPerPizza: z.coerce.number().min(0).default(0),
   app4BatchLbs: z.coerce.number().min(0).default(0),
   app4BatchesMade: z.coerce.number().min(0).default(0),
@@ -98,6 +101,7 @@ export const formSchema = z.object({
   app4StockLbs: z.coerce.number().min(0).default(0),
   app4StockAnchorNetSec: z.coerce.number().min(0).default(0),
   app4StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app4StockConsumedLbs: z.coerce.number().min(0).default(0),
   applicatorStockInitialized: z.boolean().default(false),
   pep1StockLbs: z.coerce.number().min(0).default(0),
   pep1StockAnchorNetSec: z.coerce.number().min(0).default(0),
@@ -173,6 +177,9 @@ export const formSchema = z.object({
   // standard pre/post dwell).  A one-time boot heal writes 2.5 into any
   // existing profile that still has 0 stored from before this default was set.
   preTunnelMin: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.preTunnelMin),
+  // Absent means editable half/half legacy allocation, not a measured default.
+  pressOvenMin: z.coerce.number().finite().min(0).optional(),
+  frontlineMin: z.coerce.number().finite().min(0).optional(),
   postTunnelMin: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.postTunnelMin),
   // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
   // override (use the Setup value). Never saved into brand/flavor profiles.
@@ -250,6 +257,7 @@ export const DEFAULT_VALUES: FormValues = {
   app1StockLbs: 0,
   app1StockAnchorNetSec: 0,
   app1StockCorrectionGeneration: 0,
+  app1StockConsumedLbs: 0,
   app2OzPerPizza: 0,
   app2BatchLbs: 0,
   app2BatchesMade: 0,
@@ -258,6 +266,7 @@ export const DEFAULT_VALUES: FormValues = {
   app2StockLbs: 0,
   app2StockAnchorNetSec: 0,
   app2StockCorrectionGeneration: 0,
+  app2StockConsumedLbs: 0,
   app3OzPerPizza: 0,
   app3BatchLbs: 0,
   app3BatchesMade: 0,
@@ -266,6 +275,7 @@ export const DEFAULT_VALUES: FormValues = {
   app3StockLbs: 0,
   app3StockAnchorNetSec: 0,
   app3StockCorrectionGeneration: 0,
+  app3StockConsumedLbs: 0,
   app4OzPerPizza: 0,
   app4BatchLbs: 0,
   app4BatchesMade: 0,
@@ -274,6 +284,7 @@ export const DEFAULT_VALUES: FormValues = {
   app4StockLbs: 0,
   app4StockAnchorNetSec: 0,
   app4StockCorrectionGeneration: 0,
+  app4StockConsumedLbs: 0,
   applicatorStockInitialized: false,
   pep1StockLbs: 0,
   pep1StockAnchorNetSec: 0,
@@ -596,6 +607,8 @@ export type SyncPayload = {
     pausedAt: number;
     resumeAt: number;
     updatedAt: number;
+    /** Server revision that last changed this run's Dough timer control. */
+    controlRevision?: number;
   }>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
@@ -649,7 +662,11 @@ export type PackagingProgress = {
   manualOverrideUntil: number;
 };
 
-export type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
+export type HistoryDay = {
+  date: string; runs: RunMeta[]; runValues: Record<string, FormValues>;
+  /** Read-model provenance only; never part of an immutable completion. */
+  pendingRunIds?: string[];
+};
 export type RunTemplate = { id: string; name: string; values: FormValues; brand?: string; flavor?: string; createdAt: string };
 
 export const DAY_KEY = "run-calc-day";
@@ -657,11 +674,9 @@ export const HISTORY_KEY = "run-calc-history";
 export const TEMPLATES_KEY = "run-calc-templates";
 export const MAX_HISTORY_DAYS = 14;
 
-// ── Master-data change history (local-only, NOT synced) ─────────────────────
-// A capped log of recent edits to the manageable lists (merges, adds, removes,
-// renames). Each entry snapshots the full local master-data state BEFORE the
-// edit so it can be rolled back. Deliberately excluded from the sync payload —
-// it's a per-device undo trail, and snapshots would blow the sync size limit.
+// ── Legacy master-data evidence (local-only, NOT synced) ────────────────────
+// Existing snapshot bytes are retained for review, never executed or uploaded.
+// New compatibility notices contain metadata only and live in session memory.
 export const CHANGE_HISTORY_KEY = "run-calc-change-history";
 export const MAX_CHANGE_HISTORY = 20;
 
@@ -672,8 +687,9 @@ export type MasterDataChange = {
   ts: number;
   type: MasterDataChangeType;
   description: string;
-  /** Full local master-data snapshot taken BEFORE the edit (key → JSON value). */
+  /** Legacy format only. New history projections never contain snapshot facts. */
   before: Record<string, string>;
+  evidence?: "legacy-only" | "session-only";
 };
 export const MAX_TEMPLATES = 20;
 export const MAX_RUNS = 30;
@@ -688,7 +704,6 @@ export const DEFAULT_STOP_REASONS = [
   "Equipment jam", "Changeover", "Break", "Maintenance",
   "Quality hold", "Staffing", "Waiting on dough",
 ];
-export const DEFAULT_SUPERVISOR_PIN = "1234";
 
 // Factory-wide shift timing constants (stored as HH:MM strings in factory KV).
 export const SHIFT_START_TIME_KEY = "run-calc-shift-start-time";

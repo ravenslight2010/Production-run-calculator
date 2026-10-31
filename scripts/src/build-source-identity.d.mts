@@ -2,7 +2,7 @@ export interface SourceRecord {
   schemaVersion: 1;
   kind: "prepared-build-source";
   appBuildId: string;
-  sourcePolicy: "production-source-v3";
+  sourcePolicy: "production-source-v4";
   sourceFingerprintSha256: string;
   gitRevision: string | null;
   gitBinding: "verified" | "unavailable";
@@ -13,7 +13,7 @@ export interface BuildInfo {
   schemaVersion: 1;
   kind: "app-build-info";
   appBuildId: string;
-  sourcePolicy: "production-source-v3";
+  sourcePolicy: "production-source-v4";
   sourceFingerprintSha256: string;
   gitRevision: string | null;
   gitBinding: "verified" | "unavailable";
@@ -39,3 +39,4 @@ export function sourceRecordDigest(record: SourceRecord): string;
 export function buildInfoFromRecord(record: SourceRecord, mode: "release" | "development", completedAt?: string): BuildInfo;
 export function completeBuildStage(root: string, record: SourceRecord, stage: "api" | "web"): BuildInfo | false;
 export function sealBuildIdentity(root?: string, required?: boolean): BuildInfo | false;
+export function outputFingerprint(root: string, stage: "api" | "web"): string;

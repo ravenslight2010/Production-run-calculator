@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Unit coverage for the shared recipe-suggestion Apply/Undo decision logic
 // (@workspace/recipe-apply). The web and mobile apps both call this single
 // function with only their own platform write glue, so locking its behavior here

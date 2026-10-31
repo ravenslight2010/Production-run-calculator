@@ -30,3 +30,26 @@ the responsive result, while broadly suppressing page errors would hide defects.
 **How to apply:** Match the exact font stylesheet host/path in the WebKit test
 listener. Do not skip other network requests or errors, and do not claim the
 loaded Google font appearance was verified.
+
+Reporter changes need a focused strict compiler check against installed
+Playwright reporter types in addition to fake-event fixtures and the root
+workspace typecheck.
+
+**Why:** Fake-event execution transpiles TypeScript without checking it; the
+workspace typecheck previously left reporter-only API mismatches undetected.
+Those mismatches can break diagnostic output while all ordinary checks pass.
+
+**How to apply:** Compile touched reporters and their fixtures directly against
+the installed Playwright declarations; preserve existing sanitizer and lane
+authorization rules when repairing any mismatch.
+
+Use the discovered suite's project-qualified case identities to validate a
+selected reporter lane, not the complete configured-project list.
+
+**Why:** Playwright retains unselected projects in `FullConfig.projects` when
+`--project` filters execution. Treating that list as selected coverage rejects
+valid phone/tablet evidence.
+
+**How to apply:** Keep all original configured budgets as diagnostic metadata,
+but validate actual suite membership against the reviewed identities. Include
+unselected configured projects in fake reporter fixtures.

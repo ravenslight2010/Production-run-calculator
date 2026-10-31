@@ -8,3 +8,12 @@ Keep one deliberate terminal registration for each public method/path. Express e
 **Why:** A copied legacy sync handler remained after its replacement. It looked like a second implementation of current behavior, but the earlier handler answered requests first. Future edits could easily target the inactive code.
 
 **How to apply:** When reviewing or modularizing route families, inspect the assembled route inventory and handler order, then confirm the authoritative registration is the one exercised by integration tests. Do not infer runtime behavior from a source declaration alone.
+
+Also distinguish an isolated router test from an assembled application test.
+Directly mounting a router in a fixture can prove its handler while the real
+application never mounts it. Check authorization inventories in both directions:
+mounted protected reads must be classified, and intended classified endpoints
+must actually be reachable through the assembled API.
+
+**Why:** A declaration, an authorization-list entry and an isolated passing test
+can agree while the manager-facing request still has no connected handler.

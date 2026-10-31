@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, afterEach } from "vitest";
 import { computeCheesePull } from "@workspace/inventory-math";
 import { DEFAULT_VALUES, type FormValues } from "./types";

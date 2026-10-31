@@ -3,13 +3,17 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import shutil
 import select
 import signal
 import socket
 import socketserver
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
@@ -125,17 +129,111 @@ class LoopbackProxyServer(socketserver.ThreadingTCPServer):
     block_on_close = False
 
 
+def prepare_pnpm_command(
+    command: list[str], environment: dict[str, str]
+) -> tuple[list[str], dict[str, str], tempfile.TemporaryDirectory[str] | None]:
+    if command[0] != "pnpm":
+        return command, environment, None
+
+    repo_root = environment.get("RELEASE_REPO_ROOT", os.getcwd())
+    package_json_path = os.path.join(repo_root, "package.json")
+    try:
+        with open(package_json_path, encoding="utf-8") as package_file:
+            package = json.load(package_file)
+            package_manager = (
+                package.get("packageManager") if isinstance(package, dict) else None
+            )
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(
+            f"Release command could not read the workspace packageManager pin: {error}"
+        ) from error
+
+    match = re.fullmatch(
+        r"pnpm@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)",
+        str(package_manager),
+    )
+    if match is None:
+        raise ValueError(
+            "Release command requires package.json packageManager to pin an exact pnpm version."
+        )
+    pnpm_version = match.group(1)
+
+    registry = environment.get(
+        "RELEASE_NODE_NPM_REGISTRY", "https://registry.npmjs.org/"
+    )
+    try:
+        registry_url = urlsplit(registry)
+        registry_url.port
+    except ValueError as error:
+        raise ValueError(
+            "Release command requires a valid HTTPS registry for pinned pnpm acquisition."
+        ) from error
+    if (
+        registry_url.scheme.lower() != "https"
+        or not registry_url.hostname
+        or registry_url.username
+        or registry_url.password
+        or any(character.isspace() for character in registry)
+    ):
+        raise ValueError(
+            "Release command requires a valid HTTPS registry for pinned pnpm acquisition."
+        )
+
+    npm_bin = shutil.which("npm", path=environment.get("PATH"))
+    if npm_bin is None:
+        raise FileNotFoundError(
+            "Release command could not find npm to provision the pinned pnpm version."
+        )
+
+    tool_cache = tempfile.TemporaryDirectory(
+        prefix="run-release-pnpm-", dir=environment.get("TMPDIR") or None
+    )
+    os.chmod(tool_cache.name, 0o700)
+    npm_cache = os.path.join(tool_cache.name, "npm-cache")
+    os.mkdir(npm_cache, 0o700)
+    pinned_environment = environment.copy()
+    pinned_environment["npm_config_cache"] = npm_cache
+    pinned_environment["npm_config_registry"] = registry
+    pinned_environment["NPM_CONFIG_REGISTRY"] = registry
+
+    return (
+        [
+            npm_bin,
+            "exec",
+            "--yes",
+            f"--package=pnpm@{pnpm_version}",
+            "--",
+            "pnpm",
+            *command[1:],
+        ],
+        pinned_environment,
+        tool_cache,
+    )
+
+
 def run(command: list[str]) -> int:
     if not command:
         print("Release command runner requires a command.", file=sys.stderr)
         return 2
+
+    tool_cache: tempfile.TemporaryDirectory[str] | None = None
+    try:
+        command, prepared_environment, tool_cache = prepare_pnpm_command(
+            command, os.environ.copy()
+        )
+    except FileNotFoundError as error:
+        print(str(error), file=sys.stderr)
+        return 127
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
 
     server = LoopbackProxyServer(("127.0.0.1", 0), HttpsOnlyProxyHandler)
     proxy_url = f"http://127.0.0.1:{server.server_address[1]}"
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
-    child_environment = os.environ.copy()
+    child_environment = prepared_environment
     for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
                  "ALL_PROXY", "all_proxy"):
         child_environment[name] = proxy_url
@@ -189,6 +287,8 @@ def run(command: list[str]) -> int:
         server.shutdown()
         server.server_close()
         server_thread.join(timeout=2)
+        if tool_cache is not None:
+            tool_cache.cleanup()
 
 
 if __name__ == "__main__":

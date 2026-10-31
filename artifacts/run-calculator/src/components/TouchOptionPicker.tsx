@@ -100,6 +100,10 @@ export function TouchOptionPicker({
     restoreFocus();
   }, [restoreFocus]);
 
+  React.useEffect(() => {
+    if (disabled && open) close();
+  }, [disabled, open, close]);
+
   const onOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
       setQuery("");
@@ -209,7 +213,7 @@ export function TouchOptionPicker({
                   type="button"
                   role="option"
                   aria-selected={isSelected}
-                  disabled={option.disabled}
+                  disabled={disabled || option.disabled}
                   className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-3 text-left text-base outline-none transition-colors hover:bg-muted focus:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => {
                     onValueChange(option.value);

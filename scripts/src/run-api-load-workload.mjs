@@ -20,14 +20,30 @@ const TEST_TIMEOUT_MS = 3 * 60_000;
 const CLEANUP_RESERVE_MS = 30_000;
 const MAX_CLIENTS = 4;
 const MAX_ROUNDS = 4;
-const MAX_CONCURRENT_REQUESTS = 12;
+const MAX_CONCURRENT_REQUESTS = 16;
 const MAX_SYNC_WRITE_ATTEMPTS = MAX_CLIENTS * MAX_ROUNDS * 2 * MAX_CLIENTS;
+const READINESS_INSTANCE_COUNT = 2;
+const READINESS_ROUNDS = 2;
+const READINESS_PROBES_PER_INSTANCE_PER_ROUND = 6;
+const READINESS_PROBE_COUNT =
+  READINESS_INSTANCE_COUNT * READINESS_ROUNDS * READINESS_PROBES_PER_INSTANCE_PER_ROUND;
+const READINESS_DRAIN_PROBES = READINESS_INSTANCE_COUNT;
+const READINESS_SYNC_WRITE_COUNT = READINESS_INSTANCE_COUNT * READINESS_ROUNDS;
+const READINESS_MAX_SYNC_WRITE_ATTEMPTS = READINESS_SYNC_WRITE_COUNT * MAX_CLIENTS;
+const READINESS_SYNC_SNAPSHOT_READS = READINESS_ROUNDS;
+const READINESS_VERIFY_REQUESTS = 1;
 const MAX_TOTAL_REQUESTS =
   MAX_SYNC_WRITE_ATTEMPTS
   + MAX_ROUNDS * 2
   + 3
   + MAX_CLIENTS * MAX_ROUNDS * 2
-  + MAX_CLIENTS * MAX_ROUNDS;
+  + MAX_CLIENTS * MAX_ROUNDS
+  + MAX_ROUNDS * 4
+  + READINESS_PROBE_COUNT
+  + READINESS_DRAIN_PROBES
+  + READINESS_MAX_SYNC_WRITE_ATTEMPTS
+  + READINESS_SYNC_SNAPSHOT_READS
+  + READINESS_VERIFY_REQUESTS;
 
 let activeChild;
 let receivedSignal;
@@ -123,6 +139,19 @@ function parseMetrics(value) {
     "consumeRequests",
     "adjustmentRequests",
     "verificationRequests",
+    "healthProbeCount",
+    "healthProbeElapsedMs",
+    "healthProbeP95Ms",
+    "readinessInstances",
+    "readinessProbeCount",
+    "readinessProbeElapsedMs",
+    "readinessProbeP95Ms",
+    "readinessSyncWrites",
+    "readinessSyncWriteAttempts",
+    "readinessOptionalReadsPerInstance",
+    "readinessMaxPoolWaitingCount",
+    "readinessPoolWaitersAtDrain",
+    "maxPoolWaitingCount",
     "totalRequests",
     "peakConcurrentRequests",
     "syncElapsedMs",
@@ -138,16 +167,43 @@ function parseMetrics(value) {
     || value.schemaVersion !== 1
     || value.clients !== MAX_CLIENTS
     || value.rounds !== MAX_ROUNDS
-    || value.syncWrites !== MAX_CLIENTS * MAX_ROUNDS * 2
+    || value.syncWrites !== MAX_CLIENTS * MAX_ROUNDS * 2 + READINESS_SYNC_WRITE_COUNT
     || !Number.isInteger(value.syncWriteAttempts)
     || value.syncWriteAttempts < value.syncWrites
-    || value.syncWriteAttempts > MAX_SYNC_WRITE_ATTEMPTS
+    || value.syncWriteAttempts > MAX_SYNC_WRITE_ATTEMPTS + READINESS_MAX_SYNC_WRITE_ATTEMPTS
     || value.syncFallbacks !== value.syncWriteAttempts - value.syncWrites
-    || value.syncSnapshotReads !== MAX_ROUNDS * 2
+    || value.syncSnapshotReads !== MAX_ROUNDS * 2 + READINESS_SYNC_SNAPSHOT_READS
     || value.consumeRequests !== MAX_CLIENTS * MAX_ROUNDS * 2
     || value.adjustmentRequests !== MAX_CLIENTS * MAX_ROUNDS
-    || value.verificationRequests !== 3
-    || value.totalRequests !== value.syncWriteAttempts + value.syncSnapshotReads + value.consumeRequests + value.adjustmentRequests + value.verificationRequests
+    || value.verificationRequests !== 3 + READINESS_VERIFY_REQUESTS
+    || value.healthProbeCount !== MAX_ROUNDS * 4
+    || !Number.isFinite(value.healthProbeElapsedMs)
+    || value.healthProbeElapsedMs < 0
+    || value.healthProbeElapsedMs > MAX_ROUNDS * 4 * TEST_TIMEOUT_MS
+    || !Number.isFinite(value.healthProbeP95Ms)
+    || value.healthProbeP95Ms < 0
+    || value.healthProbeP95Ms > 10_000
+    || value.readinessInstances !== READINESS_INSTANCE_COUNT
+    || value.readinessProbeCount !== READINESS_PROBE_COUNT + READINESS_DRAIN_PROBES
+    || !Number.isFinite(value.readinessProbeElapsedMs)
+    || value.readinessProbeElapsedMs < 0
+    || value.readinessProbeElapsedMs > (READINESS_PROBE_COUNT + READINESS_DRAIN_PROBES) * TEST_TIMEOUT_MS
+    || !Number.isFinite(value.readinessProbeP95Ms)
+    || value.readinessProbeP95Ms < 0
+    || value.readinessProbeP95Ms > 10_000
+    || value.readinessSyncWrites !== READINESS_SYNC_WRITE_COUNT
+    || !Number.isInteger(value.readinessSyncWriteAttempts)
+    || value.readinessSyncWriteAttempts < READINESS_SYNC_WRITE_COUNT
+    || value.readinessSyncWriteAttempts > READINESS_MAX_SYNC_WRITE_ATTEMPTS
+    || value.readinessOptionalReadsPerInstance !== READINESS_ROUNDS + 1
+    || !Number.isInteger(value.readinessMaxPoolWaitingCount)
+    || value.readinessMaxPoolWaitingCount < 0
+    || value.readinessMaxPoolWaitingCount > MAX_CONCURRENT_REQUESTS
+    || value.readinessPoolWaitersAtDrain !== 0
+    || !Number.isInteger(value.maxPoolWaitingCount)
+    || value.maxPoolWaitingCount < 0
+    || value.maxPoolWaitingCount > MAX_CONCURRENT_REQUESTS
+    || value.totalRequests !== value.syncWriteAttempts + value.syncSnapshotReads + value.consumeRequests + value.adjustmentRequests + value.verificationRequests + value.healthProbeCount + value.readinessProbeCount
     || value.totalRequests > MAX_TOTAL_REQUESTS
     || !Number.isInteger(value.peakConcurrentRequests)
     || value.peakConcurrentRequests < 1
@@ -198,6 +254,19 @@ async function writeResult({ startedAt, revision, status, failureKind, metrics }
           consumeRequests: metrics.consumeRequests,
           adjustmentRequests: metrics.adjustmentRequests,
           verificationRequests: metrics.verificationRequests,
+          healthProbeCount: metrics.healthProbeCount,
+          healthProbeElapsedMs: Math.round(metrics.healthProbeElapsedMs),
+          healthProbeP95Ms: Math.round(metrics.healthProbeP95Ms),
+          readinessInstances: metrics.readinessInstances,
+          readinessProbeCount: metrics.readinessProbeCount,
+          readinessProbeElapsedMs: Math.round(metrics.readinessProbeElapsedMs),
+          readinessProbeP95Ms: Math.round(metrics.readinessProbeP95Ms),
+          readinessSyncWrites: metrics.readinessSyncWrites,
+          readinessSyncWriteAttempts: metrics.readinessSyncWriteAttempts,
+          readinessOptionalReadsPerInstance: metrics.readinessOptionalReadsPerInstance,
+          readinessMaxPoolWaitingCount: metrics.readinessMaxPoolWaitingCount,
+          readinessPoolWaitersAtDrain: metrics.readinessPoolWaitersAtDrain,
+          maxPoolWaitingCount: metrics.maxPoolWaitingCount,
           totalRequests: metrics.totalRequests,
           peakConcurrentRequests: metrics.peakConcurrentRequests,
           syncElapsedMs: Math.round(metrics.syncElapsedMs),

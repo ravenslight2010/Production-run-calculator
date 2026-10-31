@@ -9,6 +9,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import {
+  AuthorizedBrowserFixtures,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -16,9 +17,18 @@ import {
 } from "./isolation";
 import { dismissOnboardingIfPresent, signUpAndHandleOnboarding } from "./onboarding";
 
+// The canonical sync fixtures and route-based recovery checks require live
+// network responses. Service-worker behavior has its own dedicated PWA lane.
+test.use({ serviceWorkers: "block" });
+
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
+const API_BASE =
+  process.env.PLAYWRIGHT_API_BASE_URL
+  ?? process.env.PLAYWRIGHT_BASE_URL
+  ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 const testUsernames = new Set<string>();
+let authorizedFixtures: AuthorizedBrowserFixtures | undefined;
 
 test.afterEach(async ({ page }, testInfo) => {
   if (testInfo.status === testInfo.expectedStatus) return;
@@ -95,55 +105,90 @@ async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("webkit_run");
   const seedStamp = Date.now();
   const date = today();
-  await page.context().setOffline(true);
+  const appUrl = page.url();
+  const context = page.context();
+  const authCookie = (await context.cookies(appUrl))
+    .find((cookie) => cookie.name === "rc_auth");
+  if (!authCookie) {
+    throw new Error("WebKit canonical run fixture requires an authenticated session.");
+  }
+  await context.setOffline(true);
   try {
     await page.evaluate(() => {
       for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
         if (key?.startsWith("run-calc")) localStorage.removeItem(key);
       }
     });
-    const db = new Client({
-      connectionString: requireIsolatedTestDatabase("WebKit canonical run fixture"),
+    // Drop the mounted app's in-memory provisional state before writing the
+    // canonical fixture through the versioned sync endpoint.
+    await page.goto("about:blank");
+    if (!authorizedFixtures) {
+      throw new Error("WebKit canonical run fixture lifecycle was not initialized.");
+    }
+    await authorizedFixtures.seedTodaySync({
+      token: authCookie.value,
+      senderId: `fixture:${runId}`,
+      date,
+      payload: {
+        dayState: {
+          runs: [{
+            id: runId,
+            brand: "WebKit",
+            flavor: "Release Smoke",
+            seeded: false,
+            metaUpdatedAt: seedStamp,
+          }],
+          currentIndex: 0,
+          currentRunId: runId,
+          date,
+          resetAt: 0,
+        },
+        runValues: {
+          [runId]: {
+            casesNeeded: 30,
+            pizzasPerCase: 12,
+          },
+        },
+        runValuesUpdatedAt: { [runId]: seedStamp },
+        syncVersion: 1,
+        completeness: "complete",
+      },
     });
-    try {
-      await db.connect();
-      await db.query(
-        `INSERT INTO daily_sync (date, scope, data, updated_at)
-         VALUES ($1, 'live', $2::jsonb, NOW())
-         ON CONFLICT (date, scope) DO UPDATE
-           SET data = $2::jsonb, updated_at = NOW()`,
-        [date, JSON.stringify({
-          dayState: {
-            runs: [{
-              id: runId,
-              brand: "WebKit",
-              flavor: "Release Smoke",
-              seeded: false,
-              metaUpdatedAt: seedStamp,
-            }],
-            currentIndex: 0,
-            currentRunId: runId,
-            date,
-            resetAt: 0,
-          },
-          runValues: {
-            [runId]: {
-              casesNeeded: 30,
-              pizzasPerCase: 12,
-            },
-          },
-          runValuesUpdatedAt: { [runId]: seedStamp },
-        })],
+    await context.setOffline(false);
+    const readbackUrl = new URL("/api/sync/today", appUrl);
+    readbackUrl.searchParams.set("today", date);
+    const readback = await page.request.get(readbackUrl.toString(), {
+      headers: { Cookie: `rc_auth=${authCookie.value}` },
+    });
+    if (!readback.ok()) {
+      throw new Error(
+        `WebKit canonical run fixture readback failed with HTTP ${readback.status()}.`,
       );
-    } finally {
-      await db.end().catch(() => {});
+    }
+    const readbackBody = await readback.json() as {
+      dayState?: { runs?: Array<{ id?: unknown }> };
+    };
+    const persistedRunId = readbackBody.dayState?.runs?.[0]?.id;
+    if (persistedRunId !== runId) {
+      throw new Error(
+        `WebKit canonical run fixture readback mismatch: expected ${runId}, received ${String(persistedRunId ?? "missing")}.`,
+      );
     }
   } finally {
-    await page.context().setOffline(false);
+    await context.setOffline(false);
   }
+  await page.addInitScript(() => {
+    if (window.location.origin === "null") return;
+    const cleaned = "__e2e_webkit_seed_state_cleared";
+    if (window.sessionStorage.getItem(cleaned) === "1") return;
+    for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
+      if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+    }
+    window.sessionStorage.setItem(cleaned, "1");
+  });
   for (let attempt = 0; ; attempt += 1) {
     try {
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.goto(appUrl, { waitUntil: "domcontentloaded" });
       break;
     } catch (error) {
       if (
@@ -160,6 +205,8 @@ async function seedPendingRun(page: Page): Promise<string> {
     state: "visible",
     timeout: 20_000,
   });
+  await expect.poll(async () => (await selectedRun(page)).id, { timeout: 20_000 }).toBe(runId);
+  await expect(page.getByTestId("input-casesNeeded")).toHaveValue("30");
   return runId;
 }
 
@@ -179,17 +226,25 @@ async function selectedRun(page: Page): Promise<{
   });
 }
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ playwright }) => {
   requireIsolatedTestDatabase("WebKit release smoke");
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    API_BASE,
+    SIGNUP_CODE,
+  );
 });
 
 test.beforeEach(async () => {
+  if (!authorizedFixtures) {
+    throw new Error("WebKit browser fixtures were not initialized.");
+  }
+  await authorizedFixtures.removeTodaySync([today()]);
   const db = new Client({
     connectionString: requireIsolatedTestDatabase("WebKit release smoke reset"),
   });
   try {
     await db.connect();
-    await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
     await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
@@ -197,15 +252,19 @@ test.beforeEach(async () => {
 });
 
 test.afterAll(async () => {
-  if (!process.env.DATABASE_URL) return;
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
-    await db.connect();
-    await cleanupTestUsers(db, testUsernames);
-    await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
-    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
+    await authorizedFixtures?.cleanup({ syncDates: [today()] });
   } finally {
-    await db.end().catch(() => {});
+    if (process.env.DATABASE_URL) {
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      try {
+        await db.connect();
+        await cleanupTestUsers(db, testUsernames);
+        await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
+      } finally {
+        await db.end().catch(() => {});
+      }
+    }
   }
 });
 
@@ -303,7 +362,7 @@ test("manager can preview an authoritative operational report", async ({ page })
   await reportToggle.evaluate((element) =>
     element.scrollIntoView({ block: "center", inline: "nearest" }),
   );
-  await reportToggle.click();
+  await reportToggle.click({ position: { x: 24, y: 18 } });
   await expect(reportToggle).toHaveAttribute("aria-expanded", "true");
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();

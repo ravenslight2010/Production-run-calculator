@@ -8,12 +8,14 @@ import {
   type FormValues,
 } from "../types";
 import { browserRecordStore, recordCodec } from "./browserRecordStore";
+import { legacyFrontlineConsumption } from "@workspace/live-calc";
 
 /** Browser-only cache adapter. Domain conflict policy deliberately lives elsewhere. */
 const UPDATED_KEY = "run-calc-runvalues-updated";
 const WRITE_EVENT = "run-calculator:run-values-written";
 
 function normalize(values: Record<string, unknown>, raw: Record<string, unknown>): FormValues {
+  Object.assign(values, legacyFrontlineConsumption(raw));
   for (const key of Object.keys(MACHINE_TIME_DEFAULTS) as Array<keyof typeof MACHINE_TIME_DEFAULTS>) {
     const value = Number(values[key]);
     if (!Number.isFinite(value) || value <= 0) values[key] = MACHINE_TIME_DEFAULTS[key];

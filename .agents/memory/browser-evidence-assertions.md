@@ -15,6 +15,15 @@ selectors that did not match the rendered UI contract.
 `data-testid`; use exact text only when the target element's full text is known to
 contain no nested controls.
 
+When an accessible name includes a live count, match its stable label prefix
+rather than the complete count-dependent name.
+
+**Why:** `aria-label` overrides visible menu text, so an exact-name locator can
+stop matching as soon as fixture data populates a count.
+
+**How to apply:** For counted actions, use a role locator with a prefix regex and
+assert the visible count separately.
+
 For responsive browser journeys that navigate through a menu before using a
 native `<details>` disclosure, wait for the destination surface to become
 visible and assert that the disclosure is open before checking its contents.

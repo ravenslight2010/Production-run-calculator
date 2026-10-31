@@ -3,10 +3,13 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import runsRouter from "./runs";
 import profileDataHealthRouter from "./profileDataHealth";
+import masterDataOperationsRouter from "./masterDataOperations";
+import { masterDataMutationFence, masterDataReadEpoch } from "../lib/masterDataWriteFence";
 import sourceLibraryReconciliationCaptureRouter, {
   publicSourceLibraryReconciliationCaptureRouter,
 } from "./sourceLibraryReconciliationCapture";
 import masterDataHealthRouter from "./masterDataHealth";
+import backgroundOperationDiagnosticsRouter from "./backgroundOperationDiagnostics";
 import runTemplatesRouter from "./runTemplates";
 import coreSyncRunsRouter from "./capabilities/coreSyncRuns";
 import masterDataImportsRouter from "./capabilities/masterDataImports";
@@ -54,6 +57,7 @@ export const directAuthorizationCoverageRouters = [
     authOnlyRoutes: ["GET /runs"],
   },
   { name: "profile data health", router: profileDataHealthRouter },
+  { name: "guarded master-data history", router: masterDataOperationsRouter },
   {
     name: "source-library reconciliation capture",
     router: sourceLibraryReconciliationCaptureRouter,
@@ -67,6 +71,10 @@ export const directAuthorizationCoverageRouters = [
       "POST /run-templates",
       "DELETE /run-templates",
     ],
+  },
+  {
+    name: "background operation diagnostics",
+    router: backgroundOperationDiagnosticsRouter,
   },
 ] as const;
 
@@ -93,6 +101,18 @@ export type ReadAuthorization = {
   scope: "scoped" | "live-only";
 };
 
+export type ReadAuthorizationExemption = {
+  method: "GET";
+  path: string;
+  module: string;
+  reason: string;
+};
+
+export type ReadAuthorizationValidationOptions = {
+  inventory?: readonly ReadAuthorization[];
+  exemptions?: readonly ReadAuthorizationExemption[];
+};
+
 const reads = (
   capabilities: readonly Capability[],
   capabilityMatch: ReadAuthorization["capabilityMatch"],
@@ -117,18 +137,31 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/sync/conflict-stats", "/manager-action-queue",
     "/profile-data/health-check", "/profile-data/health-workspace",
     "/ai-memory/health-check", "/background-operations/diagnostics",
+    "/import-gold/config", "/import-gold/cases", "/import-gold/export.jsonl",
+    "/import-gold/synthetic-review", "/import-gold/cleanup-cases",
   ]),
-  ...reads(["manage-staff"], "all", "live-only", ["/sync/health"]),
+  ...reads(["manage-staff", "manage-qc"], "any", "scoped", [
+    "/import-gold/approvals", "/import-gold/retention",
+  ]),
+  ...reads(["manage-staff"], "all", "live-only", ["/sync/health", "/health/diagnostics"]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
     "/freezer-surplus/adjustments",
+    "/freezer-surplus/confirmations/:runId/corrections",
     "/inventory/count-observations/:id", "/inventory/count-observations",
     "/inventory/quality-checks",
   ]),
   ...reads(["record-qc"], "all", "scoped", [
-    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity",
+    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity", "/qc/planning", "/qc/label-references",
+    "/qc/date-code-references",
   ]),
-  ...reads(["manage-qc"], "all", "scoped", ["/qc/history.csv"]),
+  ...reads(["record-qc", "manage-qc"], "any", "scoped", ["/qc/recipe-review-statuses"]),
+  ...reads(["manage-qc"], "all", "scoped", [
+    "/qc/history.csv", "/qc/intelligence", "/qc/intelligence.csv",
+    "/qc/recipe-reviews", "/qc/recipe-reviews/:captureId",
+    "/qc/import-reviews", "/qc/import-reviews/:operationId",
+    "/qc/intelligence", "/qc/intelligence.csv",
+  ]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
     "/import-history", "/import-operations/:operationId",
   ]),
@@ -136,6 +169,10 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/import-operations/distillation-evidence",
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
+  ...reads(["manage-factory-settings"], "all", "scoped", ["/master-data-operations"]),
+  ...reads(["manage-factory-settings"], "all", "scoped", [
+    "/sync/schedule-swap-eligibility",
+  ]),
   ...reads(["review-incidents"], "all", "scoped", [
     "/incidents", "/incidents/unreviewed-count", "/incidents/actionable-count",
     "/incidents/assignees", "/incidents/:id", "/field-checks",
@@ -171,6 +208,7 @@ export const authenticatedCapabilityFamilies = [
   { name: "administration", router: administrationRouter },
   { name: "retained-ai", router: retainedAiRouter },
   { name: "server-jobs", router: serverJobsRouter },
+  { name: "background-operation-diagnostics", router: backgroundOperationDiagnosticsRouter },
 ] as const;
 
 // Stale-data protection runs first, including public health/auth routes.
@@ -185,6 +223,8 @@ router.use(authRouter);
 // All capability families are authenticated. Family-owned capability checks
 // continue to run inside their existing route modules.
 router.use(requireAuth);
+router.use(masterDataReadEpoch);
+router.use(masterDataMutationFence);
 for (const family of authenticatedCapabilityFamilies) {
   router.use(family.router);
 }
@@ -215,6 +255,30 @@ const writes = (
 });
 
 export const mutationAuthorizationInventory: readonly MutationAuthorization[] = [
+  {
+    method: "POST", path: "/import-gold/retention/:caseId/verification", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  },
+  {
+    method: "DELETE", path: "/import-gold/cleanup-cases/:id", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed", capabilities: ["manage-staff"], capabilityMatch: "all",
+  },
+  {
+    method: "POST", path: "/import-gold/approvals", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  },
+  ...["verification", "revocation"].map((operation): MutationAuthorization => ({
+    method: "POST", path: `/import-gold/approvals/:id/${operation}`, ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  })),
+  ...["preview", "apply", "undo"].map((action): MutationAuthorization => ({
+    method: "POST", path: `/master-data-operations/:operationId/${action}`,
+    ownership: "manager-only", scope: "scoped", sandbox: "allowed", managerRole: true,
+    capabilities: ["manage-factory-settings", "manage-inventory", "manage-profiles"], capabilityMatch: "all",
+  })),
   ...writes("public", "live-only", "denied", undefined, [
     "POST /auth/sign-up", "POST /auth/sign-in", "POST /auth/sign-out",
     "POST /auth/forgot-password", "POST /auth/reset-password",
@@ -234,7 +298,9 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /completed-history", "POST /field-checks/observations",
     "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
+    "POST /supervisor-pin/verify",
     "POST /run-suggestions/follow-up", "POST /sync/operational-intents", "POST /sync/manual-section",
+    "POST /sync/station-activity",
     "POST /sync/auto-track/claim", "POST /sync/e2e/auto-track-tick", "PUT /sync/today",
     "POST /cycle-count-schedules/:id/mark-counted",
     "POST /operations-insights/spec-reconciliation", "POST /ai/spec-reconcile",
@@ -251,12 +317,19 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /merge-aliases", "POST /denied-merges", "DELETE /denied-merges", "POST /merged-away", "DELETE /merged-away",
     "POST /master-data/health/scan", "POST /master-data/health/repair",
   ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-staff", [
+    "PATCH /import-gold/cases/:id/exclusion",
+    "DELETE /import-gold/cases/:id",
+    "POST /import-gold/score", "PATCH /import-gold/local-scoring",
+    "POST /import-gold/synthetic-apply",
+  ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-inventory", [
     "POST /cheese-recipes", "DELETE /cheese-recipes", "POST /cycle-count-schedules", "DELETE /cycle-count-schedules",
     "POST /die-line-defaults", "DELETE /die-line-defaults", "POST /die-types", "POST /die-types/delete",
     "POST /dough-recipes", "DELETE /dough-recipes", "POST /ingredients", "DELETE /ingredients", "POST /ingredients/merge",
     "POST /freezer-pull-items", "DELETE /freezer-pull-items", "POST /freezer-surplus", "PUT /freezer-surplus/allocations/:runId",
-    "POST /freezer-surplus/lots/:lotId/adjustments",
+    "POST /freezer-surplus/lots/:lotId/adjustments", "POST /freezer-surplus/confirmations",
+    "POST /freezer-surplus/confirmations/:runId/corrections",
     "POST /ingredient-batch-weights", "POST /mixes", "DELETE /mixes", "POST /photo-aliases",
     "POST /premix-sheets", "DELETE /premix-sheets/:id", "POST /cheese-sheets", "DELETE /cheese-sheets/:id",
     "POST /sauce-recipes", "DELETE /sauce-recipes", "PATCH /inventory/items/:id/production-link",
@@ -273,12 +346,17 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "record-qc", [
     "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
-    "POST /qc/component-checks",
+    "POST /qc/component-checks", "POST /qc/label-checks", "POST /qc/brix-checks",
     "POST /qc/cleaning-records", "POST /qc/cleaning-records/:eventId/verification",
+    "POST /qc/date-code-checks",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-qc", [
-    "POST /qc/targets", "POST /qc/run-signoffs",
+    "POST /qc/targets", "POST /qc/run-signoffs", "POST /qc/brix-targets",
+    "POST /qc/label-references", "POST /qc/label-references/:eventId/review",
     "POST /qc/events/:eventId/corrections", "POST /qc/events/:eventId/redactions",
+    "POST /qc/import-reviews/:operationId/decisions",
+    "POST /qc/date-code-references", "POST /qc/date-code-references/:eventId/review",
+    "POST /qc/recipe-reviews/:captureId/decisions",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
@@ -294,6 +372,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-factory-settings", [
     "PUT /factory-data", "POST /runs", "DELETE /runs/:id", "PUT /sync/:date", "DELETE /sync/:date",
+    "POST /sync/schedule-move", "POST /sync/schedule-swap",
   ]),
   ...writes("manager-only", "live-only", "denied", "manage-staff", [
     "POST /roles", "PUT /roles/:name", "DELETE /roles/:name", "PUT /users/:userId/role",
@@ -322,6 +401,10 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   {
     method: "POST", path: "/import-history", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/preview", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   {
@@ -423,13 +506,28 @@ export function validateMutationAuthorizationInventory(
         const managerRoleIndex = layer.route.stack.findIndex(({ handle }) => isRequireManagerRole(handle));
         const matches = entries.some((entry) => {
           const expected = entry.capabilities ?? [];
-          const capabilityMatches = required.length === (expected.length ? 1 : 0) &&
-            (expected.length === 0 || required.some(({ capabilities, match, index }) =>
-              index < layer.route!.stack.length - 1 &&
-              match === (entry.capabilityMatch ?? "all") &&
-              capabilities.length === expected.length &&
-              expected.every((capability) => capabilities.includes(capability)),
-            ));
+          const expectedMatch = entry.capabilityMatch ?? "all";
+          const handlerIndex = layer.route!.stack.length - 1;
+          const actualCapabilities = required.flatMap(({ capabilities }) => [...capabilities]);
+          const actualCapabilitySet = new Set(actualCapabilities);
+          const singleGate = required.length === 1 ? required[0] : undefined;
+          const capabilityMatches = expected.length === 0
+            ? required.length === 0
+            : expectedMatch === "all"
+              ? required.length > 0 &&
+                required.every(({ capabilities, match, index }) =>
+                  index < handlerIndex &&
+                  match === "all" &&
+                  capabilities.length > 0 &&
+                  capabilities.every((capability) => expected.includes(capability)),
+                ) &&
+                actualCapabilities.length === expected.length &&
+                expected.every((capability) => actualCapabilitySet.has(capability))
+              : singleGate !== undefined &&
+                singleGate.index < handlerIndex &&
+                singleGate.match === "any" &&
+                singleGate.capabilities.length === expected.length &&
+                expected.every((capability) => singleGate.capabilities.includes(capability));
           const mustBeLiveOnly = entry.scope === "live-only" && entry.sandbox === "denied" && entry.ownership !== "public";
           const liveScopeMatches = mustBeLiveOnly
             ? liveScopeIndex >= 0 && liveScopeIndex < layer.route!.stack.length - 1
@@ -465,10 +563,27 @@ export function validateMutationAuthorizationInventory(
  */
 export function validateReadAuthorizationInventory(
   router: { stack: unknown[] },
+  options: ReadAuthorizationValidationOptions = {},
 ): void {
+  const inventory = options.inventory ?? readAuthorizationInventory;
+  const exemptions = options.exemptions ?? [];
   const byRoute = new Map<string, ReadAuthorization[]>();
-  for (const entry of readAuthorizationInventory) {
+  for (const entry of inventory) {
     byRoute.set(entry.path, [...(byRoute.get(entry.path) ?? []), entry]);
+  }
+
+  const registeredGetRoutes = new Set<string>();
+  const matchedInventoryRoutes = new Set<string>();
+  const exemptedPaths = new Map<string, ReadAuthorizationExemption>();
+  for (const exemption of exemptions) {
+    const key = `${exemption.method} ${exemption.path}`;
+    if (!exemption.module.trim() || !exemption.reason.trim()) {
+      throw new Error(`read authorization exemption ${key} must document its module and reason`);
+    }
+    if (exemptedPaths.has(key)) {
+      throw new Error(`duplicate read authorization exemption for ${key}`);
+    }
+    exemptedPaths.set(key, exemption);
   }
 
   const validateStack = (stack: readonly unknown[], owner: string): void => {
@@ -483,6 +598,16 @@ export function validateReadAuthorizationInventory(
       const methods = layer.route.methods;
       if (!methods.get && !methods._all && !methods.all) continue;
       const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+      for (const path of paths) {
+        const exemptionKey = `GET ${path}`;
+        registeredGetRoutes.add(exemptionKey);
+        if (exemptedPaths.has(exemptionKey)) {
+          const exemption = exemptedPaths.get(exemptionKey)!;
+          throw new Error(
+            `read authorization exemption for ${exemptionKey} (${exemption.module}) is stale; remove it now that the route is mounted`,
+          );
+        }
+      }
       const capabilityMiddleware = layer.route.stack
         .map(({ handle }) => ({
           capabilities: getRequiredCapabilities(handle),
@@ -514,9 +639,25 @@ export function validateReadAuthorizationInventory(
         if (!matches) {
           throw new Error(`${owner} protected read GET ${path} does not match its inventory authorization middleware`);
         }
+        matchedInventoryRoutes.add(`GET ${path}`);
       }
     }
   };
 
   validateStack(router.stack, "assembled API router");
+
+  for (const entry of inventory) {
+    const key = `${entry.method} ${entry.path}`;
+    if (!registeredGetRoutes.has(key)) {
+      if (exemptedPaths.has(key)) continue;
+      throw new Error(
+        `declared protected read ${key} is not registered in the assembled API router`,
+      );
+    }
+    if (!matchedInventoryRoutes.has(key)) {
+      throw new Error(
+        `declared protected read ${key} is not registered with its inventory authorization middleware`,
+      );
+    }
+  }
 }

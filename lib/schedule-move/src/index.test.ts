@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { moveEntries, relocateValues } from "./index";
+import {
+  isTodayScheduleSwapAllowed,
+  moveEntries,
+  relocateValues,
+  swapDateScopedScheduleState,
+} from "./index";
 
 interface Run {
   id: string;
@@ -128,5 +133,66 @@ describe("relocateValues", () => {
 
     expect(res.source).toEqual({ untouched: 900 });
     expect(res.target).toEqual({ live: 2400, "moved-copy": 1200 });
+  });
+});
+
+describe("swapDateScopedScheduleState", () => {
+  it("swaps date-owned state while retaining factory-wide data on each date", () => {
+    const left = {
+      dayState: { date: "2026-10-30", runs: [{ id: "left-run" }], breaks: { a: 10 } },
+      runValues: { "left-run": { casesNeeded: 11 } },
+      runValuesUpdatedAt: { "left-run": 101 },
+      packagingProgress: { "left-run": { casesOnCurrentSkid: 3 } },
+      autoTrackCoordination: { runs: { "left-run": { sequence: 1 } } },
+      doughTimerControls: { "left-run": { generation: "left" } },
+      brands: ["Left factory list"],
+      templates: [{ id: "left-template" }],
+    };
+    const right = {
+      dayState: { date: "2026-10-31", runs: [{ id: "right-run" }], breaks: { a: 20 } },
+      runValues: { "right-run": { casesNeeded: 22 } },
+      runValuesUpdatedAt: { "right-run": 202 },
+      packagingProgress: { "right-run": { casesOnCurrentSkid: 4 } },
+      autoTrackServerState: { netOwnership: { "right-run": { case: { sequence: 2 } } } },
+      brands: ["Right factory list"],
+      templates: [{ id: "right-template" }],
+    };
+
+    const result = swapDateScopedScheduleState(left, right, "2026-10-30", "2026-10-31");
+
+    expect(result.left.dayState).toEqual({
+      date: "2026-10-30",
+      runs: [{ id: "right-run" }],
+      breaks: { a: 20 },
+    });
+    expect(result.left.runValues).toEqual(right.runValues);
+    expect(result.left.runValuesUpdatedAt).toEqual(right.runValuesUpdatedAt);
+    expect(result.left.packagingProgress).toEqual(right.packagingProgress);
+    expect(result.left.autoTrackServerState).toEqual(right.autoTrackServerState);
+    expect(result.left.doughTimerControls).toBeUndefined();
+    expect(result.right.dayState.date).toBe("2026-10-31");
+    expect(result.right.runValues).toEqual(left.runValues);
+    expect(result.right.autoTrackCoordination).toEqual(left.autoTrackCoordination);
+    expect(result.left.brands).toEqual(["Left factory list"]);
+    expect(result.right.brands).toEqual(["Right factory list"]);
+    expect(result.left.templates).toEqual([{ id: "left-template" }]);
+    expect(result.right.templates).toEqual([{ id: "right-template" }]);
+  });
+});
+
+describe("isTodayScheduleSwapAllowed", () => {
+  const runs = [{ id: "run", startedAt: "06:30" }];
+
+  it("allows started runs before 7:00 a.m. and rejects them at 7:00", () => {
+    expect(isTodayScheduleSwapAllowed(runs, Date.parse("2026-10-29T06:59:00Z"), "UTC")).toBe(true);
+    expect(isTodayScheduleSwapAllowed(runs, Date.parse("2026-10-29T07:00:00Z"), "UTC")).toBe(false);
+  });
+
+  it("allows any time when today's plan has no started run", () => {
+    expect(isTodayScheduleSwapAllowed([{ id: "run" }], Date.parse("2026-10-29T12:00:00Z"), "UTC")).toBe(true);
+  });
+
+  it("fails closed when the configured time zone is invalid and a run has started", () => {
+    expect(isTodayScheduleSwapAllowed(runs, Date.now(), "Not/AZone")).toBe(false);
   });
 });

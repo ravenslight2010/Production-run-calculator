@@ -47,6 +47,7 @@ let server: Server;
 let baseUrl: string;
 
 const MANAGER = "manager-1";
+const OPERATOR = "operator-1";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -162,6 +163,45 @@ async function listRules(): Promise<ApiRule[]> {
   const body = (await res.json()) as { rules: ApiRule[] };
   return body.rules;
 }
+
+describe("background-operation diagnostics authorization", () => {
+  it("requires authentication and the manager capability over the mounted HTTP route", async () => {
+    await db.insert(usersTable).values([
+      { id: OPERATOR, username: "operator", passwordHash: "x" },
+    ]);
+    await db.insert(userRolesTable).values([
+      { userId: OPERATOR, role: "operator" },
+    ]);
+
+    const anonymous = await req(
+      null,
+      "GET",
+      "/api/background-operations/diagnostics",
+    );
+    expect(anonymous.status).toBe(401);
+
+    const denied = await req(
+      OPERATOR,
+      "GET",
+      "/api/background-operations/diagnostics",
+    );
+    expect(denied.status).toBe(403);
+
+    const allowed = await req(
+      MANAGER,
+      "GET",
+      "/api/background-operations/diagnostics",
+    );
+    expect(allowed.status).toBe(200);
+    expect(await allowed.json()).toEqual(
+      expect.objectContaining({
+        warnings: expect.any(Array),
+        automaticTrackingBackoff: expect.any(Object),
+        windowMs: expect.any(Number),
+      }),
+    );
+  });
+});
 
 describe("production rule exceptions survive save + reload", () => {
   it("round-trips both bypass conditions and checklist steps intact and in order", async () => {

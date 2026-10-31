@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateCompletionBoundary } from "./completedHistory";
+import { validateCompletionBoundary, parseHistoryCursor } from "./completedHistory";
 
 const endedAt = Date.parse("2026-09-06T15:00:00.000Z");
 const valid = {
@@ -17,6 +17,16 @@ const valid = {
   },
 };
 
+describe("completed history cursor", () => {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  it("keeps the full date/run identity as the stable page boundary", () => {
+    expect(parseHistoryCursor(encode({ date: "2026-10-23", runId: "equal-time-z" })))
+      .toEqual({ date: "2026-10-23", runId: "equal-time-z" });
+  });
+  it.each(["garbage", encode({ date: "2026-02-30", runId: "r" }), encode({ date: "2026-10-23" })])(
+    "rejects malformed cursors (%s)", (cursor) => expect(parseHistoryCursor(cursor)).toBeNull(),
+  );
+});
 describe("completed history boundary", () => {
   it("accepts exactly one ended run whose envelope matches the snapshot", () => {
     expect(validateCompletionBoundary(valid)).toBe(true);

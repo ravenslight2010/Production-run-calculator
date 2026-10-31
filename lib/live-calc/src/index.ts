@@ -1,4 +1,6 @@
 import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
+import { selectCanonicalLiveRun } from "./canonicalLiveRun";
+export { selectCanonicalLiveRun } from "./canonicalLiveRun";
 
 import {
   caseBasedProductionNeedsAvailable,
@@ -298,6 +300,23 @@ export interface ServerCalcSyncPayload {
   packagingProgress?: Record<string, { skidsCompleted: number; casesOnCurrentSkid: number }>;
 }
 export interface ServerCalcResult { runId: string; calc: Calc }
+/** Canonical shared read model. Explicit per-run/report calculations continue
+ * to use computeServerCalc, whose currentIndex is a caller-owned calculation
+ * target rather than persisted device selection.
+ */
+export function computeSharedServerCalc(
+  payload: ServerCalcSyncPayload,
+  defaultPepTypes: string[],
+  nowTimeMs = Date.now(),
+): ServerCalcResult | null {
+  const run = selectCanonicalLiveRun(payload.dayState?.runs);
+  if (!run) return null;
+  return computeServerCalc({
+    ...payload,
+    dayState: { ...payload.dayState, runs: [run], currentIndex: 0 },
+  }, defaultPepTypes, nowTimeMs);
+}
+
 export function computeServerCalc(
   payload: ServerCalcSyncPayload,
   defaultPepTypes: string[],
@@ -345,6 +364,9 @@ export * from "./applicatorStock";
 export * from "./sauceStock";
 export * from "./wallClockEngine";
 export * from "./linePhases";
+export * from "./lineTiming";
+export * from "./lineSections";
 export * from "./operationalRunView";
 export * from "./operationalProjection";
 export * from "./stagedSupply";
+export * from "./runEstimate";

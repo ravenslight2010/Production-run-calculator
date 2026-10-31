@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, Re
 import { useLayoutEffect, useRef, useState } from "react";
 import { formatWakeRecoveryDiagnostic, type SyncDiagnostic } from "../syncDiagnostics";
 import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, type AttentionState } from "../attentionStates";
+import { loadPendingSyncIntent, type PendingSyncIntent } from "../syncPendingIntent";
 import {
   discardOperationalIntent,
   flushOperationalIntentOutbox,
@@ -9,8 +10,20 @@ import {
   operationalIntentStorageHealth,
   operationalIntentSummary,
   readOperationalIntentOutbox,
+  readManualSectionRecoveries,
   retryOperationalIntent,
 } from "../operationalIntentOutbox";
+import { subscribeToManualSectionErrors } from "../manualSectionErrors";
+
+function SavedRequest({ value }: { value: unknown }) {
+  const [expanded, setExpanded] = useState(false);
+  return <details className="mt-1" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+    <summary className="cursor-pointer underline">Review saved request</summary>
+    {expanded && <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px]">
+      {JSON.stringify(value, null, 2)}
+    </pre>}
+  </details>;
+}
 
 export type SyncStatus = "connected" | "syncing" | "retrying" | "synchronized" | "delayed" | "failed";
 
@@ -22,6 +35,7 @@ type Props = {
   pendingCount: number;
   failedCount: number;
   diagnostics: SyncDiagnostic[];
+  pendingScope?: string;
   canViewConflicts: boolean;
   onRetry: () => void;
   onOpenConflicts: () => void;
@@ -43,9 +57,14 @@ function time(at: number | null): string {
 
 export default function SyncStatusPopover(props: Props) {
   const [open, setOpen] = useState(false);
+  const [snapshotRecovery, setSnapshotRecovery] = useState<PendingSyncIntent | null>(null);
+  useLayoutEffect(() => {
+    setSnapshotRecovery(open && props.pendingScope ? loadPendingSyncIntent(props.pendingScope, props.date) : null);
+  }, [open, props.pendingScope, props.date, props.failedCount]);
   const [horizontalOffset, setHorizontalOffset] = useState(0);
   const [intentSummary, setIntentSummary] = useState(() => operationalIntentSummary());
   const [intents, setIntents] = useState(() => readOperationalIntentOutbox());
+  const [manualRecoveries, setManualRecoveries] = useState(() => readManualSectionRecoveries());
   const [storageHealth, setStorageHealth] = useState(() => operationalIntentStorageHealth());
   const panelRef = useRef<HTMLDivElement>(null);
   const horizontalOffsetRef = useRef(0);
@@ -93,16 +112,20 @@ export default function SyncStatusPopover(props: Props) {
     const refresh = () => {
       setIntentSummary(operationalIntentSummary());
       setIntents(readOperationalIntentOutbox());
+      setManualRecoveries(readManualSectionRecoveries());
       setStorageHealth(operationalIntentStorageHealth());
     };
     window.addEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
     // The custom event updates this tab; storage updates the other open tabs.
     window.addEventListener("storage", refresh);
+    const unsubscribeManual = subscribeToManualSectionErrors(refresh);
+    refresh();
     return () => {
       window.removeEventListener(OPERATIONAL_INTENT_OUTBOX_EVENT, refresh);
       window.removeEventListener("storage", refresh);
+      unsubscribeManual();
     };
-  }, []);
+  }, [open]);
   const storageIssue =
     storageHealth.corruptRecords > 0 ||
     storageHealth.unavailableReads > 0 ||
@@ -111,6 +134,8 @@ export default function SyncStatusPopover(props: Props) {
   return (
     <div className="relative">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        aria-label={`Sync status: ${labels[props.status]}`}
+        data-testid="sync-status-button"
         title={props.connected ? "Sync connected" : `Sync: ${labels[props.status]}`}
         className={`flex h-8 items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold ${color} hover:bg-muted/60`}>
         <Icon className={`h-3.5 w-3.5 ${props.status === "syncing" ? "animate-spin" : ""}`} />
@@ -170,6 +195,26 @@ export default function SyncStatusPopover(props: Props) {
                {intentSummary["review-required"] ? `, ${intentSummary["review-required"]} need manager review` : ""}.
              </p>
            )}
+           {snapshotRecovery?.scope === props.pendingScope && snapshotRecovery?.operationalReviewRequired && (
+             <div className="mt-3 border-t border-border pt-2">
+               <p className="font-semibold">Saved snapshot changes · review required</p>
+               <p className="text-[11px] text-amber-200">Operational changes in this older saved request were not applied or replayed. The working screen uses confirmed server state. Compare the saved request before making a fresh live-control change.</p>
+               <SavedRequest value={{ date: snapshotRecovery.date, requested: snapshotRecovery.payload, prior: snapshotRecovery.baseline }} />
+             </div>
+           )}
+           {manualRecoveries.length > 0 && (
+             <div className="mt-3 border-t border-border pt-2">
+               <p className="mb-1 font-semibold">Saved manual corrections</p>
+               <p className="text-[11px]">These are not confirmed totals. Rejected corrections remain here for manager review; the working form shows the last confirmed totals.</p>
+               {manualRecoveries.map((record) => <div key={record.id} className="mt-2 rounded border border-border p-2 text-[11px]">
+                 <p>{record.section} · {record.date} · {record.deliveryState === "rejected" ? "Review required" : record.deliveryState === "auth-required" ? "Sign-in required" : "Pending confirmation"}</p>
+                 {record.failure && <p>{record.failure}</p>}
+                 <SavedRequest value={{ runId: record.runId, requested: record.values,
+                   prior: record.baseValues, observedGeneration: record.observedGeneration,
+                   baseRevision: record.baseRevision, operation: record.operation }} />
+               </div>)}
+             </div>
+           )}
            {intents.length > 0 && (
              <div className="mt-3 border-t border-border pt-2">
                <p className="mb-1 font-semibold">Offline action queue</p>
@@ -183,8 +228,16 @@ export default function SyncStatusPopover(props: Props) {
                            : intent.state === "blocked" ? "Blocked" : intent.state;
                    return (
                      <div key={intent.id} className="rounded border border-border bg-muted/20 p-2 text-[11px]">
+                       <SavedRequest value={{
+                         date: intent.date, runId: intent.runId, action: intent.action,
+                         observedGeneration: intent.observedGeneration, baseRevision: intent.baseRevision,
+                         control: intent.control, values: intent.values, lifecycle: intent.lifecycle,
+                         savedSnapshot: intent.localSnapshotReview,
+                       }} />
                        <div className="flex items-start justify-between gap-2">
-                         <span className="font-semibold capitalize">{intent.action} · {label}</span>
+                         <span className="font-semibold capitalize">{intent.localSnapshotReview ? "Saved snapshot review" : intent.action === "control"
+                           ? intent.control?.kind?.replaceAll("-", " ") ?? "Run control"
+                           : intent.action} · {label}</span>
                          <span className="text-muted-foreground">#{intent.id.slice(-6)}</span>
                        </div>
                        <p className="mt-1 text-muted-foreground">
@@ -203,8 +256,12 @@ export default function SyncStatusPopover(props: Props) {
                          <p className="mt-1 font-medium text-amber-500">Open the manager conflict monitor for review guidance.</p>
                         ) : !["accepted", "superseded", "rebased", "sending"].includes(intent.state) && (
                          <div className="mt-2 flex gap-2">
-                           <button type="button" onClick={() => { if (retryOperationalIntent(intent.id)) void flushOperationalIntentOutbox(); }}
-                              className="min-h-11 rounded border border-border px-3 font-semibold hover:bg-muted/50">Retry</button>
+                           {intent.state === "permanently-rejected" ? (
+                             <p className="text-amber-500">Review the current run before discarding this invalid action and creating a corrected action. It cannot be retried unchanged.</p>
+                           ) : (
+                             <button type="button" onClick={() => { if (retryOperationalIntent(intent.id)) void flushOperationalIntentOutbox(); }}
+                                className="min-h-11 rounded border border-border px-3 font-semibold hover:bg-muted/50">Retry</button>
+                           )}
                            <button type="button" onClick={() => discardOperationalIntent(intent.id)}
                               className="min-h-11 rounded border border-border px-3 text-muted-foreground hover:bg-muted/50">Discard</button>
                          </div>

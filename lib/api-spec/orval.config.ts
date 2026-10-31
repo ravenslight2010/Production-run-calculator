@@ -84,7 +84,10 @@ async function hoistZodValidatorConstants(filePath: string): Promise<void> {
     ...constants,
     "",
   );
-  await writeFile(filePath, remainingLines.join("\n"));
+  // Removing scalar exports leaves variable-sized gaps. Normalize those gaps
+  // so fresh generation and saved/checkpointed output compare identically.
+  const normalized = remainingLines.join("\n").replace(/\n{3,}/g, "\n\n");
+  await writeFile(filePath, `${normalized.trimEnd()}\n`);
 }
 
 async function hoistZodValidatorConstantsInDirectory(

@@ -23,6 +23,9 @@ export default defineConfig({
   use: {
     baseURL: releaseBrowserBaseUrl(process.env.PLAYWRIGHT_BASE_URL!),
     headless: true, screenshot: "only-on-failure", video: "off", trace: "off",
+    // This suite verifies the manager diagnostics UI, not PWA interception.
+    // Let the test's bounded API fixture routes control evidence deterministically.
+    serviceWorkers: "block",
   },
   projects: (["chromium", "webkit"] as const).flatMap((browserName) =>
     viewports.map(([label, viewport]) => ({

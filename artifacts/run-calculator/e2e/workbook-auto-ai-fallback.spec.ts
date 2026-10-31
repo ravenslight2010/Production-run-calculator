@@ -12,6 +12,7 @@ import {
   type SheetGrid,
 } from "@workspace/spec-import";
 import { buildExportWorkbook } from "../src/specExportWorkbook";
+import { getWorkbookAuditFailureEntries } from "./workbookAuditEvidence.mjs";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
 import { dismissOnboardingIfPresent, signUpAndHandleOnboarding } from "./onboarding";
 
@@ -315,16 +316,12 @@ test("manager gets Mauro's three products in review; source audit calls are read
   await expect(dialog.getByText("Step 1 of 2 — products.")).toBeVisible({
     timeout: 8 * 60_000,
   });
-  const visibleProducts = await dialog
-    .locator('li[data-testid^="spec-profile-"] span.truncate')
-    .allTextContents();
-  const profileCount = await dialog.locator('li[data-testid^="spec-profile-"]').count();
-
   let mauroParseSummary: Record<string, unknown> | null = null;
   let mauroHttpStatus: number | null = null;
   if (realParseResponse) {
     const response = await realParseResponse;
     mauroHttpStatus = response.status();
+    expect(mauroHttpStatus, "The authorized real workbook parser must succeed before product review").toBe(200);
     if (response.ok()) {
       const parsed = await response.json() as ParsedSpecImport;
       mauroParseSummary = summarizeParse(
@@ -333,6 +330,16 @@ test("manager gets Mauro's three products in review; source audit calls are read
       );
     }
   }
+
+  // Labels now wrap to remain readable on short/narrow screens. Locate their
+  // actual text rather than depending on the removed truncation CSS class.
+  const visibleProducts: string[] = [];
+  for (const flavor of EXPECTED_MAURO_PRODUCTS) {
+    const label = dialog.getByText(`Mauro's Pinsa — ${flavor}`, { exact: true });
+    await expect(label).toBeVisible();
+    visibleProducts.push((await label.innerText()).trim());
+  }
+  const profileCount = await dialog.locator('li[data-testid^="spec-profile-"]').count();
 
   const viewportChecks: Array<Record<string, unknown>> = [];
   for (const viewport of [
@@ -377,7 +384,7 @@ test("manager gets Mauro's three products in review; source audit calls are read
       engine,
       aiEvidence: engine === "chromium" ? "real-provider" : "mocked-provider",
       selectedSourceSha256: createHash("sha256").update(await readFile(mauroPath)).digest("hex"),
-      visibleProducts: EXPECTED_MAURO_PRODUCTS,
+      visibleProducts,
       reviewReached: true,
       canceledWithoutApply: true,
       beforeMasterDataCounts: before.counts,
@@ -597,12 +604,13 @@ test("manager gets Mauro's three products in review; source audit calls are read
   const matrixPath = path.join(evidenceDir, "matrix.json");
   const matrix = JSON.parse(await readFile(matrixPath, "utf8")) as {
     source: Record<string, unknown>;
-    entries: Array<Record<string, unknown>>;
+    files: Array<Record<string, unknown> & { sha256?: string; realAiReview?: unknown }>;
+    realAiAudit?: Record<string, unknown>;
     [key: string]: unknown;
   };
-  const auditedFiles = matrix.entries.map((file) => ({
+  const auditedFiles = matrix.files.map((file) => ({
     ...file,
-    realAiReview: aiByHash.get(String(file.sha256)) ?? null,
+    realAiReview: aiByHash.get(String(file.sha256)) ?? file.realAiReview ?? null,
   }));
   const coverage = {
     format: "workbook-real-ai-audit",
@@ -638,9 +646,10 @@ test("manager gets Mauro's three products in review; source audit calls are read
     path.join(evidenceDir, "ai-provider.json"),
     `${JSON.stringify(coverage, null, 2)}\n`,
   );
-  matrix.entries = auditedFiles;
+  matrix.files = auditedFiles;
   matrix.source.manifestSha256 = manifestSha256;
   matrix.realAiAudit = {
+    ...(matrix.realAiAudit ?? {}),
     manifestSha256,
     distinctAiContentCount: byHash.size,
     parserEndpointRequests: parseRequestCount,
@@ -648,10 +657,11 @@ test("manager gets Mauro's three products in review; source audit calls are read
   };
   await writeFile(matrixPath, `${JSON.stringify(matrix, null, 2)}\n`);
   const ledgerPath = path.join(evidenceDir, "failure-ledger.json");
-  const oldLedger = JSON.parse(await readFile(ledgerPath, "utf8")) as Array<
-    Record<string, unknown> & { sha256?: string; status?: string }
-  >;
-  const newLedger = oldLedger.map((finding) => {
+  const ledger = JSON.parse(await readFile(ledgerPath, "utf8")) as {
+    entries?: Array<Record<string, unknown> & { sha256?: string; status?: string }>;
+    [key: string]: unknown;
+  };
+  ledger.entries = getWorkbookAuditFailureEntries(ledger).map((finding) => {
     if (finding.status !== "NEEDS_AI" && finding.status !== "PARTIAL_NEEDS_AI") {
       return finding;
     }
@@ -682,7 +692,7 @@ test("manager gets Mauro's three products in review; source audit calls are read
             : "Inspect source-backed fields in the review and resolve flagged gaps before any apply.",
     };
   });
-  await writeFile(ledgerPath, `${JSON.stringify(newLedger, null, 2)}\n`);
+  await writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
   const stagePath = path.join(evidenceDir, "stage-counts.json");
   const stages = JSON.parse(await readFile(stagePath, "utf8")) as Record<string, unknown>;
   await writeFile(stagePath, `${JSON.stringify({

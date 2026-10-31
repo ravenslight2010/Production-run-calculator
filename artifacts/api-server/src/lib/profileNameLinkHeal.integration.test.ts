@@ -31,6 +31,7 @@ let doughRecipesTable: DbModule["doughRecipesTable"];
 let sauceRecipesTable: DbModule["sauceRecipesTable"];
 let cheeseRecipesTable: DbModule["cheeseRecipesTable"];
 let mixesTable: DbModule["mixesTable"];
+let ingredientsTable: DbModule["ingredientsTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let runProfileNameLinkStubPurge: () => Promise<void>;
 let runWorkbookImportStubPurge: () => Promise<void>;
@@ -83,6 +84,7 @@ beforeAll(async () => {
   sauceRecipesTable = dbMod.sauceRecipesTable;
   cheeseRecipesTable = dbMod.cheeseRecipesTable;
   mixesTable = dbMod.mixesTable;
+  ingredientsTable = dbMod.ingredientsTable;
   dataHealsTable = dbMod.dataHealsTable;
 
   const heals = await import("./dataHeals");
@@ -795,6 +797,7 @@ describe("master-data health launch classification", () => {
     await db.insert(doughRecipesTable).values([
       { id: "health-purchased-crust", scope: "live", name: 'Pedone Crust 7"x12" Oval', components: [] },
       { id: "health-review-dough", scope: "live", name: "Lucia's Dough recipe", components: [] },
+      { id: "health-explicit-premade", scope: "live", name: "Specialty Crust Without Formula", components: [], isPremadeCrust: true },
     ]);
     await db.insert(brandProfilesTable).values({
       key: "health-legacy__", scope: "live", brand: "Health Legacy", flavor: "",
@@ -803,14 +806,69 @@ describe("master-data health launch classification", () => {
 
     const report = await buildMasterDataHealthReport(db, "live", new Date("2026-08-25T00:00:00.000Z"));
     const findings = report.findings.filter((item: any) =>
-      item.id.includes("health-legacy") ||
-      item.id.includes("health-purchased-crust") ||
-      item.id.includes("health-review-dough"),
+      !item.stableKey.startsWith("unreferenced:") && (
+        item.id.includes("health-legacy") ||
+        item.id.includes("health-purchased-crust") ||
+        item.id.includes("health-review-dough")),
     );
 
     expect(findings.length).toBeGreaterThanOrEqual(3);
-    expect(findings.every((item: any) => item.severity === "warning")).toBe(true);
+    expect(findings.some((item: any) => item.id.includes("health-purchased-crust") && item.severity === "error")).toBe(true);
+    expect(findings.filter((item: any) => !item.id.includes("health-purchased-crust")).every((item: any) => item.severity === "warning")).toBe(true);
     expect(findings.every((item: any) => item.owner)).toBe(true);
     expect(findings.every((item: any) => item.followUpDate === "2026-09-30")).toBe(true);
+    const unmarkedEmptyDough = findings.find((item: any) =>
+      item.id.includes("health-review-dough"),
+    );
+    expect(unmarkedEmptyDough?.severity).toBe("warning");
+    expect(unmarkedEmptyDough?.message).toContain(
+      "approved empty/placeholder record pending manager setup",
+    );
+    expect(report.findings.some((item: any) =>
+      item.id.includes("health-explicit-premade") &&
+      !item.stableKey.startsWith("unreferenced:") &&
+      item.message.includes("no positive component values"),
+    )).toBe(false);
+  });
+
+  it("cross-import health recognizes shared recipes and direct slots, and reports absent explicit links without repair", async () => {
+    await db.insert(ingredientsTable).values({
+      id: "import-health-ready-sauce", scope: "live", name: "Import Health Ready Sauce",
+    });
+    await db.insert(cheeseRecipesTable).values({
+      id: "import-health-shared", scope: "live", name: "Import Health Shared Cheese",
+      components: [{ ingredient: "Cheese", lbs: 1 }],
+    });
+    await db.insert(brandProfilesTable).values({
+      key: "import-health-explicit", scope: "live", brand: "Import Health", flavor: "Plain",
+      values: {
+        frontlineRecipeName: "Import Health Ready Sauce",
+        app1Type: "Direct Pepper", app1CheeseRecipeName: "",
+        app2Type: "Cheese", app2CheeseRecipeName: "Import Health Shared Cheese",
+        app3Type: "Cheese", app3CheeseRecipeName: "Import Health Missing Recipe",
+      }, updatedAtMs: 1,
+    });
+    const before = await db.select().from(brandProfilesTable).where(eq(brandProfilesTable.key, "import-health-explicit"));
+    const report = await buildMasterDataHealthReport(db, "live");
+    const links = report.findings.filter((item: any) => item.stableKey.startsWith("import-health-explicit:"));
+    expect(links.some((item: any) => item.stableKey.includes("app1CheeseRecipeName"))).toBe(false);
+    expect(links.some((item: any) => item.stableKey.includes("app2CheeseRecipeName"))).toBe(false);
+    expect(links.some((item: any) => item.stableKey.includes("frontlineRecipeName"))).toBe(false);
+    expect(links.filter((item: any) => item.stableKey.includes("app3CheeseRecipeName"))).toHaveLength(1);
+    expect(report.repairs.some((repair: any) => repair.profileKey === "import-health-explicit")).toBe(false);
+    const after = await db.select().from(brandProfilesTable).where(eq(brandProfilesTable.key, "import-health-explicit"));
+    expect(after).toEqual(before);
+    const sandbox = await buildMasterDataHealthReport(db, "sandbox");
+    expect(sandbox.findings.some((item: any) => item.stableKey.includes("import-health-explicit"))).toBe(false);
+  });
+
+  it("the unified workspace reports all seven source coverage paths without treating absent history as a defect", async () => {
+    const { createProfileDataHealthService } = await import("../routes/profileDataHealth");
+    const workspace = await createProfileDataHealthService(db).buildWorkspace();
+    expect(workspace.importCoverage.sources.map((item) => item.importType)).toEqual(["spec", "premix", "cheese", "shipping", "sauce", "dough", "schedule"]);
+    expect(workspace.importCoverage.sources.every((item) => ["observed", "missing-evidence"].includes(item.status))).toBe(true);
+    expect(workspace.importCoverage.scanned).toBeLessThanOrEqual(200);
+    expect(workspace.importCoverage.limitation).toContain("Missing evidence is not a confirmed defect");
+    expect(workspace.importCoverage.detectors.limits.maxRowsPerTable).toBe(2000);
   });
 });

@@ -43,6 +43,7 @@ cleanup_test_root() {
 trap cleanup_test_root EXIT
 
 REQUIRED_NODE_VERSION="24.20.0"
+REQUIRED_PNPM_VERSION="12.8.1"
 
 assert_contains() {
   local haystack="$1"
@@ -76,6 +77,8 @@ make_workspace() {
     "${workspace}/scripts/src/release-node-https-only.cjs"
   cp "$HISTORY_VIEWER" "${workspace}/scripts/src/show-release-lock-history.sh"
   printf '%s\n' "$REQUIRED_NODE_VERSION" >"${workspace}/.nvmrc"
+  printf '{"packageManager":"pnpm@%s"}\n' "$REQUIRED_PNPM_VERSION" \
+    >"${workspace}/package.json"
 
   cat >"${workspace}/bin/release-child" <<'EOF'
 #!/usr/bin/env bash
@@ -471,6 +474,7 @@ set -euo pipefail
 
 printf 'npx-invoked\n' >>"\$RUN_LOG"
 printf 'npx-node-options=%s\n' "\${NODE_OPTIONS:-unset}" >>"\$RUN_LOG"
+printf 'npx-node-system-ca=%s\n' "\${NODE_USE_SYSTEM_CA:-unset}" >>"\$RUN_LOG"
 printf 'npx-registry=%s\n' "\${npm_config_registry:-unset}" >>"\$RUN_LOG"
 fallback_dir=\$(dirname "\$RELEASE_NODE_FALLBACK_MARKER")
 if [[ "\${npm_config_cache:-}" == "\$fallback_dir/npm-cache" &&
@@ -599,12 +603,136 @@ test_matching_node_skips_npx() {
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" \
     "node-options=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
-  assert_contains "$events" "node-system-ca=1"
+  assert_contains "$events" "node-system-ca=0"
   assert_contains "$events" "ssl-cert-file-readable=yes"
   assert_contains "$events" "ssl-cert-dir-readable=yes"
   assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
   assert_not_contains "$events" "npx-invoked"
   echo "PASS: matching Node path runs preflight, skips npx, and preserves Node for the child"
+}
+
+test_pinned_pnpm_bootstrap_uses_package_manager_pin_and_cleans_cache() {
+  local workspace
+  local log_path
+  local output_path
+  local cache_path
+  local cache_count
+  local status
+  workspace=$(make_workspace pinned-pnpm-bootstrap)
+  log_path="${workspace}/events"
+  output_path="${workspace}/output"
+
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  cat >"${workspace}/bin/npm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ "${1:-}" == "exec" &&
+  "${2:-}" == "--yes" &&
+  "${3:-}" == "--package=pnpm@${PINNED_PNPM_VERSION}" &&
+  "${4:-}" == "--" &&
+  "${5:-}" == "pnpm" ]] || {
+  printf 'Unexpected npm package-manager bootstrap arguments: %s\n' "$*" >&2
+  exit 2
+}
+[[ "${npm_config_registry:-}" == "https://registry.npmjs.org/" ]] || {
+  printf 'Pinned pnpm bootstrap did not use the HTTPS registry.\n' >&2
+  exit 2
+}
+[[ "${NODE_USE_SYSTEM_CA:-}" == "0" &&
+  "${NODE_OPTIONS:-}" == *release-node-https-only.cjs* ]] || {
+  printf 'Pinned pnpm bootstrap lost the Node or HTTPS safeguards.\n' >&2
+  exit 2
+}
+[[ -n "${npm_config_cache:-}" && "${npm_config_cache:-}" != *"/workspace/"* ]] || {
+  printf 'Pinned pnpm bootstrap cache was not isolated from the repository.\n' >&2
+  exit 2
+}
+printf 'pnpm-bootstrap-cache=%s\n' "$npm_config_cache" >>"$RUN_LOG"
+printf 'pnpm-bootstrap-registry=%s\n' "$npm_config_registry" >>"$RUN_LOG"
+mkdir -p -- "$npm_config_cache"
+printf 'temporary-tool-cache\n' >"${npm_config_cache}/fixture"
+shift 5
+exec "$PINNED_PNPM_BIN" "$@"
+EOF
+  cat >"${workspace}/bin/pinned-pnpm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'selected-pnpm=%s\n' "$PINNED_PNPM_VERSION" >>"$RUN_LOG"
+if [[ "${1:-}" == "--version" ]]; then
+  printf '%s\n' "$PINNED_PNPM_VERSION"
+elif [[ "${1:-}" == "exec" ]]; then
+  shift
+  exec "$@"
+else
+  printf 'Unexpected pinned pnpm command: %s\n' "$*" >&2
+  exit 2
+fi
+EOF
+  cat >"${workspace}/bin/pnpm-child" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'pnpm-child-executed node=%s\n' "$(node --version)" >>"$RUN_LOG"
+EOF
+  chmod +x "${workspace}/bin/npm" "${workspace}/bin/pinned-pnpm" \
+    "${workspace}/bin/pnpm-child"
+
+  set +e
+  RUN_LOG="$log_path" \
+    PINNED_PNPM_BIN="${workspace}/bin/pinned-pnpm" \
+    PINNED_PNPM_VERSION="$REQUIRED_PNPM_VERSION" \
+    PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" pnpm --version \
+    >"$output_path" 2>&1
+  status=$?
+  set -e
+  [[ "$status" -eq 0 ]] || {
+    printf 'Pinned pnpm version command failed (status %s):\n' "$status" >&2
+    cat "$output_path" >&2
+    return 1
+  }
+  [[ "$(cat "$output_path")" == "$REQUIRED_PNPM_VERSION" ]] || {
+    printf 'Pinned pnpm reported the wrong version:\n' >&2
+    cat "$output_path" >&2
+    return 1
+  }
+
+  set +e
+  RUN_LOG="$log_path" \
+    PINNED_PNPM_BIN="${workspace}/bin/pinned-pnpm" \
+    PINNED_PNPM_VERSION="$REQUIRED_PNPM_VERSION" \
+    PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    pnpm exec "${workspace}/bin/pnpm-child" \
+    >"$output_path" 2>&1
+  status=$?
+  set -e
+  [[ "$status" -eq 0 ]] || {
+    printf 'Pinned pnpm child command failed (status %s):\n' "$status" >&2
+    cat "$output_path" >&2
+    return 1
+  }
+
+  assert_contains "$(cat "$log_path")" "selected-pnpm=${REQUIRED_PNPM_VERSION}"
+  assert_contains "$(cat "$log_path")" \
+    "pnpm-child-executed node=v${REQUIRED_NODE_VERSION}"
+  assert_contains "$(cat "$log_path")" \
+    "pnpm-bootstrap-registry=https://registry.npmjs.org/"
+  cache_count=$(grep -c '^pnpm-bootstrap-cache=' "$log_path")
+  [[ "$cache_count" -eq 2 ]] || {
+    printf 'Expected two isolated pnpm caches to be recorded, got %s.\n' \
+      "$cache_count" >&2
+    return 1
+  }
+  while IFS= read -r cache_path; do
+    [[ -n "$cache_path" && ! -e "$(dirname "$cache_path")" ]] || {
+      printf 'Pinned pnpm temporary cache was not cleaned: %s\n' "$cache_path" >&2
+      return 1
+    }
+  done < <(sed -n 's/^pnpm-bootstrap-cache=//p' "$log_path")
+  echo "PASS: pnpm uses the packageManager pin, runs children with pinned Node, and removes its isolated cache"
 }
 
 test_mismatching_node_uses_npx() {
@@ -627,6 +755,8 @@ test_mismatching_node_uses_npx() {
   local events
   events=$(cat "$log_path")
   assert_contains "$events" "npx-invoked"
+  assert_contains "$events" "npx-node-system-ca=0"
+  assert_contains "$events" "node-system-ca=0"
   assert_contains "$events" \
     "npx-node-options=--trace-warnings --require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
   assert_contains "$events" "npx-registry=https://registry.npmjs.org/"
@@ -3868,6 +3998,7 @@ EOF
 }
 
 test_matching_node_skips_npx
+test_pinned_pnpm_bootstrap_uses_package_manager_pin_and_cleans_cache
 test_mismatching_node_uses_npx
 test_concurrent_fallbacks_use_private_npm_caches
 test_invalid_npx_registry_fails_before_package_acquisition

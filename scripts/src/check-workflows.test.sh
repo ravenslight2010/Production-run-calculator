@@ -391,10 +391,11 @@ test_ci_runs_routine_scripts_tests() {
   echo "PASS: CI runs routine scripts tests after catalog contracts"
 }
 
-test_ci_docker_image_check_is_build_only() {
+test_ci_docker_images_are_build_only_and_runtime_checked() {
   local docker_block
   local required_checks
   local push_false_count
+  local load_true_count
 
   docker_block=$(ci_docker_job_block)
   assert_contains "$docker_block" "name: Docker image"
@@ -410,10 +411,22 @@ test_ci_docker_image_check_is_build_only() {
     printf 'Docker image check must not push to a registry or log in to one.\n' >&2
     return 1
   fi
+  load_true_count=$(grep -cE '^[[:space:]]+load:[[:space:]]+true$' \
+    <<<"$docker_block" || true)
+  if [[ "$load_true_count" != "3" ]]; then
+    printf 'Docker runtime verification requires all three built images loaded locally (found %s load:true entries).\n' \
+      "$load_true_count" >&2
+    return 1
+  fi
+  assert_contains "$docker_block" \
+    "      - name: Start and verify the Docker stack on disposable data"
+  assert_contains "$docker_block" \
+    "        run: bash scripts/src/check-docker-runtime.sh"
+  assert_contains "$docker_block" "    timeout-minutes: 40"
 
   required_checks=$(<"${SCRIPT_DIR}/../../.github/repository-policy.md")
   assert_contains "$required_checks" "Docker image"
-  echo "PASS: retains the required Docker image check as a build-only test"
+  echo "PASS: Docker images remain build-only and the disposable runtime check is required"
 }
 
 test_release_build_identity_is_prepared_for_container_and_browser_smoke() {
@@ -1761,7 +1774,7 @@ test_rejects_missing_remaining_workflow_job_timeout
 test_rejects_non_positive_remaining_workflow_job_timeout
 test_department_navigation_readiness_contract
 test_ci_runs_routine_scripts_tests
-test_ci_docker_image_check_is_build_only
+test_ci_docker_images_are_build_only_and_runtime_checked
 test_release_build_identity_is_prepared_for_container_and_browser_smoke
 test_docker_executable_targets_default_to_nonroot
 test_rejects_github_package_publishing

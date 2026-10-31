@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, numeric, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, numeric, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 // Per-day run state, one JSONB blob per date. `scope` isolates the live factory
 // data from the seeded sandbox account's copy, so a date has at most one row per
@@ -47,6 +47,7 @@ export const completedRunHistoryTable = pgTable(
   (t) => [
     uniqueIndex("completed_run_history_scope_operation_idx").on(t.scope, t.operationId),
     uniqueIndex("completed_run_history_scope_date_run_idx").on(t.scope, t.date, t.runId),
+    index("completed_run_history_scope_run_date_idx").on(t.scope, t.runId, t.date),
   ],
 );
 

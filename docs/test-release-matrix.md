@@ -51,8 +51,11 @@ details. Direct Vitest lanes, browser suites without a JSON case summary, and
 `browser-main` (whose full-suite summary is Markdown) remain `null`; console
 output is not a count source.
 
-The full Chromium contract currently enumerates 170 cases, including the
-Summary-card live-timer focus regression added after the previous 169-case report.
+The owner-reviewed full Chromium contract enumerates 216 exact file/title
+identities in the sole `chromium` project. The
+[inventory reconciliation](./full-browser-inventory.md) records the retained
+coverage, renamed die-timer identity, 44 additional app regressions, and 36
+cases left in dedicated lanes. Discovery is not browser execution evidence.
 Physical Android suspension and process-restart checks remain excluded from
 desktop Chromium and require the dedicated real-device lane. The two
 narrow-landscape sign-in checks and the virtual-keyboard-resize check are part

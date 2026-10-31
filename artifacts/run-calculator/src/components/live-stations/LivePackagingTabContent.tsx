@@ -1,4 +1,3 @@
-import { memo, useEffect, useRef } from "react";
 import { AlertTriangle, Boxes, CheckCircle2, ChevronDown, MoveDown, Package, Snowflake, Sparkles, Zap } from "lucide-react";
 import type { RunMeta } from "../../types";
 import { PACKAGING_FIELDS, isCartonedValue, labelPositionLabel, withTempOverrides } from "../../types";
@@ -14,6 +13,11 @@ import { AUTO_SUPPRESS_MS, TimelineNode, PkgMiniStepper, fmtMS } from "./station
 import { PackagingSpeedNudgeFeedback } from "../PackagingSpeedNudgeFeedback";
 import { runUnlockedManualSectionAction } from "../../packagingManager";
 import { isPackagingDrainComplete } from "../../linePhases";
+import { getFreezerSurplusRemainingMs } from "../../freezerSurplus";
+import { linePhaseRows } from "@workspace/live-calc";
+import { memo, useEffect, useRef, useState } from "react";
+import { loadPackagingProgress } from "../../packagingProgress";
+import { hasPendingManualSection, readPendingManualSection, retireObsoletePackagingResume, retryPendingManualSection, submitManualSection } from "../../operationalIntentOutbox";
 
 export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
@@ -33,8 +37,101 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
     acceptPackagingSpeedNudge, dismissPackagingSpeedNudge,
   } = useLiveRun();
+  const surplusPromptRun = (dayState.runs as RunMeta[])
+    .filter((run) =>
+      !!run.endedAt &&
+      !hx.freezerSurplusConfirmations?.some(
+        (confirmation: { runId: string }) => confirmation.runId === run.id,
+      ),
+    )
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+    .find((run) =>
+      getFreezerSurplusRemainingMs({
+        endedAt: run.endedAt,
+        freezerTimeMin: Number(withTempOverrides(loadRunValues(run.id)).freezerTime) || 0,
+        nowMs: nowTime.getTime(),
+      }) > 0,
+    );
+  const surplusPromptFreezerTimeMin = surplusPromptRun
+    ? Number(withTempOverrides(loadRunValues(surplusPromptRun.id)).freezerTime) || 0
+    : 0;
 
   const autoAdvancedRunRef = useRef<string | null>(null);
+  const resumeInFlight = useRef(false);
+  const selectedRunRef = useRef(currentRunId);
+  selectedRunRef.current = currentRunId;
+  const [resumeState, setResumeState] = useState<{ runId: string; busy?: boolean; error?: string } | null>(null);
+  const resumePackaging = async () => {
+    const runId = currentRunId;
+    if (resumeInFlight.current) return;
+    if (getManualSectionLock(runId, "packaging")) {
+      setResumeState({ runId, error: "Packaging is being updated. Wait for the correction to sync, then try Resume again." });
+      return;
+    }
+    const progress = loadPackagingProgress()[runId];
+    if (!currentRun || !progress || progress.correctionGeneration < 1) {
+      setResumeState({ runId, error: "The saved Packaging correction is not confirmed yet. Wait for sync, then try Resume again." });
+      return;
+    }
+    resumeInFlight.current = true;
+    setResumeState({ runId, busy: true });
+    try {
+      const observedGeneration = `${runId}:${currentRun.metaUpdatedAt ?? currentRun.startedAt ?? 0}`;
+      retireObsoletePackagingResume(runId, observedGeneration, progress.correctionGeneration);
+      const pending = readPendingManualSection(runId, "packaging");
+      if (pending) {
+        if (pending.deliveryState === "rejected") {
+          setResumeState({
+            runId,
+            error: "Packaging needs review before Resume. Check the latest counts and enter the correction again; the rejected action will not be resent unchanged.",
+          });
+          return;
+        }
+        const accepted = await retryPendingManualSection(pending.id);
+        if (selectedRunRef.current !== runId) return;
+        setResumeState(accepted && pending.operation ? null : {
+          runId, error: accepted
+            ? "Packaging correction confirmed. Choose Resume again to end its hold."
+            : pending.operation
+              ? "Resume is not confirmed. Reconnect or sign in again, then choose Resume to retry the saved action."
+              : "Correction is not confirmed. Reconnect or sign in and choose Resume to retry; if counts conflict, enter the correction again.",
+        });
+        return;
+      }
+      if (hasPendingManualSection(runId, "packaging")) {
+        setResumeState({ runId, error: "A Packaging correction is still being sent. Wait for confirmation, then try Resume again." });
+        return;
+      }
+      const counts = { skidsCompleted: progress.skidsCompleted, casesOnCurrentSkid: progress.casesOnCurrentSkid };
+      const result = await submitManualSection({
+        runId, section: "packaging", values: counts, baseValues: counts,
+        observedGeneration,
+        operation: "resume-packaging", correctionGeneration: progress.correctionGeneration,
+      });
+      if (selectedRunRef.current !== runId) return;
+      setResumeState(result === "accepted" ? null : {
+        runId,
+        error: result === "offline"
+          ? "Resume is not confirmed. Reconnect, then choose Resume to retry the saved action."
+          : result === "authentication-required"
+            ? "Resume is not confirmed. Sign in again, then choose Resume to retry the saved action."
+            : result === "conflicted"
+              ? "Packaging changed before Resume was confirmed. Wait for the latest counts, then choose Resume again."
+               : result === "validation-rejected"
+                 ? "Resume was rejected. Review the latest counts and enter the Packaging correction again before trying Resume."
+                 : result === "permission-denied"
+                   ? "Resume is not confirmed. Ask a manager to restore your access before retrying."
+              : "Resume is not confirmed. Reconnect or sign in again, then choose Resume to retry.",
+      });
+    } catch {
+      if (selectedRunRef.current === runId) setResumeState({ runId, error: "Resume could not be confirmed. Review Sync and try again." });
+    } finally {
+      resumeInFlight.current = false;
+      // A response ignored after a run switch must not leave the old run
+      // displaying "Confirming" forever when the operator selects it again.
+      setResumeState((state) => state && state.runId === runId && state.busy ? null : state);
+    }
+  };
   useEffect(() => {
     const nextIndex = dayState.currentIndex + 1;
     const nextRun = dayState.runs[nextIndex];
@@ -104,17 +201,14 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   ledger={freezerSurplus}
                   loaded={freezerSurplusLoaded}
                   busy={freezerSurplusBusy}
-                  error={freezerSurplusError}
-                  completedRun={lastEndedRun}
-                  freezerTimeMin={lastEndedRun
-                    ? Number(withTempOverrides(loadRunValues(lastEndedRun.id)).freezerTime) || 0
-                    : 0}
+                  error={freezerSurplusError ?? hx.freezerSurplusConfirmationsError}
+                  completedRun={surplusPromptRun}
+                  confirmations={hx.freezerSurplusConfirmations}
+                  confirmationsLoaded={hx.freezerSurplusConfirmationsLoaded}
+                  freezerTimeMin={surplusPromptFreezerTimeMin}
                   nowMs={nowTime.getTime()}
                   getOriginalTarget={(run) => run.id === currentRunId ? Number(v.casesNeeded) || 0 : Number(loadRunValues(run.id).casesNeeded) || 0}
-                  onConfirm={async (run, count, date) => {
-                    await confirmRunSurplus(run, count, date);
-                    await refreshFreezerSurplus();
-                  }}
+                  onConfirm={confirmRunSurplus}
                   onAllocate={async () => {}}
                 />
                 <div className="flex flex-col">
@@ -228,7 +322,7 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   // current run in every lifecycle state (running / paused / ended),
                   // falling back locally inside LiveRunContext when offline/lagging.
                   const phases = linePhases;
-                  const rows = [phases.stage1, phases.stage2, phases.stage3];
+                  const rows = linePhaseRows(phases);
                   const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
                   if (!anyVisible && !showEmptying) return null;
                   // A phase can drain only from its persisted pause / end record.
@@ -406,12 +500,10 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 show={manualOverrideBannerShow(autoTrackProgress, s, autoSuppressUntilRef.current)}
                                 station="Packaging"
                                 minsLeft={suppressedMinsLeft}
-                                onResume={() => {
-                                  const now = Date.now();
-                                  onManual(skids, casesOnSkid, now);
-                                  autoSuppressUntilRef.current = 0;
-                                  fireAutoTrackNow("case");
-                                }}
+                                onResume={() => { void resumePackaging(); }}
+                                busy={resumeState?.runId === currentRunId && resumeState?.busy}
+                                error={resumeState?.runId === currentRunId ? resumeState?.error : undefined}
+                                disabled={!!packagingLock}
                               />
 
                               {(() => {

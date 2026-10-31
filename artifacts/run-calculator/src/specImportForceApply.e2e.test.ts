@@ -69,6 +69,7 @@ vi.mock("./mergeSuggest", () => ({
 }));
 
 import { commitSpecImport } from "./specImport";
+import { setProfileCacheIdentity, writeCachedProfileBlobs } from "./profileCache";
 import {
   canonicalProfileKey,
   flushProfileQueue,
@@ -122,7 +123,9 @@ function prepareImport(): Parameters<typeof commitSpecImport>[0] {
 }
 
 beforeEach(() => {
+  setProfileCacheIdentity(null);
   localStorage.clear();
+  setProfileCacheIdentity({ userId: "import-owner", scope: "live" });
   resetProfileSyncMemoryFallbackForTests();
   serverProfile = {
     key: profileKey,
@@ -139,14 +142,9 @@ beforeEach(() => {
   applySpy.mockReset();
   applySpy.mockImplementation((parsed: ParsedSpecImport) => {
     const p = parsed.profiles[0];
-    localStorage.setItem(
-      `run-calc-profile-${canonicalProfileKey(p.brand, p.flavor)}`,
-      JSON.stringify(importedValues),
-    );
-    localStorage.setItem(
-      `run-calc-crust-profile-${canonicalProfileKey(p.brand, p.flavor)}`,
-      JSON.stringify({}),
-    );
+    writeCachedProfileBlobs(canonicalProfileKey(p.brand, p.flavor), {
+      dough: JSON.stringify(importedValues), crust: "{}",
+    });
     return {
       touchedProfiles: [{ brand: p.brand, flavor: p.flavor }],
       crustProfiles: [],

@@ -21,6 +21,8 @@ validateBrowserSpecSyntaxDirectory(
 export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
+  // Node/Vitest helper tests in this directory are not browser specifications.
+  testMatch: "**/*.spec.ts",
   globalSetup: "./e2e/global-setup.ts",
   timeout: 60_000,
   retries: 0,
@@ -47,17 +49,36 @@ export default defineConfig({
   // configs. Keep them out of the destructive full suite so that suite retains
   // its existing case/runtime budget instead of duplicating focused coverage.
   testIgnore: [
+    // Focused importer safety matrix has its own Chromium/WebKit config.
+    "**/task3494-audited-import.spec.ts",
+    // Synthetic immutable-history read/reload journey has its own debug lane.
+    "**/completed-history-archive.spec.ts",
+    // Authority continuity has explicit remaining-only Chromium/WebKit lanes.
+    // Do not duplicate it or alter the reviewed full-suite case inventory.
+    "live-authority.spec.ts",
+    "live-authority-continuation.spec.ts",
     "calendar.spec.ts",
     "release-webkit-smoke.spec.ts",
     // Physical iOS evidence is collected by its dedicated device lane.
     "ios-safari-pwa-device.spec.ts",
+    // Owner-reviewed dedicated harnesses; see docs/full-browser-inventory.md.
+    // These require different servers, opt-in capture, engines, or build setup.
+    "csp-production.spec.ts",
+    "docker-caddy-browser-smoke.spec.ts",
+    "home-opening-measurement.spec.ts",
+    "import-gold-apply.spec.ts",
+    "reduced-motion.spec.ts",
+    "webkit-https.spec.ts",
+    "recipe-picker-webkit.spec.ts",
   ],
   // Physical Android checks run through the dedicated device lane. Keep the
   // three phone-layout checks, the two Android-only sync checks, and
   // focused-only regressions outside the full-browser Chromium contract. The
   // exclusions live here so focused suites still run them without relying on
-  // an operator CLI grep flag. The 170-case contract includes the Summary-card
-  // live-timer focus regression. The two narrow-landscape sign-in checks remain
+  // an operator CLI grep flag. Three previously reviewed PWA sentinels remain
+  // included; the other handoff cases belong to playwright.pwa.config.ts.
+  // The reviewed 216-case contract includes the
+  // Summary-card live-timer focus regression. Narrow-landscape sign-in checks remain
   // included, while physical Android suspension/restart journeys stay in the
   // real-mobile-chromium lane.
   grepInvert: FULL_BROWSER_EXCLUDED_CASE_PATTERN,

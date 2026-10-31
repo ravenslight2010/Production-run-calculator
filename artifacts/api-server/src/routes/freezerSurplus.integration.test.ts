@@ -19,6 +19,8 @@ let pool: DbModule["pool"];
 let freezerSurplusLotsTable: DbModule["freezerSurplusLotsTable"];
 let freezerSurplusAllocationsTable: DbModule["freezerSurplusAllocationsTable"];
 let freezerSurplusAdjustmentsTable: DbModule["freezerSurplusAdjustmentsTable"];
+let freezerSurplusConfirmationsTable: DbModule["freezerSurplusConfirmationsTable"];
+let freezerSurplusDecisionCorrectionsTable: DbModule["freezerSurplusDecisionCorrectionsTable"];
 let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
@@ -36,6 +38,7 @@ let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
+let untouchedIngredientId: number;
 
 const MANAGER = "surplus-manager";
 const SANDBOX_MANAGER = "surplus-sandbox";
@@ -75,6 +78,8 @@ beforeAll(async () => {
   freezerSurplusLotsTable = dbMod.freezerSurplusLotsTable;
   freezerSurplusAllocationsTable = dbMod.freezerSurplusAllocationsTable;
   freezerSurplusAdjustmentsTable = dbMod.freezerSurplusAdjustmentsTable;
+  freezerSurplusConfirmationsTable = dbMod.freezerSurplusConfirmationsTable;
+  freezerSurplusDecisionCorrectionsTable = dbMod.freezerSurplusDecisionCorrectionsTable;
   inventoryItemsTable = dbMod.inventoryItemsTable;
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
@@ -118,7 +123,9 @@ beforeEach(async () => {
   clearUserValidityCache();
   clearSandboxCache();
   await db.execute(sql`
-    TRUNCATE ${freezerSurplusAdjustmentsTable}, ${freezerSurplusAllocationsTable}, ${freezerSurplusLotsTable},
+    TRUNCATE ${freezerSurplusConfirmationsTable}, ${freezerSurplusDecisionCorrectionsTable},
+      ${freezerSurplusAdjustmentsTable},
+      ${freezerSurplusAllocationsTable}, ${freezerSurplusLotsTable},
       ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryItemsTable}, ${inventoryLocationsTable},
       ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
       RESTART IDENTITY CASCADE
@@ -138,6 +145,14 @@ beforeEach(async () => {
     { userId: SANDBOX_MANAGER, role: "manager" },
     { userId: OPERATOR, role: "operator" },
   ]);
+  const [ingredient] = await db.insert(inventoryItemsTable).values({
+    scope: "live", key: "ingredient:Pepperoni:lbs", category: "ingredient",
+    name: "Already charged ingredient sentinel", unit: "lbs",
+  }).returning();
+  untouchedIngredientId = ingredient.id;
+  await db.insert(inventoryLotsTable).values({
+    scope: "live", itemId: ingredient.id, qtyReceived: 100, qtyRemaining: 100,
+  });
 });
 
 async function req(
@@ -225,6 +240,52 @@ async function expectFreezerParity(expectedCases: number, expectedMovements: num
     ledgerNet: expectedCases,
     movementCount: expectedMovements,
   });
+  const ingredientLots = await db.select().from(inventoryLotsTable)
+    .where(eq(inventoryLotsTable.itemId, untouchedIngredientId));
+  expect(ingredientLots.reduce((sum, lot) => sum + lot.qtyRemaining, 0)).toBe(100);
+  expect(await db.select().from(inventoryLedgerTable)
+    .where(eq(inventoryLedgerTable.itemId, untouchedIngredientId))).toHaveLength(0);
+}
+
+async function raceOnExistingFinishedStock<T>(start: () => Promise<T>): Promise<T> {
+  const existing = await pool.query<{ id: number }>(`
+    SELECT lots.id FROM inventory_lots lots
+    JOIN inventory_items items ON items.id = lots.item_id
+    WHERE items.scope = 'live' AND items.key = $1
+    LIMIT 1
+  `, ["finished:acme:pepperoni"]);
+  expect(existing.rows).toHaveLength(1);
+  const blocker = await pool.connect();
+  let pending: Promise<T>;
+  let bothWaiting = false;
+  try {
+    await blocker.query("BEGIN");
+    await blocker.query("SELECT id FROM inventory_lots WHERE id = $1 FOR UPDATE", [
+      existing.rows[0]!.id,
+    ]);
+    pending = start();
+    // Hold the shared row until both independent transactions reach it.
+    // Without read locking/atomic updates, both can precompute from the old
+    // quantity while blocked, making the lost-update regression deterministic.
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const waiting = await pool.query<{ count: number }>(`
+        SELECT count(*)::integer AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock' AND query LIKE '%inventory_lots%'
+      `);
+      if (waiting.rows[0]!.count >= 2) {
+        bothWaiting = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  } finally {
+    await blocker.query("ROLLBACK");
+    blocker.release();
+  }
+  const result = await pending!;
+  expect(bothWaiting).toBe(true);
+  return result;
 }
 
 async function confirm(userId: string, overrides: Record<string, unknown> = {}) {
@@ -235,6 +296,32 @@ async function confirm(userId: string, overrides: Record<string, unknown> = {}) 
     cases: 20,
     ...overrides,
   });
+}
+
+async function confirmOutcome(
+  userId: string,
+  runId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return req(userId, "POST", "/api/freezer-surplus/confirmations", {
+    runId,
+    cases: 0,
+    ...overrides,
+  });
+}
+
+async function correctOutcome(
+  userId: string,
+  runId: string,
+  body: Record<string, unknown>,
+) {
+  return req(userId, "POST",
+    `/api/freezer-surplus/confirmations/${encodeURIComponent(runId)}/corrections`, body);
+}
+
+async function readOutcome(userId: string, runId: string) {
+  return req(userId, "GET",
+    `/api/freezer-surplus/confirmations/${encodeURIComponent(runId)}/corrections`);
 }
 
 async function allocate(
@@ -268,11 +355,12 @@ async function adjust(
 async function seedRun(
   id: string,
   overrides: Record<string, unknown> = {},
+  date = "2026-08-29",
 ): Promise<void> {
   const [existing] = await db
     .select()
     .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, "2026-08-29"), eq(dailySyncTable.scope, "live")))
+    .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")))
     .limit(1);
   const data = existing?.data as { dayState?: { runs?: unknown[] } } | null;
   const runs = Array.isArray(data?.dayState?.runs) ? data.dayState.runs : [];
@@ -287,14 +375,46 @@ async function seedRun(
     await db
       .update(dailySyncTable)
       .set({ data: nextData })
-      .where(and(eq(dailySyncTable.date, "2026-08-29"), eq(dailySyncTable.scope, "live")));
+      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")));
   } else {
     await db.insert(dailySyncTable).values({
-      date: "2026-08-29",
+      date,
       scope: "live",
       data: nextData,
     });
   }
+}
+
+async function seedCompletedRun(
+  id: string,
+  overrides: Record<string, unknown> = {},
+  date = "2026-08-29",
+): Promise<void> {
+  const endedAt = Date.now() - 15 * 60_000;
+  await seedRun(id, { endedAt, ...overrides }, date);
+  const [row] = await db
+    .select()
+    .from(dailySyncTable)
+    .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")))
+    .limit(1);
+  if (!row) throw new Error("Expected the seeded completed run day to exist");
+  const data = row.data as Record<string, unknown>;
+  const runValues =
+    data.runValues && typeof data.runValues === "object"
+      ? (data.runValues as Record<string, unknown>)
+      : {};
+  await db
+    .update(dailySyncTable)
+    .set({
+      data: {
+        ...data,
+        runValues: {
+          ...runValues,
+          [id]: { freezerTime: "20" },
+        },
+      },
+    })
+    .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, "live")));
 }
 
 async function markRunStarted(id: string): Promise<void> {
@@ -315,10 +435,359 @@ async function markRunStarted(id: string): Promise<void> {
 }
 
 describe("dated freezer surplus API", () => {
+  it("records zero as a scoped receipt only and rejects conflicting outcomes", async () => {
+    await seedCompletedRun("confirmed-none-run");
+    const first = await confirmOutcome(MANAGER, "confirmed-none-run");
+    expect(first.status).toBe(201);
+    expect(await first.json()).toMatchObject({
+      confirmation: {
+        runId: "confirmed-none-run",
+        runDate: "2026-08-29",
+        brand: "Acme",
+        flavor: "Pepperoni",
+        cases: 0,
+        productionDate: null,
+        lotId: null,
+      },
+    });
+
+    const replay = await confirmOutcome(MANAGER, "confirmed-none-run");
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      confirmation: { runId: "confirmed-none-run", cases: 0, lotId: null },
+    });
+    expect((await confirmOutcome(MANAGER, "confirmed-none-run", { cases: 2, productionDate: "2026-08-29" })).status)
+      .toBe(409);
+    const visible = await req(OPERATOR, "GET", "/api/freezer-surplus/confirmations");
+    expect(visible.status).toBe(200);
+    expect(await visible.json()).toMatchObject({
+      confirmations: [{ runId: "confirmed-none-run", cases: 0 }],
+    });
+    expect((await confirmOutcome(OPERATOR, "confirmed-none-run")).status).toBe(403);
+    expect((await ledger()).lots).toHaveLength(0);
+    expect(await db.select().from(freezerSurplusConfirmationsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryItemsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLotsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+
+    const sandboxRead = await req(SANDBOX_MANAGER, "GET", "/api/freezer-surplus/confirmations");
+    expect(await sandboxRead.json()).toEqual({ confirmations: [] });
+    expect((await confirmOutcome(SANDBOX_MANAGER, "confirmed-none-run")).status).toBe(404);
+  });
+
+  it("creates positive lots once per run and allows independent same-product runs", async () => {
+    await seedCompletedRun("confirmed-positive-run");
+    await seedCompletedRun("independent-positive-run");
+    const body = { cases: 12, productionDate: "2026-08-28" };
+    const concurrent = await Promise.all([
+      confirmOutcome(MANAGER, "confirmed-positive-run", body),
+      confirmOutcome(MANAGER, "confirmed-positive-run", body),
+    ]);
+    expect(concurrent.map((response) => response.status).sort()).toEqual([200, 201]);
+    expect((await confirmOutcome(MANAGER, "confirmed-positive-run", body)).status).toBe(200);
+    expect((await confirmOutcome(MANAGER, "confirmed-positive-run", {
+      cases: 10,
+      productionDate: "2026-08-28",
+    })).status).toBe(409);
+    expect((await confirmOutcome(MANAGER, "independent-positive-run", body)).status).toBe(201);
+    await expectFreezerParity(24, 2);
+    expect(await db.select().from(freezerSurplusConfirmationsTable)).toHaveLength(2);
+    expect(await db.select().from(freezerSurplusLotsTable)).toHaveLength(2);
+  });
+
+  it("preserves both independent cross-day confirmations sharing an existing inventory lot", async () => {
+    expect((await confirm(MANAGER, { cases: 5 })).status).toBe(201);
+    await seedCompletedRun("cross-day-a", {}, "2026-08-29");
+    await seedCompletedRun("cross-day-b", {}, "2026-08-30");
+    const responses = await raceOnExistingFinishedStock(() => Promise.all([
+      confirmOutcome(MANAGER, "cross-day-a", { cases: 3, productionDate: "2026-08-29" }),
+      confirmOutcome(MANAGER, "cross-day-b", { cases: 7, productionDate: "2026-08-29" }),
+    ]));
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const receipts = await db.select().from(freezerSurplusConfirmationsTable);
+    expect(receipts.map((receipt) => receipt.runDate).sort()).toEqual(["2026-08-29", "2026-08-30"]);
+    expect(receipts.reduce((sum, receipt) => sum + receipt.cases, 0)).toBe(10);
+    await expectFreezerParity(15, 3);
+    expect((await confirmOutcome(MANAGER, "cross-day-a", {
+      cases: 3, productionDate: "2026-08-29",
+    })).status).toBe(200);
+    expect((await confirmOutcome(MANAGER, "cross-day-b", {
+      cases: 8, productionDate: "2026-08-29",
+    })).status).toBe(409);
+    await expectFreezerParity(15, 3);
+  });
+
+  it("preserves a concurrent existing-stock allocation and legacy lot creation", async () => {
+    const initial = await confirm(MANAGER, { cases: 20 });
+    const lotId = ((await initial.json()) as { createdLot: { id: string } }).createdLot.id;
+    await seedRun("concurrent-pull", {}, "2026-08-29");
+    const responses = await raceOnExistingFinishedStock(() => Promise.all([
+      allocate(MANAGER, "concurrent-pull", [{ lotId, cases: 12 }]),
+      confirm(MANAGER, {
+        cases: 7, productionDate: "2026-08-29",
+      }),
+    ]));
+    expect(responses.map((response) => response.status)).toEqual([200, 201]);
+    expect(await db.select().from(freezerSurplusConfirmationsTable)).toHaveLength(0);
+    await expectFreezerParity(15, 3);
+  });
+
+  it("rejects invalid counts and expired completed-run windows", async () => {
+    await seedCompletedRun("invalid-count-run");
+    for (const cases of [-1, 1.5, 1_000_001, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect((await confirmOutcome(MANAGER, "invalid-count-run", { cases })).status).toBe(400);
+    }
+    expect((await confirmOutcome(MANAGER, "invalid-count-run", {
+      cases: 1,
+      productionDate: "2026-02-30",
+    })).status).toBe(400);
+    await seedCompletedRun("expired-confirmation-run", {
+      endedAt: Date.now() - 40 * 60_000,
+    });
+    expect((await confirmOutcome(MANAGER, "expired-confirmation-run")).status).toBe(409);
+    expect(await db.select().from(freezerSurplusConfirmationsTable)).toHaveLength(0);
+  });
+
+  it("requires a real completed run and freezer location for positive stock only", async () => {
+    await seedRun("not-completed-run");
+    await seedCompletedRun("future-completion-run", { endedAt: Date.now() + 60_000 });
+    expect((await confirmOutcome(MANAGER, "not-completed-run")).status).toBe(409);
+    expect((await confirmOutcome(MANAGER, "future-completion-run")).status).toBe(409);
+    expect((await confirmOutcome(MANAGER, "missing-run")).status).toBe(404);
+    expect((await confirmOutcome(MANAGER, "   ")).status).toBe(400);
+    await db.delete(inventoryLocationsTable).where(eq(inventoryLocationsTable.isOnsite, false));
+    await seedCompletedRun("missing-freezer-positive");
+    await seedCompletedRun("no-freezer-none");
+    expect((await confirmOutcome(MANAGER, "missing-freezer-positive", {
+      cases: 2,
+      productionDate: "2026-08-28",
+    })).status).toBe(409);
+    expect((await confirmOutcome(MANAGER, "no-freezer-none")).status).toBe(201);
+    expect(await db.select().from(freezerSurplusLotsTable)).toHaveLength(0);
+    expect(await db.select().from(inventoryItemsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+  });
+
+  it("rolls back lot and stock effects if the confirmation receipt cannot be committed", async () => {
+    await seedCompletedRun("receipt-rollback-run");
+    await db.execute(sql`
+      ALTER TABLE freezer_surplus_confirmations
+      ADD CONSTRAINT freezer_surplus_confirmations_test_reject_42 CHECK (cases <> 42)
+    `);
+    const failed = await confirmOutcome(MANAGER, "receipt-rollback-run", {
+      cases: 42,
+      productionDate: "2026-08-28",
+    });
+    expect(failed.status).toBe(500);
+    expect(await db.select().from(freezerSurplusConfirmationsTable)).toHaveLength(0);
+    expect(await db.select().from(freezerSurplusLotsTable)).toHaveLength(0);
+    expect(await db.select().from(inventoryItemsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLotsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    await db.execute(sql`
+      ALTER TABLE freezer_surplus_confirmations
+      DROP CONSTRAINT freezer_surplus_confirmations_test_reject_42
+    `);
+  });
+
+  it("corrects a saved decision with append-only, idempotent stock deltas", async () => {
+    await seedCompletedRun("correct-count-run");
+    expect((await confirmOutcome(MANAGER, "correct-count-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const original = await db.select().from(freezerSurplusConfirmationsTable);
+    const saved = await (await readOutcome(MANAGER, "correct-count-run")).json() as {
+      revision: string; original: { cases: number }; current: { cases: number };
+    };
+    expect(saved.original.cases).toBe(5);
+    const requestBody = {
+      eventId: "correct-count-event-001", previousRevision: saved.revision,
+      cases: 8, productionDate: "2026-08-28", reason: "Counted one case twice",
+    };
+    expect((await correctOutcome(OPERATOR, "correct-count-run", requestBody)).status).toBe(403);
+    const [first, retry] = await Promise.all([
+      correctOutcome(MANAGER, "correct-count-run", requestBody),
+      correctOutcome(MANAGER, "correct-count-run", requestBody),
+    ]);
+    expect([first.status, retry.status].sort()).toEqual([200, 201]);
+    expect((await correctOutcome(MANAGER, "correct-count-run", requestBody)).status).toBe(200);
+    expect((await correctOutcome(MANAGER, "correct-count-run", {
+      ...requestBody, cases: 9,
+    })).status).toBe(409);
+    expect(await db.select().from(freezerSurplusConfirmationsTable)).toEqual(original);
+    expect(await db.select().from(freezerSurplusDecisionCorrectionsTable)).toHaveLength(1);
+    expect((await (await readOutcome(MANAGER, "correct-count-run")).json() as {
+      current: { cases: number }; corrections: unknown[];
+    })).toMatchObject({ current: { cases: 8 }, corrections: [expect.any(Object)] });
+    await expectFreezerParity(8, 2);
+    const raised = await (await readOutcome(MANAGER, "correct-count-run")).json() as {
+      revision: string;
+    };
+    expect((await correctOutcome(MANAGER, "correct-count-run", {
+      eventId: "correct-count-reduce", previousRevision: raised.revision,
+      cases: 6, productionDate: "2026-08-28", reason: "Remove two cases from the recount",
+    })).status).toBe(201);
+    const preservedLots = await db.select().from(freezerSurplusLotsTable);
+    expect(preservedLots.map((lot) => lot.totalCases).sort((a, b) => a - b)).toEqual([3, 5]);
+    await expectFreezerParity(6, 3);
+    expect((await correctOutcome(MANAGER, "correct-count-run", {
+      ...requestBody, eventId: "correct-count-stale", cases: 4,
+    })).status).toBe(409);
+    const replayAfterNextCorrection = await correctOutcome(MANAGER, "correct-count-run", requestBody);
+    expect(replayAfterNextCorrection.status).toBe(200);
+    expect((await replayAfterNextCorrection.json() as { current: { cases: number } }).current.cases).toBe(6);
+  });
+
+  it("rejects a competing correction based on a stale revision", async () => {
+    await seedCompletedRun("competing-corrections-run");
+    expect((await confirmOutcome(MANAGER, "competing-corrections-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const saved = await (await readOutcome(MANAGER, "competing-corrections-run")).json() as {
+      revision: string;
+    };
+    const [left, right] = await Promise.all([
+      correctOutcome(MANAGER, "competing-corrections-run", {
+        eventId: "competing-correction-left", previousRevision: saved.revision,
+        cases: 6, productionDate: "2026-08-28", reason: "First corrected count",
+      }),
+      correctOutcome(MANAGER, "competing-corrections-run", {
+        eventId: "competing-correction-right", previousRevision: saved.revision,
+        cases: 7, productionDate: "2026-08-28", reason: "Second corrected count",
+      }),
+    ]);
+    expect([left.status, right.status].sort()).toEqual([201, 409]);
+    expect(await db.select().from(freezerSurplusDecisionCorrectionsTable)).toHaveLength(1);
+    const current = await (await readOutcome(MANAGER, "competing-corrections-run")).json() as {
+      current: { cases: number };
+    };
+    expect([6, 7]).toContain(current.current.cases);
+    await expectFreezerParity(current.current.cases, 2);
+  });
+
+  it("supports zero-to-positive and positive-to-zero without reusing the confirmation write", async () => {
+    await seedCompletedRun("zero-correction-run");
+    expect((await confirmOutcome(MANAGER, "zero-correction-run")).status).toBe(201);
+    const zero = await (await readOutcome(MANAGER, "zero-correction-run")).json() as {
+      revision: string; original: { cases: number };
+    };
+    expect(zero.original.cases).toBe(0);
+    expect((await correctOutcome(MANAGER, "zero-correction-run", {
+      eventId: "zero-to-positive", previousRevision: zero.revision, cases: 4,
+      productionDate: "2026-08-28", reason: "Found four cases from this run",
+    })).status).toBe(201);
+    const positive = await (await readOutcome(MANAGER, "zero-correction-run")).json() as {
+      revision: string; original: { cases: number }; corrections: Array<{ lotIds: string[] }>;
+    };
+    expect(positive.corrections[0]?.lotIds).toHaveLength(1);
+    const zeroing = await correctOutcome(MANAGER, "zero-correction-run", {
+      eventId: "positive-to-zero", previousRevision: positive.revision, cases: 0,
+      reason: "These cases belonged to another run",
+    });
+    expect(zeroing.status, await zeroing.clone().text()).toBe(201);
+    const final = await (await readOutcome(MANAGER, "zero-correction-run")).json() as {
+      original: { cases: number }; current: { cases: number; lotId: string | null }; corrections: unknown[];
+    };
+    expect(final).toMatchObject({ original: { cases: 0 }, current: { cases: 0, lotId: null }, corrections: [{}, {}] });
+    const stockLots = await db.select().from(freezerSurplusLotsTable);
+    expect(stockLots).toHaveLength(1);
+    expect(stockLots[0]).toMatchObject({ totalCases: 4, remainingCases: 0 });
+    await expectFreezerParity(0, 2);
+  });
+
+  it("allows an unused date change but rejects allocated stock reductions and date changes", async () => {
+    await seedCompletedRun("date-correction-run");
+    expect((await confirmOutcome(MANAGER, "date-correction-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const saved = await (await readOutcome(MANAGER, "date-correction-run")).json() as {
+      revision: string;
+    };
+    expect((await correctOutcome(MANAGER, "date-correction-run", {
+      eventId: "change-date-unused", previousRevision: saved.revision, cases: 5,
+      productionDate: "2026-08-29", reason: "Correct production date",
+    })).status).toBe(201);
+    const changed = await (await readOutcome(MANAGER, "date-correction-run")).json() as {
+      revision: string; current: { lotId: string };
+    };
+    await seedRun("allocated-correction-target", {}, "2026-08-29");
+    expect((await allocate(MANAGER, "allocated-correction-target", [
+      { lotId: changed.current.lotId, cases: 3 },
+    ])).status).toBe(200);
+    expect((await correctOutcome(MANAGER, "date-correction-run", {
+      eventId: "reject-allocated-reduction", previousRevision: changed.revision,
+      cases: 2, productionDate: "2026-08-29", reason: "Reduce beyond available cases",
+    })).status).toBe(409);
+    expect((await correctOutcome(MANAGER, "date-correction-run", {
+      eventId: "reject-allocated-date", previousRevision: changed.revision,
+      cases: 5, productionDate: "2026-08-30", reason: "Try to move allocated stock",
+    })).status).toBe(409);
+    await expectFreezerParity(2, 4);
+    expect((await readOutcome(SANDBOX_MANAGER, "date-correction-run")).status).toBe(404);
+  });
+
+  it("blocks date changes when a legacy lot's allocation history is unknown", async () => {
+    await seedCompletedRun("legacy-date-correction-run");
+    expect((await confirmOutcome(MANAGER, "legacy-date-correction-run", {
+      cases: 2, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    await db.update(freezerSurplusLotsTable).set({ dateCorrectionSafe: false });
+    const saved = await (await readOutcome(MANAGER, "legacy-date-correction-run")).json() as {
+      revision: string;
+    };
+    expect((await correctOutcome(MANAGER, "legacy-date-correction-run", {
+      eventId: "legacy-date-correction-event", previousRevision: saved.revision,
+      cases: 2, productionDate: "2026-08-29", reason: "Correct the recorded date",
+    })).status).toBe(409);
+    await expectFreezerParity(2, 1);
+  });
+
+  it("rolls back stock movement when correction evidence cannot be committed", async () => {
+    await seedCompletedRun("correction-rollback-run");
+    expect((await confirmOutcome(MANAGER, "correction-rollback-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const saved = await (await readOutcome(MANAGER, "correction-rollback-run")).json() as {
+      revision: string;
+    };
+    await db.execute(sql`
+      ALTER TABLE freezer_surplus_decision_corrections
+      ADD CONSTRAINT surplus_correction_test_reject_42 CHECK (cases <> 42)
+    `);
+    try {
+      expect((await correctOutcome(MANAGER, "correction-rollback-run", {
+        eventId: "correction-rollback-event", previousRevision: saved.revision,
+        cases: 42, productionDate: "2026-08-28", reason: "Test transaction rollback",
+      })).status).toBe(500);
+      expect(await db.select().from(freezerSurplusDecisionCorrectionsTable)).toHaveLength(0);
+      await expectFreezerParity(5, 1);
+    } finally {
+      await db.execute(sql`
+        ALTER TABLE freezer_surplus_decision_corrections
+        DROP CONSTRAINT surplus_correction_test_reject_42
+      `);
+    }
+  });
+
   it("requires authentication and preserves separate dated lots on reload", async () => {
     expect((await req(null, "GET", "/api/freezer-surplus")).status).toBe(401);
 
-    expect((await confirm(MANAGER)).status).toBe(201);
+    const concurrentQueryWarnings: string[] = [];
+    const onWarning = (warning: Error) => {
+      if (warning.message.includes("Calling client.query() when the client is already executing a query")) {
+        concurrentQueryWarnings.push(warning.message);
+      }
+    };
+    process.on("warning", onWarning);
+    let firstLotResponse: Awaited<ReturnType<typeof confirm>>;
+    try {
+      firstLotResponse = await confirm(MANAGER);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("warning", onWarning);
+    }
+    expect(concurrentQueryWarnings).toEqual([]);
+    expect(firstLotResponse.status).toBe(201);
     expect((await confirm(MANAGER, { productionDate: "2026-08-29", cases: 7 })).status).toBe(201);
     const loaded = await ledger();
     expect(loaded.lots).toHaveLength(2);
@@ -660,7 +1129,10 @@ describe("dated freezer surplus API", () => {
     const lotResponse = await confirm(MANAGER, { cases: 6 });
     const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
     const stockLots = await db.select().from(inventoryLotsTable);
-    const stockLot = stockLots.find((candidate) => candidate.scope === "live");
+    const [finishedItem] = await db.select().from(inventoryItemsTable)
+      .where(and(eq(inventoryItemsTable.scope, "live"), eq(inventoryItemsTable.key, "finished:acme:pepperoni")));
+    const stockLot = stockLots.find((candidate) =>
+      candidate.scope === "live" && candidate.itemId === finishedItem?.id);
     if (!stockLot) throw new Error("Expected the confirmed freezer inventory lot");
     await db
       .update(inventoryLotsTable)

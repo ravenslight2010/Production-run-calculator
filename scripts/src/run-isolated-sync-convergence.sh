@@ -228,6 +228,6 @@ if (( test_status == 0 )); then
 else
   printf 'sync-convergence status=failed elapsedMs=%s\n' "$test_elapsed_ms" >&2
   sed -E 's#postgres(ql)?://[^[:space:]]+#<database-url>#g' "$test_log" |
-    tail -n 50 >&2
+    tail -n 200 >&2
   exit "$test_status"
 fi

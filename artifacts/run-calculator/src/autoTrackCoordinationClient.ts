@@ -9,18 +9,71 @@ export const DOUGH_TIMER_CONTROL_ADOPT_EVENT = "run-calculator:dough-timer-contr
 export type DoughTimerControl = {
   runId: string; generation: string; pausedAt: number; resumeAt: number; updatedAt: number;
 };
+const DOUGH_CONTROLS_KEY = "run-calculator:dough-timer-controls";
+const DOUGH_OWNER_KEY = `${DOUGH_CONTROLS_KEY}:owner`;
+let doughControlOwner: string | undefined;
+let adoptedDoughControls: SyncPayload["doughTimerControls"] | undefined;
 
-export function publishDoughTimerControl(control: DoughTimerControl): void {
+/** Recovery projections belong to one authenticated scope, never the browser. */
+export function setDoughTimerControlOwner(owner: string | undefined): void {
+  if (doughControlOwner === owner) return;
+  doughControlOwner = owner;
+  adoptedDoughControls = undefined;
+  if (typeof window !== "undefined") window.dispatchEvent(
+    new CustomEvent(DOUGH_TIMER_CONTROL_ADOPT_EVENT, { detail: {} }),
+  );
+}
+
+export function readDoughTimerControlProjection(): SyncPayload["doughTimerControls"] {
+  if (adoptedDoughControls !== undefined) return adoptedDoughControls;
+  try {
+    if (!doughControlOwner || localStorage.getItem(DOUGH_OWNER_KEY) !== doughControlOwner) return undefined;
+    const value: unknown = JSON.parse(localStorage.getItem(DOUGH_CONTROLS_KEY) ?? "null");
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as SyncPayload["doughTimerControls"] : undefined;
+  } catch { return undefined; }
+}
+
+/** Canonical controls replace optimistic browser controls, including absence. */
+export function adoptDoughTimerControls(controls: SyncPayload["doughTimerControls"]): void {
   if (typeof window === "undefined") return;
-  const raw = localStorage.getItem("run-calculator:dough-timer-controls");
+  adoptedDoughControls = controls ?? {};
+  try {
+    localStorage.setItem(DOUGH_CONTROLS_KEY, JSON.stringify(controls ?? {}));
+    if (doughControlOwner) localStorage.setItem(DOUGH_OWNER_KEY, doughControlOwner);
+  } catch {
+    // Display adoption remains usable when browser recovery storage is unavailable.
+  }
+  window.dispatchEvent(new CustomEvent(DOUGH_TIMER_CONTROL_ADOPT_EVENT, { detail: controls ?? {} }));
+}
+
+export function publishDoughTimerControl(localControl: DoughTimerControl, serverClockOffsetMs = 0): boolean {
+  if (typeof window === "undefined") return false;
+  const control = { ...localControl,
+    pausedAt: localControl.pausedAt > 0 ? localControl.pausedAt + serverClockOffsetMs : 0,
+    resumeAt: localControl.resumeAt > 0 ? localControl.resumeAt + serverClockOffsetMs : 0,
+    updatedAt: localControl.updatedAt + serverClockOffsetMs,
+  };
+  // A mounted operational owner must first retain the command durably. Do not
+  // display an optimistic hold if delivery/recovery could not be recorded.
+  if (!window.dispatchEvent(new CustomEvent(DOUGH_TIMER_CONTROL_EVENT, {
+    detail: control, cancelable: true,
+  }))) return false;
   let controls: Record<string, Omit<DoughTimerControl, "runId">> = {};
-  try { controls = raw ? JSON.parse(raw) : {}; } catch {}
+  try {
+    const raw = localStorage.getItem("run-calculator:dough-timer-controls");
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      controls = parsed as typeof controls;
+    }
+  } catch {}
   controls[control.runId] = {
     generation: control.generation, pausedAt: control.pausedAt,
     resumeAt: control.resumeAt, updatedAt: control.updatedAt,
   };
-  localStorage.setItem("run-calculator:dough-timer-controls", JSON.stringify(controls));
-  window.dispatchEvent(new CustomEvent(DOUGH_TIMER_CONTROL_EVENT, { detail: control }));
+  try { localStorage.setItem("run-calculator:dough-timer-controls", JSON.stringify(controls)); } catch {}
+  try { if (doughControlOwner) localStorage.setItem(DOUGH_OWNER_KEY, doughControlOwner); } catch {}
+  return true;
 }
 
 export function publishAutoTrackCoordination(payload: Pick<SyncPayload, "autoTrackCoordination">): void {

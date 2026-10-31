@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  legacyFrontlineConsumption,
   computeAutoTrackElapsedMs,
   computeAutoTrackSchedule,
+  computeAppSlotInfo,
+  computeFrontlineSupplyFromStockLbs,
   applicatorStockFields,
   applicatorStockRegisterForChannel,
   capApplicatorStock,
@@ -19,6 +22,7 @@ import {
   rearmWallClockTimers,
   tickWallClock,
   type AutoTrackSchedule,
+  type Calc,
   type WallClockChannel,
   type WallClockBookkeeping,
 } from "@workspace/live-calc";
@@ -45,7 +49,13 @@ type Payload = {
     wallClockBookkeeping?: Record<string, Record<string, unknown>>;
     netOwnership?: Record<string, Record<string, { generation?: string; sequence?: number; updatedAt?: number }>>;
   };
-  doughTimerControls?: Record<string, { generation?: string; pausedAt?: number; resumeAt?: number; updatedAt?: number }>;
+  doughTimerControls?: Record<string, {
+    generation?: string;
+    pausedAt?: number;
+    resumeAt?: number;
+    updatedAt?: number;
+    controlRevision?: number;
+  }>;
 };
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
 const DEFAULT_OUTER_STAGE_MIN = 2.5;
@@ -84,10 +94,12 @@ function pausedPackagingDrain(
     pauseStopsTunnel,
     lastPauseStopsTunnel: true,
     runStatus: "paused",
-    preTunnelMin: number(values.preTunnelMin) > 0
+    pressOvenMin: typeof values.pressOvenMin === "number" ? values.pressOvenMin : undefined,
+    frontlineMin: typeof values.frontlineMin === "number" ? values.frontlineMin : undefined,
+    preTunnelMin: typeof values.preTunnelMin === "number"
       ? number(values.preTunnelMin)
       : DEFAULT_OUTER_STAGE_MIN,
-    postTunnelMin: number(values.postTunnelMin) > 0
+    postTunnelMin: typeof values.postTunnelMin === "number"
       ? number(values.postTunnelMin)
       : DEFAULT_OUTER_STAGE_MIN,
     freezerTime: number(values.freezerTime),
@@ -107,21 +119,93 @@ function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anc
   ];
 }
 
+function selectTrackingRun(
+  payload: Payload,
+  nowMs: number,
+  options: {
+    allowEndedDrain?: boolean;
+    allowPausedPackagingDrain?: boolean;
+    targetRunId?: string;
+  },
+): { run: Record<string, unknown>; index: number } | null {
+  const runs = payload.dayState?.runs ?? [];
+  const active: Array<{ run: Record<string, unknown>; index: number; startedAt: number }> = [];
+  const drains: Array<{ run: Record<string, unknown>; index: number; lifecycleAt: number }> = [];
+
+  runs.forEach((run, index) => {
+    if (typeof run.id !== "string" || number(run.startedAt) <= 0) return;
+    if (options.targetRunId !== undefined && run.id !== options.targetRunId) return;
+    const values = payload.runValues?.[run.id];
+    if (!values) return;
+    const endedAt = number(run.endedAt);
+    if (endedAt > 0) {
+      const freezerTime = number(values.freezerTime);
+      if (
+        options.allowEndedDrain === true
+        && freezerTime > 0
+        && nowMs < endedAt + freezerTime * 60_000
+      ) drains.push({ run, index, lifecycleAt: endedAt });
+      return;
+    }
+
+    const pausedAt = number(run.pausedAt);
+    if (pausedAt > 0) {
+      if (
+        options.allowPausedPackagingDrain === true
+        && pausedPackagingDrain(run, values, nowMs).active
+      ) drains.push({ run, index, lifecycleAt: pausedAt });
+      return;
+    }
+    active.push({ run, index, startedAt: number(run.startedAt) });
+  });
+
+  // The selected tab is device-local and is deliberately absent from canonical
+  // sync snapshots. A started run's server-issued lifecycle is the authority
+  // for background tracking; prefer the newest if legacy state has competing
+  // active rows, with run order as a deterministic tie-breaker.
+  const activeRun = active.sort((a, b) => b.startedAt - a.startedAt || b.index - a.index)[0];
+  if (activeRun) return { run: activeRun.run, index: activeRun.index };
+
+  // With no running lifecycle, continue only an eligible pause/end freezer
+  // drain. Filter by its own window before choosing the most recent one.
+  const drainingRun = drains.sort((a, b) => b.lifecycleAt - a.lifecycleAt || b.index - a.index)[0];
+  return drainingRun ? { run: drainingRun.run, index: drainingRun.index } : null;
+}
+
 function schedule(
   payload: Payload,
   nowMs: number,
-  options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean } = {},
-): { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null {
-  const result = computeServerCalc(payload as never, [], nowMs);
-  const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
-  if (!result || !run || typeof run.id !== "string") return null;
+  options: {
+    allowEndedDrain?: boolean;
+    allowPausedPackagingDrain?: boolean;
+    targetRunId?: string;
+  } = {},
+): {
+  schedule: AutoTrackSchedule;
+  values: Record<string, unknown>;
+  ppm: number;
+  run: Record<string, unknown>;
+  calc: Calc;
+} | null {
+  const selected = selectTrackingRun(payload, nowMs, options);
+  if (!selected) return null;
+  const run = selected.run;
+  const selectedPayload = {
+    ...payload,
+    dayState: { ...payload.dayState, currentIndex: selected.index },
+  };
+  const result = computeServerCalc(selectedPayload as never, [], nowMs);
+  if (!result || typeof run.id !== "string") return null;
   // Date rows are client-local (and can legitimately be tomorrow in UTC), so
   // eligibility is lifecycle based rather than server-date based. Conversely,
   // an abandoned old running register must never restart net claims.
   const startedAt = number(run.startedAt);
   const endedAt = number(run.endedAt);
   if (run.autoTrackDisabled === true) return null;
-  const values = payload.runValues?.[run.id];
+  const storedValues = payload.runValues?.[run.id];
+  const values = storedValues
+    ? { ...storedValues, ...legacyFrontlineConsumption(storedValues) }
+    : undefined;
   if (!values) return null;
   const endedDrainActive = options.allowEndedDrain === true
     && endedAt > 0
@@ -151,6 +235,8 @@ function schedule(
     }),
     values,
     ppm: result.calc.ppm,
+    run,
+    calc: result.calc,
   };
 }
 
@@ -163,7 +249,7 @@ export function buildNetSecondServerClaims(
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
   const built = schedule(payload, nowMs);
   if (!built) return [];
-  const { schedule: plan, values, ppm } = built;
+  const { schedule: plan, values, ppm, calc } = built;
   const baseUpdatedAt = number(payload.runValuesUpdatedAt?.[plan.runId]);
   const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
   return plan.entries.flatMap((entry) => {
@@ -172,11 +258,10 @@ export function buildNetSecondServerClaims(
       const onHand = number(values.sauceStockBarrels);
       const anchor = number(values.sauceStockAnchorNetSec);
       const correctionGeneration = Math.max(0, number(values.sauceStockCorrectionGeneration));
-      const calc = computeServerCalc(payload as never, [], nowMs)?.calc;
       const cadence = computeSauceStockStepSeconds(
         values.sauceOzPerPizza,
         ppm,
-        Number(calc?.sauceEffBarrel) || 0,
+        Number(calc.sauceEffBarrel) || 0,
       );
       const prior = coordination?.["sauce-stock"];
       const initialize = values.sauceStockInitialized !== true;
@@ -221,6 +306,10 @@ export function buildNetSecondServerClaims(
         onHand - cadence * computeApplicatorStockRateLbsPerSecond(values[ozField], ppm),
         capacity,
       );
+      const consumedField = register.startsWith("app")
+        ? `${register}StockConsumedLbs`
+        : null;
+      const consumed = consumedField ? number(values[consumedField]) : 0;
       const prior = coordination?.[entry.channel];
       return [{
         version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
@@ -235,6 +324,11 @@ export function buildNetSecondServerClaims(
           { field: fields.stock, from: onHand, to: nextOnHand },
           { field: fields.anchor, from: anchor, to: entry.dueAt },
           { field: fields.correctionGeneration, from: correctionGeneration, to: correctionGeneration },
+          ...(consumedField ? [{
+            field: consumedField as AutoTrackClaim["mutations"][number]["field"],
+            from: consumed,
+            to: consumed + Math.max(0, onHand - nextOnHand),
+          }] : []),
         ],
       } as AutoTrackClaim];
     }
@@ -244,6 +338,64 @@ export function buildNetSecondServerClaims(
     const correctionField = entry.channel === "sauce-barrel" ? "sauceBarrelCorrectionGeneration" : `${slot}BatchCorrectionGeneration`;
     const correctionGeneration = Math.max(0, number(values[correctionField]));
     const prefix = entry.channel === "sauce-barrel" ? "sauceBarrel" : `${slot}Batch`;
+    if (/^app[1-4]-batch$/.test(entry.channel)) {
+      const appSlot = slot as "app1" | "app2" | "app3" | "app4";
+      const info = computeAppSlotInfo({
+        type: String(values[`${appSlot}Type`] ?? ""),
+        recipe: values[`${appSlot}CheeseRecipe`] as Array<{ lbs: number }> | undefined,
+        batchLbs: number(values[`${appSlot}BatchLbs`]),
+        ozPerPizza: number(values[`${appSlot}OzPerPizza`]),
+        casesNeeded: number(values.casesNeeded),
+        pizzasPerCase: number(values.pizzasPerCase),
+        ppm,
+      });
+      const stockField = `${appSlot}StockLbs`;
+      const consumedField = `${appSlot}StockConsumedLbs`;
+      const stock = Math.max(0, number(values[stockField]));
+      const consumed = Math.max(0, number(values[consumedField]));
+      const capacity = Math.min(
+        computeApplicatorStockCapacityLbs(values, appSlot),
+        info.effectiveBatchLbs * 2,
+      );
+      const supply = computeFrontlineSupplyFromStockLbs({
+        demandLbs: info.required * info.effectiveBatchLbs,
+        consumedLbs: consumed,
+        onLineLbs: stock,
+        configuredEffectiveWeight: info.effectiveBatchLbs,
+      });
+      const producedLbs = Math.min(
+        info.effectiveBatchLbs,
+        (supply?.stillToMake ?? 0) * info.effectiveBatchLbs,
+      );
+      if (
+        !info.validForClaim
+        || values.applicatorStockInitialized !== true
+        || !supply?.stillToMake
+        || producedLbs <= 0
+        || capacity - stock + 0.0001 < producedLbs
+      ) return [];
+
+      const made = Math.max(0, number(values[madeField]));
+      const anchor = Math.max(0, number(values[anchorField]));
+      const mutations = buildNetMutations(prefix, made, made + 1, anchor, entry.dueAt, correctionGeneration);
+      mutations.push({
+        field: stockField as AutoTrackClaim["mutations"][number]["field"],
+        from: stock,
+        to: capApplicatorStock(stock + producedLbs, capacity),
+      });
+      const prior = coordination?.[entry.channel];
+      const cadence = Math.max(0, entry.dueAt - anchor);
+      return [{
+        version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
+        sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
+        eventId: eventIdNamespace
+          ? `srv:${entry.channel}:${eventIdNamespace}`
+          : `srv:${entry.channel}:${randomUUID()}`,
+        dueAt: entry.dueAt,
+        nextDueAt: entry.nextDueAt > entry.dueAt ? entry.nextDueAt : entry.dueAt + cadence,
+        baseUpdatedAt, correctionGeneration, mutations,
+      } as AutoTrackClaim];
+    }
     const mutations = buildNetMutations(prefix, Math.max(0, number(values[madeField])), Math.max(0, number(values[madeField])) + 1, Math.max(0, number(values[anchorField])), entry.dueAt, correctionGeneration);
     const cadence = Math.max(0, entry.dueAt - Math.max(0, number(values[anchorField])));
     const claimNextDueAt = entry.nextDueAt > entry.dueAt
@@ -268,20 +420,25 @@ export type ServerWallClockBookkeeping = WallClockBookkeeping & {
   lifecycleGeneration: string;
   serverSequences: Partial<Record<WallClockChannel, number>>;
   appliedDoughControlUpdatedAt?: number;
+  appliedPackagingCorrectionGeneration?: number;
+  appliedPackagingOverrideUntil?: number;
+  packagingHeld?: boolean;
 };
 export function buildWallClockServerClaims(
   raw: unknown,
   nowMs = Date.now(),
   eventIdNamespace?: string,
+  targetRunId?: string,
 ): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
   const built = schedule(payload, nowMs, {
     allowEndedDrain: true,
     allowPausedPackagingDrain: true,
+    targetRunId,
   });
-  const run = payload.dayState?.runs?.[payload.dayState?.currentIndex ?? 0];
+  const run = built?.run;
   if (!built || !run || number(run.startedAt) <= 0) return null;
-  const { schedule: plan, values } = built;
+  const { schedule: plan, values, calc } = built;
   const endedAt = number(run.endedAt);
   const drainActive = endedAt > 0
     && number(values.freezerTime) > 0
@@ -294,7 +451,6 @@ export function buildWallClockServerClaims(
       ? "paused"
       : "running";
   const old = payload.autoTrackServerState?.wallClockBookkeeping?.[plan.runId] ?? {};
-  const calc = computeServerCalc(payload as never, [], nowMs)!.calc;
   const timing = getAutoTrackTiming(calc.ppm, number(values.pizzasPerCase), calc.perTray, calc.perBatch, {
     spinSec: number(values.mixerLowSec) + number(values.mixerHighSec),
     hopperSec: number(values.hopperSec),
@@ -403,9 +559,29 @@ export function buildWallClockServerClaims(
   } else if (matchingControl && number(control?.pausedAt) === 0 && bookkeeping.doughPausedAtMs > 0) {
     bookkeeping = rearmWallClockTimers(bookkeeping, nowMs, timing);
   }
+  const progress = payload.packagingProgress?.[plan.runId];
+  const correctionGeneration = number(progress?.correctionGeneration);
+  const overrideUntil = number(progress?.manualOverrideUntil);
+  const caseSuppressed = overrideUntil > nowMs;
+  const correctionChanged = correctionGeneration > 0 && (
+    old.appliedPackagingCorrectionGeneration !== correctionGeneration
+    || old.appliedPackagingOverrideUntil !== overrideUntil
+  );
+  // A correction is the new physical baseline, not a gap to fill from expected
+  // lifetime output. Keep observing output during the hold without issuing
+  // rejected claims (which also prevented the other wall arms being persisted).
+  // On expiry or explicit Resume wait one full case period; never replay held
+  // time, even when the worker slept through the entire hold.
+  if (caseSuppressed || correctionChanged || old.packagingHeld === true) {
+    bookkeeping.lastExpectedCases = expectedCasesRaw;
+    bookkeeping.drainFreezer = Math.max(0, Math.floor(calc.casesInFreezer));
+    bookkeeping.caseNextDueMs = Math.max(nowMs, overrideUntil) + timing.caseMs;
+    bookkeeping.caseClaimRetry = false;
+    bookkeeping.formResetSkipped = true;
+  }
   const tick = tickWallClock({
     bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive,
-    packagingAutoTrackActive: true, caseSuppressed: false, doughSuppressed: false,
+    packagingAutoTrackActive: true, caseSuppressed, doughSuppressed: false,
     calc: { ppm: calc.ppm, perTray: calc.perTray, perBatch: calc.perBatch, pressDone: calc.pressDone, casesInFreezer: calc.casesInFreezer, traysNeeded: calc.traysNeeded, batchesNeeded: calc.batchesNeeded },
     v: { pizzasPerCase: number(values.pizzasPerCase), casesPerSkid: number(values.casesPerSkid), casesNeeded: number(values.casesNeeded), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
     form: { skidsCompleted: number(values.skidsCompleted), casesOnCurrentSkid: number(values.casesOnCurrentSkid), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
@@ -449,6 +625,9 @@ export function buildWallClockServerClaims(
       ...tick.next, lifecycleGeneration: plan.generation, serverSequences,
       appliedDoughControlUpdatedAt: timedResume
         ? number(control?.updatedAt) : number(old.appliedDoughControlUpdatedAt),
+      appliedPackagingCorrectionGeneration: correctionGeneration,
+      appliedPackagingOverrideUntil: overrideUntil,
+      packagingHeld: caseSuppressed,
     },
     claims,
   };

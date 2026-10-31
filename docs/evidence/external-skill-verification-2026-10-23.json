@@ -1,0 +1,120 @@
+{
+  "date": "2026-10-23T15:00:59.205126+00:00",
+  "environment": "isolated research; public source and repository metadata only",
+  "scope": "Research checks; no candidate scripts or model/browser tests executed",
+  "checks": {
+    "local_markdown_paths": {
+      "status": "PASS",
+      "checked": 24,
+      "missing": [],
+      "initialFailure": "The first pass checked its own verification output before that output was created; the generated output now exists and all paths were rechecked."
+    },
+    "retained_file_identities": {
+      "status": "PASS",
+      "files": 182,
+      "errors": []
+    },
+    "recommended_source_and_license_links": [
+      {
+        "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/LICENSE",
+        "status": "PASS",
+        "bytes": 10179
+      },
+      {
+        "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/NOTICE",
+        "status": "PASS",
+        "bytes": 828
+      },
+      {
+        "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/SKILL.md",
+        "status": "PASS",
+        "bytes": 21644
+      },
+      {
+        "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/LICENSE",
+        "status": "PASS",
+        "bytes": 1065
+      },
+      {
+        "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/SKILL.md",
+        "status": "PASS",
+        "bytes": 3231
+      },
+      {
+        "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/LICENSE",
+        "status": "PASS",
+        "bytes": 1068
+      },
+      {
+        "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/skills/accessibility/SKILL.md",
+        "status": "PASS",
+        "bytes": 14358
+      },
+      {
+        "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/LICENSE",
+        "status": "PASS",
+        "bytes": 20131
+      },
+      {
+        "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/SKILL.md",
+        "status": "PASS",
+        "bytes": 9895
+      }
+    ],
+    "catalog": {
+      "roots": [
+        {
+          "id": "agents",
+          "relativePath": ".agents/skills",
+          "classification": "editable",
+          "skillsFound": 30,
+          "missing": false
+        },
+        {
+          "id": "custom",
+          "relativePath": ".local/custom_skills",
+          "classification": "editable",
+          "skillsFound": 1,
+          "missing": false
+        },
+        {
+          "id": "platform",
+          "relativePath": ".local/skills",
+          "classification": "managed",
+          "skillsFound": 68,
+          "missing": false
+        },
+        {
+          "id": "secondary",
+          "relativePath": ".local/secondary_skills",
+          "classification": "managed",
+          "skillsFound": 48,
+          "missing": false
+        }
+      ],
+      "failures": 0,
+      "warnings": 33,
+      "documentedWarnings": 31,
+      "undocumentedWarnings": 2,
+      "managedWarningDrift": [
+        {
+          "kind": "excess_finding_count",
+          "path": ".local/skills/query-integration-data/SKILL.md",
+          "code": "line_limit_exceeded",
+          "baselineCount": 1,
+          "actualCount": 0,
+          "excessCount": 1,
+          "reason": "Platform-managed integration guidance exceeds the editable 500-line policy."
+        }
+      ]
+    },
+    "adoption_model_evaluations": {
+      "status": "NOT REACHED",
+      "reason": "Research-only objective; requires owner-selected adoption approval"
+    },
+    "runtime_checks": {
+      "status": "NOT APPLICABLE",
+      "reason": "No app/skill/runtime/configuration changes"
+    }
+  }
+}

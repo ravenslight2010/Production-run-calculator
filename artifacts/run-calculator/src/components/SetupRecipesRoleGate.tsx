@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { Lock } from "lucide-react";
+import { useFactoryDirectoryReady } from "./FactoryDirectoryBoundary";
 
 /**
  * Wraps the SetupRecipes tab editing surface with a supervisor role gate.
@@ -18,6 +19,7 @@ export function SetupRecipesRoleGate({
   isSupervisor: boolean;
   children: ReactNode;
 }) {
+  const ready = useFactoryDirectoryReady();
   return (
     <>
       {!isSupervisor && (
@@ -31,9 +33,10 @@ export function SetupRecipesRoleGate({
       )}
       <fieldset
         data-testid="setup-recipes-fieldset"
-        disabled={!isSupervisor}
+        disabled={!isSupervisor || !ready}
         className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}
       >
+        {!ready && <p>Recipe editing is unavailable until operational lists load online.</p>}
         {children}
       </fieldset>
     </>

@@ -157,6 +157,8 @@ type ApiEntry = {
   casesPerLayer: number;
   preTunnelMin?: number;
   postTunnelMin?: number;
+  pressOvenMin?: number;
+  frontlineMin?: number;
 };
 
 function entry(overrides: Partial<ApiEntry> = {}): ApiEntry {
@@ -204,6 +206,20 @@ describe("die-line-defaults auth boundary", () => {
 });
 
 describe("die-line-defaults upsert semantics", () => {
+  it("round-trips independently configurable splits including intentional zero", async () => {
+    const initial = entry({ pressOvenMin: 0, frontlineMin: 1.75 });
+    const created = await req(MANAGER, "POST", "/api/die-line-defaults", { entries: [initial] });
+    expect(created.status).toBe(200);
+    const body = (await created.json()) as { entries: ApiEntry[] };
+    expect(body.entries[0]).toMatchObject(initial);
+    const update = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [{ ...initial, pressOvenMin: 2.25, frontlineMin: 0, updatedAt: body.entries[0].updatedAt }],
+    });
+    expect(update.status).toBe(200);
+    const items = await listAs(OPERATOR);
+    expect(items[0]).toMatchObject({ pressOvenMin: 2.25, frontlineMin: 0 });
+  });
+
   it("upserts idempotently across spellings (case-folded id), last write wins", async () => {
     const created = await req(MANAGER, "POST", "/api/die-line-defaults", { entries: [entry()] });
     const createdBody = (await created.json()) as { entries: ApiEntry[] };

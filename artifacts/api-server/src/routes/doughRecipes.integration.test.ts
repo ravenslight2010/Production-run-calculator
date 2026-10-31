@@ -50,6 +50,7 @@ let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
+const serverErrors: Array<{ err: unknown; message: string }> = [];
 
 const MANAGER = "manager-doughtest-1";
 
@@ -97,7 +98,14 @@ beforeAll(async () => {
   app.use(express.json({ limit: "10mb" }));
   app.use((req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = {
+      info() {},
+      warn() {},
+      error(fields: { err?: unknown }, message: string) {
+        serverErrors.push({ err: fields.err, message });
+      },
+      debug() {},
+    };
     next();
   });
   app.use(observabilityMod.observabilityMiddleware);
@@ -126,6 +134,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  serverErrors.length = 0;
   clearUserValidityCache();
   await db.execute(
     sql`TRUNCATE ${doughRecipesTable}, ${sauceRecipesTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
@@ -143,8 +152,10 @@ async function postDoughRecipes(items: NamedRecipe[]): Promise<NamedRecipe[]> {
     headers: { "content-type": "application/json", ...AUTH() },
     body: JSON.stringify({ items }),
   });
-  expect(res.status).toBe(200);
-  return normalizeNamedRecipes(((await res.json()) as { items: unknown }).items);
+  const body = (await res.json()) as { items?: unknown; error?: string };
+  const lastError = serverErrors.at(-1);
+  expect(res.status, `${body.error ?? ""} ${lastError?.message ?? ""} ${String(lastError?.err ?? "")}`).toBe(200);
+  return normalizeNamedRecipes(body.items);
 }
 
 async function getDoughRecipes(): Promise<NamedRecipe[]> {
@@ -220,7 +231,7 @@ describe("dough and sauce recipe audit attribution", () => {
         doughballsPerTray: 30,
       }),
       createdFields: [
-        "name", "notes", "components", "enabled", "brand", "flavors",
+        "name", "notes", "components", "enabled", "isPremadeCrust", "brand", "flavors",
         "doughballWeightOz", "doughballsPerTray", "doughballVariants",
       ],
       privateValues: [
@@ -332,6 +343,63 @@ describe("dough and sauce recipe audit attribution", () => {
 });
 
 describe("POST /dough-recipes — customer preservation on re-import (Bug 1 regression)", () => {
+  it("keeps an explicit premade-crust classification when an older client omits the field", async () => {
+    await postDoughRecipes([
+      namedRecipe({
+        id: "explicit-premade-crust",
+        name: "A Name Is Not Classification",
+        components: [],
+        isPremadeCrust: true,
+      }),
+    ]);
+    const [stored] = await getDoughRecipes();
+    expect(stored.isPremadeCrust).toBe(true);
+
+    const { isPremadeCrust: _omitted, ...oldClientItem } = stored;
+    const response = await rawPostNamedRecipe("/api/dough-recipes", oldClientItem);
+    expect(response.status).toBe(200);
+    const [afterOldClientSave] = await getDoughRecipes();
+    expect(afterOldClientSave.isPremadeCrust).toBe(true);
+
+    await postDoughRecipes([{ ...afterOldClientSave, isPremadeCrust: false }]);
+    const [explicitlyCleared] = await getDoughRecipes();
+    expect(explicitlyCleared.isPremadeCrust).toBe(false);
+    const auditResponse = await fetch(`${baseUrl}/api/audit-logs`, { headers: AUTH() });
+    expect(auditResponse.status).toBe(200);
+    const auditPage = await auditResponse.json() as { logs: Array<{ resource: string; action: string; changes: { fieldNames?: string[] } }> };
+    expect(auditPage.logs.find((row) =>
+      row.resource === "dough_recipe:explicit-premade-crust" && row.action === "dough_recipe_updated",
+    )?.changes.fieldNames).toEqual(["isPremadeCrust"]);
+  });
+
+  it("requires manage-inventory to change the premade-crust classification", async () => {
+    const [created] = await postDoughRecipes([
+      namedRecipe({
+        id: "manager-only-premade-crust",
+        name: "Specialty Crust",
+        components: [],
+        isPremadeCrust: false,
+      }),
+    ]);
+    const operatorId = "operator-dough-classification";
+    await db.insert(usersTable).values([{
+      id: operatorId,
+      username: "operator-dough-classification",
+      passwordHash: "x",
+    }]);
+    await db.insert(userRolesTable).values([{ userId: operatorId, role: "operator" }]);
+
+    const response = await rawPostNamedRecipe(
+      "/api/dough-recipes",
+      { ...created, isPremadeCrust: true },
+      { authorization: `Bearer ${signLegacyTokenForTests(operatorId)}` },
+    );
+
+    expect(response.status).toBe(403);
+    expect((await getDoughRecipes()).find((recipe) => recipe.id === created.id)?.isPremadeCrust)
+      .toBe(false);
+  });
+
   it("customers survive when the re-import variants have no customers (replace mode)", async () => {
     // Step 1: Create a dough recipe with variants that carry customers.
     const initial: NamedRecipe = {

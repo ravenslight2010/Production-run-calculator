@@ -1,0 +1,887 @@
+{
+  "scope": "Recent wave updated since 2026-10-26; captured during planning, not all project history",
+  "records": [
+    {
+      "taskRef": "#3692",
+      "title": "Verify the approved full browser suite within its release time limit",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-29T04:02:26.362Z"
+    },
+    {
+      "taskRef": "#3696",
+      "title": "Run local release checks without requiring a matching published build",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-29T04:15:01.762Z"
+    },
+    {
+      "taskRef": "#3697",
+      "title": "Keep partial browser results when a verification runner restarts",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-29T04:16:07.925Z"
+    },
+    {
+      "taskRef": "#3699",
+      "title": "Clarify Retained Data and Errors",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T17:40:56.402Z"
+    },
+    {
+      "taskRef": "#3700",
+      "title": "Repair Sequential Packaging Runs",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T17:42:23.261Z"
+    },
+    {
+      "taskRef": "#3701",
+      "title": "Keep shared live station displays aligned with the active run",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:21:45.224Z"
+    },
+    {
+      "taskRef": "#3702",
+      "title": "Tell operators when automatic Packaging tracking cannot progress",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:08:10.591Z"
+    },
+    {
+      "taskRef": "#3703",
+      "title": "Find and fix production stalls that delay shared updates",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:15:55.074Z"
+    },
+    {
+      "taskRef": "#3704",
+      "title": "Compare old device-only history with shared history before removing it",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T17:51:12.185Z"
+    },
+    {
+      "taskRef": "#3705",
+      "title": "Make published version reports agree with release records",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:27:58.069Z"
+    },
+    {
+      "taskRef": "#3706",
+      "title": "Restore the development database health check without risking saved IDs",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:48:05.392Z"
+    },
+    {
+      "taskRef": "#3707",
+      "title": "Keep background production alerts tied to the active run",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:50:04.893Z"
+    },
+    {
+      "taskRef": "#3708",
+      "title": "Make manager sync health checks inspect the active run",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:33:36.825Z"
+    },
+    {
+      "taskRef": "#3709",
+      "title": "Repair break planning and timeline estimates",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:06:58.362Z"
+    },
+    {
+      "taskRef": "#3710",
+      "title": "Check saved-ID allocation in the newer import evaluation tables",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:49:40.655Z"
+    },
+    {
+      "taskRef": "#3711",
+      "title": "Review the existing recipe-data health errors before changing saved recipes",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:49:40.655Z"
+    },
+    {
+      "taskRef": "#3712",
+      "title": "Establish one evidence-backed sync and tracking baseline",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:06:26.785Z"
+    },
+    {
+      "taskRef": "#3713",
+      "title": "Confirm opted-in background alerts reach supported push services",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:50:13.565Z"
+    },
+    {
+      "taskRef": "#3714",
+      "title": "Prevent a page and service worker from showing the same alert twice",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T18:50:13.565Z"
+    },
+    {
+      "taskRef": "#3715",
+      "title": "Compare all research and plans with the current app",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:03:58.216Z"
+    },
+    {
+      "taskRef": "#3716",
+      "title": "Make manager sync health describe the active production run",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:08:03.523Z"
+    },
+    {
+      "taskRef": "#3717",
+      "title": "Find why live shared updates stall before changing server settings",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:50:33.171Z"
+    },
+    {
+      "taskRef": "#3718",
+      "title": "Restore the manager background-health warning endpoint",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:07:39.918Z"
+    },
+    {
+      "taskRef": "#3719",
+      "title": "Catch manager API handlers that are declared but never connected",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:19:23.508Z"
+    },
+    {
+      "taskRef": "#3720",
+      "title": "Prevent duplicate API handlers from hiding the active endpoint",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:27:18.360Z"
+    },
+    {
+      "taskRef": "#3721",
+      "title": "Ensure every mounted API write receives authorization review",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-26T21:27:18.360Z"
+    },
+    {
+      "taskRef": "#3722",
+      "title": "Make App-Wide Workflows Dependable",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T15:26:22.107Z"
+    },
+    {
+      "taskRef": "#3723",
+      "title": "Resume Browser Release Verification",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-27T22:22:28.208Z"
+    },
+    {
+      "taskRef": "#3724",
+      "title": "Check saved local results without rerunning tests",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-29T04:32:58.365Z"
+    },
+    {
+      "taskRef": "#3725",
+      "title": "Compare local check results across revisions",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-29T04:31:40.629Z"
+    },
+    {
+      "taskRef": "#3726",
+      "title": "Keep old browser attempt records from filling workspace storage",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-29T05:20:47.944Z"
+    },
+    {
+      "taskRef": "#3727",
+      "title": "Keep interrupted WebKit checks from losing progress",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-29T04:39:58.390Z"
+    },
+    {
+      "taskRef": "#3728",
+      "title": "Verify inventory permissions and recovery on the published version",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:41:18.500Z"
+    },
+    {
+      "taskRef": "#3729",
+      "title": "Decide whether customer workbooks may be used in Gold Lab",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T15:43:56.521Z"
+    },
+    {
+      "taskRef": "#3730",
+      "title": "Track Gold Lab deletion deadlines before cases expire",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:22:06.117Z"
+    },
+    {
+      "taskRef": "#3731",
+      "title": "Allow safe case cleanup after Gold Lab approval is withdrawn",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T16:25:45.792Z"
+    },
+    {
+      "taskRef": "#3732",
+      "title": "Keep Saved Copy Removal Reliable",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:16:28.267Z"
+    },
+    {
+      "taskRef": "#3733",
+      "title": "Confirm which Gold data copies remain after cleanup",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T16:26:00.851Z"
+    },
+    {
+      "taskRef": "#3734",
+      "title": "Protect cases if cleanup audit writing fails",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T16:26:00.851Z"
+    },
+    {
+      "taskRef": "#3735",
+      "title": "Review Staff Role Permissions",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:19:17.556Z"
+    },
+    {
+      "taskRef": "#3736",
+      "title": "Keep real-source Gold Lab capture blocked until approvals are verified",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T22:01:41.802Z"
+    },
+    {
+      "taskRef": "#3737",
+      "title": "Bring seven-day Gold Lab reminders into the daily manager workspace",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:47:31.116Z"
+    },
+    {
+      "taskRef": "#3738",
+      "title": "Keep Safari manager API requests working",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:07:15.072Z"
+    },
+    {
+      "taskRef": "#3739",
+      "title": "Confirm pending facility edits sync after reconnecting",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T21:00:04.801Z"
+    },
+    {
+      "taskRef": "#3740",
+      "title": "Apply approved reset approvals to the published supervisor role",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:03:00.500Z"
+    },
+    {
+      "taskRef": "#3741",
+      "title": "Decide whether role editors can revoke permissions they do not hold",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:08:44.242Z"
+    },
+    {
+      "taskRef": "#3742",
+      "title": "Repair three unrelated failures in the full client test suite",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:29:32.045Z"
+    },
+    {
+      "taskRef": "#3743",
+      "title": "Verify Gold cleanup rollback safety",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:36:18.904Z"
+    },
+    {
+      "taskRef": "#3744",
+      "title": "Create Safe Staging Test Environment",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T22:03:55.664Z"
+    },
+    {
+      "taskRef": "#3745",
+      "title": "Diagnose Agent Storage and Merge Stalls",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:41:43.456Z"
+    },
+    {
+      "taskRef": "#3746",
+      "title": "Keep nested Schedule pickers usable above the open window",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T21:04:40.638Z"
+    },
+    {
+      "taskRef": "#3747",
+      "title": "Prove reconnect cannot replace the server's first daily baseline",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:07:18.988Z"
+    },
+    {
+      "taskRef": "#3748",
+      "title": "Keep standard Gold Lab deletions auditable",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:53:51.151Z"
+    },
+    {
+      "taskRef": "#3749",
+      "title": "Give managers safe cleanup failure messages",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T21:02:18.479Z"
+    },
+    {
+      "taskRef": "#3750",
+      "title": "Help managers find urgent retention records faster",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:24:15.637Z"
+    },
+    {
+      "taskRef": "#3751",
+      "title": "Prevent missed reminders when retention pages are reordered",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T21:10:58.480Z"
+    },
+    {
+      "taskRef": "#3752",
+      "title": "Prevent pnpm Startup Recursion",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:19:33.084Z"
+    },
+    {
+      "taskRef": "#3753",
+      "title": "Help managers recognize Gold Lab deletions in audit history",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:08:05.257Z"
+    },
+    {
+      "taskRef": "#3754",
+      "title": "Keep Gold Lab deletions in downloaded audit reports",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T20:59:49.932Z"
+    },
+    {
+      "taskRef": "#3755",
+      "title": "Show unsynced facility edits to managers",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:00.601Z"
+    },
+    {
+      "taskRef": "#3756",
+      "title": "Keep one rejected facility edit from blocking others",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:10:46.036Z"
+    },
+    {
+      "taskRef": "#3757",
+      "title": "Record workspace storage evidence",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:11:39.205Z"
+    },
+    {
+      "taskRef": "#3758",
+      "title": "Keep cleanup records understandable when they cannot load",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:07:24.443Z"
+    },
+    {
+      "taskRef": "#3759",
+      "title": "Tell managers when deletion verification cannot be recorded",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:10:09.088Z"
+    },
+    {
+      "taskRef": "#3760",
+      "title": "Make sure saved Schedule entries survive a reload",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:21:29.867Z"
+    },
+    {
+      "taskRef": "#3761",
+      "title": "Prove Schedule works with only the permission it needs",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:10:04.654Z"
+    },
+    {
+      "taskRef": "#3762",
+      "title": "Keep reminder totals accurate when new cases arrive mid-page",
+      "state": "MERGED",
+      "reviewDepth": "metadata-reviewed; needs outcome reconciliation",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:21:43.818Z"
+    },
+    {
+      "taskRef": "#3763",
+      "title": "Tell managers when retention reminders cannot load",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T21:14:15.350Z"
+    },
+    {
+      "taskRef": "#3764",
+      "title": "Let managers see who changed role permissions",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:24:02.745Z"
+    },
+    {
+      "taskRef": "#3765",
+      "title": "Keep one role edit from erasing newer permission grants",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:24:06.797Z"
+    },
+    {
+      "taskRef": "#3766",
+      "title": "Explain why some role permissions cannot be changed",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:58.800Z"
+    },
+    {
+      "taskRef": "#3767",
+      "title": "Refresh open staff screens after permission changes",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:55.080Z"
+    },
+    {
+      "taskRef": "#3768",
+      "title": "Let managers review Gold Lab approvals in the app",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:45:19.924Z"
+    },
+    {
+      "taskRef": "#3769",
+      "title": "Keep revoked approvals from admitting concurrent imports",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:29:31.214Z"
+    },
+    {
+      "taskRef": "#3770",
+      "title": "Keep intentional run edits when a device reconnects",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:30.511Z"
+    },
+    {
+      "taskRef": "#3771",
+      "title": "Keep stale writes blocked when the server baseline cannot load",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:51.732Z"
+    },
+    {
+      "taskRef": "#3772",
+      "title": "Help managers recognize other audit actions",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:22.761Z"
+    },
+    {
+      "taskRef": "#3773",
+      "title": "Let managers filter audit history by event type",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:26.678Z"
+    },
+    {
+      "taskRef": "#3774",
+      "title": "Confirm manager requests work on a real iPad",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:18.950Z"
+    },
+    {
+      "taskRef": "#3775",
+      "title": "Keep expired Safari sessions from looking like connection failures",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:03.954Z"
+    },
+    {
+      "taskRef": "#3776",
+      "title": "Let managers retry waiting facility edits",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:14.754Z"
+    },
+    {
+      "taskRef": "#3777",
+      "title": "Show managers which facility edits are waiting",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:23:10.946Z"
+    },
+    {
+      "taskRef": "#3778",
+      "title": "Open the matching retention queue from each reminder",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:24:43.355Z"
+    },
+    {
+      "taskRef": "#3779",
+      "title": "Find a retention record by its case number",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:24:47.044Z"
+    },
+    {
+      "taskRef": "#3780",
+      "title": "Keep facility edits safe when two tabs save",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:19:27.188Z"
+    },
+    {
+      "taskRef": "#3781",
+      "title": "Recover facility edits after browser storage fills",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:19:27.188Z"
+    },
+    {
+      "taskRef": "#3782",
+      "title": "Keep production startup working when package downloads are unavailable",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:19:35.241Z"
+    },
+    {
+      "taskRef": "#3783",
+      "title": "Identify startup-tool problems without downloading anything",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:19:35.241Z"
+    },
+    {
+      "taskRef": "#3784",
+      "title": "Find Gold Lab approvals by reference or state",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:00:43.939Z"
+    },
+    {
+      "taskRef": "#3785",
+      "title": "Remind managers when Gold Lab approvals expire soon",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:00:50.266Z"
+    },
+    {
+      "taskRef": "#3786",
+      "title": "Keep approval changes atomic when audit recording fails",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:30:15.771Z"
+    },
+    {
+      "taskRef": "#3787",
+      "title": "Keep private documents out of approval metadata",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-30T23:30:15.771Z"
+    },
+    {
+      "taskRef": "#3788",
+      "title": "Let managers reach older Gold Lab cleanup cases",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:08:06.491Z"
+    },
+    {
+      "taskRef": "#3789",
+      "title": "Distinguish cleanup load failures from an empty inventory",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:07:51.365Z"
+    },
+    {
+      "taskRef": "#3790",
+      "title": "Keep retention reminders responsive as the register grows",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:22:23.582Z"
+    },
+    {
+      "taskRef": "#3791",
+      "title": "Find why scheduled checks are stalling on database access",
+      "state": "MERGED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "merged-deliverable; do not infer full verification",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:33:09.647Z"
+    },
+    {
+      "taskRef": "#3792",
+      "title": "Identify what causes scheduled-check connection stalls",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:50:46.574Z"
+    },
+    {
+      "taskRef": "#3793",
+      "title": "Reduce reminder-check contention without delaying alerts",
+      "state": "CANCELLED",
+      "reviewDepth": "plan-content-reviewed; not a completion certificate",
+      "disposition": "archived-suggestion; see consolidated plan mapping",
+      "owner": "3794 consolidated closure",
+      "updatedAt": "2026-10-31T00:50:39.875Z"
+    }
+  ]
+}

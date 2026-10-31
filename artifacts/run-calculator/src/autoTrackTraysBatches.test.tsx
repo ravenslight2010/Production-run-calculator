@@ -605,7 +605,7 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.traysOnLine).toBe(49);
 
     // Operator takes over: suppression armed for 1 minute (real-clock based).
-    result.current.autoSuppressUntilRef.current = Date.now() + 60 * 1000;
+    result.current.doughAutoSuppressUntilRef.current = Date.now() + 60 * 1000;
 
     // A tray tick fires during suppression -> no write, but bookkeeping advances.
     now = new Date(t0 + 36 * 1000);
@@ -615,7 +615,7 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.traysOnLine).toBe(49);
 
     // Suppression expires; the next tray tick decrements again.
-    result.current.autoSuppressUntilRef.current = Date.now() - 1;
+    result.current.doughAutoSuppressUntilRef.current = Date.now() - 1;
     now = new Date(t0 + 72 * 1000);
     elapsed += 36;
     v = makeV({ traysOnLine: values.traysOnLine, batchesReady: 0 });

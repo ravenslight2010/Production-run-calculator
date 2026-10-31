@@ -4,12 +4,17 @@ import {
   releaseBrowserBaseUrl,
   releaseBrowserWebServers,
 } from "./playwright.release-servers";
+import { webkitLaunchOptions } from "./e2e/webkit-runtime";
 
 const baseURL = releaseBrowserBaseUrl(
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
 );
 const realMobileBrowserWsEndpoint =
   process.env.PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT;
+const frontlineMatrix = process.env.FRONTLINE_BROWSER_MATRIX === "1";
+const baselineBrowserMatrix = process.env.SYNC_BASELINE_BROWSER_MATRIX === "1";
+const matrixWebkitOptions =
+  frontlineMatrix || baselineBrowserMatrix ? webkitLaunchOptions() : undefined;
 const chromiumExecutablePath =
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ??
   process.env.CHROMIUM_PATH ??
@@ -19,7 +24,12 @@ export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "sync-convergence.spec.ts",
-  timeout: 60_000,
+  timeout: baselineBrowserMatrix ? 120_000 : frontlineMatrix ? 150_000 : 60_000,
+  grep: baselineBrowserMatrix
+    ? /first daily baseline/i
+    : frontlineMatrix
+      ? /frontline supply recovers across runs/
+      : undefined,
   retries: 0,
   workers: 1,
   reporter: "list",
@@ -32,12 +42,40 @@ export default defineConfig({
       executablePath: chromiumExecutablePath,
     },
   },
-  projects: [
+  projects: baselineBrowserMatrix
+    ? [
+        { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
+        {
+          name: "phone-chromium",
+          use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } },
+        },
+        {
+          name: "desktop-webkit",
+          use: { ...devices["Desktop Safari"], launchOptions: matrixWebkitOptions ?? {} },
+        },
+        {
+          name: "phone-webkit",
+          use: { ...devices["iPhone 13"], launchOptions: matrixWebkitOptions ?? {} },
+        },
+      ]
+    : [
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
     {
       name: "phone-chromium",
       use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } },
     },
+    {
+      name: "tablet-portrait-chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } },
+    },
+    {
+      name: "tablet-landscape-chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 768 } },
+    },
+    ...(frontlineMatrix ? [
+      { name: "desktop-webkit", use: { ...devices["Desktop Safari"], launchOptions: matrixWebkitOptions ?? {} } },
+      { name: "phone-webkit", use: { ...devices["iPhone 13"], launchOptions: matrixWebkitOptions ?? {} } },
+    ] : []),
     ...(realMobileBrowserWsEndpoint
       ? [
           {

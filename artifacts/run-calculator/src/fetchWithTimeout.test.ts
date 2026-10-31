@@ -4,7 +4,7 @@
 // 2) every OTHER failure (network error, server error) is rethrown unchanged
 //    so existing caller error handling keeps working.
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { fetchWithTimeout, IMPORT_WAKE_HINT } from "./fetchWithTimeout";
+import { fetchAndConsumeWithTimeout, fetchWithTimeout, IMPORT_WAKE_HINT } from "./fetchWithTimeout";
 
 const realFetch = globalThis.fetch;
 
@@ -15,6 +15,34 @@ afterEach(() => {
 });
 
 describe("fetchWithTimeout", () => {
+  it("bounds a stalled body read even after successful response headers", async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn(async () => new Response("{}")) as unknown as typeof fetch;
+    let bodySignal: AbortSignal | undefined;
+    const request = fetchAndConsumeWithTimeout("/api/sync/today", {}, 10_000, async (_response, signal) => {
+      bodySignal = signal;
+      return new Promise<never>(() => {});
+    });
+    const rejection = expect(request).rejects.toThrow(IMPORT_WAKE_HINT);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejection;
+    expect(bodySignal?.aborted).toBe(true);
+  });
+
+  it("keeps caller cancellation attached during the body read", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("{}")) as unknown as typeof fetch;
+    const controller = new AbortController();
+    let bodyStarted!: () => void;
+    const started = new Promise<void>((resolve) => { bodyStarted = resolve; });
+    const request = fetchAndConsumeWithTimeout("/api/sync/today", { signal: controller.signal }, 10_000, async () => {
+      bodyStarted();
+      return new Promise<never>(() => {});
+    });
+    const rejection = expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await started;
+    controller.abort();
+    await rejection;
+  });
   it("passes through a successful response and attaches a timeout signal", async () => {
     const ok = new Response("{}", { status: 200 });
     const spy = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {

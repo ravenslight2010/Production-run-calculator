@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { FreezerSurplusLedger } from "@workspace/freezer-pull";
 import type { RunMeta } from "../types";
 
 const mocks = vi.hoisted(() => ({
   hasCapability: vi.fn(),
+  fetchConfirmations: vi.fn().mockResolvedValue([]),
+  fetchDecision: vi.fn(),
+  correctDecision: vi.fn(),
+  fetchAdjustments: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../useRole", () => ({
@@ -15,7 +19,10 @@ vi.mock("../useRole", () => ({
 
 vi.mock("../freezerSurplus", () => ({
   getFreezerSurplusRemainingMs: () => 60_000,
-  fetchFreezerSurplusAdjustments: vi.fn().mockResolvedValue([]),
+  fetchFreezerSurplusConfirmations: mocks.fetchConfirmations,
+  fetchFreezerSurplusDecision: mocks.fetchDecision,
+  correctFreezerSurplusDecision: mocks.correctDecision,
+  fetchFreezerSurplusAdjustments: mocks.fetchAdjustments,
 }));
 
 import { FreezerSurplusPanel } from "./FreezerSurplusPanel";
@@ -32,6 +39,19 @@ const pendingRun: RunMeta = {
   brand: "Northstar",
   flavor: "Pepperoni",
 };
+
+function receipt(run: RunMeta, cases: number, productionDate?: string) {
+  return {
+    runId: run.id,
+    runDate: "2026-09-07",
+    brand: run.brand,
+    flavor: run.flavor ?? "",
+    cases,
+    productionDate: cases > 0 ? productionDate ?? "2026-09-07" : null,
+    lotId: cases > 0 ? "lot-confirmed" : null,
+    createdAt: "2026-09-07T12:00:00.000Z",
+  };
+}
 
 const ledger: FreezerSurplusLedger = {
   lots: [
@@ -60,7 +80,8 @@ function renderPackaging(overrides: Partial<React.ComponentProps<typeof FreezerS
       freezerTimeMin={1}
       nowMs={1_000}
       getOriginalTarget={() => 12}
-      onConfirm={vi.fn().mockResolvedValue(undefined)}
+      onConfirm={vi.fn().mockImplementation((run: RunMeta, count: number, date?: string) =>
+        Promise.resolve(receipt(run, count, date)))}
       onAllocate={vi.fn().mockResolvedValue(undefined)}
       {...overrides}
     />,
@@ -87,6 +108,10 @@ function renderWarehouse(overrides: Partial<React.ComponentProps<typeof FreezerS
 afterEach(() => {
   cleanup();
   mocks.hasCapability.mockReset();
+  mocks.fetchConfirmations.mockReset().mockResolvedValue([]);
+  mocks.fetchDecision.mockReset();
+  mocks.correctDecision.mockReset();
+  mocks.fetchAdjustments.mockReset().mockResolvedValue([]);
 });
 
 describe("FreezerSurplusPanel capability gates", () => {
@@ -106,7 +131,8 @@ describe("FreezerSurplusPanel capability gates", () => {
 
   it("allows managers to record finished-case freezer surplus", async () => {
     mocks.hasCapability.mockReturnValue(true);
-    const onConfirm = vi.fn().mockResolvedValue(undefined);
+    const onConfirm = vi.fn().mockImplementation((run: RunMeta, count: number, date?: string) =>
+      Promise.resolve(receipt(run, count, date)));
     const user = userEvent.setup();
 
     renderPackaging({ onConfirm });
@@ -115,6 +141,139 @@ describe("FreezerSurplusPanel capability gates", () => {
     await user.click(screen.getByRole("button", { name: "Confirm surplus" }));
 
     expect(onConfirm).toHaveBeenCalledWith(completedRun, 3, expect.any(String));
+    await waitFor(() => expect(screen.queryByTestId("freezer-surplus-confirm")).toBeNull());
+  });
+
+  it("distinguishes blank from an explicit zero and offers the no-extra-cases shortcut", async () => {
+    mocks.hasCapability.mockReturnValue(true);
+    const onConfirm = vi.fn().mockImplementation((run: RunMeta, count: number, date?: string) =>
+      Promise.resolve(receipt(run, count, date)));
+    const user = userEvent.setup();
+    renderPackaging({ onConfirm });
+
+    await user.click(screen.getByRole("button", { name: "Confirm surplus" }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toMatch(/whole number from 0/i);
+
+    await user.type(screen.getByRole("spinbutton", { name: "Excess finished cases" }), "0");
+    await user.click(screen.getByRole("button", { name: "Confirm surplus" }));
+    expect(onConfirm).toHaveBeenCalledWith(completedRun, 0, undefined);
+    expect(screen.queryByTestId("freezer-surplus-confirm")).toBeNull();
+
+    cleanup();
+    renderPackaging({ onConfirm });
+    await user.click(screen.getByRole("button", { name: "No extra cases" }));
+    expect(onConfirm).toHaveBeenLastCalledWith(completedRun, 0, undefined);
+    expect(screen.queryByTestId("freezer-surplus-confirm")).toBeNull();
+  });
+
+  it("restores server-confirmed dismissal and keeps a failed draft available", async () => {
+    mocks.hasCapability.mockReturnValue(true);
+    const user = userEvent.setup();
+    const saved = receipt(completedRun, 0);
+    const { rerender } = renderPackaging({
+      confirmations: [saved],
+      onConfirm: vi.fn(),
+    });
+    expect(screen.queryByTestId("freezer-surplus-confirm")).toBeNull();
+
+    rerender(
+      <FreezerSurplusPanel
+        mode="packaging"
+        ledger={ledger}
+        loaded
+        busy={false}
+        error={null}
+        completedRun={completedRun}
+        freezerTimeMin={1}
+        nowMs={1_000}
+        getOriginalTarget={() => 12}
+        onConfirm={vi.fn().mockRejectedValue(new Error("Save failed; retry this run."))}
+        onAllocate={vi.fn()}
+      />,
+    );
+    await user.type(screen.getByRole("spinbutton", { name: "Excess finished cases" }), "7");
+    const dateInput = screen.getByLabelText("Freezer lot production date");
+    await user.clear(dateInput);
+    await user.type(dateInput, "2026-09-08");
+    await user.click(screen.getByRole("button", { name: "Confirm surplus" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Save failed; retry this run.");
+    expect((screen.getByRole("spinbutton", { name: "Excess finished cases" }) as HTMLInputElement).value)
+      .toBe("7");
+    expect((dateInput as HTMLInputElement).value).toBe("2026-09-08");
+  });
+
+  it("does not let a delayed result for one run dismiss a different run", async () => {
+    mocks.hasCapability.mockReturnValue(true);
+    let finishSave!: (value: ReturnType<typeof receipt>) => void;
+    const onConfirm = vi.fn(() => new Promise<ReturnType<typeof receipt>>((resolve) => {
+      finishSave = resolve;
+    }));
+    const user = userEvent.setup();
+    const { rerender } = renderPackaging({ onConfirm });
+    await user.type(screen.getByRole("spinbutton", { name: "Excess finished cases" }), "4");
+    await user.click(screen.getByRole("button", { name: "Confirm surplus" }));
+
+    const nextRun: RunMeta = { ...completedRun, id: "run-2" };
+    rerender(
+      <FreezerSurplusPanel
+        mode="packaging"
+        ledger={ledger}
+        loaded
+        busy={false}
+        error={null}
+        completedRun={nextRun}
+        freezerTimeMin={1}
+        nowMs={1_000}
+        getOriginalTarget={() => 12}
+        onConfirm={onConfirm}
+        onAllocate={vi.fn()}
+      />,
+    );
+    finishSave(receipt(completedRun, 4));
+    await Promise.resolve();
+    expect(screen.getByTestId("freezer-surplus-confirm")).toBeTruthy();
+    expect(onConfirm).toHaveBeenCalledWith(completedRun, 4, expect.any(String));
+  });
+
+  it("retains a draft when an acknowledgment is malformed", async () => {
+    mocks.hasCapability.mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPackaging({ onConfirm: vi.fn().mockResolvedValue(undefined) });
+    await user.type(screen.getByRole("spinbutton", { name: "Excess finished cases" }), "6");
+    await user.click(screen.getByRole("button", { name: "Confirm surplus" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/response did not match/i);
+    expect((screen.getByRole("spinbutton", { name: "Excess finished cases" }) as HTMLInputElement).value)
+      .toBe("6");
+  });
+
+  it("blocks busy and duplicate submissions and removes actions after access is revoked", async () => {
+    mocks.hasCapability.mockReturnValue(true);
+    const user = userEvent.setup();
+    const onConfirm = vi.fn(() => new Promise<void>(() => {}));
+    const props: React.ComponentProps<typeof FreezerSurplusPanel> = {
+      mode: "packaging",
+      ledger,
+      loaded: true,
+      busy: true,
+      error: null,
+      completedRun,
+      freezerTimeMin: 1,
+      nowMs: 1_000,
+      getOriginalTarget: () => 12,
+      onConfirm,
+      onAllocate: vi.fn(),
+    };
+    const { rerender } = render(<FreezerSurplusPanel {...props} />);
+    await user.click(screen.getByRole("button", { name: "No extra cases" }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    rerender(<FreezerSurplusPanel {...props} busy={false} />);
+    await user.dblClick(screen.getByRole("button", { name: "No extra cases" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    mocks.hasCapability.mockReturnValue(false);
+    rerender(<FreezerSurplusPanel {...props} busy={false} />);
+    expect(screen.queryByRole("button", { name: "No extra cases" })).toBeNull();
+    expect(screen.getByTestId("freezer-surplus-record-read-only")).toBeTruthy();
   });
 
   it("does not expose pull controls without manage-inventory", () => {
@@ -180,5 +339,56 @@ describe("FreezerSurplusPanel capability gates", () => {
     });
     expect(await screen.findByText(/damage · 2 cases/)).toBeTruthy();
     expect(screen.getByText(/manager-1/)).toBeTruthy();
+  });
+
+  it("lets inventory managers review and submit a reasoned surplus correction", async () => {
+    mocks.hasCapability.mockReturnValue(true);
+    const initial = receipt(pendingRun, 2, "2026-09-07");
+    const corrected = receipt(pendingRun, 3, "2026-09-07");
+    mocks.fetchConfirmations.mockResolvedValue([initial]);
+    mocks.fetchDecision.mockResolvedValue({
+      original: initial,
+      current: initial,
+      revision: "revision-original",
+      corrections: [],
+    });
+    mocks.correctDecision.mockResolvedValue({
+      original: initial,
+      current: corrected,
+      revision: "correction-event",
+      corrections: [{
+        eventId: "correction-event",
+        previousRevision: "revision-original",
+        cases: 3,
+        productionDate: "2026-09-07",
+        lotId: "lot-corrected",
+        reason: "Recounted the pallet",
+        actorId: "manager-1",
+        createdAt: "2026-09-07T12:00:00.000Z",
+      }],
+    });
+    const user = userEvent.setup();
+    renderWarehouse();
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Saved surplus decision to correct" }),
+      "run-2",
+    );
+    await screen.findByText(/Original: 2 cases/);
+    await user.clear(screen.getByRole("spinbutton", { name: "Corrected cases" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Corrected cases" }), "3");
+    await user.type(screen.getByPlaceholderText("Explain the correction"), "Recounted the pallet");
+    await user.click(screen.getByRole("button", { name: "Save correction" }));
+
+    await waitFor(() => expect(mocks.correctDecision).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-2",
+      previousRevision: "revision-original",
+      cases: 3,
+      productionDate: "2026-09-07",
+      reason: "Recounted the pallet",
+      eventId: expect.any(String),
+    })));
+    await screen.findByText(/Original: 2 cases.*Current: 3 cases/);
+    expect(screen.getByText(/Recounted the pallet/)).toBeTruthy();
   });
 });

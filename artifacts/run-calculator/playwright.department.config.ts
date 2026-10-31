@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { releaseBrowserWebServers } from "./playwright.release-servers";
 
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ??
@@ -11,6 +12,7 @@ const baseURL =
  * each test creates a unique account and local run fixture.
  */
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "department-workflow-navigation.spec.ts",
   timeout: 60_000,

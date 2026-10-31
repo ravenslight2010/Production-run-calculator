@@ -1752,10 +1752,13 @@ test("workflow contracts publish reports on failure without changing triggers or
     release,
     /TEST_RESULTS_EXPECT_FULL_RELEASE: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.run_full \}\}/u,
   );
-  assert.match(
-    release,
-    /pattern: automated-test-results-release-\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.run_full && '\*' \|\| 'standard' \}\}-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u,
-  );
+  for (const producer of ["standard", "full"]) {
+    const artifactName = `automated-test-results-release-${producer}-\\$\\{\\{ github\\.run_id \\}\\}-\\$\\{\\{ github\\.run_attempt \\}\\}`;
+    assert.match(release, new RegExp(
+      `name: ${artifactName}\\n\\s+path: test-evidence/reports/${artifactName}\\n\\s+digest-mismatch: error`, "u",
+    ), "single and multiple report downloads must retain independently named producer directories");
+  }
+  assert.match(release, /id: download-full-release-test-report\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.run_full \}\}/u);
   assert.match(
     release,
     /name: Summarize missing merged test report\n\s+if: \$\{\{ always\(\) && \(steps\.download-release-test-reports\.outcome != 'success' \|\| steps\.merge-release-test-report\.outcome != 'success'\) \}\}\n\s+env:\n\s+TEST_RESULTS_DOWNLOAD_OUTCOME:/u,

@@ -154,8 +154,10 @@ background-worker warnings remain warnings and do not fail core readiness.
 ### Automatic capacity report
 
 The offline report generator summarizes allowlisted `database_capacity_sample`
-JSONL records and a small Replit-metrics JSON file. It performs no database
-queries or writes and does not call a Replit metrics API. Copy
+JSONL records, including bounded PostgreSQL active/lock-wait counts when present,
+and a small Replit-metrics JSON file. Older samples without wait counts remain
+unknown for that signal. It performs no database queries or writes and does not
+call a Replit metrics API. Copy
 [`sse-capacity-platform-metrics.template.json`](evidence/sse-capacity-platform-metrics.template.json),
 set both files to the same representative monitoring window, and supply:
 
@@ -192,6 +194,108 @@ sanitization status. Do not put raw or mixed application logs into the retained
 evidence directory.
 
 ## Release commands
+
+### Local-only evidence
+
+Use `pnpm run release:check:local` without a matching published build, or add
+`-- --full` for the local full check set. This explicitly opts into local
+evidence, not publishing or release approval. Standard/full commands remain
+strict: missing required published identity still blocks before their gates.
+
+Local mode reuses the exact check commands, browser case identities, serial
+browser stages, disposable-database fences, and full-browser 80-minute warning /
+90-minute timeout. It omits production source-library reconciliation (including
+import/preflight/fixture gates) and the production signing-key preflight.
+Published readiness is not assessed. Other missing prerequisites fail or block
+the affected checks explicitly; independent checks can continue.
+
+Reports live at `.local/release-check/standard/local-check-report.md` or
+`.local/release-check/full/local-check-report.md`. They bind results to both
+source and verification fingerprints and the combined assessed revision.
+Local results are `PASS`, `FAIL`, or `INCOMPLETE`; production decision,
+published readiness, and production reconciliation are always **NOT ASSESSED**.
+Changing source or verification inputs during a run invalidates completion.
+No local result can satisfy published readiness/reconciliation, produce
+production GO, or pass the retained-release verifier.
+
+To check an existing report against the current checkout **without rerunning
+tests**, use:
+
+```sh
+pnpm run release:verify:local
+pnpm run release:verify:local -- --full
+# An earlier attempt in a private child directory:
+pnpm run release:verify:local -- --evidence-dir .local/release-check/my-attempt
+```
+
+The verifier reads only `local-check-report.md` from the selected local
+directory (the same defaults and `RELEASE_EVIDENCE_DIR` override as above).
+It checks local-only scope, both current fingerprints and the combined revision,
+the exact ordered standard/full check identities, permitted statuses, and
+completeness. Exit 0 requires a complete local PASS; stale, malformed, mismatched,
+failed, and incomplete reports exit nonzero. Unsafe paths, symlinked directories
+or files, non-regular files, invalid UTF-8, and reports larger than 256 KiB
+are rejected. It does not create directories, rewrite reports, read raw logs,
+resume checks, contact production, or run browser suites.
+
+This is a metadata-consistency check, not a signature or proof against someone
+rewriting the entire report. A successful read still means production decision,
+published readiness, and production reconciliation are **NOT ASSESSED**.
+It cannot certify a release or issue production GO. Published verification
+continues to reject local reports. Only `--full` and `--evidence-dir` are
+supported consumer options; runner fixture overrides are rejected.
+
+`--evidence-dir` (or `RELEASE_EVIDENCE_DIR`) must select a child of
+`.local/release-check`; select a new directory to preserve earlier attempts.
+Local mode does not support resume, retained-release verification, published
+evidence preparation, deployment/source-library arguments, or TypeScript
+promotion. Raw child output is not streamed to the console. Logs, traces, and
+payloads stay in the owner-only directory with private new-file permissions;
+do not attach them as sanitized release proof.
+
+This tooling does not close or waive the failed certification in
+`docs/evidence/full-browser-runtime-certification-2026-10-24.md`.
+
+#### Compare two saved local reports
+
+From the workspace root, use the pinned runner:
+
+```sh
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run compare:local-release -- ../.local/release-check/before/local-check-report.md ../.local/release-check/after/local-check-report.md
+```
+
+The command reads exactly two reports and prints a sanitized comparison; it does
+not run checks, inspect current source, write evidence, retry, or access production.
+Save attempts in separate `--evidence-dir` directories before comparing them;
+the default report path is overwritten by a later run. Paths in the example are
+relative to the package directory (`scripts`), hence the `../` prefixes.
+Absolute report paths also work.
+
+Exact, case-sensitive check identities form the union of both reports. With matching
+verification fingerprints and completed attempts, PASS to FAIL is **newly failing**,
+FAIL to PASS is **recovered**, and identical PASS/FAIL statuses are **unchanged**.
+Changed source fingerprints are allowed and both source and verification fingerprints
+are displayed for both inputs. Changed verification inputs make shared checks
+**not comparable**: a source change can also change verification inputs, since the
+verification fingerprint includes implementation files as well as tests/policies.
+This intentionally prevents attributing apparent improvements to code alone.
+
+Standard/full differences are explicitly flagged; only shared checks can be compared.
+Added/removed checks, missing results (`NOT REACHED`), blocked/infrastructure statuses,
+and any pair involving an INCOMPLETE attempt are **not comparable**, never recovered.
+An incomplete attempt conservatively prevents comparison even of its recorded checks.
+The comparison operates at the saved report's check-label granularity; it does not
+invent individual browser case results absent from that report.
+
+Inputs must match the current sanitized local report contract exactly, including
+consistent fingerprints, authority fields, unique identities and overall result.
+Unsupported/invalid reports, final-file symlinks, non-regular files, invalid UTF-8,
+files over 1 MiB, and reports over 2000 checks fail with a generic error, without
+echoing paths or contents. Exit 0 means the comparison succeeded, **not** that checks
+passed; exit 1 means input/usage failure. Output omits raw logs, payloads and paths.
+Reports are not signed: structural validation is not proof of authenticity.
+This is optional local analysis only and cannot issue production GO, satisfy published
+readiness/reconciliation, or change certification outcomes.
 
 ```bash
 pnpm run release:check
@@ -272,8 +376,14 @@ wall-clock duration, and a sorted per-file duration table. The report is
 generated from Playwright's completed test results; a `GO` report requires
 every case declared by the
 [`full-browser-case-contract.mts`](../scripts/src/full-browser-case-contract.mts)
-contract to be enumerated and completed. The main config remains serial with
-`workers: 1`, with no retries or reduced test-match coverage. The release report
+contract to be enumerated and completed. The owner-approved
+[216-case inventory](./full-browser-inventory.md) checks exact file/title
+identities and the sole `chromium` project before runtime evidence is accepted;
+a same-count substitution is not valid coverage. Dedicated harnesses stay in
+their documented lanes, and Node/Vitest helper tests are not browser specs.
+The main config remains serial with `workers: 1`, no retries, and the existing
+90-minute hard limit (80-minute warning). A successful collection is not a
+runtime pass or a release certificate. The release report
 also records total wall-clock time and per-stage wall-clock durations so the
 scheduler's speedup can be compared with the existing per-gate timings.
 

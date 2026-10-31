@@ -37,10 +37,10 @@ export function isolatePendingRunPackagingProgress(
       && Number(values.app4BatchAnchorNetSec) === 0
       && Number(values.app4BatchCorrectionGeneration) === 0
       && values.applicatorStockInitialized !== true
-      && Number(values.app1StockLbs) === 0 && Number(values.app1StockAnchorNetSec) === 0 && Number(values.app1StockCorrectionGeneration) === 0
-      && Number(values.app2StockLbs) === 0 && Number(values.app2StockAnchorNetSec) === 0 && Number(values.app2StockCorrectionGeneration) === 0
-      && Number(values.app3StockLbs) === 0 && Number(values.app3StockAnchorNetSec) === 0 && Number(values.app3StockCorrectionGeneration) === 0
-      && Number(values.app4StockLbs) === 0 && Number(values.app4StockAnchorNetSec) === 0 && Number(values.app4StockCorrectionGeneration) === 0
+       && Number(values.app1StockLbs) === 0 && Number(values.app1StockAnchorNetSec) === 0 && Number(values.app1StockCorrectionGeneration) === 0 && Number(values.app1StockConsumedLbs) === 0
+       && Number(values.app2StockLbs) === 0 && Number(values.app2StockAnchorNetSec) === 0 && Number(values.app2StockCorrectionGeneration) === 0 && Number(values.app2StockConsumedLbs) === 0
+       && Number(values.app3StockLbs) === 0 && Number(values.app3StockAnchorNetSec) === 0 && Number(values.app3StockCorrectionGeneration) === 0 && Number(values.app3StockConsumedLbs) === 0
+       && Number(values.app4StockLbs) === 0 && Number(values.app4StockAnchorNetSec) === 0 && Number(values.app4StockCorrectionGeneration) === 0 && Number(values.app4StockConsumedLbs) === 0
       && Number(values.pep1StockLbs) === 0 && Number(values.pep1StockAnchorNetSec) === 0 && Number(values.pep1StockCorrectionGeneration) === 0
       && Number(values.pep1bStockLbs) === 0 && Number(values.pep1bStockAnchorNetSec) === 0 && Number(values.pep1bStockCorrectionGeneration) === 0
       && Number(values.pep2StockLbs) === 0 && Number(values.pep2StockAnchorNetSec) === 0 && Number(values.pep2StockCorrectionGeneration) === 0
@@ -67,24 +67,28 @@ export function isolatePendingRunPackagingProgress(
     app1StockLbs: 0,
     app1StockAnchorNetSec: 0,
     app1StockCorrectionGeneration: 0,
+    app1StockConsumedLbs: 0,
     app2BatchesMade: 0,
     app2BatchAnchorNetSec: 0,
     app2BatchCorrectionGeneration: 0,
     app2StockLbs: 0,
     app2StockAnchorNetSec: 0,
     app2StockCorrectionGeneration: 0,
+    app2StockConsumedLbs: 0,
     app3BatchesMade: 0,
     app3BatchAnchorNetSec: 0,
     app3BatchCorrectionGeneration: 0,
     app3StockLbs: 0,
     app3StockAnchorNetSec: 0,
     app3StockCorrectionGeneration: 0,
+    app3StockConsumedLbs: 0,
     app4BatchesMade: 0,
     app4BatchAnchorNetSec: 0,
     app4BatchCorrectionGeneration: 0,
     app4StockLbs: 0,
     app4StockAnchorNetSec: 0,
     app4StockCorrectionGeneration: 0,
+    app4StockConsumedLbs: 0,
     applicatorStockInitialized: false,
     pep1StockLbs: 0,
     pep1StockAnchorNetSec: 0,

@@ -1,4 +1,4 @@
-import { pgTable, text, real, jsonb, timestamp, index, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, real, jsonb, timestamp, index, integer, serial } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 
 // A persisted, structured record of a quality check a manager reviewed and
@@ -19,7 +19,7 @@ import { usersTable } from "./users";
 export const qualityChecksTable = pgTable(
   "quality_checks",
   {
-    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    id: serial("id").primaryKey(),
     scope: text("scope").notNull().default("live"),
     productType: text("product_type").notNull(),
     status: text("status").notNull(),

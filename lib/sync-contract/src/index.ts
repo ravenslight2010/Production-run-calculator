@@ -1,4 +1,5 @@
 export const SYNC_SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
+export { isOperationalControl, type OperationalControl } from "./operationalControl";
 
 export const SYNC_DELTA_MAP_SECTIONS = [
   "runValues",
@@ -12,10 +13,10 @@ export const MANUAL_SECTION_FIELDS = {
   dough: ["traysOnLine", "batchesReady"],
   sauce: ["sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration"],
   "sauce-stock": ["sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration"],
-  app1: ["app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration", "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration"],
-  app2: ["app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration", "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration"],
-  app3: ["app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration", "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration"],
-  app4: ["app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration", "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration"],
+  app1: ["app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration", "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration", "app1StockConsumedLbs"],
+  app2: ["app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration", "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration", "app2StockConsumedLbs"],
+  app3: ["app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration", "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration", "app3StockConsumedLbs"],
+  app4: ["app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration", "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration", "app4StockConsumedLbs"],
   pep1: ["pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration", "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration"],
   pep2: ["pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration", "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration"],
 } as const;
@@ -57,6 +58,25 @@ export function isManualSection(value: unknown): value is ManualSection {
 export function isManualSectionField(value: unknown): value is ManualSectionField {
   return typeof value === "string" && MANUAL_SECTION_FIELD_SET.has(value);
 }
+
+/** Snapshot transport carries these facts but can never command them. */
+export const COMMAND_OWNED_RUN_FIELDS = [
+  "startedAt", "pausedAt", "pausedStoppageId", "endedAt", "stoppages", "autoTrackDisabled",
+] as const;
+
+export const COMMAND_OWNED_VALUE_FIELDS: readonly string[] = [
+  ...Object.values(MANUAL_SECTION_FIELDS).flat(),
+  "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration",
+  "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration", "sauceStockInitialized",
+  "applicatorStockInitialized",
+  ...[1, 2, 3, 4].flatMap((slot) => [
+    `app${slot}BatchAnchorNetSec`, `app${slot}BatchCorrectionGeneration`,
+    `app${slot}StockAnchorNetSec`, `app${slot}StockCorrectionGeneration`, `app${slot}StockConsumedLbs`,
+  ]),
+  ...["pep1", "pep1b", "pep2", "pep2b"].flatMap((slot) => [
+    `${slot}StockAnchorNetSec`, `${slot}StockCorrectionGeneration`,
+  ]),
+];
 
 export function manualSectionKey(runId: string, section: ManualSection): string {
   return `${runId}:${section}`;

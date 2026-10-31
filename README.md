@@ -139,8 +139,15 @@ validation workflows and post-merge setup:
 
 ```bash
 bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run test
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run test:agent-memory-infrastructure
 bash scripts/src/run-release-node.sh pnpm run typecheck
 ```
+
+The scripts test suite includes a guard for concrete private hosts and
+deployable image references in tracked `.agents/memory` notes. It omits
+`.agents/memory/codex-fixes.md`; findings show only the note path, line, and
+category. The focused command above runs its synthetic tests and scans the
+current tracked notes.
 
 The launcher independently checks the exact evidence-bound version and puts
 its executable first on `PATH` for pnpm and its child scripts. It uses the

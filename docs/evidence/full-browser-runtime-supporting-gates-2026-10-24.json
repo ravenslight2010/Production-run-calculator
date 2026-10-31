@@ -1,0 +1,434 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-24T03:34:39.471442+00:00",
+  "releaseDecision": "NO-GO",
+  "scope": "Isolated Linux development evidence; no physical device or published certification",
+  "publishedPrerequisites": {
+    "standard": "BLOCKED",
+    "full": "BLOCKED",
+    "publishedSourcePolicyObserved": "production-source-v3",
+    "publishedSourceFingerprintObserved": "bd319653b852c242f755bd44fd6116d35088052d13930627830e847363875442",
+    "preparationResult": "Invalid sealed build identity"
+  },
+  "preRepair": {
+    "revision": "test-sha256:add0162508de4dab23e1cf0166676c969d603ca2cb084f1f4afd5cc462bbb850",
+    "sourceRevision": "source-sha256:7defc919019528dec657a107dacb0b689e260fd81eb8ea7395ca51a535507265",
+    "sourcePolicy": "production-source-v4",
+    "sourceFingerprintSha256": "7defc919019528dec657a107dacb0b689e260fd81eb8ea7395ca51a535507265",
+    "verificationFingerprintSha256": "2c3ff7087558b3e83c21c9cc36ef0bff43bac0a1d8e73ad2311fcc9b16897761",
+    "node": "v24.21.0",
+    "independentGates": [
+      {
+        "label": "audit protection publish configuration",
+        "startedAt": "2026-10-24T03:21:47.506Z",
+        "finishedAt": "2026-10-24T03:21:47.995Z",
+        "exitCode": 0,
+        "elapsedMs": 487,
+        "status": "PASS"
+      },
+      {
+        "label": "blocking release security audit (high severity; registry required)",
+        "startedAt": "2026-10-24T03:21:47.995Z",
+        "finishedAt": "2026-10-24T03:21:48.441Z",
+        "exitCode": 1,
+        "elapsedMs": 445,
+        "status": "FAIL"
+      },
+      {
+        "label": "shell lint inventory",
+        "startedAt": "2026-10-24T03:21:48.442Z",
+        "finishedAt": "2026-10-24T03:21:49.095Z",
+        "exitCode": 0,
+        "elapsedMs": 653,
+        "status": "PASS"
+      },
+      {
+        "label": "generated API client freshness",
+        "startedAt": "2026-10-24T03:21:49.096Z",
+        "finishedAt": "2026-10-24T03:22:19.662Z",
+        "exitCode": 0,
+        "elapsedMs": 30564,
+        "status": "PASS"
+      },
+      {
+        "label": "immutable build-source identity contracts",
+        "startedAt": "2026-10-24T03:22:19.662Z",
+        "finishedAt": "2026-10-24T03:22:22.593Z",
+        "exitCode": 0,
+        "elapsedMs": 2930,
+        "status": "PASS"
+      },
+      {
+        "label": "real API/web build-source integration",
+        "startedAt": "2026-10-24T03:22:22.594Z",
+        "finishedAt": "2026-10-24T03:22:54.270Z",
+        "exitCode": 0,
+        "elapsedMs": 31675,
+        "status": "PASS"
+      },
+      {
+        "label": "shared library typechecks",
+        "startedAt": "2026-10-24T03:22:54.271Z",
+        "finishedAt": "2026-10-24T03:23:05.839Z",
+        "exitCode": 0,
+        "elapsedMs": 11568,
+        "status": "PASS"
+      },
+      {
+        "label": "API server typecheck",
+        "startedAt": "2026-10-24T03:23:05.840Z",
+        "finishedAt": "2026-10-24T03:23:44.302Z",
+        "exitCode": 0,
+        "elapsedMs": 38462,
+        "status": "PASS"
+      },
+      {
+        "label": "run calculator typecheck",
+        "startedAt": "2026-10-24T03:23:44.303Z",
+        "finishedAt": "2026-10-24T03:24:36.606Z",
+        "exitCode": 0,
+        "elapsedMs": 52301,
+        "status": "PASS"
+      },
+      {
+        "label": "mockup sandbox typecheck",
+        "startedAt": "2026-10-24T03:24:36.607Z",
+        "finishedAt": "2026-10-24T03:24:44.454Z",
+        "exitCode": 0,
+        "elapsedMs": 7846,
+        "status": "PASS"
+      },
+      {
+        "label": "scripts typecheck",
+        "startedAt": "2026-10-24T03:24:44.459Z",
+        "finishedAt": "2026-10-24T03:24:48.694Z",
+        "exitCode": 0,
+        "elapsedMs": 4235,
+        "status": "PASS"
+      },
+      {
+        "label": "recovery evidence audit",
+        "startedAt": "2026-10-24T03:24:48.695Z",
+        "finishedAt": "2026-10-24T03:24:49.183Z",
+        "exitCode": 0,
+        "elapsedMs": 488,
+        "status": "PASS"
+      },
+      {
+        "label": "onboarding bypass guard",
+        "startedAt": "2026-10-24T03:24:49.184Z",
+        "finishedAt": "2026-10-24T03:24:49.341Z",
+        "exitCode": 0,
+        "elapsedMs": 157,
+        "status": "PASS"
+      },
+      {
+        "label": "WebKit identity contracts",
+        "startedAt": "2026-10-24T03:24:49.342Z",
+        "finishedAt": "2026-10-24T03:25:01.527Z",
+        "exitCode": 1,
+        "elapsedMs": 12185,
+        "status": "FAIL"
+      },
+      {
+        "label": "production rules tests",
+        "startedAt": "2026-10-24T03:25:01.527Z",
+        "finishedAt": "2026-10-24T03:25:02.635Z",
+        "exitCode": 0,
+        "elapsedMs": 1107,
+        "status": "PASS"
+      },
+      {
+        "label": "inventory math tests",
+        "startedAt": "2026-10-24T03:25:02.636Z",
+        "finishedAt": "2026-10-24T03:25:03.224Z",
+        "exitCode": 0,
+        "elapsedMs": 587,
+        "status": "PASS"
+      },
+      {
+        "label": "spec reconcile tests",
+        "startedAt": "2026-10-24T03:25:03.224Z",
+        "finishedAt": "2026-10-24T03:25:03.811Z",
+        "exitCode": 0,
+        "elapsedMs": 586,
+        "status": "PASS"
+      },
+      {
+        "label": "spec import tests",
+        "startedAt": "2026-10-24T03:25:03.812Z",
+        "finishedAt": "2026-10-24T03:25:05.262Z",
+        "exitCode": 0,
+        "elapsedMs": 1450,
+        "status": "PASS"
+      },
+      {
+        "label": "scheduled recipe check tests",
+        "startedAt": "2026-10-24T03:25:05.263Z",
+        "finishedAt": "2026-10-24T03:25:05.837Z",
+        "exitCode": 0,
+        "elapsedMs": 574,
+        "status": "PASS"
+      },
+      {
+        "label": "spec export tests",
+        "startedAt": "2026-10-24T03:25:05.838Z",
+        "finishedAt": "2026-10-24T03:25:06.620Z",
+        "exitCode": 0,
+        "elapsedMs": 782,
+        "status": "PASS"
+      },
+      {
+        "label": "corpus tests",
+        "startedAt": "2026-10-24T03:25:06.621Z",
+        "finishedAt": "2026-10-24T03:25:13.083Z",
+        "exitCode": 1,
+        "elapsedMs": 6462,
+        "status": "FAIL"
+      },
+      {
+        "label": "run calculator tests",
+        "startedAt": "2026-10-24T03:25:13.083Z",
+        "finishedAt": "2026-10-24T03:26:49.434Z",
+        "exitCode": 0,
+        "elapsedMs": 96351,
+        "status": "PASS"
+      },
+      {
+        "label": "operational evidence check",
+        "startedAt": "2026-10-24T03:26:49.434Z",
+        "finishedAt": "2026-10-24T03:26:49.738Z",
+        "exitCode": 0,
+        "elapsedMs": 304,
+        "status": "PASS"
+      }
+    ],
+    "fullChromium": {
+      "startedAt": "2026-10-24T01:54:25.720Z",
+      "finishedAt": "2026-10-24T03:16:02.923Z",
+      "exitCode": 1,
+      "elapsedMs": 4897200,
+      "status": "FAIL",
+      "expectedCases": 216,
+      "files": 54,
+      "passed": 108,
+      "failed": 102,
+      "skipped": 6,
+      "reporterCompletedCallbacks": 216,
+      "reporterNotRunCallbacks": 0,
+      "warningMs": 4800000,
+      "timeoutMs": 5400000,
+      "warningFired": true,
+      "hardTimeout": false,
+      "reportDurationMs": 4868664,
+      "workers": 1,
+      "retries": 0,
+      "generatedReportSha256": "aa08fa4a974a8d27a850496a1e0cb423a6dc6292f1eda11f96ef30ac8950507c"
+    },
+    "webkitLanes": [
+      {
+        "revision": "test-sha256:add0162508de4dab23e1cf0166676c969d603ca2cb084f1f4afd5cc462bbb850",
+        "sourceRevision": "source-sha256:7defc919019528dec657a107dacb0b689e260fd81eb8ea7395ca51a535507265",
+        "sourcePolicy": "production-source-v4",
+        "sourceFingerprintSha256": "7defc919019528dec657a107dacb0b689e260fd81eb8ea7395ca51a535507265",
+        "verificationFingerprintSha256": "2c3ff7087558b3e83c21c9cc36ef0bff43bac0a1d8e73ad2311fcc9b16897761",
+        "label": "browser WebKit smoke",
+        "startedAt": "2026-10-24T03:16:24.444Z",
+        "finishedAt": "2026-10-24T03:18:25.746Z",
+        "exitCode": 1,
+        "elapsedMs": 121299,
+        "status": "FAIL",
+        "browser": "webkit",
+        "environment": "development",
+        "caseCount": 3,
+        "completedCount": 3,
+        "failureCount": 1,
+        "failureClassifications": {
+          "product": 0,
+          "test-setup": 1,
+          "infrastructure": 0,
+          "optional-environment-gap": 0
+        },
+        "cases": [
+          {
+            "file": "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+            "title": " \u203a webkit \u203a release-webkit-smoke.spec.ts \u203a authenticates and preserves current-run start, pause, resume, and reload",
+            "projectName": "webkit",
+            "status": "failed",
+            "durationMs": 24495,
+            "failureClassification": "test-setup"
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+            "title": " \u203a webkit \u203a release-webkit-smoke.spec.ts \u203a recovers a failed sync pull after the browser reconnects",
+            "projectName": "webkit",
+            "status": "passed",
+            "durationMs": 13051
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+            "title": " \u203a webkit \u203a release-webkit-smoke.spec.ts \u203a manager can preview an authoritative operational report",
+            "projectName": "webkit",
+            "status": "passed",
+            "durationMs": 16530
+          }
+        ]
+      },
+      {
+        "revision": "test-sha256:add0162508de4dab23e1cf0166676c969d603ca2cb084f1f4afd5cc462bbb850",
+        "sourceRevision": "source-sha256:7defc919019528dec657a107dacb0b689e260fd81eb8ea7395ca51a535507265",
+        "sourcePolicy": "production-source-v4",
+        "sourceFingerprintSha256": "7defc919019528dec657a107dacb0b689e260fd81eb8ea7395ca51a535507265",
+        "verificationFingerprintSha256": "2c3ff7087558b3e83c21c9cc36ef0bff43bac0a1d8e73ad2311fcc9b16897761",
+        "label": "browser phone/tablet WebKit compatibility",
+        "startedAt": "2026-10-24T03:18:25.747Z",
+        "finishedAt": "2026-10-24T03:21:25.635Z",
+        "exitCode": 1,
+        "elapsedMs": 179886,
+        "status": "FAIL",
+        "browser": "webkit",
+        "environment": "development",
+        "caseCount": 8,
+        "completedCount": 8,
+        "failureCount": 2,
+        "failureClassifications": {
+          "product": 0,
+          "test-setup": 2,
+          "infrastructure": 0,
+          "optional-environment-gap": 0
+        },
+        "cases": [
+          {
+            "file": "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts",
+            "title": " \u203a phone-webkit \u203a import-gold-lab-responsive.spec.ts \u203a Import Gold manager panel fits and remains reviewable at this browser viewport",
+            "projectName": "phone-webkit",
+            "status": "passed",
+            "durationMs": 7381
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+            "title": " \u203a phone-webkit \u203a release-webkit-smoke.spec.ts \u203a authenticates and preserves current-run start, pause, resume, and reload",
+            "projectName": "phone-webkit",
+            "status": "failed",
+            "durationMs": 19003,
+            "failureClassification": "test-setup"
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+            "title": " \u203a phone-webkit \u203a release-webkit-smoke.spec.ts \u203a manager can preview an authoritative operational report",
+            "projectName": "phone-webkit",
+            "status": "passed",
+            "durationMs": 15861
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/report-issue-confirmation.spec.ts",
+            "title": " \u203a phone-webkit \u203a report-issue-confirmation.spec.ts \u203a staff can retry a failed issue report without retyping and sees its diagnostic reference",
+            "projectName": "phone-webkit",
+            "status": "passed",
+            "durationMs": 4521
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts",
+            "title": " \u203a tablet-webkit \u203a import-gold-lab-responsive.spec.ts \u203a Import Gold manager panel fits and remains reviewable at this browser viewport",
+            "projectName": "tablet-webkit",
+            "status": "passed",
+            "durationMs": 3928
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+            "title": " \u203a tablet-webkit \u203a release-webkit-smoke.spec.ts \u203a authenticates and preserves current-run start, pause, resume, and reload",
+            "projectName": "tablet-webkit",
+            "status": "failed",
+            "durationMs": 18416,
+            "failureClassification": "test-setup"
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+            "title": " \u203a tablet-webkit \u203a release-webkit-smoke.spec.ts \u203a manager can preview an authoritative operational report",
+            "projectName": "tablet-webkit",
+            "status": "passed",
+            "durationMs": 16712
+          },
+          {
+            "file": "artifacts/run-calculator/e2e/report-issue-confirmation.spec.ts",
+            "title": " \u203a tablet-webkit \u203a report-issue-confirmation.spec.ts \u203a staff can retry a failed issue report without retyping and sees its diagnostic reference",
+            "projectName": "tablet-webkit",
+            "status": "passed",
+            "durationMs": 5560
+          }
+        ]
+      }
+    ]
+  },
+  "postRepair": {
+    "revision": "test-sha256:f6562dfd1b3895fbe661c2b07cf9527c50ab1cccc7f2fd6b44864af40bd642e9",
+    "sourceRevision": "source-sha256:477fbcc306adaf80e0552e7a47a02e9fe62df6e250b3b932cd508f0d2e71f0e4",
+    "sourcePolicy": "production-source-v4",
+    "sourceFingerprintSha256": "477fbcc306adaf80e0552e7a47a02e9fe62df6e250b3b932cd508f0d2e71f0e4",
+    "verificationFingerprintSha256": "03982432027f1b69aa8740604d4aca5e1a7b2e66c6c64dd6c163599c27c7f3c6",
+    "node": "v24.21.0",
+    "repairs": [
+      "body-parser override 2.3.0 to 2.4.0 (GHSA-27r3-jxmh-p828)",
+      "Regenerated corpus dependency-lock fingerprint only; all workbook/parse snapshots unchanged"
+    ],
+    "gates": [
+      {
+        "label": "frozen dependency installation",
+        "startedAt": "2026-10-24T03:31:14.522Z",
+        "finishedAt": "2026-10-24T03:31:14.640Z",
+        "exitCode": 0,
+        "elapsedMs": 115,
+        "status": "PASS"
+      },
+      {
+        "label": "blocking release security audit (high severity; registry required)",
+        "startedAt": "2026-10-24T03:31:14.641Z",
+        "finishedAt": "2026-10-24T03:31:14.901Z",
+        "exitCode": 0,
+        "elapsedMs": 260,
+        "status": "PASS"
+      },
+      {
+        "label": "real API/web build-source integration",
+        "startedAt": "2026-10-24T03:31:14.902Z",
+        "finishedAt": "2026-10-24T03:31:46.969Z",
+        "exitCode": 0,
+        "elapsedMs": 32067,
+        "status": "PASS"
+      },
+      {
+        "label": "corpus tests",
+        "startedAt": "2026-10-24T03:31:46.970Z",
+        "finishedAt": "2026-10-24T03:31:57.003Z",
+        "exitCode": 0,
+        "elapsedMs": 10032,
+        "status": "PASS"
+      },
+      {
+        "label": "spec import tests",
+        "startedAt": "2026-10-24T03:31:57.003Z",
+        "finishedAt": "2026-10-24T03:31:58.530Z",
+        "exitCode": 0,
+        "elapsedMs": 1526,
+        "status": "PASS"
+      },
+      {
+        "label": "focused API JSON error/parser contracts (no database)",
+        "startedAt": "2026-10-24T03:31:58.531Z",
+        "finishedAt": "2026-10-24T03:32:07.696Z",
+        "exitCode": 0,
+        "elapsedMs": 9165,
+        "status": "PASS"
+      }
+    ],
+    "fullBrowserOnThisRevision": "NOT RETESTED; earlier failed browser results are not reassigned to the repaired revision",
+    "webKitIdentityContract": "UNRESOLVED; reviewed inventory/configuration drift; no inventory edits or waiver"
+  },
+  "limitations": [
+    "COMPLETE reporter coverage includes skipped callbacks and is not successful journey coverage",
+    "WebKit failure classifications are reporter labels, not established root causes",
+    "Raw errors, logs, traces, request payloads and credentials are intentionally omitted",
+    "Passing-run timing is not certified by a failed run with skips",
+    "No publication or production write was performed"
+  ]
+}

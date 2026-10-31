@@ -31,41 +31,45 @@ describe("shared live calculation boundary", () => {
     expect(getAutoTrackTiming(1000, 1, 1, 100).caseMs).toBe(1000);
   });
 
-  it("uses 50 lb operational Frontline batches for missing or oversized weights", () => {
+  it("does not create automatic batch claims without a valid configured weight", () => {
     const base = {
-      type: "Cheese", recipe: [], ozPerPizza: 4, casesNeeded: 100,
-      pizzasPerCase: 10, ppm: 100,
+      type: "Cheese", recipe: [], ozPerPizza: 2,
+      casesNeeded: 100, pizzasPerCase: 10, ppm: 40,
     };
-    expect(computeAppSlotInfo({ ...base, batchLbs: 0 }).effectiveBatchLbs).toBe(50);
-    expect(computeAppSlotInfo({ ...base, batchLbs: 70 }).effectiveBatchLbs).toBe(50);
+    expect(computeAppSlotInfo({ ...base, batchLbs: 0 })).toMatchObject({
+      effectiveBatchLbs: 0, required: 0, cadence: 0, validForClaim: false,
+    });
+    expect(computeAppSlotInfo({ ...base, batchLbs: 70 })).toMatchObject({
+      effectiveBatchLbs: 0, required: 0, cadence: 0, validForClaim: false,
+    });
     expect(computeAppSlotInfo({ ...base, batchLbs: 40 }).effectiveBatchLbs).toBe(40);
   });
 
-  it("fails closed on buffer-only Sauce and Frontline quantities without pizzas per case", () => {
+  it.each([0, -1, undefined, Number.NaN])("fails closed on buffer-only quantities with pizzas per case %s", (pizzasPerCase) => {
     const result = computeServerCalc({
-      dayState: {
-        runs: [{ id: "invalid", brand: "A", flavor: "B" }] as unknown as CalcRunMeta[],
-        currentIndex: 0,
-      },
+      dayState: { runs: [{ id: "run-override", startedAt: 1000 }], currentIndex: 0 },
       runValues: {
-        invalid: {
-          casesNeeded: 240,
-          pizzasPerCase: 0,
-          casesPerLayer: 10,
-          crustsPerCycle: 1,
-          cycleSpeed: 100,
+        "run-override": {
+          pizzasPerCase,
+          casesPerSkid: 20,
+          casesNeeded: 100,
+          crustsPerCycle: 4,
+          cycleSpeed: 10,
           speedAdjustment: 1,
-          sauceOzPerPizza: 3,
-          sauceBarrelLbs: 55,
+          casesPerLayer: 10,
+          sauceOzPerPizza: 2,
+          sauceBarrelLbs: 40,
           app1Type: "Cheese",
-          app1OzPerPizza: 2.9,
-          app1CheeseRecipe: [{ ingredient: "A", lbs: 55.6 }],
-          pep1Type: "Pepperoni",
+          app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 40 }],
+          app1OzPerPizza: 2,
+          app1BatchLbs: 40,
+          pep1Type: "Custom",
           pep1OzPerPizza: 1,
-          pep1Sticks: 10,
+          pep1Sticks: 2,
+          pep1BatchLbs: 10,
         },
       },
-    }, ["Pepperoni"], 1000);
+    }, [], 2000);
     expect(result?.calc).toMatchObject({
       sauceBatches: 0,
       sauceDepletionSec: 0,
@@ -127,6 +131,8 @@ describe("shared live calculation boundary", () => {
       canonical: true,
       sequence: 3,
     });
+    expect(computeAutoTrackSchedule({ ...input, serverWallOwnership: { case: 4 } })
+      .entries.find((entry) => entry.channel === "case")).toMatchObject({ canonical: false });
   });
 
   it("treats stale-generation coordination as noncanonical fallback", () => {
@@ -207,9 +213,21 @@ describe("shared live calculation boundary", () => {
       .elapsed.phase.stage1.state).toBe("draining");
     expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000, endedAt: 2_000 }, 602_000))
       .elapsed.phase.stage3.state).toBe("empty");
-  });
 
-  it("marks stale snapshots and rejects reset mismatch, override-safe duplicate runs", () => {
+    const splitActive = deriveOperationalRunView({
+      ...args({ id: "run-1", startedAt: 1_000 }, 6_000),
+      snapshot: {
+        ...snapshot({ id: "run-1", startedAt: 1_000 }),
+        runValues: {
+          "run-1": {
+            pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
+            crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
+            freezerTime: 10, preTunnelMin: 2, pressOvenMin: 1,
+            frontlineMin: 1, postTunnelMin: 1,
+          },
+        },
+      } as never,
+    });
     const base = {
       syncVersion: 1 as const, completeness: "complete" as const,
       dayState: { date: "2026-09-06", resetAt: 10, currentIndex: 0, substitutions: [{ action: "replace" }], runs: [{ id: "run-1", startedAt: 1_000 }] },
@@ -222,7 +240,7 @@ describe("shared live calculation boundary", () => {
       policy: "operational-run-view",
       policyVersion: 1,
       calculatorVersion: 1,
-      linePhasesVersion: 1,
+      linePhasesVersion: 2,
     });
     expect(view.observed.temporaryOverrides.cycleSpeed).toBe(true);
     expect(view.observed.substitutionsApplied).toBe(1);

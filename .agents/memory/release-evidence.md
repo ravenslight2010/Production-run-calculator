@@ -5,6 +5,19 @@ description: Preserve source, revision, runner, and artifact identity when revie
 
 # Release and operational evidence
 
+## Local evidence authority
+
+Keep exploratory local verification separate from release approval, even when
+both execute the same checks. A local pass must not close a failed certification
+or stand in for matching published readiness and production reconciliation.
+
+**Why:** Strict published gates can prevent useful independent local results
+from being collected; relaxing those gates would confuse local evidence with
+production authority.
+
+**How to apply:** Add local capabilities as explicit opt-in evidence scopes,
+bound to source and verification inputs, and keep normal release gates strict.
+
 Treat release and operational evidence as scoped records, not interchangeable summaries. Bind it to its source database or report, environment, exact revision, runner, and provenance. Preserve full task-run reports for handoffs, keep screenshots masked and isolated, and keep synthetic recovery evidence separate from authoritative release gates.
 
 **Why:** A plausible screenshot, stale revision, synthetic fixture, or shortened CI summary can appear convincing while proving a different system state than the one being evaluated.

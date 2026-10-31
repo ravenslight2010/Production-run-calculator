@@ -1,5 +1,6 @@
 /** Browser cache reset adapter; epoch comparison is intentionally side-effect scoped here. */
 import { browserRecordStore } from "./browserRecordStore";
+import { blockDayStatePersistenceForReset } from "./dayStatePersistenceFence";
 const RESET_EPOCH_KEY = "run-calc-reset-epoch";
 const COMPLETED_HISTORY_OUTBOX_PREFIX = "run-calc-completed-history-outbox";
 const COMPLETED_HISTORY_CACHE_PREFIX = "run-calc-completed-history-cache";
@@ -19,6 +20,7 @@ export function getStoredResetEpoch(): number {
 
 export function applyResetWipe(serverEpoch: number): boolean {
   if (!Number.isFinite(serverEpoch) || serverEpoch <= getStoredResetEpoch()) return false;
+  blockDayStatePersistenceForReset();
   try {
     const keys = browserRecordStore.keys("run-calc").filter((key) =>
         key !== RESET_EPOCH_KEY
@@ -29,6 +31,15 @@ export function applyResetWipe(serverEpoch: number): boolean {
         && !key.startsWith(APPLICATOR_EVIDENCE_CACHE_PREFIX)
         && !key.startsWith(APPLICATOR_EVIDENCE_CONFLICT_PREFIX)
         && !key.startsWith(OPERATIONAL_INTENT_OUTBOX_PREFIX)
+         && !key.startsWith("run-calc-fkv-queue-")
+         && !key.startsWith("run-calc-fkv-legacy-review:")
+         && !key.startsWith("run-calc-profilesync-")
+         && !key.startsWith("run-calc-profile-cache-")
+         && !key.startsWith("run-calc-profile-")
+         && !key.startsWith("run-calc-crust-profile-")
+         && !key.startsWith("run-calc-templates")
+         && !key.startsWith("run-calc-shared-history-review-v1:")
+         && !key.startsWith("run-calc-completed-history-conflicts")
     );
     for (const key of keys) localStorage.removeItem(key);
     browserRecordStore.record(RESET_EPOCH_KEY, () => 0, {

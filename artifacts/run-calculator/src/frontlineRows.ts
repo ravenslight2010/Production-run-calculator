@@ -1,6 +1,7 @@
 import type { FormValues } from "./types";
 import {
   computeFrontlineRunRequirement,
+  knownFrontlineBatchWeight,
   type Calc,
 } from "@workspace/live-calc";
 
@@ -27,6 +28,11 @@ export type FrontlineNeedRow = {
   totalLbs: number;
   recipeName?: string;
   batchProgressField?: "app1BatchesMade" | "app2BatchesMade" | "app3BatchesMade" | "app4BatchesMade";
+};
+
+export type FrontlineIngredientNeed = {
+  ingredient: string;
+  amountLbs: number;
 };
 
 type LiveFrontlineCalcInput = Pick<
@@ -57,14 +63,21 @@ export function deriveLiveFrontlineQuantitySource(
       (sum, row) => sum + (Number(row.lbs) || 0),
       0,
     );
-    return computeFrontlineRunRequirement({
+    const configuredEffectiveWeight = recipeLbs > 0
+      ? recipeLbs
+      : v[`app${slot}BatchLbs`];
+    const requirement = computeFrontlineRunRequirement({
       casesNeeded: v.casesNeeded,
       pizzasPerCase: v.pizzasPerCase,
       ozPerPizza: v[`app${slot}OzPerPizza`],
-      configuredEffectiveWeight: recipeLbs > 0
-        ? recipeLbs
-        : v[`app${slot}BatchLbs`],
+      configuredEffectiveWeight,
     });
+    return {
+      ...requirement,
+      totalUnits: knownFrontlineBatchWeight(configuredEffectiveWeight) === null
+        ? 0
+        : requirement.totalLbs / knownFrontlineBatchWeight(configuredEffectiveWeight)!,
+    };
   };
 
   const app1 = appRequirement(1);
@@ -120,7 +133,10 @@ export function deriveFrontlineNeedRows(
   }
 
   const addApp = (slot: 1 | 2 | 3 | 4) => {
-    const type = v[`app${slot}Type`].trim();
+    // Older immutable snapshots may predate an applicator slot. Missing is
+    // unknown, not a configured ingredient, and must not crash history reads.
+    const rawType = v[`app${slot}Type`];
+    const type = typeof rawType === "string" ? rawType.trim() : "";
     const lbs = q[`app${slot}Lbs`];
     const batches = q[`app${slot}Batches`];
     if (!type || !(lbs > 0)) return;
@@ -169,4 +185,48 @@ export function deriveFrontlineNeedRows(
   addApp(3);
   addApp(4);
   return rows;
+}
+
+/**
+ * Derive display-only ingredient quantities from each applicator's existing
+ * pound need and recipe proportions. This deliberately does not affect the
+ * aggregate need or any shared Frontline calculations.
+ */
+export function deriveFrontlineIngredientNeeds(
+  v: FormValues,
+  needRows: FrontlineNeedRow[],
+): Record<string, FrontlineIngredientNeed[]> {
+  const ingredientsByRow: Record<string, FrontlineIngredientNeed[]> = {};
+
+  for (const needRow of needRows) {
+    if (!/^app[1-4]$/.test(needRow.key)) continue;
+
+    const slot = Number(needRow.key.slice(3)) as 1 | 2 | 3 | 4;
+    const recipe = v[`app${slot}CheeseRecipe`] ?? [];
+    const components = recipe
+      .map((component) => ({
+        ingredient: component.ingredient.trim(),
+        lbs: Number(component.lbs),
+      }))
+      .filter((component) => component.lbs > 0);
+
+    const recipeLbs = components.reduce((total, component) => total + component.lbs, 0);
+    if (
+      components.length === 0
+      || components.some((component) => !component.ingredient || !Number.isFinite(component.lbs))
+      || !Number.isFinite(recipeLbs)
+      || recipeLbs <= 0
+      || !Number.isFinite(needRow.totalLbs)
+      || needRow.totalLbs <= 0
+    ) {
+      continue;
+    }
+
+    ingredientsByRow[needRow.key] = components.map((component) => ({
+      ingredient: component.ingredient,
+      amountLbs: needRow.totalLbs * component.lbs / recipeLbs,
+    }));
+  }
+
+  return ingredientsByRow;
 }

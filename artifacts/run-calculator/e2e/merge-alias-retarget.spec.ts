@@ -1,10 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { Client } from "pg";
 import {
   cleanupTestUsers,
   DEFAULT_MANAGER_CAPABILITIES,
   requireIsolatedTestDatabase,
   uniqueTestId,
+  freshMasterDataSeedHeaders,
 } from "./isolation";
 import { signUpAndHandleOnboarding } from "./onboarding";
 
@@ -12,12 +13,106 @@ const PASSWORD = "MergeAliasTest123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
 const testBrands = new Set<string>();
+const testAliasNames = new Set<string>();
+const ingredientFixtureIds: string[] = [];
+const testDeniedPairs: Array<{
+  category: string;
+  brand: string | null;
+  nameA: string;
+  nameB: string;
+}> = [];
+const recipeFixtureIds: Record<"mixes" | "dough" | "sauce" | "cheese", string[]> = {
+  mixes: [],
+  dough: [],
+  sauce: [],
+  cheese: [],
+};
 
-type FactoryRow = { key: string; value: unknown };
+type FactoryRow = { key: string; value: unknown; updated_at: Date | string };
 
 const FACTORY_BRANDS_KEY = "run-calc-brands";
 const FACTORY_FLAVORS_KEY = "run-calc-brand-flavors";
 const TEST_FACTORY_KEYS = [FACTORY_BRANDS_KEY, FACTORY_FLAVORS_KEY];
+const RECIPE_NAME_CATEGORIES = [
+  { category: "mixes", label: "Mix Recipes", key: "run-calc-mix-recipe-names" },
+  { category: "dough", label: "Dough", key: "run-calc-dough-recipe-names" },
+  { category: "sauce", label: "Sauce", key: "run-calc-frontline-recipe-names" },
+  { category: "cheese", label: "Cheese mixes", key: "run-calc-cheese-recipe-names" },
+] as const;
+type RecipeNameCategory = (typeof RECIPE_NAME_CATEGORIES)[number]["category"];
+const RECIPE_ISOLATION_TARGET: Record<RecipeNameCategory, RecipeNameCategory> = {
+  mixes: "dough",
+  dough: "sauce",
+  sauce: "dough",
+  cheese: "dough",
+};
+
+async function seedRecipeNamePool(
+  page: Page,
+  category: RecipeNameCategory,
+  names: string[],
+): Promise<void> {
+  const ids = names.map(() => uniqueTestId(`mergeAlias${category}`));
+  recipeFixtureIds[category].push(...ids);
+  const items = names.map((name, index) => ({ id: ids[index], name }));
+  const data = category === "mixes"
+    ? {
+        items: items.map((item) => ({
+          ...item,
+          brand: "",
+          flavor: "",
+          batchSize: 0,
+          daysEarly: 0,
+          notes: "",
+          amountAlreadyMade: 0,
+          components: [],
+          enabled: true,
+          isPrep: false,
+        })),
+      }
+    : category === "cheese"
+    ? {
+        items: items.map((item) => ({
+          ...item,
+          brand: "",
+          flavors: [],
+          shredderSetting: "",
+          cellulose: "",
+          notes: "",
+          components: [],
+          enabled: true,
+        })),
+      }
+    : {
+        items: items.map((item) => ({
+          ...item,
+          notes: "",
+          components: [],
+          enabled: true,
+          brand: "",
+          flavors: [],
+        })),
+      };
+  const route = category === "mixes"
+    ? "/api/mixes"
+    : category === "cheese"
+    ? "/api/cheese-recipes"
+    : `/api/${category}-recipes`;
+  const response = await page.request.post(route, {
+    headers: await freshMasterDataSeedHeaders(page.request, route),
+    data,
+  });
+  expect(response.status(), `seed ${category} recipe-name fixtures`).toBe(200);
+}
+
+function trackAliasNames(...names: string[]): void {
+  for (const name of names) testAliasNames.add(name);
+}
+
+function trackDeniedPair(category: string, brand: string | null, a: string, b: string): void {
+  const [nameA, nameB] = [a.trim().toLowerCase(), b.trim().toLowerCase()].sort();
+  testDeniedPairs.push({ category, brand, nameA, nameB });
+}
 
 async function signInAsManager(page: Page, username: string): Promise<void> {
   if (!SIGNUP_CODE) throw new Error("STAFF_SIGNUP_CODE must be configured for merge-alias browser tests.");
@@ -50,50 +145,546 @@ async function signInAsManager(page: Page, username: string): Promise<void> {
   expect((await me.json() as { role?: string }).role).toBe("manager");
 }
 
-async function openFlavorMerge(page: Page, brand: string) {
+async function signInExistingManager(page: Page, username: string): Promise<void> {
+  await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+  await page.locator("#username").fill(username);
+  await page.locator("#password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  const me = await page.request.get("/api/me", { failOnStatusCode: true });
+  expect((await me.json() as { role?: string }).role).toBe("manager");
+}
+
+async function seedLocalMergeUniverse(
+  page: Page,
+  input: {
+    ingredientNames: string[];
+    brands: string[];
+    flavorsByBrand: Record<string, string[]>;
+  },
+): Promise<void> {
+  await page.evaluate(({ ingredientNames, brands, flavorsByBrand }) => {
+    localStorage.setItem("run-calc-ingredient-types", JSON.stringify(ingredientNames));
+    localStorage.setItem("run-calc-brands", JSON.stringify(brands));
+    localStorage.setItem("run-calc-brand-flavors", JSON.stringify(flavorsByBrand));
+  }, input);
+}
+
+async function seedServerMergeUniverse(
+  page: Page,
+  input: {
+    ingredientNames: string[];
+    brands: string[];
+    flavorsByBrand: Record<string, string[]>;
+  },
+): Promise<() => Promise<void>> {
+  const factoryDb = new Client({
+    connectionString: requireIsolatedTestDatabase("shared merge-universe fixture"),
+  });
+  await factoryDb.connect();
+  let originalRows: FactoryRow[] = [];
+  let snapshotCaptured = false;
+  try {
+    const original = await factoryDb.query<FactoryRow>(
+      "SELECT key, value, updated_at FROM factory_kv WHERE scope = 'live' AND key = ANY($1::text[])",
+      [TEST_FACTORY_KEYS],
+    );
+    originalRows = original.rows;
+    snapshotCaptured = true;
+    const values = new Map(originalRows.map((row) => [row.key, row.value]));
+    const storedBrands = values.get(FACTORY_BRANDS_KEY);
+    const brands = Array.isArray(storedBrands)
+      ? storedBrands.filter((name): name is string => typeof name === "string")
+      : [];
+    const storedFlavors = values.get(FACTORY_FLAVORS_KEY);
+    const flavors: Record<string, string[]> =
+      storedFlavors && typeof storedFlavors === "object" && !Array.isArray(storedFlavors)
+        ? { ...(storedFlavors as Record<string, string[]>) }
+        : {};
+    for (const [brand, names] of Object.entries(input.flavorsByBrand)) {
+      const current = Array.isArray(flavors[brand]) ? flavors[brand] : [];
+      flavors[brand] = [...new Set([...current, ...names])];
+    }
+    const seedFactoryValue = async (key: string, value: unknown) => {
+      await factoryDb.query(
+        `INSERT INTO factory_kv (scope, key, value, updated_at)
+         VALUES ('live', $1, $2::jsonb, NOW())
+         ON CONFLICT (scope, key)
+         DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+        [key, JSON.stringify(value)],
+      );
+    };
+    await seedFactoryValue(FACTORY_BRANDS_KEY, [...new Set([...brands, ...input.brands])]);
+    await seedFactoryValue(FACTORY_FLAVORS_KEY, flavors);
+  } catch (error) {
+    if (snapshotCaptured) {
+      await factoryDb.query(
+        "DELETE FROM factory_kv WHERE scope = 'live' AND key = ANY($1::text[])",
+        [TEST_FACTORY_KEYS],
+      );
+      for (const row of originalRows) {
+        await factoryDb.query(
+          `INSERT INTO factory_kv (scope, key, value, updated_at)
+           VALUES ('live', $1, $2::jsonb, $3)
+           ON CONFLICT (scope, key)
+           DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+          [row.key, JSON.stringify(row.value), row.updated_at],
+        );
+      }
+    }
+    throw error;
+  } finally {
+    await factoryDb.end();
+  }
+
+  const ids = input.ingredientNames.map(() => uniqueTestId("mergeAliasIngredient"));
+  ingredientFixtureIds.push(...ids);
+  try {
+    const response = await page.request.post("/api/ingredients", {
+      headers: await freshMasterDataSeedHeaders(page.request, "/api/ingredients"),
+      data: {
+        items: input.ingredientNames.map((name, index) => ({
+          id: ids[index]!,
+          name,
+          categories: ["general"],
+          enabled: true,
+        })),
+      },
+    });
+    expect(response.status()).toBe(200);
+  } catch (error) {
+    await restoreFactoryValues();
+    throw error;
+  }
+
+  let restored = false;
+  return async () => {
+    if (restored) return;
+    restored = true;
+    await restoreFactoryValues();
+  };
+
+  async function restoreFactoryValues(): Promise<void> {
+    const restoreDb = new Client({
+      connectionString: requireIsolatedTestDatabase("shared merge-universe fixture restore"),
+    });
+    await restoreDb.connect();
+    try {
+      await restoreDb.query(
+        "DELETE FROM factory_kv WHERE scope = 'live' AND key = ANY($1::text[])",
+        [TEST_FACTORY_KEYS],
+      );
+      for (const row of originalRows) {
+        await restoreDb.query(
+          `INSERT INTO factory_kv (scope, key, value, updated_at)
+           VALUES ('live', $1, $2::jsonb, $3)
+           ON CONFLICT (scope, key)
+           DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+          [row.key, JSON.stringify(row.value), row.updated_at],
+        );
+      }
+    } finally {
+      await restoreDb.end();
+    }
+  }
+}
+
+async function openMergeManager(page: Page) {
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Tools", exact: true }).click();
   await dialog.getByRole("button", { name: "Merge", exact: true }).click();
+  return dialog;
+}
+
+async function openFlavorMerge(page: Page, brand: string) {
+  const dialog = await openMergeManager(page);
   await dialog.getByRole("button", { name: "Brand/Flavor", exact: true }).click();
   await dialog.getByRole("button", { name: "Flavors", exact: true }).click();
   await dialog.locator("select").selectOption(brand);
   return dialog;
 }
 
+async function seedPreviousAlias(
+  page: Page,
+  category: string,
+  previousName: string,
+  sourceName: string,
+  brand?: string,
+): Promise<void> {
+  const response = await page.request.post("/api/merge-aliases", {
+    headers: await freshMasterDataSeedHeaders(page.request, "/api/brand-profiles"),
+    data: {
+      category,
+      ...(category === "flavor" && brand ? { brand } : {}),
+      aliases: [{ externalName: previousName, canonicalName: sourceName }],
+    },
+  });
+  expect(response.status()).toBe(200);
+}
+
+async function confirmMerge(
+  page: Page,
+  dialog: Locator,
+  sourceName: string,
+  targetName: string,
+): Promise<void> {
+  await dialog.getByRole("checkbox", { name: sourceName, exact: true }).check();
+  await dialog.locator('input[list="merge-target-options"]').fill(targetName);
+  await dialog.getByRole("button", { name: "Merge…", exact: true }).click();
+
+  const aliasWritePromise = page.waitForResponse((response) =>
+    /^\/api\/master-data-operations\/[^/]+\/apply$/.test(new URL(response.url()).pathname)
+      && response.request().method() === "POST",
+  );
+  await dialog.getByRole("button", { name: "Confirm merge", exact: true }).click();
+  expect((await aliasWritePromise).status()).toBe(200);
+}
+
+async function getAliases(page: Page, category: string, brand?: string) {
+  const query = new URLSearchParams({ category });
+  if (brand) query.set("brand", brand);
+  const response = await page.request.get(
+    `/api/merge-aliases?${query.toString()}`,
+    { failOnStatusCode: true },
+  );
+  return (await response.json() as {
+    aliases: Array<{ externalName: string; canonicalName: string }>;
+  }).aliases;
+}
+
+async function reloadAndOpenMergeManager(page: Page) {
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  return openMergeManager(page);
+}
+
+async function expectPreviouslyMergedSuggestion(
+  dialog: Locator,
+  previousName: string,
+  targetName: string,
+): Promise<void> {
+  // Master-data polling intentionally starts after a randomized startup jitter.
+  // Wait for the server-backed names before scanning, or the scan can validly
+  // return no suggestions against the initial, incomplete client snapshot.
+  await expect(dialog.getByRole("checkbox", { name: previousName, exact: true }))
+    .toBeVisible({ timeout: 25_000 });
+  await expect(dialog.getByRole("checkbox", { name: targetName, exact: true }))
+    .toBeVisible({ timeout: 25_000 });
+  await dialog.getByRole("button", { name: "Scan deterministic matches", exact: true }).click();
+  const suggestion = suggestionForAliasPair(dialog, previousName, targetName);
+  await expect(suggestion).toHaveCount(1, { timeout: 15_000 });
+  await expect(suggestion).toContainText("→");
+  await expect(dialog.getByText("Previously merged", { exact: true })).toBeVisible();
+}
+
+function suggestionForAliasPair(
+  dialog: Locator,
+  previousName: string,
+  targetName: string,
+): Locator {
+  return dialog
+    .locator("p")
+    .filter({ hasText: previousName })
+    .filter({ hasText: targetName });
+}
+
+function ignoreSuggestionButton(
+  dialog: Locator,
+  sourceName: string,
+  targetName: string,
+): Locator {
+  return dialog
+    .getByText(`${sourceName} → ${targetName}`, { exact: true })
+    .locator("xpath=../..")
+    .getByRole("button", { name: "Ignore", exact: true });
+}
+
+async function scanDeterministicMatches(dialog: Locator): Promise<void> {
+  const scan = dialog.getByRole("button", { name: "Scan deterministic matches", exact: true });
+  await scan.click();
+  await expect(scan).toBeEnabled({ timeout: 15_000 });
+}
+
+function canonicalDeniedPair(a: string, b: string) {
+  const [nameA, nameB] = [a, b].map((name) => name.trim().toLowerCase()).sort();
+  return { nameA, nameB };
+}
+async function getDenials(page: Page, category: string, brand?: string) {
+  const query = new URLSearchParams({ category });
+  if (brand) query.set("brand", brand);
+  const response = await page.request.get(`/api/denied-merges?${query.toString()}`, {
+    failOnStatusCode: true,
+  });
+  return (await response.json() as {
+    denied: Array<{ nameA: string; nameB: string }>;
+  }).denied;
+}
+
 test.beforeEach(() => {
   requireIsolatedTestDatabase("merge alias retarget browser beforeEach");
 });
 
-test.afterAll(async () => {
+async function cleanupFixtures(): Promise<void> {
   if (!process.env.DATABASE_URL) return;
   const db = new Client({ connectionString: process.env.DATABASE_URL });
+  const failures: unknown[] = [];
+  const cleanup = async (action: () => Promise<unknown>) => {
+    try {
+      await action();
+    } catch (error) {
+      failures.push(error);
+    }
+  };
   try {
     await db.connect();
+    if (testAliasNames.size > 0) {
+      await cleanup(() => db.query(
+        `DELETE FROM merge_aliases
+         WHERE scope = 'live'
+           AND external_name = ANY($1::text[])`,
+        [[...testAliasNames]],
+      ));
+    }
+    for (const [category, table] of [
+      ["mixes", "mixes"],
+      ["dough", "dough_recipes"],
+      ["sauce", "sauce_recipes"],
+      ["cheese", "cheese_recipes"],
+    ] as const) {
+      if (recipeFixtureIds[category].length === 0) continue;
+      await cleanup(() => db.query(
+        `DELETE FROM ${table} WHERE scope = 'live' AND id = ANY($1::text[])`,
+        [recipeFixtureIds[category]],
+      ));
+    }
+    if (ingredientFixtureIds.length > 0) {
+      await cleanup(() => db.query(
+        "DELETE FROM ingredients WHERE scope = 'live' AND id = ANY($1::text[])",
+        [ingredientFixtureIds],
+      ));
+    }
     if (testBrands.size > 0) {
-      await db.query(
+      await cleanup(() => db.query(
         "DELETE FROM merge_aliases WHERE scope = 'live' AND category = 'flavor' AND brand = ANY($1::text[])",
         [[...testBrands]],
-      );
+      ));
     }
-    await cleanupTestUsers(db, testUsernames);
+    for (const denied of testDeniedPairs) {
+      await cleanup(() => db.query(
+        `DELETE FROM denied_merges
+         WHERE scope = 'live'
+           AND category = $1
+           AND brand IS NOT DISTINCT FROM $2
+           AND name_a = $3
+           AND name_b = $4`,
+        [denied.category, denied.brand, denied.nameA, denied.nameB],
+      ));
+    }
+    await cleanup(() => cleanupTestUsers(db, testUsernames));
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "One or more merge-alias test fixtures could not be cleaned up.");
+    }
+    testUsernames.clear();
+    testBrands.clear();
+    testAliasNames.clear();
+    ingredientFixtureIds.length = 0;
+    testDeniedPairs.length = 0;
+    for (const ids of Object.values(recipeFixtureIds)) ids.length = 0;
   } finally {
     await db.end().catch(() => {});
+  }
+}
+
+test.afterEach(cleanupFixtures);
+test.afterAll(cleanupFixtures);
+
+test("ignoring a recipe-name match stays in its category after reload and preserves aliases", async ({ page }) => {
+  const username = uniqueTestId("merge_ignore_recipe");
+  const priorName = uniqueTestId("PriorDough");
+  const sourceName = uniqueTestId("SourceDough");
+  testUsernames.add(username);
+  trackAliasNames(priorName, sourceName);
+  trackDeniedPair("dough", null, priorName, sourceName);
+
+  await signInAsManager(page, username);
+  for (const category of ["dough", "sauce"] as const) {
+    await seedRecipeNamePool(page, category, [priorName, sourceName]);
+    await seedPreviousAlias(page, category, priorName, sourceName);
+  }
+  const doughAliases = await getAliases(page, "dough");
+  const sauceAliases = await getAliases(page, "sauce");
+  let dialog = await reloadAndOpenMergeManager(page);
+  await dialog.getByRole("button", { name: "Dough", exact: true }).click();
+  await expectPreviouslyMergedSuggestion(dialog, priorName, sourceName);
+  const denyResponsePromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/denied-merges"
+      && response.request().method() === "POST",
+  );
+  await ignoreSuggestionButton(dialog, priorName, sourceName).click();
+  const denyResponse = await denyResponsePromise;
+  expect(denyResponse.status()).toBe(200);
+  expect(denyResponse.request().postDataJSON()).toEqual({
+    pairs: [{ nameA: sourceName, nameB: priorName }],
+    category: "dough",
+  });
+  const { nameA, nameB } = canonicalDeniedPair(priorName, sourceName);
+  expect(await getDenials(page, "dough")).toContainEqual({ nameA, nameB });
+  await scanDeterministicMatches(dialog);
+  await expect(dialog.getByText(`${priorName} → ${sourceName}`, { exact: true })).toHaveCount(0);
+  dialog = await reloadAndOpenMergeManager(page);
+  await dialog.getByRole("button", { name: "Dough", exact: true }).click();
+  await scanDeterministicMatches(dialog);
+  await expect(dialog.getByText(`${priorName} → ${sourceName}`, { exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Sauce", exact: true }).click();
+  await expectPreviouslyMergedSuggestion(dialog, priorName, sourceName);
+  expect(await getDenials(page, "sauce")).not.toContainEqual({ nameA, nameB });
+  await dialog.getByRole("button", { name: "Dough", exact: true }).click();
+  await restoreIgnoredMatch(page, dialog, priorName, sourceName, "dough");
+  expect(await getDenials(page, "dough")).not.toContainEqual({ nameA, nameB });
+  await expectPreviouslyMergedSuggestion(dialog, priorName, sourceName);
+  expect(await getAliases(page, "dough")).toEqual(doughAliases);
+  expect(await getAliases(page, "sauce")).toEqual(sauceAliases);
+});
+
+test("ignoring a flavor match stays in its brand after reload and preserves the other brand", async ({ page }) => {
+  const username = uniqueTestId("merge_ignore_flavor");
+  const brand = uniqueTestId("MergeAliasBrand");
+  const otherBrand = uniqueTestId("MergeAliasOtherBrand");
+  const priorName = uniqueTestId("PriorFlavor");
+  const sourceName = uniqueTestId("SourceBrand");
+
+  const otherBrandOnlyNames = [uniqueTestId("OtherBrandIgnoreA"), uniqueTestId("OtherBrandIgnoreB")];
+  testUsernames.add(username);
+  testBrands.add(brand);
+  testBrands.add(otherBrand);
+  trackAliasNames(priorName, sourceName);
+  trackDeniedPair("flavor", brand, priorName, sourceName);
+  trackDeniedPair("flavor", otherBrand, priorName, sourceName);
+  trackDeniedPair("flavor", otherBrand, otherBrandOnlyNames[0], otherBrandOnlyNames[1]);
+  await signInAsManager(page, username);
+  const factoryDb = new Client({ connectionString: process.env.DATABASE_URL });
+  await factoryDb.connect();
+  let originalFactoryRows: FactoryRow[] = [];
+  let factorySnapshotCaptured = false;
+  try {
+    const result = await factoryDb.query<FactoryRow>(
+      "SELECT key, value FROM factory_kv WHERE scope = 'live' AND key = ANY($1::text[])",
+      [TEST_FACTORY_KEYS],
+    );
+    originalFactoryRows = result.rows;
+    factorySnapshotCaptured = true;
+    const originalFactory = new Map(originalFactoryRows.map((row) => [row.key, row.value]));
+    const originalBrands =
+      (originalFactory.get(FACTORY_BRANDS_KEY) as string[] | undefined) ?? [];
+    const originalFlavors =
+      (originalFactory.get(FACTORY_FLAVORS_KEY) as Record<string, string[]> | undefined) ?? {};
+    for (const [key, value] of [
+      [FACTORY_BRANDS_KEY, [...new Set([...originalBrands, brand, otherBrand])]],
+      [FACTORY_FLAVORS_KEY, {
+        ...originalFlavors,
+        [brand]: [priorName, sourceName],
+        [otherBrand]: [priorName, sourceName],
+      }],
+    ] as const) {
+      await factoryDb.query(
+        `INSERT INTO factory_kv (scope, key, value, updated_at)
+         VALUES ('live', $1, $2::jsonb, NOW())
+         ON CONFLICT (scope, key)
+         DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+        [key, JSON.stringify(value)],
+      );
+    }
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    for (const scopedBrand of [brand, otherBrand]) {
+      const response = await page.request.post("/api/merge-aliases", {
+        headers: await freshMasterDataSeedHeaders(page.request, "/api/merge-aliases"),
+        data: {
+          category: "flavor",
+          brand: scopedBrand,
+          aliases: [{ externalName: priorName, canonicalName: sourceName }],
+        },
+      });
+      expect(response.status()).toBe(200);
+    }
+
+    const otherBrandDenials = await page.request.post("/api/denied-merges", {
+      data: {
+        pairs: [
+          { nameA: priorName, nameB: sourceName },
+          { nameA: otherBrandOnlyNames[0], nameB: otherBrandOnlyNames[1] },
+        ],
+        category: "flavor",
+        brand: otherBrand,
+      },
+    });
+    expect(otherBrandDenials.status()).toBe(200);
+    const selectedAliases = await getAliases(page, "flavor", brand);
+    const otherAliases = await getAliases(page, "flavor", otherBrand);
+    let dialog = await openFlavorMerge(page, brand);
+    await expectPreviouslyMergedSuggestion(dialog, priorName, sourceName);
+    const denyResponsePromise = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/denied-merges"
+        && response.request().method() === "POST",
+    );
+    await ignoreSuggestionButton(dialog, priorName, sourceName).click();
+    const denyResponse = await denyResponsePromise;
+    expect(denyResponse.status()).toBe(200);
+    expect(denyResponse.request().postDataJSON()).toEqual({
+      pairs: [{ nameA: sourceName, nameB: priorName }],
+      category: "flavor",
+      brand,
+    });
+    const [nameA, nameB] = [priorName, sourceName].map((name) => name.toLowerCase()).sort();
+    expect(await getDenials(page, "flavor", brand)).toContainEqual({ nameA, nameB });
+    const otherDenials = await getDenials(page, "flavor", otherBrand);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    dialog = await openFlavorMerge(page, brand);
+    await scanDeterministicMatches(dialog);
+    await expect(dialog.getByText(`${priorName} → ${sourceName}`, { exact: true })).toHaveCount(0);
+    await restoreIgnoredMatch(page, dialog, priorName, sourceName, "flavor", brand);
+    expect(await getDenials(page, "flavor", brand)).not.toContainEqual({ nameA, nameB });
+    expect(await getDenials(page, "flavor", otherBrand)).toEqual(otherDenials);
+    expect(await getAliases(page, "flavor", brand)).toEqual(selectedAliases);
+    expect(await getAliases(page, "flavor", otherBrand)).toEqual(otherAliases);
+    await expectPreviouslyMergedSuggestion(dialog, priorName, sourceName);
+  } finally {
+    try {
+      if (factorySnapshotCaptured) {
+        await factoryDb.query("DELETE FROM factory_kv WHERE scope = 'live' AND key = ANY($1::text[])", [TEST_FACTORY_KEYS]);
+        for (const row of originalFactoryRows) {
+          await factoryDb.query(
+            `INSERT INTO factory_kv (scope, key, value, updated_at)
+             VALUES ('live', $1, $2::jsonb, NOW() + INTERVAL '5 minutes')
+             ON CONFLICT (scope, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+            [row.key, JSON.stringify(row.value)],
+          );
+        }
+      }
+    } finally {
+      await factoryDb.end().catch(() => {});
+    }
   }
 });
 
 test("confirmed flavor merge retargets scoped aliases and a later scan suggests the survivor", async ({ page }, testInfo) => {
-  const username = uniqueTestId("merge_alias");
+  const username = uniqueTestId("merge_alias_brand");
   const brand = uniqueTestId("MergeAliasBrand");
   const otherBrand = uniqueTestId("MergeAliasOtherBrand");
-  const previousName = uniqueTestId("PreviousFlavor");
-  const sourceName = uniqueTestId("SourceFlavor");
+  const previousName = uniqueTestId("PriorBrand");
+  const sourceName = uniqueTestId("SourceBrand");
+
+  const otherBrandOnlyNames = [uniqueTestId("OtherBrandIgnoreA"), uniqueTestId("OtherBrandIgnoreB")];
   const survivorName = uniqueTestId("SurvivorFlavor");
   testUsernames.add(username);
   testBrands.add(brand);
   testBrands.add(otherBrand);
+  trackAliasNames(previousName, sourceName);
 
   await signInAsManager(page, username);
 
@@ -131,13 +722,14 @@ test("confirmed flavor merge retargets scoped aliases and a later scan suggests 
     );
     await seedFactoryValue(FACTORY_FLAVORS_KEY, {
       ...originalFlavors,
-      [brand]: [sourceName, survivorName],
-      [otherBrand]: [sourceName, survivorName],
+      [brand]: [previousName, sourceName, survivorName],
+      [otherBrand]: [previousName, sourceName, survivorName],
     });
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
     const firstAliasWrite = await page.request.post("/api/merge-aliases", {
+      headers: await freshMasterDataSeedHeaders(page.request, "/api/merge-aliases"),
       data: {
         category: "flavor",
         brand,
@@ -146,6 +738,7 @@ test("confirmed flavor merge retargets scoped aliases and a later scan suggests 
     });
     expect(firstAliasWrite.status()).toBe(200);
     const otherBrandAliasWrite = await page.request.post("/api/merge-aliases", {
+      headers: await freshMasterDataSeedHeaders(page.request, "/api/merge-aliases"),
       data: {
         category: "flavor",
         brand: otherBrand,
@@ -160,7 +753,9 @@ test("confirmed flavor merge retargets scoped aliases and a later scan suggests 
     await dialog.getByRole("button", { name: "Merge…", exact: true }).click();
     await page.screenshot({ path: testInfo.outputPath("merge-before-confirm.jpg") });
     const aliasWritePromise = page.waitForResponse((response) =>
-      new URL(response.url()).pathname === "/api/merge-aliases"
+      /^\/api\/master-data-operations\/[^/]+\/apply$/.test(
+        new URL(response.url()).pathname,
+      )
         && response.request().method() === "POST",
     );
     await dialog.getByRole("button", { name: "Confirm merge", exact: true }).click();
@@ -194,21 +789,32 @@ test("confirmed flavor merge retargets scoped aliases and a later scan suggests 
       canonicalName: sourceName,
     });
 
-    await page.evaluate(({ brandName, previousFlavor, survivor }) => {
-      const key = "run-calc-brand-flavors";
-      const current = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, string[]>;
-      current[brandName] = [...new Set([...(current[brandName] ?? []), previousFlavor, survivor])];
-      localStorage.setItem(key, JSON.stringify(current));
-    }, { brandName: brand, previousFlavor: previousName, survivor: survivorName });
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
     const suggestionDialog = await openFlavorMerge(page, brand);
+    expect(await getAliases(page, "flavor", brand)).toContainEqual({
+      externalName: previousName,
+      canonicalName: survivorName,
+    });
+    expect(await getAliases(page, "flavor", otherBrand)).toContainEqual({
+      externalName: previousName,
+      canonicalName: sourceName,
+    });
     await suggestionDialog.getByRole("button", { name: "Scan deterministic matches", exact: true }).click();
     await expect(
       suggestionDialog.getByText(`${previousName} → ${survivorName}`, { exact: true }),
     ).toBeVisible({ timeout: 15_000 });
     await expect(suggestionDialog.getByText("Previously merged", { exact: true })).toBeVisible();
+
+    await suggestionDialog.locator("select").selectOption(otherBrand);
+    await suggestionDialog.getByRole("button", { name: "Scan deterministic matches", exact: true }).click();
+    await expect(
+      suggestionDialog.getByText(`${previousName} → ${sourceName}`, { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      suggestionDialog.getByText(`${previousName} → ${survivorName}`, { exact: true }),
+    ).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("merge-follow-up-suggestion.jpg") });
   } finally {
     try {
@@ -232,3 +838,499 @@ test("confirmed flavor merge retargets scoped aliases and a later scan suggests 
     }
   }
 });
+
+test("ingredient confirmation stores ingredient aliases and keeps later scans in scope", async ({ page }) => {
+  const username = uniqueTestId("merge_alias_brand");
+  const previousName = uniqueTestId("PriorBrand");
+  const sourceName = uniqueTestId("SourceBrand");
+
+  const otherBrandOnlyNames = [uniqueTestId("OtherBrandIgnoreA"), uniqueTestId("OtherBrandIgnoreB")];
+  const targetName = uniqueTestId("TargetBrand");
+  testUsernames.add(username);
+  trackAliasNames(previousName, sourceName);
+
+  await signInAsManager(page, username);
+  const restoreServerMergeUniverse = await seedServerMergeUniverse(page, {
+    ingredientNames: [previousName, sourceName, targetName],
+    brands: [],
+    flavorsByBrand: {},
+  });
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await seedPreviousAlias(page, "ingredient", previousName, sourceName);
+
+    const dialog = await openMergeManager(page);
+    await dialog.getByRole("button", { name: "Ingredients", exact: true }).click();
+    await confirmMerge(page, dialog, sourceName, targetName);
+
+    const aliases = await getAliases(page, "ingredient");
+    expect(aliases).toContainEqual({
+      externalName: previousName,
+      canonicalName: targetName,
+    });
+    expect(aliases).toContainEqual({
+      externalName: sourceName,
+      canonicalName: targetName,
+    });
+    expect(await getAliases(page, "dough")).not.toContainEqual({
+      externalName: previousName,
+      canonicalName: targetName,
+    });
+    const reloadedDialog = await reloadAndOpenMergeManager(page);
+    await reloadedDialog.getByRole("button", { name: "Ingredients", exact: true }).click();
+    expect(await getAliases(page, "ingredient")).toContainEqual({
+      externalName: previousName,
+      canonicalName: targetName,
+    });
+    await expectPreviouslyMergedSuggestion(reloadedDialog, previousName, targetName);
+    // Recipe names are intentionally excluded from the Ingredients picker. Seed
+    // the competing category only after verifying the ingredient reload journey,
+    // rather than depending on selecting the ingredient before pools hydrate.
+    await seedRecipeNamePool(page, "dough", [previousName, sourceName, targetName]);
+    // Read the authenticated bootstrap through the request context before the
+    // next document navigation; the UI assertion below independently verifies
+    // that the refreshed page hydrates the same names.
+    const bootstrapResponse = await page.request.get("/api/master-data/bootstrap");
+    expect(bootstrapResponse.status()).toBe(200);
+    const bootstrap = await bootstrapResponse.json() as {
+      doughRecipes: Array<{ name: string }>;
+    };
+    expect(bootstrap.doughRecipes).toEqual(expect.arrayContaining(
+      [previousName, sourceName, targetName].map((name) => expect.objectContaining({ name })),
+    ));
+
+    const doughDialog = await reloadAndOpenMergeManager(page);
+    await doughDialog.getByRole("button", { name: "Dough", exact: true }).click();
+    await expect(doughDialog.getByRole("checkbox", { name: previousName, exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(doughDialog.getByRole("checkbox", { name: targetName, exact: true })).toBeVisible({ timeout: 15_000 });
+    expect(await getAliases(page, "dough")).not.toContainEqual({
+      externalName: previousName,
+      canonicalName: targetName,
+    });
+    await scanDeterministicMatches(doughDialog);
+    await expect(doughDialog.getByText(`${previousName} → ${targetName}`, { exact: true })).toHaveCount(0);
+  } finally {
+    await restoreServerMergeUniverse();
+  }
+});
+
+test("recipe-name confirmations keep learned aliases isolated to each recipe category", async ({ page }) => {
+  const username = uniqueTestId("merge_alias_brand");
+  testUsernames.add(username);
+  const nameSets = RECIPE_NAME_CATEGORIES.map(({ category }) => ({
+    category,
+    previousName: uniqueTestId(`Prior${category}`),
+    sourceName: uniqueTestId(`Source${category}`),
+    targetName: uniqueTestId(`Target${category}`),
+  }));
+  for (const names of nameSets) {
+    trackAliasNames(names.previousName, names.sourceName);
+  }
+
+  await signInAsManager(page, username);
+  for (let index = 0; index < RECIPE_NAME_CATEGORIES.length; index += 1) {
+    const { category } = RECIPE_NAME_CATEGORIES[index];
+    const names = nameSets[index];
+    const categoryNames = [names.previousName, names.sourceName, names.targetName];
+    await seedRecipeNamePool(page, category, categoryNames);
+    await seedRecipeNamePool(
+      page,
+      RECIPE_ISOLATION_TARGET[category],
+      categoryNames,
+    );
+  }
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+  let dialog = await openMergeManager(page);
+  for (let index = 0; index < RECIPE_NAME_CATEGORIES.length; index += 1) {
+    const scope = RECIPE_NAME_CATEGORIES[index];
+    const names = nameSets[index];
+    await seedPreviousAlias(page, scope.category, names.previousName, names.sourceName);
+    await dialog.getByRole("button", { name: scope.label, exact: true }).click();
+    await confirmMerge(page, dialog, names.sourceName, names.targetName);
+
+    const aliases = await getAliases(page, scope.category);
+    expect(aliases).toContainEqual({
+      externalName: names.previousName,
+      canonicalName: names.targetName,
+    });
+    expect(aliases).toContainEqual({
+      externalName: names.sourceName,
+      canonicalName: names.targetName,
+    });
+
+    const unrelatedScope = RECIPE_NAME_CATEGORIES.find(
+      (item) => item.category === RECIPE_ISOLATION_TARGET[scope.category],
+    )!;
+    expect(await getAliases(page, unrelatedScope.category)).not.toContainEqual({
+      externalName: names.previousName,
+      canonicalName: names.targetName,
+    });
+    dialog = await reloadAndOpenMergeManager(page);
+    await dialog.getByRole("button", { name: scope.label, exact: true }).click();
+    expect(await getAliases(page, scope.category)).toContainEqual({
+      externalName: names.previousName,
+      canonicalName: names.targetName,
+    });
+    await expectPreviouslyMergedSuggestion(dialog, names.previousName, names.targetName);
+    for (const otherNames of nameSets.filter((candidate) => candidate !== names)) {
+      await expect(
+        dialog.getByText(`${otherNames.previousName} → ${otherNames.targetName}`, { exact: true }),
+      ).toHaveCount(0);
+    }
+
+    await dialog.getByRole("button", { name: unrelatedScope.label, exact: true }).click();
+    await dialog.getByRole("button", { name: "Scan deterministic matches", exact: true }).click();
+    await expect(
+      dialog.getByText(`${names.previousName} → ${names.targetName}`, { exact: true }),
+    ).toHaveCount(0);
+  }
+});
+
+test("brand confirmation saves brand aliases without leaking them into ingredient suggestions", async ({ page }) => {
+  const username = uniqueTestId("merge_alias_brand");
+  const previousName = uniqueTestId("PriorBrand");
+  const sourceName = uniqueTestId("SourceBrand");
+
+  const otherBrandOnlyNames = [uniqueTestId("OtherBrandIgnoreA"), uniqueTestId("OtherBrandIgnoreB")];
+  const targetName = uniqueTestId("TargetBrand");
+  testUsernames.add(username);
+  testBrands.add(previousName);
+  testBrands.add(sourceName);
+  testBrands.add(targetName);
+  trackAliasNames(previousName, sourceName);
+
+  await signInAsManager(page, username);
+  const factoryDb = new Client({ connectionString: process.env.DATABASE_URL });
+  await factoryDb.connect();
+  let originalFactoryRows: FactoryRow[] = [];
+  let factorySnapshotCaptured = false;
+
+  try {
+    const originalFactoryResult = await factoryDb.query<FactoryRow>(
+      "SELECT key, value FROM factory_kv WHERE scope = 'live' AND key = ANY($1::text[])",
+      [TEST_FACTORY_KEYS],
+    );
+    originalFactoryRows = originalFactoryResult.rows;
+    factorySnapshotCaptured = true;
+    const originalFactory = new Map(originalFactoryRows.map((row) => [row.key, row.value]));
+    const originalBrands =
+      (originalFactory.get(FACTORY_BRANDS_KEY) as string[] | undefined) ?? [];
+    const originalFlavors =
+      (originalFactory.get(FACTORY_FLAVORS_KEY) as Record<string, string[]> | undefined) ?? {};
+    const seedFactoryValue = async (key: string, value: unknown) => {
+      await factoryDb.query(
+        `INSERT INTO factory_kv (scope, key, value, updated_at)
+         VALUES ('live', $1, $2::jsonb, NOW())
+         ON CONFLICT (scope, key)
+         DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+        [key, JSON.stringify(value)],
+      );
+    };
+
+    await seedFactoryValue(
+      FACTORY_BRANDS_KEY,
+      [...new Set([...originalBrands, previousName, sourceName, targetName])],
+    );
+    await seedFactoryValue(FACTORY_FLAVORS_KEY, {
+      ...originalFlavors,
+      [previousName]: [],
+      [sourceName]: [],
+      [targetName]: [],
+    });
+    await page.evaluate(({ previous, source, target }) => {
+      localStorage.setItem(
+        "run-calc-ingredient-types",
+        JSON.stringify([previous, source, target]),
+      );
+    }, { previous: previousName, source: sourceName, target: targetName });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await seedPreviousAlias(page, "brand", previousName, sourceName);
+
+    const dialog = await openMergeManager(page);
+    await dialog.getByRole("button", { name: "Brand/Flavor", exact: true }).click();
+    await dialog.getByRole("button", { name: "Brands", exact: true }).click();
+    await confirmMerge(page, dialog, sourceName, targetName);
+
+    const aliases = await getAliases(page, "brand");
+    expect(aliases).toContainEqual({
+      externalName: previousName,
+      canonicalName: targetName,
+    });
+    expect(aliases).toContainEqual({
+      externalName: sourceName,
+      canonicalName: targetName,
+    });
+    expect(await getAliases(page, "ingredient")).not.toContainEqual({
+      externalName: previousName,
+      canonicalName: targetName,
+    });
+    const reloadedDialog = await reloadAndOpenMergeManager(page);
+    expect(await getAliases(page, "brand")).toContainEqual({
+      externalName: previousName,
+      canonicalName: targetName,
+    });
+    expect(await getAliases(page, "brand")).toContainEqual({
+      externalName: sourceName,
+      canonicalName: targetName,
+    });
+    await reloadedDialog.getByRole("button", { name: "Brand/Flavor", exact: true }).click();
+    await reloadedDialog.getByRole("button", { name: "Brands", exact: true }).click();
+    await expectPreviouslyMergedSuggestion(reloadedDialog, previousName, targetName);
+
+    await reloadedDialog.getByRole("button", { name: "Ingredients", exact: true }).click();
+    await reloadedDialog.getByRole("button", { name: "Scan deterministic matches", exact: true }).click();
+    await expect(
+      reloadedDialog.getByText(`${previousName} → ${targetName}`, { exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    try {
+      if (factorySnapshotCaptured) {
+        await factoryDb.query(
+          "DELETE FROM factory_kv WHERE scope = 'live' AND key = ANY($1::text[])",
+          [TEST_FACTORY_KEYS],
+        );
+        for (const row of originalFactoryRows) {
+          await factoryDb.query(
+            `INSERT INTO factory_kv (scope, key, value, updated_at)
+             VALUES ('live', $1, $2::jsonb, NOW() + INTERVAL '5 minutes')
+             ON CONFLICT (scope, key)
+             DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+            [row.key, JSON.stringify(row.value)],
+          );
+        }
+      }
+    } finally {
+      await factoryDb.end().catch(() => {});
+    }
+  }
+});
+
+test("learned aliases are available to a different manager after sign-in", async ({ page, browser }) => {
+  const managerA = uniqueTestId("merge_alias_writer");
+  const managerB = uniqueTestId("merge_alias_reader");
+  const ingredient = {
+    previous: uniqueTestId("PriorIngredient"),
+    source: uniqueTestId("SourceIngredient"),
+    target: uniqueTestId("TargetIngredient"),
+  };
+  const recipe = {
+    previous: uniqueTestId("PriorDough"),
+    source: uniqueTestId("SourceDough"),
+    target: uniqueTestId("TargetDough"),
+  };
+  const flavor = {
+    previous: uniqueTestId("PriorFlavor"),
+    source: uniqueTestId("SourceFlavor"),
+    target: uniqueTestId("TargetFlavor"),
+  };
+  const brand = uniqueTestId("MergeAliasBrand");
+  const otherBrand = uniqueTestId("MergeAliasOtherBrand");
+
+  testUsernames.add(managerA);
+  testUsernames.add(managerB);
+  testBrands.add(brand);
+  testBrands.add(otherBrand);
+  trackAliasNames(
+    ingredient.previous,
+    ingredient.source,
+    recipe.previous,
+    recipe.source,
+    flavor.previous,
+    flavor.source,
+  );
+
+  let managerBSetupContext: BrowserContext | undefined;
+  let managerBContext: BrowserContext | undefined;
+  let restoreServerMergeUniverse: (() => Promise<void>) | undefined;
+  try {
+    await signInAsManager(page, managerA);
+    await seedRecipeNamePool(page, "dough", [
+      recipe.previous,
+      recipe.source,
+      recipe.target,
+    ]);
+    await seedPreviousAlias(page, "ingredient", ingredient.previous, ingredient.source);
+    await seedPreviousAlias(page, "dough", recipe.previous, recipe.source);
+    await seedPreviousAlias(page, "flavor", flavor.previous, flavor.source, brand);
+    restoreServerMergeUniverse = await seedServerMergeUniverse(page, {
+      ingredientNames: [ingredient.previous, ingredient.source, ingredient.target],
+      brands: [brand, otherBrand],
+      flavorsByBrand: {
+        [brand]: [flavor.previous, flavor.source, flavor.target],
+        [otherBrand]: [flavor.previous, flavor.source, flavor.target],
+      },
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    let managerADialog = await openMergeManager(page);
+    await managerADialog.getByRole("button", { name: "Ingredients", exact: true }).click();
+    await confirmMerge(page, managerADialog, ingredient.source, ingredient.target);
+    expect(await getAliases(page, "ingredient")).toContainEqual({
+      externalName: ingredient.previous,
+      canonicalName: ingredient.target,
+    });
+
+    managerADialog = await reloadAndOpenMergeManager(page);
+    await managerADialog.getByRole("button", { name: "Dough", exact: true }).click();
+    await confirmMerge(page, managerADialog, recipe.source, recipe.target);
+    expect(await getAliases(page, "dough")).toContainEqual({
+      externalName: recipe.previous,
+      canonicalName: recipe.target,
+    });
+
+    managerADialog = await reloadAndOpenMergeManager(page);
+    await managerADialog.getByRole("button", { name: "Brand/Flavor", exact: true }).click();
+    await managerADialog.getByRole("button", { name: "Flavors", exact: true }).click();
+    await managerADialog.locator("select").selectOption(brand);
+    await confirmMerge(page, managerADialog, flavor.source, flavor.target);
+    expect(await getAliases(page, "flavor", brand)).toContainEqual({
+      externalName: flavor.previous,
+      canonicalName: flavor.target,
+    });
+    expect(await getAliases(page, "flavor", otherBrand)).not.toContainEqual({
+      externalName: flavor.previous,
+      canonicalName: flavor.target,
+    });
+
+    // Provision manager B in a setup context, then discard it. The reader signs
+    // in from an independent context with no access to manager A's localStorage.
+    managerBSetupContext = await browser.newContext();
+    const setupPage = await managerBSetupContext.newPage();
+    await signInAsManager(setupPage, managerB);
+    await managerBSetupContext.close();
+    managerBSetupContext = undefined;
+
+    managerBContext = await browser.newContext();
+    const readerPage = await managerBContext.newPage();
+    await readerPage.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await signInExistingManager(readerPage, managerB);
+
+    // The aliases are read by manager B from the authenticated server endpoint;
+    // other categories and the other flavor brand must remain isolated.
+    expect(await getAliases(readerPage, "ingredient")).toContainEqual({
+      externalName: ingredient.previous,
+      canonicalName: ingredient.target,
+    });
+    expect(await getAliases(readerPage, "ingredient")).toContainEqual({
+      externalName: ingredient.source,
+      canonicalName: ingredient.target,
+    });
+    expect(await getAliases(readerPage, "dough")).toContainEqual({
+      externalName: recipe.previous,
+      canonicalName: recipe.target,
+    });
+    expect(await getAliases(readerPage, "dough")).toContainEqual({
+      externalName: recipe.source,
+      canonicalName: recipe.target,
+    });
+    expect(await getAliases(readerPage, "flavor", brand)).toContainEqual({
+      externalName: flavor.previous,
+      canonicalName: flavor.target,
+    });
+    expect(await getAliases(readerPage, "flavor", brand)).toContainEqual({
+      externalName: flavor.source,
+      canonicalName: flavor.target,
+    });
+    expect(await getAliases(readerPage, "dough")).not.toContainEqual({
+      externalName: ingredient.previous,
+      canonicalName: ingredient.target,
+    });
+    expect(await getAliases(readerPage, "ingredient")).not.toContainEqual({
+      externalName: recipe.previous,
+      canonicalName: recipe.target,
+    });
+    expect(await getAliases(readerPage, "flavor", otherBrand)).not.toContainEqual({
+      externalName: flavor.previous,
+      canonicalName: flavor.target,
+    });
+
+    let readerDialog = await openMergeManager(readerPage);
+    await readerDialog.getByRole("button", { name: "Ingredients", exact: true }).click();
+    await expectPreviouslyMergedSuggestion(
+      readerDialog,
+      ingredient.previous,
+      ingredient.target,
+    );
+
+    // Put each alias pair into a different recipe category as well. This makes
+    // the UI's negative assertions prove scope filtering, not just missing names.
+    await seedRecipeNamePool(readerPage, "dough", [ingredient.previous, ingredient.target]);
+    await seedRecipeNamePool(readerPage, "sauce", [recipe.previous, recipe.target]);
+    readerDialog = await reloadAndOpenMergeManager(readerPage);
+    await readerDialog.getByRole("button", { name: "Dough", exact: true }).click();
+    await expectPreviouslyMergedSuggestion(readerDialog, recipe.previous, recipe.target);
+    await scanDeterministicMatches(readerDialog);
+    await expect(suggestionForAliasPair(
+      readerDialog,
+      ingredient.previous,
+      ingredient.target,
+    )).toHaveCount(0);
+
+    await readerDialog.getByRole("button", { name: "Sauce", exact: true }).click();
+    await scanDeterministicMatches(readerDialog);
+    await expect(suggestionForAliasPair(
+      readerDialog,
+      recipe.previous,
+      recipe.target,
+    )).toHaveCount(0);
+
+    await readerDialog.getByRole("button", { name: "Brand/Flavor", exact: true }).click();
+    await readerDialog.getByRole("button", { name: "Flavors", exact: true }).click();
+    await readerDialog.locator("select").selectOption(brand);
+    await expectPreviouslyMergedSuggestion(readerDialog, flavor.previous, flavor.target);
+    await readerDialog.locator("select").selectOption(otherBrand);
+    await scanDeterministicMatches(readerDialog);
+    await expect(suggestionForAliasPair(
+      readerDialog,
+      flavor.previous,
+      flavor.target,
+    )).toHaveCount(0);
+  } finally {
+    await restoreServerMergeUniverse?.();
+    await managerBContext?.close().catch(() => {});
+    await managerBSetupContext?.close().catch(() => {});
+  }
+});
+
+async function restoreIgnoredMatch(
+  page: Page,
+  dialog: Locator,
+  firstName: string,
+  secondName: string,
+  category: string,
+  brand?: string,
+): Promise<void> {
+  const ignoredPanel = dialog.getByTestId("ignored-merge-matches");
+  const toggle = ignoredPanel.getByRole("button", { name: /^Previously ignored matches/ });
+  if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+  const { nameA, nameB } = canonicalDeniedPair(firstName, secondName);
+  const pairLabel = deniedPairLabel(firstName, secondName);
+  const row = ignoredPanel.getByRole("listitem").filter({ hasText: pairLabel });
+  await expect(row).toBeVisible();
+  const restoreResponsePromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/denied-merges"
+      && response.request().method() === "DELETE",
+  );
+  await row.getByRole("button", {
+    name: `Restore ignored match ${nameA} and ${nameB}`,
+    exact: true,
+  }).click();
+  const response = await restoreResponsePromise;
+  expect(response.status()).toBe(200);
+  expect(response.request().postDataJSON()).toEqual({
+    pairs: [{ nameA, nameB }],
+    category,
+    ...(category === "flavor" && brand ? { brand } : {}),
+  });
+  await expect(row).toHaveCount(0);
+}
+
+function deniedPairLabel(a: string, b: string): string {
+  const { nameA, nameB } = canonicalDeniedPair(a, b);
+  return `${nameA} ↔ ${nameB}`;
+}

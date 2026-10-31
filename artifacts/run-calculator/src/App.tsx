@@ -42,6 +42,11 @@ import {
 import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
 import { createUpdateCoordinator, type UpdateState } from "./pwaUpdateCoordinator";
 import { AppUpdateControl } from "./components/AppUpdateControl";
+import { QcImportReviewBadge } from "./components/QcImportReview";
+import {
+  RECIPE_QC_REVIEW_NOTICE_EVENT,
+  type RecipeQcReviewAcknowledgement,
+} from "./recipeQcReviewNotice";
 
 const queryClient = new QueryClient();
 registerMasterDataQueryClient(queryClient);
@@ -167,6 +172,22 @@ function HomeGate() {
     };
   }, [isAuthenticated, toast, updateAndReload]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const onRecipeReviewAcknowledged = (event: Event) => {
+      const detail = (event as CustomEvent<RecipeQcReviewAcknowledgement>).detail;
+      if (!detail || detail.status !== "applied-awaiting-review") return;
+      const noun = detail.changedCount === 1 ? "recipe change" : "recipe changes";
+      toast({
+        title: "Applied — awaiting QC review",
+        description: `${detail.changedCount} shared ${noun} are saved and remain available for production. A rejection does not undo them.`,
+        duration: 7000,
+      });
+    };
+    window.addEventListener(RECIPE_QC_REVIEW_NOTICE_EVENT, onRecipeReviewAcknowledged);
+    return () => window.removeEventListener(RECIPE_QC_REVIEW_NOTICE_EVENT, onRecipeReviewAcknowledged);
+  }, [isAuthenticated, toast]);
+
   const [preHomeSafetyUserId, setPreHomeSafetyUserId] = useState<string | null>(null);
   const userId = isAuthenticated ? me?.userId ?? null : null;
 
@@ -199,6 +220,7 @@ function HomeGate() {
   }
   return isAuthenticated ? (
     <MasterDataPolling>
+      <QcImportReviewBadge key={userId ?? "anonymous"} />
       <Suspense fallback={<AppLoadingSurface />}>
         <LazyHome />
       </Suspense>
@@ -264,6 +286,11 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       registration: ServiceWorkerRegistration | undefined,
     ) => {
       stopUpdateWatchRef.current?.();
+      stopUpdateWatchRef.current = undefined;
+      if (import.meta.env.DEV) {
+        registrationRef.current = undefined;
+        return;
+      }
       registrationRef.current = registration;
       if (!registration) return;
 
@@ -302,8 +329,8 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   useRegisterSW({
     onRegisteredSW,
     // Detection is not permission to reload. The coordinator owns navigation.
-    onNeedReload: () => { void coordinator.check(); },
-    onRegisterError: () => { void coordinator.check(); },
+    onNeedReload: () => { if (!import.meta.env.DEV) void coordinator.check(); },
+    onRegisterError: () => { if (!import.meta.env.DEV) void coordinator.check(); },
   });
   const handleUpdateAndReload = useCallback(
     (canReload: () => boolean = getAutomaticUpdateReloadSafety, verifyBeforeReload?: () => Promise<boolean>) =>
@@ -342,6 +369,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      setUpdateState({ phase: "unchecked", running: WEB_BUILD_ID, stage: "development" });
+      return;
+    }
     const initial = coordinator.start();
     setUpdateState(initial);
     if (initial.phase === "confirmed") emitFieldCheckSignal("pwa-update-handoff", "success");
@@ -399,7 +430,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       <AppUpdateControl state={updateState}
         check={() => void coordinator.check()}
         update={() => void coordinator.requestUpdate()}
-        cancelUpdate={() => coordinator.cancelQueuedUpdate()} />
+        cancelUpdate={() => coordinator.cancelQueuedUpdate()}
+        autoReloadSafe={calculatorSafe}
+        autoReloadIdle={updateIdle}
+        developmentPreview={import.meta.env.DEV} />
       {children}
     </AppUpdateContext.Provider>
   );
@@ -407,15 +441,18 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
 
 function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
   const updateContext = useContext(AppUpdateContext);
+  const publishedUpdateRecoveryEnabled = !import.meta.env.DEV;
   return (
     <ErrorBoundary
-      onUpdateAndReload={updateContext?.updateAndReload}
-      scheduleSafeIdleRecovery={updateContext?.scheduleSafeIdleRecovery}
+      onUpdateAndReload={publishedUpdateRecoveryEnabled ? updateContext?.updateAndReload : undefined}
+      scheduleSafeIdleRecovery={publishedUpdateRecoveryEnabled ? updateContext?.scheduleSafeIdleRecovery : undefined}
     >
       {children}
     </ErrorBoundary>
   );
 }
+
+import { ImportSafetyReviewHost } from "./components/ImportSafetyReviewHost";
 
 function App() {
   const isStationDisplay =
@@ -430,6 +467,7 @@ function App() {
         <AppUpdatePrompt>
           <ErrorBoundaryWithRecovery>
           <AuthProvider>
+            <ImportSafetyReviewHost />
             {!isStationDisplay && <FieldVerificationObserver appBuild={WEB_BUILD_ID} />}
             <AppRoutes />
           </AuthProvider>

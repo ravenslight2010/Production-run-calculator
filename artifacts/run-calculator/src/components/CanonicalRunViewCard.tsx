@@ -24,7 +24,7 @@ function duration(seconds: number): string {
 
 function phaseLabel(view: OperationalRunView): string {
   const phase = view.elapsed.phase;
-  const active = [phase.stage1, phase.stage2, phase.stage3]
+  const active = (phase.sections ? Object.values(phase.sections) : [phase.stage1, phase.stage2, phase.stage3])
     .filter((stage) => stage.state !== "empty")
     .map((stage) => `${stage.label} (${stage.state})`);
   return active.length > 0 ? active.join(" · ") : view.observed.status.replace("-", " ");
@@ -132,12 +132,12 @@ export default function CanonicalRunViewCard({
             {[
               ["Cases", `${number(state.view.recap.casesCompleted, 0)}/${number(state.view.recap.casesNeeded, 0)}`],
               ["Remaining", number(state.view.recap.casesLeftToRun, 0)],
-              ["Pace", `${number(state.view.pace.ppm)} ppm`],
+              ["Line rate", `${number(state.view.pace.ppm)} pizzas/min · ${number(state.view.pace.ppm / 2)} pairs/min`],
               ["Elapsed", duration(state.view.elapsed.batchSec)],
               ["Phase", phaseLabel(state.view)],
               ["On line", `${number(state.view.advisory.line.cases, 0)} cases`],
               ["In freezer", `${number(state.view.advisory.freezer.cases, 0)} cases`],
-              ["Estimate", state.view.pace.catchUpPpm == null ? "On plan" : `${number(state.view.pace.catchUpPpm)} ppm needed`],
+              ["Estimate", state.view.pace.catchUpPpm == null ? "On plan" : `${number(state.view.pace.catchUpPpm)} pizzas/min needed`],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-border/50 bg-muted/20 p-2">
                 <p className="text-[10px] uppercase text-muted-foreground">{label}</p>

@@ -59,6 +59,13 @@ export function captureReleaseIdentity(root) {
     walk(base);
   }
   walk("scripts/package.json");
+  // The recovery manifest is a verification policy input just like test code.
+  // Older assessment fixtures may omit it, but when present it must invalidate
+  // retained evidence if its expected contracts change.
+  try { walk("scripts/recovery-manifest.json"); }
+  catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
   // Browser/test configuration lives outside src/e2e.
   for (const artifact of ["api-server", "run-calculator"]) {
     const directory = path.join(root, "artifacts", artifact);

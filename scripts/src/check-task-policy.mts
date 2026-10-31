@@ -8,7 +8,33 @@ type Requirement = {
   contradictions?: { label: string; pattern: RegExp }[];
 };
 
+// These checks protect the authoring contract, not task-runner behavior.
+const coverageRequirements: Requirement[] = [
+  {
+    label: "broad-objective coverage inventory",
+    pattern:
+      /Before narrowing or splitting a broad objective, inventory material input types, formats\/locales, layouts, platforms, lifecycle states, and failure paths[\s\S]{0,120}acceptance and test matrix/i,
+    remediation:
+      "inventory relevant variants before narrowing scope and keep them in the acceptance and test matrix",
+  },
+  {
+    label: "same-outcome variant ownership",
+    pattern:
+      /Variants of the same user outcome belong in the owning task, not separate follow-ups[\s\S]{0,60}Different tests, false-positive risks, or implementation steps alone do not justify a split[\s\S]{0,300}independent user outcome, explicit user deferral, or distinct authorization\/safety boundary/i,
+    remediation:
+      "keep same-outcome variants together; different tests or implementation risks alone are not separate outcomes",
+    contradictions: [
+      {
+        label: "a separate task is required for each format or edge case",
+        pattern:
+          /Create a separate task for each (?:address format|format variant|edge case|test case)/i,
+      },
+    ],
+  },
+];
+
 const requirements: Requirement[] = [
+  ...coverageRequirements,
   {
     label: "discovered-error triage and repair",
     pattern:
@@ -266,6 +292,7 @@ const root = resolve(
 const failures: string[] = [];
 
 const taskPlanRequirements: Requirement[] = [
+  ...coverageRequirements,
   {
     label: "agent-owned execution heading",
     pattern: /## Agent-owned execution/,

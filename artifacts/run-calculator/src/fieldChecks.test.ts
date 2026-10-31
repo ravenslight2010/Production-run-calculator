@@ -438,7 +438,7 @@ describe("field-check observer", () => {
       ["failure", { durationMs: 1501, sourceCode: 2 }],
     ]);
     expect(fieldCheckDiagnosticLabel("performance", {})).toContain("older evidence");
-    expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 2 })).toContain("stale/reset");
+    expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 2 })).toContain("out of date or came after a reset");
     expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 4 })).toContain("rejected the sync request");
   });
 
@@ -476,7 +476,9 @@ describe("field-check observer", () => {
       },
     });
     expect(fieldCheckDiagnosticLabel("performance", sample.metrics))
-      .toContain("API HTTP failure · sync · HTTP 5xx · HTTP 500");
+      .toContain("Server returned an error · syncing · server error · HTTP 500");
+    expect(fieldCheckDiagnosticLabel("performance", sample.metrics))
+      .toContain("Browser wait is not server processing time.");
   });
 
   it("stores cancelled and uncorrelated transport failures distinctly without inventing references", async () => {
@@ -511,6 +513,10 @@ describe("field-check observer", () => {
       outcome: "incomplete",
       metrics: { sourceCode: 6, outcomeCode: 7, operationCode: 4, backgroundCode: 0 },
     });
+    expect(fieldCheckDiagnosticLabel("performance", sample.metrics))
+      .toContain("Request ended before a reply · loading inventory · cancelled before a reply");
+    expect(fieldCheckDiagnosticLabel("performance", sample.metrics))
+      .toContain("operating-system pause is unknown");
     expect(
       submit.mock.calls.flatMap((call) => call[0])
         .filter((item: { checkName: string }) => item.checkName === "performance"),
@@ -526,7 +532,7 @@ describe("field-check observer", () => {
     const sample = submit.mock.calls.flatMap((call) => call[0])
       .find((item: { checkName: string }) => item.checkName === "performance");
     expect(sample).toMatchObject({ outcome: "failure", metrics: { durationMs: 10_000_000, sourceCode: 2 } });
-    expect(fieldCheckDiagnosticLabel("performance", sample.metrics)).toContain("≥10000000 ms");
+    expect(fieldCheckDiagnosticLabel("performance", sample.metrics)).toContain("at least 10000000 ms");
   });
 
   it("backs off a failed delivery instead of retrying in a hot loop", async () => {

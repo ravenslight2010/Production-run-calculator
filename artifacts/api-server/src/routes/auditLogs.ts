@@ -3,6 +3,7 @@ import { db, auditLogsTable, dataHealsTable } from "@workspace/db";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { eq, and, desc, lt, or, sql, type SQL } from "drizzle-orm";
 import { currentActorId, currentScope } from "../lib/requestScope";
+import { CAPABILITIES, isCapability } from "../lib/roles";
 
 /**
  * Audit log endpoints for compliance and forensics.
@@ -109,7 +110,7 @@ export const CHEESE_RECIPE_AUDIT_FIELDS = [
   "name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled",
 ] as const;
 export const DOUGH_RECIPE_AUDIT_FIELDS = [
-  "name", "notes", "components", "enabled", "brand", "flavors",
+  "name", "notes", "components", "enabled", "isPremadeCrust", "brand", "flavors",
   "doughballWeightOz", "doughballsPerTray", "doughballVariants",
 ] as const;
 export const SAUCE_RECIPE_AUDIT_FIELDS = [
@@ -122,9 +123,17 @@ export const MIX_RECIPE_AUDIT_FIELDS = [
 
 const EVENT_SCHEMAS: Record<string, AuditEventSchema> = {
   factory_reset: { required: ["outcome"], allowed: ["outcome", "count"] },
+  import_gold_case_deleted: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  import_gold_approval_created: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  import_gold_approval_verified: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  import_gold_approval_revoked: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   role_granted: { required: ["outcome"], allowed: ["outcome", "targetId"] },
   role_revoked: { required: ["outcome"], allowed: ["outcome", "targetId"] },
   role_changed: { required: ["outcome"], allowed: ["outcome", "targetId"] },
+  role_definition_updated: {
+    required: ["outcome", "beforeName", "afterName", "beforeCapabilities", "afterCapabilities", "builtin"],
+    allowed: ["outcome", "beforeName", "afterName", "beforeCapabilities", "afterCapabilities", "builtin"],
+  },
   password_reset: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId", "method"] },
   password_reset_approved: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId", "requestId"] },
   audit_log_maintenance_approved: {
@@ -175,12 +184,16 @@ function boundedString(value: unknown, max = MAX_STRING): string | undefined {
 
 /** Redacts arbitrary legacy event input into the small operational evidence schema. */
 export function redactAuditChanges(value: unknown): Record<string, unknown> {
-  const allowed = new Set(["count", "outcome", "reason", "reasonCode", "targetId", "targetType", "authorizedBy", "from", "to", "method", "requestId", "candidateIds", "fieldNames", "correlationId"]);
+  const allowed = new Set(["count", "outcome", "reason", "reasonCode", "targetId", "targetType", "authorizedBy", "from", "to", "method", "requestId", "candidateIds", "fieldNames", "correlationId", "beforeName", "afterName", "beforeCapabilities", "afterCapabilities", "builtin"]);
   const output: Record<string, unknown> = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return output;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (!allowed.has(key)) continue;
-    if (key === "candidateIds") {
+    if (key === "beforeCapabilities" || key === "afterCapabilities") {
+      if (Array.isArray(raw) && raw.length <= CAPABILITIES.length && raw.every(isCapability)) {
+        output[key] = [...new Set(raw)].sort();
+      }
+    } else if (key === "candidateIds") {
       if (
         Array.isArray(raw) &&
         raw.length <= 50 &&

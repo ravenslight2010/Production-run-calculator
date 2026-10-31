@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Unit tests for computeLinePhases covering all phase transitions:
 //   • Filling sequence (Stage 1 → 2 → 3 in virtual elapsed order)
 //   • Persisted-policy pause sequence (safe stop-tunnel or normal line drain)
@@ -13,8 +14,11 @@ import {
   computeEndedRunElapsedSec,
   isFrontlineDrainComplete,
   isPackagingDrainComplete,
+  isPressOvenDrainComplete,
+  lineThroughput,
+  resolveLineTiming,
   pickMostActivePhase,
-} from "./linePhases";
+} from "@workspace/live-calc";
 
 const BASE = {
   preTunnelMin: 2.5,
@@ -27,6 +31,117 @@ const BASE = {
 };
 
 const T0 = 1_700_000_000_000; // fixed wall-clock anchor
+
+describe("four-section split timing and pizza units", () => {
+  it("allocates a legacy pre-tunnel setting equally without changing total time", () => {
+    expect(resolveLineTiming({ freezerTime: 20, preTunnelMin: 4, postTunnelMin: 2 }))
+      .toMatchObject({
+        pressOvenMin: 2, frontlineMin: 2, tunnelMin: 14,
+        postTunnelMin: 2, totalMin: 20, compatibilityAllocation: true,
+      });
+  });
+
+  it("honors explicit zero and partial values, and fits over-allocation to the total", () => {
+    expect(resolveLineTiming({
+      freezerTime: 10, preTunnelMin: 4, pressOvenMin: 0, postTunnelMin: 1,
+    })).toMatchObject({ pressOvenMin: 0, frontlineMin: 4, tunnelMin: 5 });
+    expect(resolveLineTiming({
+      freezerTime: 6, pressOvenMin: 4, frontlineMin: 4, postTunnelMin: 2,
+    })).toMatchObject({ totalMin: 6, pressOvenMin: 2.4, frontlineMin: 2.4, postTunnelMin: 1.2 });
+  });
+
+  it("counts paired positions at half the pizza rate without changing pizza counts", () => {
+    expect(lineThroughput(72)).toEqual({ pizzasPerMinute: 72, pairsPerMinute: 36 });
+    expect(lineThroughput(-1)).toEqual({ pizzasPerMinute: 0, pairsPerMinute: 0 });
+  });
+
+  it("keeps Press/Oven completion separate from Frontline and Packaging drain", () => {
+    const phases = computeLinePhases({
+      elapsedBatchSec: 600,
+      pausedAt: null,
+      lastResumeWallMs: 0,
+      lastPauseStartWallMs: 0,
+      runStatus: "ended",
+      pressOvenMin: 1,
+      frontlineMin: 2,
+      postTunnelMin: 1,
+      freezerTime: 10,
+      endedAt: T0,
+      nowMs: T0 + 90_000,
+    });
+    const args = { runStatus: "ended", endedAt: T0, elapsedBatchSec: 600, phases };
+    expect(phases.sections?.pressOven.state).toBe("empty");
+    expect(phases.sections?.frontline.state).toBe("draining");
+    expect(isPressOvenDrainComplete(args)).toBe(true);
+    expect(isFrontlineDrainComplete(args)).toBe(false);
+    expect(isPackagingDrainComplete(args)).toBe(false);
+    expect(isFrontlineDrainComplete({
+      ...args,
+      phases: computeLinePhases({
+        elapsedBatchSec: 600, pausedAt: null, lastResumeWallMs: 0,
+        lastPauseStartWallMs: 0, runStatus: "ended", pressOvenMin: 1,
+        frontlineMin: 2, postTunnelMin: 1, freezerTime: 10,
+        endedAt: T0, nowMs: T0 + 181_000,
+      }),
+    })).toBe(true);
+  });
+
+  it("supports zero-length sections without negative countdowns", () => {
+    const phase = computeLinePhases({
+      elapsedBatchSec: 60, pausedAt: null, lastResumeWallMs: 0,
+      lastPauseStartWallMs: 0, runStatus: "running", pressOvenMin: 0,
+      frontlineMin: 0, postTunnelMin: 0, freezerTime: 0, nowMs: T0,
+    });
+    expect(Object.values(phase.sections ?? {}).every((row) => row.remainMs >= 0)).toBe(true);
+  });
+
+  it("fills each section at its own boundary and drains sequentially when the tunnel stays on", () => {
+    const base = {
+      elapsedBatchSec: 60, pausedAt: null, lastResumeWallMs: 0,
+      lastPauseStartWallMs: 0, runStatus: "running", pressOvenMin: 1,
+      frontlineMin: 1, postTunnelMin: 1, freezerTime: 10, nowMs: T0,
+    } as const;
+    expect(computeLinePhases(base).sections).toMatchObject({
+      pressOven: { state: "active" },
+      frontline: { state: "filling", remainMs: 60_000 },
+      freezeTunnel: { state: "empty" },
+    });
+    expect(computeLinePhases({ ...base, runStatus: "paused", pausedAt: T0,
+      pauseStopsTunnel: false, nowMs: T0 + 90_000 }).sections).toMatchObject({
+      pressOven: { state: "empty" },
+      frontline: { state: "draining", remainMs: 30_000 },
+      freezeTunnel: { state: "active" },
+    });
+  });
+
+  it("holds the tunnel on safe pauses and resumes its downstream stages in order", () => {
+    const paused = computeLinePhases({
+      elapsedBatchSec: 600, pausedAt: T0, lastResumeWallMs: 0,
+      lastPauseStartWallMs: 0, runStatus: "paused", pressOvenMin: 1,
+      frontlineMin: 1, postTunnelMin: 1, freezerTime: 10,
+      pauseStopsTunnel: true, nowMs: T0 + 120_000,
+    });
+    expect(paused.sections).toMatchObject({
+      pressOven: { state: "empty" }, frontline: { state: "empty" },
+      freezeTunnel: { state: "paused" }, packaging: { state: "draining" },
+    });
+    const resumed = computeLinePhases({
+      elapsedBatchSec: 600, pausedAt: null, lastResumeWallMs: T0 + 600_000,
+      lastPauseStartWallMs: T0, runStatus: "running", pressOvenMin: 1,
+      frontlineMin: 1, postTunnelMin: 1, freezerTime: 10,
+      lastPauseStopsTunnel: true, nowMs: T0 + 630_000,
+    });
+    expect(resumed.sections?.pressOven.state).toBe("resuming");
+    expect(resumed.sections?.freezeTunnel.state).toBe("paused");
+  });
+
+  it("accepts compatible numeric-string durations and rejects invalid values deterministically", () => {
+    expect(resolveLineTiming({ freezerTime: "10", preTunnelMin: "4", postTunnelMin: "1" }))
+      .toMatchObject({ pressOvenMin: 2, frontlineMin: 2, tunnelMin: 5, totalMin: 10 });
+    expect(resolveLineTiming({ freezerTime: Number.NaN, preTunnelMin: -1, postTunnelMin: Infinity }))
+      .toMatchObject({ totalMin: 0, pressOvenMin: 1.25, frontlineMin: 1.25, postTunnelMin: 2.5 });
+  });
+});
 
 // ── Filling sequence ─────────────────────────────────────────────────────────
 describe("computeLinePhases — filling sequence", () => {
@@ -439,7 +554,7 @@ describe("computeLinePhases — pause propagation", () => {
     });
     const pick = pickMostActivePhase(phases);
     expect(pick?.state).toBe("draining");
-    expect(pick?.label).toContain("Frontline");
+    expect(pick?.label).toContain("Press / Oven");
   });
 
   it("keeps the tunnel running only when the saved policy explicitly says No", () => {

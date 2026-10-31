@@ -85,6 +85,7 @@ describe("capacity telemetry", () => {
 
     const snapshot = capacityTelemetrySnapshot();
     const eventLoopDelay = snapshot.distributions["node.event_loop.delay_ms"];
+    expect(Date.parse(snapshot.observedUntil) - Date.parse(snapshot.observedFrom)).toBe(snapshot.windowMs);
     expect(eventLoopDelay).toBeDefined();
     expect(eventLoopDelay?.count).toBeGreaterThan(0);
     expect(eventLoopDelay?.max).toBeGreaterThanOrEqual(50);
@@ -98,6 +99,8 @@ describe("capacity telemetry", () => {
     reportCapacityTelemetry({ info } as never);
     expect(info).toHaveBeenCalledWith(
       expect.objectContaining({
+        observedFrom: snapshot.observedFrom,
+        observedUntil: expect.any(String),
         distributions: expect.objectContaining({
           "node.event_loop.delay_ms": expect.objectContaining({
             count: expect.any(Number),

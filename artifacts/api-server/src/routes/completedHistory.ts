@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, eq, gt, gte, lte, or } from "drizzle-orm";
 import * as z from "zod";
 import { completedRunHistoryTable, db } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
@@ -21,7 +21,14 @@ const CompletionSchema = z.object({
 const ListSchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  cursor: z.string().max(4096).regex(/^[A-Za-z0-9_-]+$/).optional(),
 }).refine((value) => !value.from || !value.to || value.from <= value.to);
+const CursorSchema = z.object({ date: isoDate, runId: z.string().min(1).max(500) }).strict();
+export function parseHistoryCursor(raw: string): z.infer<typeof CursorSchema> | null {
+  try { return CursorSchema.parse(JSON.parse(Buffer.from(raw, "base64url").toString("utf8"))); }
+  catch { return null; }
+}
 
 export function validateCompletionBoundary(input: z.infer<typeof CompletionSchema>): boolean {
   const snapshot = input.snapshot as {
@@ -67,12 +74,25 @@ router.get("/completed-history", async (req: Request, res: Response): Promise<vo
   const conditions = [eq(completedRunHistoryTable.scope, scope)];
   if (parsed.data.from) conditions.push(gte(completedRunHistoryTable.date, parsed.data.from));
   if (parsed.data.to) conditions.push(lte(completedRunHistoryTable.date, parsed.data.to));
+  if (parsed.data.cursor) {
+    const cursor = parseHistoryCursor(parsed.data.cursor);
+    if (!cursor) { res.status(400).json({ error: "Invalid history cursor" }); return; }
+    conditions.push(or(
+      gt(completedRunHistoryTable.date, cursor.date),
+      and(eq(completedRunHistoryTable.date, cursor.date), gt(completedRunHistoryTable.runId, cursor.runId)),
+    )!);
+  }
   const rows = await db.select().from(completedRunHistoryTable)
-    .where(and(...conditions)).orderBy(asc(completedRunHistoryTable.date), asc(completedRunHistoryTable.runId));
-  res.json({ history: rows.map((row) => ({
+    .where(and(...conditions)).orderBy(asc(completedRunHistoryTable.date), asc(completedRunHistoryTable.runId))
+    .limit(parsed.data.limit + 1);
+  const page = rows.slice(0, parsed.data.limit);
+  const last = page.at(-1);
+  res.json({ history: page.map((row) => ({
     operationId: row.operationId, runId: row.runId, date: row.date,
     completedAt: row.completedAt.toISOString(), snapshot: row.snapshot, snapshotHash: row.snapshotHash,
-  })) });
+  })), ...(rows.length > parsed.data.limit && last ? {
+    nextCursor: Buffer.from(JSON.stringify({ date: last.date, runId: last.runId })).toString("base64url"),
+  } : {}) });
 });
 
 router.post("/completed-history", async (req: Request, res: Response): Promise<void> => {

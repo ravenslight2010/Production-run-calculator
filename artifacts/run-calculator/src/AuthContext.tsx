@@ -21,10 +21,19 @@ import { markExpectedAuthLifecycleCancellation } from "./performanceDiagnostics"
 import { AuthContext } from "./useAuth";
 import { resetMasterDataTransportCache } from "./masterData";
 import { setProfileCacheIdentity } from "./profileCache";
+import { setRunTemplatesIdentity } from "./runTemplatesRepository";
+import { setCompletedHistoryIdentity } from "./completedHistorySync";
+import { setFactoryDataIdentity } from "./factoryDataSync";
+
+function setDirectorySession(user: StaffMember | null): void {
+  setFactoryDataIdentity(user ? `${user.sandbox ? "sandbox" : "live"}:${user.userId}` : null,
+    user?.capabilities.includes("manage-factory-settings") ?? false);
+}
 
 const AUTH_SESSION_PROBE_TIMEOUT_MS = 8_000;
 const AUTH_SESSION_PROBE_MAX_ATTEMPTS = 2;
 const AUTH_SESSION_PROBE_RETRY_DELAY_MS = 250;
+const AUTH_ROLE_REFRESH_INTERVAL_MS = 60_000;
 const AUTH_SESSION_PROBE_TIMEOUT_MESSAGE =
   "The staff session check timed out before the server responded.";
 
@@ -71,6 +80,7 @@ async function fetchSessionWithDeadline(signal: AbortSignal): Promise<StaffMembe
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const authEpochRef = useRef(0);
+  const authTransitionPendingRef = useRef(false);
   const freshSessionRef = useRef(false);
   const [sessionEndedReason, setSessionEndedReason] =
     useState<AuthSessionReason | null>(null);
@@ -78,7 +88,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const advanceAuthEpoch = useCallback(() => {
     const next = authEpochRef.current + 1;
     authEpochRef.current = next;
+    authTransitionPendingRef.current = true;
     setAuthRequestEpoch(next);
+    // Stop delivery before a sign-in/out request can change the httpOnly cookie.
+    setProfileCacheIdentity(null);
+    setRunTemplatesIdentity(null);
+    setCompletedHistoryIdentity(null);
+    setDirectorySession(null);
     return next;
   }, []);
 
@@ -97,17 +113,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // A request that began under a previous session transition is no
         // longer allowed to become the identity source. The current cache is
         // authoritative (and may already contain the sign-in response).
-        if (requestEpoch !== authEpochRef.current) {
+        if (requestEpoch !== authEpochRef.current || authTransitionPendingRef.current) {
           return qc.getQueryData<StaffMember | null>(["me"]) ?? null;
         }
         setProfileCacheIdentity({
           userId: user.userId,
           scope: user.sandbox ? "sandbox" : "live",
         });
+        setDirectorySession(user);
+        setRunTemplatesIdentity(user.userId, user.sandbox ? "sandbox" : "live");
+        setCompletedHistoryIdentity(user.userId, user.sandbox ? "sandbox" : "live");
         setSessionEndedReason(null);
         return user;
       } catch (err) {
-        if (requestEpoch !== authEpochRef.current) {
+        if (requestEpoch !== authEpochRef.current || authTransitionPendingRef.current) {
           return qc.getQueryData<StaffMember | null>(["me"]) ?? null;
         }
         if (err instanceof InventoryApiError && err.status === 401) {
@@ -142,6 +161,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     retryDelay: AUTH_SESSION_PROBE_RETRY_DELAY_MS,
     staleTime: 60_000,
+    refetchInterval: (query) =>
+      query.state.data ? AUTH_ROLE_REFRESH_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
   });
 
   const me = data ?? null;
@@ -154,11 +176,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refetch]);
 
   useEffect(() => {
+    if (authTransitionPendingRef.current) return;
+    setDirectorySession(me);
+    setRunTemplatesIdentity(me?.userId ?? null, me?.sandbox ? "sandbox" : "live");
+    setCompletedHistoryIdentity(me?.userId ?? null, me?.sandbox ? "sandbox" : "live");
     setProfileCacheIdentity(me ? {
       userId: me.userId,
       scope: me.sandbox ? "sandbox" : "live",
     } : null);
-  }, [me?.sandbox, me?.userId]);
+  }, [me?.sandbox, me?.userId, me?.capabilities]);
 
   // On every identity change we (a) write the new identity straight into ["me"]
   // from the auth response (mirroring mobile's setMe), and (b) drop every OTHER
@@ -174,7 +200,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // carries the epoch guard above for fetch implementations that do not
       // honor AbortSignal.
       await qc.cancelQueries({ queryKey: ["me"], exact: true });
+      authTransitionPendingRef.current = false;
       resetMasterDataTransportCache();
+      setDirectorySession(identity);
+      setRunTemplatesIdentity(identity?.userId ?? null, identity?.sandbox ? "sandbox" : "live");
+      setCompletedHistoryIdentity(identity?.userId ?? null, identity?.sandbox ? "sandbox" : "live");
       setProfileCacheIdentity(identity ? {
         userId: identity.userId,
         scope: identity.sandbox ? "sandbox" : "live",
@@ -185,51 +215,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [qc],
   );
 
-  const signIn = useCallback(
-    async (username: string, password: string) => {
-      const transitionEpoch = advanceAuthEpoch();
-      const { user } = await signInRequest(username, password);
+  const completeAuthRequest = useCallback(async (
+    request: () => Promise<{ user: StaffMember }>,
+  ) => {
+    const previous = qc.getQueryData<StaffMember | null>(["me"]) ?? null;
+    const transitionEpoch = advanceAuthEpoch();
+    try {
+      const { user } = await request();
       if (transitionEpoch !== authEpochRef.current) return;
       setSessionEndedReason(null);
       freshSessionRef.current = true;
       await resetCacheTo(user);
+    } catch (error) {
+      if (transitionEpoch === authEpochRef.current) await resetCacheTo(previous);
+      throw error;
+    }
+  }, [qc, advanceAuthEpoch, resetCacheTo]);
+
+  const signIn = useCallback(
+    async (username: string, password: string) => {
+      await completeAuthRequest(() => signInRequest(username, password));
     },
-    [advanceAuthEpoch, resetCacheTo],
+    [completeAuthRequest],
   );
 
   const signUp = useCallback(
     async (username: string, password: string, accessCode: string) => {
-      const transitionEpoch = advanceAuthEpoch();
-      const { user } = await signUpRequest(username, password, accessCode);
-      if (transitionEpoch !== authEpochRef.current) return;
-      setSessionEndedReason(null);
-      freshSessionRef.current = true;
-      await resetCacheTo(user);
+      await completeAuthRequest(() => signUpRequest(username, password, accessCode));
     },
-    [advanceAuthEpoch, resetCacheTo],
+    [completeAuthRequest],
   );
   const acceptInvitation = useCallback(
     async (invitation: string, username: string, password: string) => {
-      const transitionEpoch = advanceAuthEpoch();
-      const { user } = await acceptStaffInvitation(invitation, username, password);
-      if (transitionEpoch !== authEpochRef.current) return;
-      setSessionEndedReason(null);
-      freshSessionRef.current = true;
-      await resetCacheTo(user);
+      await completeAuthRequest(() => acceptStaffInvitation(invitation, username, password));
     },
-    [advanceAuthEpoch, resetCacheTo],
+    [completeAuthRequest],
   );
 
   // Sign in as the seeded sandbox account. Credentials are intentionally the
   // well-known "test"/"test" pair — this is a non-production demo shortcut.
   const signInAsTest = useCallback(async () => {
-    const transitionEpoch = advanceAuthEpoch();
-    const { user } = await signInRequest("test", "test");
-    if (transitionEpoch !== authEpochRef.current) return;
-    setSessionEndedReason(null);
-    freshSessionRef.current = true;
-    await resetCacheTo(user);
-  }, [advanceAuthEpoch, resetCacheTo]);
+    await completeAuthRequest(() => signInRequest("test", "test"));
+  }, [completeAuthRequest]);
 
   const signOut = useCallback(async () => {
     const transitionEpoch = advanceAuthEpoch();
@@ -248,10 +275,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // the cache to prevent cross-user leakage.
   const forceSignedOut = useCallback(() => {
     advanceAuthEpoch();
+    authTransitionPendingRef.current = false;
     freshSessionRef.current = false;
     setSessionEndedReason(null);
     resetMasterDataTransportCache();
     setProfileCacheIdentity(null);
+    setRunTemplatesIdentity(null);
+    setCompletedHistoryIdentity(null);
+    setDirectorySession(null);
     qc.setQueryData(["me"], null);
   }, [advanceAuthEpoch, qc]);
 

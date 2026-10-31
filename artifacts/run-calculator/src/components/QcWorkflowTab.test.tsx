@@ -3,11 +3,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { QcAllergenReviewInput } from "@workspace/api-client-react";
+import type { QcAllergenReviewInput, QcEvent } from "@workspace/api-client-react";
 import type { Ingredient } from "@workspace/ingredient-catalog";
 import type { IngredientSubstitution } from "@workspace/inventory-math";
 import { DEFAULT_VALUES, type FormValues } from "../types";
 import QcWorkflowTab from "./QcWorkflowTab";
+import QcLabelVerification from "./QcLabelVerification";
 
 const qcMocks = vi.hoisted(() => ({
   targets: {
@@ -28,6 +29,15 @@ const qcMocks = vi.hoisted(() => ({
         targetValue: number | null;
         unit: string | null;
         toleranceValue: number | null;
+        source: string;
+        state: string;
+        reason?: string;
+      }>,
+      brixTargets: [] as Array<{
+        ingredientId: string;
+        ingredientName: string;
+        targetBrix: number | null;
+        toleranceBrix: number | null;
         source: string;
         state: string;
         reason?: string;
@@ -104,32 +114,78 @@ const qcMocks = vi.hoisted(() => ({
     isFetching: false,
     refetch: vi.fn(),
   },
+    labelReferences: {
+      data: { items: [] as Array<Record<string, any>> },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    },
   mutation: {
     mutateAsync: vi.fn(),
     mutate: vi.fn(),
     error: null,
     isPending: false,
   },
+  brixMutation: {
+    mutateAsync: vi.fn(),
+    mutate: vi.fn(),
+    error: null,
+    isPending: false,
+  },
+  brixTargetMutation: {
+    mutateAsync: vi.fn(),
+    mutate: vi.fn(),
+    error: null,
+    isPending: false,
+  },
+    labelCheckOptions: undefined as undefined | {
+      mutation: { onSuccess: (response: { event: QcEvent }) => Promise<void> };
+    },
+    labelCheckMutation: {
+      mutate: vi.fn(),
+      error: null,
+      isPending: false,
+    },
+    labelReferenceMutation: {
+      mutate: vi.fn(),
+      error: null,
+      isPending: false,
+    },
+    labelReviewMutation: {
+      mutate: vi.fn(),
+      error: null,
+      isPending: false,
+    },
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
   exportQcHistoryCsv: vi.fn(),
   getGetQcHistoryQueryKey: (...args: unknown[]) => ["qc-history", ...args],
+  getGetQcLabelReferencesQueryKey: (...args: unknown[]) => ["qc-label-references", ...args],
   getGetQcAllergenActivityQueryKey: (...args: unknown[]) => ["qc-allergen-activity", ...args],
   getGetQcRunQueryKey: (...args: unknown[]) => ["qc-run", ...args],
   getGetQcTargetsQueryKey: (...args: unknown[]) => ["qc-targets", ...args],
   useCorrectQcEvent: () => qcMocks.mutation,
   useGetQcHistory: () => qcMocks.history,
+  useGetQcLabelReferences: () => qcMocks.labelReferences,
   useGetQcAllergenActivity: () => qcMocks.activity,
   useGetQcRun: (runId: string) => (qcMocks.runs[runId] as typeof qcMocks.run | undefined) ?? qcMocks.run,
   useGetQcTargets: () => qcMocks.targets,
   useRecordQcAllergenReview: () => qcMocks.mutation,
   useRecordQcComponentCheck: () => qcMocks.mutation,
   useRecordQcCleaning: () => qcMocks.mutation,
+  useRecordQcBrixCheck: () => qcMocks.brixMutation,
+  useRecordQcLabelCheck: (options: typeof qcMocks.labelCheckOptions) => {
+    qcMocks.labelCheckOptions = options;
+    return qcMocks.labelCheckMutation;
+  },
+  useSaveQcLabelReference: () => qcMocks.labelReferenceMutation,
+  useReviewQcLabelReference: () => qcMocks.labelReviewMutation,
   useRecordQcLot: () => qcMocks.mutation,
   useRecordQcWeightCheck: () => qcMocks.mutation,
   useRedactQcEvent: () => qcMocks.mutation,
   useSetQcTarget: () => qcMocks.mutation,
+  useSetQcBrixTarget: () => qcMocks.brixTargetMutation,
   useSignoffQcRun: () => qcMocks.mutation,
   useVerifyQcCleaning: () => qcMocks.mutation,
 }));
@@ -144,6 +200,11 @@ vi.mock("../masterData", () => ({
 }));
 
 vi.mock("./QualityHistoryTab", () => ({ default: () => null }));
+// Date-code form and comparison have their own focused hook/state tests.
+vi.mock("./QcDateCodeVerification", () => ({
+  default: () => <section data-testid="qc-date-code-verification" />,
+  QcDateCodeComparison: () => null,
+}));
 
 afterEach(() => {
   cleanup();
@@ -182,6 +243,15 @@ beforeEach(() => {
       state: string;
       reason?: string;
     }>,
+    brixTargets: [{
+      ingredientId: "flour",
+      ingredientName: "Flour",
+      targetBrix: null,
+      toleranceBrix: null,
+      source: "not-configured",
+      state: "not-evaluated",
+      reason: "No manager-reviewed Brix target is configured.",
+    }],
   };
   qcMocks.run.data = {
     runId: "run-1",
@@ -203,12 +273,74 @@ beforeEach(() => {
   };
   qcMocks.runs = {};
   qcMocks.mutation.mutate.mockClear();
+  qcMocks.mutation.error = null;
+  qcMocks.mutation.isPending = false;
+  qcMocks.brixMutation.mutate.mockClear();
+  qcMocks.brixMutation.error = null;
+  qcMocks.brixMutation.isPending = false;
+  qcMocks.brixTargetMutation.mutate.mockClear();
+  qcMocks.brixTargetMutation.error = null;
+  qcMocks.brixTargetMutation.isPending = false;
+  qcMocks.labelCheckMutation.mutate.mockClear();
+  qcMocks.labelCheckMutation.error = null;
+  qcMocks.labelCheckMutation.isPending = false;
+  qcMocks.labelReferenceMutation.mutate.mockClear();
+  qcMocks.labelReferenceMutation.error = null;
+  qcMocks.labelReferenceMutation.isPending = false;
+  qcMocks.labelReviewMutation.mutate.mockClear();
+  qcMocks.labelReviewMutation.error = null;
+  qcMocks.labelReviewMutation.isPending = false;
 });
 
 const stagedIngredients: QcAllergenReviewInput["stagedIngredients"] = [
   { area: "Dough", name: "Flour", quantity: "5", unit: "lbs", staged: true },
   { area: "Sauce", name: "Tomato sauce", quantity: "2", unit: "lbs", staged: false },
 ];
+
+it("keeps a late label-save acknowledgement attached to its originating run", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(client, "invalidateQueries").mockResolvedValue(undefined);
+  const view = (profileKey: string) => (
+    <QueryClientProvider client={client}>
+      <QcLabelVerification runId="test-run" profileKey={profileKey} canRecordQc canManageQc={false} />
+    </QueryClientProvider>
+  );
+  const { rerender } = render(view("brand__flavor"));
+  expect(screen.getByLabelText("Packaging context").className).toContain("appearance-none");
+  const acknowledgeOrigin = qcMocks.labelCheckOptions!.mutation.onSuccess;
+  rerender(view("next-run"));
+  fireEvent.change(screen.getByLabelText("Observed product name"), { target: { value: "Next run text" } });
+  await act(async () => acknowledgeOrigin({ event: { runId: "origin-run" } as QcEvent }));
+  expect((screen.getByLabelText("Observed product name") as HTMLInputElement).value).toBe("Next run text");
+  expect(screen.queryByText(/Label observation saved\./)).toBeNull();
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["qc-run", "origin-run"] });
+});
+
+it("offers only approved references bound to the current product and packaging context", () => {
+  qcMocks.labelReferences.data.items = [
+    { referenceId: "matching", state: "approved", context: "shipper-case", productKey: "brand__flavor", version: 1 },
+    { referenceId: "other-product", state: "approved", context: "shipper-case", productKey: "other__product", version: 1 },
+    { referenceId: "other-context", state: "approved", context: "carton-label", productKey: "brand__flavor", version: 1 },
+    { referenceId: "missing-brand", state: "approved", context: "shipper-case", productKey: "__flavor", version: 1 },
+    { referenceId: "ambiguous-key", state: "approved", context: "shipper-case", productKey: "brand__ambiguous__flavor", version: 1 },
+  ];
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = (profileKey: string) => (
+    <QueryClientProvider client={client}>
+      <QcLabelVerification runId="test-run" profileKey={profileKey} canRecordQc canManageQc={false} />
+    </QueryClientProvider>
+  );
+  const { rerender } = render(view("brand__flavor"));
+  const values = () => Array.from(
+    (screen.getByLabelText("Approved reference") as HTMLSelectElement).options,
+    (option) => option.value,
+  );
+  expect(values()).toEqual(["", "matching"]);
+  rerender(view("__flavor"));
+  expect(values()).toEqual([""]);
+  rerender(view("brand__ambiguous__flavor"));
+  expect(values()).toEqual([""]);
+});
 
 type RenderOptions = {
   runId?: string;
@@ -252,6 +384,33 @@ function renderTab(options: RenderOptions = {}) {
   };
 }
 describe("QC workflow UI", () => {
+  it("lets QC staff save observed label text without an approved reference or client-supplied expected values", () => {
+    renderTab();
+    expect(screen.getByText("Observation-only mode").textContent).toBe("Observation-only mode");
+    fireEvent.change(screen.getByLabelText("Observed product name"), {
+      target: { value: "Observed synthetic cheese" },
+    });
+    fireEvent.change(screen.getByLabelText("Observed lot text"), {
+      target: { value: "LOT-TEST" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save observation" }));
+
+    expect(qcMocks.labelCheckMutation.mutate).toHaveBeenCalledTimes(1);
+    const request = qcMocks.labelCheckMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(request.data).toMatchObject({
+      runId: "run-1",
+      context: "shipper-case",
+      observed: {
+        productName: "Observed synthetic cheese",
+        lotText: "LOT-TEST",
+        dateText: "",
+      },
+    });
+    expect(request.data).not.toHaveProperty("expected");
+    expect(request.data).not.toHaveProperty("outcome");
+    expect(screen.queryByTestId("qc-label-reference-manager")).toBeNull();
+  });
+
   it("shows the selected run's mapped, unknown, and substituted footprint without stale run details", () => {
     qcMocks.ingredients = [
       {
@@ -598,42 +757,22 @@ describe("QC workflow UI", () => {
       source: "spec-import",
       state: "configured",
     }];
-    qcMocks.runs["run-1"] = {
-      ...qcMocks.run,
-      data: {
-        runId: "run-1",
-        items: [],
-        hasMore: true,
-        weightCheckEvents: [{
-          ingredientId: "flour",
-          checkType: "30-minute",
-          createdAt: new Date(start + 30 * 60_000).toISOString(),
-        }],
-        weightCheckEventsComplete: true,
-        componentChecklist: {
-          status: "complete",
-          issues: [],
-          expectedComponents: [],
-          source: null,
-        },
+    qcMocks.run.data = {
+      runId: "run-1",
+      items: [{
+        id: 1,
+        eventType: "weight",
+        ingredientId: "flour",
+        payload: { checkType: "30-minute" },
+        createdAt: new Date(start + 30 * 60_000).toISOString(),
+      }],
+      componentChecklist: {
+        status: "complete",
+        issues: [],
+        expectedComponents: [],
+        source: null,
       },
-    };
-    qcMocks.runs["run-2"] = {
-      ...qcMocks.run,
-      data: {
-        runId: "run-2",
-        items: [],
-        hasMore: false,
-        weightCheckEvents: [],
-        weightCheckEventsComplete: true,
-        componentChecklist: {
-          status: "complete",
-          issues: [],
-          expectedComponents: [],
-          source: null,
-        },
-        signoff: null,
-      },
+      signoff: null,
     };
     const rendered = renderTab({
       runIsActive: false,
@@ -737,5 +876,102 @@ describe("QC workflow UI", () => {
     renderTab(options);
     expect(screen.getByTestId("qc-weight-reminder-flour").querySelector("time")?.getAttribute("datetime"))
       .toBe(firstDueTime);
+  });
+
+  it("records a zero Brix reading with stable retry identity and no client-supplied result", () => {
+    renderTab();
+    fireEvent.click(screen.getByRole("tab", { name: "Brix" }));
+    fireEvent.change(screen.getByLabelText("Brix ingredient"), { target: { value: "flour" } });
+    expect(screen.getByTestId("qc-brix-target-status").textContent).toContain("Not evaluated");
+
+    fireEvent.change(screen.getByLabelText("Actual Brix (°Bx)"), { target: { value: "0" } });
+    fireEvent.click(screen.getByTestId("button-record-brix-check"));
+
+    expect(qcMocks.brixMutation.mutate).toHaveBeenCalledTimes(1);
+    const first = qcMocks.brixMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(first.data).toMatchObject({
+      runId: "run-1",
+      profileKey: "brand::flavor",
+      ingredientId: "flour",
+      checkType: "pre-run",
+      station: "dough",
+      actualBrix: 0,
+    });
+    expect(first.data).not.toHaveProperty("targetBrix");
+    expect(first.data).not.toHaveProperty("toleranceBrix");
+    expect(first.data).not.toHaveProperty("outcome");
+    qcMocks.brixMutation.error = new Error("Temporary network failure");
+    fireEvent.change(screen.getByLabelText("Brix note (optional)"), { target: { value: "Retry context" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry or correct the input" }));
+    expect(qcMocks.brixMutation.mutate).toHaveBeenCalledTimes(2);
+    const retry = qcMocks.brixMutation.mutate.mock.calls[1]?.[0] as { data: Record<string, unknown> };
+    expect(retry.data.operationId).toBe(first.data.operationId);
+    expect(retry.data.note).toBe("Retry context");
+  });
+
+  it("lets a QC manager explicitly configure a zero Brix target and zero tolerance", () => {
+    renderTab({ canManageQc: true });
+    fireEvent.change(screen.getByLabelText("Brix target ingredient"), { target: { value: "flour" } });
+    fireEvent.change(screen.getByLabelText("Target Brix (°Bx)"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Brix tolerance (°Bx)"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Reviewed reference" } });
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+
+    expect(qcMocks.brixTargetMutation.mutate).toHaveBeenCalledTimes(1);
+    const request = qcMocks.brixTargetMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+
+    expect(request.data).toMatchObject({
+      profileKey: "brand::flavor",
+      ingredientId: "flour",
+      targetBrix: 0,
+      toleranceBrix: 0,
+      reason: "Reviewed reference",
+    });
+    expect(request.data).not.toHaveProperty("sourceDocument");
+    expect(request.data).not.toHaveProperty("sourceSection");
+    expect(request.data).not.toHaveProperty("unit");
+  });
+
+  it("sends structured Brix citations separately from the reason and retains them after a failed save", () => {
+    renderTab({ canManageQc: true });
+    fireEvent.change(screen.getByLabelText("Brix target ingredient"), { target: { value: "flour" } });
+    fireEvent.change(screen.getByLabelText("Target Brix (°Bx)"), { target: { value: "12.5" } });
+    fireEvent.change(screen.getByLabelText("Brix tolerance (°Bx)"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Annual review" } });
+    const document = screen.getByLabelText("Brix approved document name or ID (optional)");
+    const section = screen.getByLabelText("Brix source section or page (optional)");
+    expect(document.getAttribute("maxlength")).toBe("300");
+    expect(section.getAttribute("maxlength")).toBe("200");
+    fireEvent.change(document, { target: { value: "  Approved 文書 — SOP-1  " } });
+    fireEvent.change(section, { target: { value: "  § 4, page 12  " } });
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+    const first = qcMocks.brixTargetMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(first.data).toMatchObject({
+      sourceDocument: "Approved 文書 — SOP-1",
+      sourceSection: "§ 4, page 12",
+      reason: "Annual review",
+    });
+    qcMocks.brixTargetMutation.error = new Error("Temporary network failure");
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Annual review " } });
+    expect((document as HTMLInputElement).value).toBe("  Approved 文書 — SOP-1  ");
+    expect((section as HTMLInputElement).value).toBe("  § 4, page 12  ");
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+    const retry = qcMocks.brixTargetMutation.mutate.mock.calls[1]?.[0] as { data: Record<string, unknown> };
+    expect(retry.data).toEqual(first.data);
+  });
+
+  it("omits blank Brix citations when clearing and keeps citation controls manager-only", () => {
+    const { rerenderTab } = renderTab({ canManageQc: true });
+    fireEvent.change(screen.getByLabelText("Brix target ingredient"), { target: { value: "flour" } });
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Clear after review" } });
+    fireEvent.change(screen.getByLabelText("Brix approved document name or ID (optional)"), { target: { value: "   " } });
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+    const request = qcMocks.brixTargetMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(request.data).toMatchObject({ targetBrix: null, toleranceBrix: null, reason: "Clear after review" });
+    expect(request.data).not.toHaveProperty("sourceDocument");
+    expect(request.data).not.toHaveProperty("sourceSection");
+    rerenderTab({ canManageQc: false });
+    expect(screen.queryByLabelText("Brix approved document name or ID (optional)")).toBeNull();
+    expect(screen.queryByLabelText("Brix source section or page (optional)")).toBeNull();
   });
 });

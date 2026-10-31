@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,13 +9,16 @@ import test from "node:test";
 import type {
   FullConfig,
   FullResult,
+  Suite,
   TestCase,
   TestResult,
 } from "@playwright/test/reporter";
 import CompatibilityDebugReporter, {
   sanitizePngScreenshot,
 } from "./compatibility-debug-reporter.ts";
+import { startBrowserAttempt } from "../../../scripts/src/browser-attempt-progress.mjs";
 
+const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const specPath = fileURLToPath(new URL("./release-webkit-smoke.spec.ts", import.meta.url));
 const PNG_TEXT_CANARY = "VISIBLE_TEXT_CANARY";
 const SECRET_CANARIES = [
@@ -124,8 +128,11 @@ function setTestEnvironment(runnerTemp: string): () => void {
     "GITHUB_RUN_ID",
     "GITHUB_RUN_ATTEMPT",
     "GITHUB_SHA",
+    "RELEASE_WEBKIT_DEBUG_ATTEMPT_ID",
   ];
   const original = new Map(keys.map((key) => [key, process.env[key]]));
+  const attemptId = startBrowserAttempt({ root: repositoryRoot, lane: "webkit-compatibility-debug" });
+  process.env.RELEASE_WEBKIT_DEBUG_ATTEMPT_ID = attemptId;
   process.env.CI = "true";
   process.env.RUNNER_TEMP = runnerTemp;
   process.env.PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR = join(
@@ -136,6 +143,7 @@ function setTestEnvironment(runnerTemp: string): () => void {
   process.env.GITHUB_RUN_ATTEMPT = "2";
   process.env.GITHUB_SHA = "a".repeat(40);
   return () => {
+    rmSync(join(repositoryRoot, ".local/browser-verification-attempts", attemptId), { recursive: true, force: true });
     for (const [key, value] of original) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -157,7 +165,10 @@ test("failed responsive WebKit fixture retains only useful sanitized diagnostics
     assert.ok(!sanitizedScreenshot.includes(PNG_TEXT_CANARY));
 
     const reporter = new CompatibilityDebugReporter();
-    reporter.onBegin({ outputDir: browserOutput } as FullConfig);
+    reporter.onBegin({
+      workers: 1, globalTimeout: 900_000,
+      projects: [{ name: "phone-webkit", outputDir: browserOutput, timeout: 75_000, retries: 0 }],
+    } as unknown as FullConfig, { allTests: () => [] } as unknown as Suite);
     reporter.onTestEnd(
       fakeTestCase(
         "phone-webkit",
@@ -233,7 +244,10 @@ test("passing responsive WebKit fixtures do not create debug artifacts", async (
 
   try {
     const reporter = new CompatibilityDebugReporter();
-    reporter.onBegin({ outputDir: browserOutput } as FullConfig);
+    reporter.onBegin({
+      workers: 1, globalTimeout: 900_000,
+      projects: [{ name: "phone-webkit", outputDir: browserOutput, timeout: 75_000, retries: 0 }],
+    } as unknown as FullConfig, { allTests: () => [] } as unknown as Suite);
     const testCase = fakeTestCase(
       "tablet-webkit",
       "manager can preview an authoritative operational report",

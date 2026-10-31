@@ -165,6 +165,9 @@ export function safeAiErrorMetadata(err: unknown): {
   status?: string | number;
   code?: string | number;
   errorType: string;
+  upstreamStatus?: number;
+  networkCode?: string;
+  causeInspectionFailed?: true;
 } {
   if (!err || typeof err !== "object") return { errorType: typeof err };
   const value = err as { status?: unknown; code?: unknown; name?: unknown };
@@ -181,9 +184,54 @@ export function safeAiErrorMetadata(err: unknown): {
     typeof value.name === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(value.name)
       ? value.name
       : "Error";
+  const causal: {
+    upstreamStatus?: number;
+    networkCode?: string;
+    causeInspectionFailed?: true;
+  } = {};
+  // Wrapped SDK errors must remain diagnosable without retaining messages,
+  // URLs, headers, bodies, or arbitrary nested codes. Inspect four causal
+  // objects at most, do not invoke getters, and stop on cycles.
+  const ownValue = (object: object, key: string): unknown => {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    return descriptor && "value" in descriptor ? descriptor.value : undefined;
+  };
+  const networkCodes = new Set([
+    "ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN",
+    "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "CERT_HAS_EXPIRED",
+    "ERR_TLS_CERT_ALTNAME_INVALID", "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+  ]);
+  try {
+    const seen = new Set<object>([err]);
+    let cause = ownValue(err, "cause");
+    for (let depth = 0; depth < 4 && cause && typeof cause === "object"; depth++) {
+      if (seen.has(cause)) break;
+      seen.add(cause);
+      const response = ownValue(cause, "response");
+      const nestedStatus = ownValue(cause, "status") ??
+        (response && typeof response === "object" ? ownValue(response, "status") : undefined);
+      if (causal.upstreamStatus === undefined &&
+          typeof nestedStatus === "number" && Number.isInteger(nestedStatus) &&
+          nestedStatus >= 100 && nestedStatus <= 599) {
+        causal.upstreamStatus = nestedStatus;
+      }
+      const nestedCode = ownValue(cause, "code");
+      if (typeof nestedCode === "string" && networkCodes.has(nestedCode)) {
+        causal.networkCode ??= nestedCode;
+      }
+      cause = ownValue(cause, "cause");
+    }
+  } catch {
+    // Diagnostics must not replace the original failure if a hostile proxy
+    // rejects inspection. Report that limitation without copying its error.
+    causal.causeInspectionFailed = true;
+  }
   return {
     ...(status !== undefined ? { status } : {}),
     ...(code !== undefined ? { code } : {}),
     errorType,
+    ...causal,
   };
 }

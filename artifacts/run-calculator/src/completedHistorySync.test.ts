@@ -10,6 +10,7 @@ import {
   queueCompletedRun,
   setCompletedHistoryScope,
   startRunAndQueueCompetingCompletions,
+  hydrateCompletedHistory, completedHistoryStatus, loadCanonicalCompletedHistory,
 } from "./completedHistorySync";
 
 const run = (id: string, endedAt = 2): RunMeta => ({
@@ -23,6 +24,7 @@ const run = (id: string, endedAt = 2): RunMeta => ({
 beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
+  setCompletedHistoryScope(null);
   setCompletedHistoryScope("live");
 });
 
@@ -111,6 +113,56 @@ describe("completed history outbox", () => {
 });
 
 describe("canonical completed history", () => {
+  const row = (id: string) => ({
+    date: "2026-09-06", runId: id,
+    snapshot: { dayState: { date: "2026-09-06", runs: [run(id)], currentIndex: 0 }, runValues: { [id]: DEFAULT_VALUES } },
+  });
+  const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+  it("follows explicit stable pages without persisting an archive read copy", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (!url.includes("/api/completed-history")) return response({ items: [] });
+      calls.push(url);
+      return response(url.includes("cursor=") ? { history: [row("b")] } : { history: [row("a")], nextCursor: "page-two" });
+    }));
+    await hydrateCompletedHistory([], () => {});
+    expect(calls).toHaveLength(2);
+    expect(calls.every((url) => url.includes("limit=100"))).toBe(true);
+    expect(loadCanonicalCompletedHistory()[0].runs.map((run) => run.id)).toEqual(["a", "b"]);
+    expect(completedHistoryStatus()).toBe("ready");
+    expect(Object.keys(localStorage).some((key) => key.includes("completed-history-cache") || key === "run-calc-history")).toBe(false);
+  });
+  it("retains warm canonical memory and reports unavailable on malformed or failed reads", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => response(
+      url.includes("/api/completed-history") ? { history: [row("kept")] } : { items: [] },
+    )));
+    await hydrateCompletedHistory([], () => {});
+    for (const result of [response({ history: [{ ...row("bad"), snapshot: {} }] }), new Response("", { status: 503 })]) {
+      vi.stubGlobal("fetch", vi.fn(async () => result));
+      await hydrateCompletedHistory([], () => {});
+      expect(completedHistoryStatus()).toBe("unavailable");
+      expect(loadCanonicalCompletedHistory()[0].runs[0].id).toBe("kept");
+    }
+  });
+  it("keeps pending completion provenance out of canonical insight inputs after hydration", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST" ? new Response("", { status: 503 }) : response({ history: [], items: [] })));
+    queueCompletedRun("2026-09-06", run("pending"), DEFAULT_VALUES);
+    await flushCompletedHistoryOutbox();
+    await hydrateCompletedHistory([], () => {});
+    expect(loadCanonicalCompletedHistory()).toEqual([]);
+    expect(loadCompletedHistoryForActiveScope()[0].pendingRunIds).toEqual(["pending"]);
+  });
+  it("does not adopt a delayed previous-account history response", async () => {
+    let resolve!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
+    const inFlight = hydrateCompletedHistory([], () => { throw new Error("stale adoption"); });
+    setCompletedHistoryScope("sandbox:other");
+    resolve(response({ history: [row("old-account")] }));
+    await inFlight;
+    expect(loadCanonicalCompletedHistory()).toEqual([]);
+    expect(completedHistoryStatus()).toBe("loading");
+  });
   it("reconstructs days and lets immutable server records win over local cache", () => {
     const canonicalRun = { ...run("run-1"), notes: "server canonical" };
     const canonical = completedHistoryDays([{

@@ -1,3 +1,5 @@
+import { MEMORY_DIRECTORY_KEYS, DIRECTORY_METADATA_KEYS, metadataStorageKey, directoryRaw, setDirectoryRaw, removeDirectoryRaw } from "../factoryDirectory";
+
 export interface BrowserRecordCodec<T> {
   decode(value: unknown): T | null;
   migrate?: (value: T) => T;
@@ -123,6 +125,11 @@ export const browserStorage: BrowserKeyValueStorage = {
   },
   getItem(key) {
     if (browserStorageOverride) return browserStorageOverride.getItem(key);
+    if (MEMORY_DIRECTORY_KEYS.has(key)) return directoryRaw(key);
+    if (DIRECTORY_METADATA_KEYS.has(key)) {
+      const scoped = metadataStorageKey(key);
+      try { return scoped ? storageAvailable()?.getItem(scoped) ?? null : null; } catch { return null; }
+    }
     try { return storageAvailable()?.getItem(key) ?? null; } catch { return null; }
   },
   setItem(key, value) {
@@ -130,11 +137,23 @@ export const browserStorage: BrowserKeyValueStorage = {
       browserStorageOverride.setItem(key, value);
       return;
     }
+    if (MEMORY_DIRECTORY_KEYS.has(key)) { setDirectoryRaw(key, value); return; }
+    if (DIRECTORY_METADATA_KEYS.has(key)) {
+      const scoped = metadataStorageKey(key);
+      try { if (scoped) storageAvailable()?.setItem(scoped, value); } catch {}
+      return;
+    }
     try { storageAvailable()?.setItem(key, value); } catch {}
   },
   removeItem(key) {
     if (browserStorageOverride) {
       browserStorageOverride.removeItem(key);
+      return;
+    }
+    if (MEMORY_DIRECTORY_KEYS.has(key)) { removeDirectoryRaw(key); return; }
+    if (DIRECTORY_METADATA_KEYS.has(key)) {
+      const scoped = metadataStorageKey(key);
+      try { if (scoped) storageAvailable()?.removeItem(scoped); } catch {}
       return;
     }
     try { storageAvailable()?.removeItem(key); } catch {}

@@ -3,13 +3,34 @@ name: Managed rebase tree recovery
 description: How to detect and repair silent tree corruption after a history-preserving managed rebase.
 ---
 
-Treat a successful rebase as history completion, not proof that the resulting tree matches the validated pre-rebase integration. Replay can leave duplicated declarations, truncated handlers, weakened policy inventories, or stale evidence fingerprints without retaining conflict markers.
+Treat a successful rebase as history completion, not proof that the resulting tree matches the validated pre-rebase integration. Replay can leave duplicated declarations, truncated handlers, weakened policy inventories, or stale evidence fingerprints without retaining conflict markers. Task-only added specs and evidence can also revert to earlier task versions; compare them with the validated tip even when they are not listed as conflicts.
+
+Completion submission can integrate newer shared source before running configured validation. If a local check passes immediately before submission but completion fails, compare the source/base identities first. Generated-output freshness can fail from merge-retained formatting alone; regenerate from the integrated contract and distinguish whitespace-only drift from changed validator semantics.
+
+Protect the verified tree before submitting completion. An `ORIG_HEAD` saved only during a later conflict may already contain regressions from an earlier automatic integration; agreement with that reference does not establish agreement with the last verified source.
 
 **Why:** A managed rebase completed cleanly while replayed conflict resolutions silently changed the integrated tree. Typechecking, sharded tests, generated-contract checks, and revision-bound evidence checks found regressions that a conflict-marker scan could not detect.
 
 **How to apply:** Preserve the pre-rebase integrated tip as a named baseline, compare the final tree against it by subsystem, restore known-good files instead of hand-reconstructing malformed merges, and separately retain intentional changes from the refreshed base. Re-run generators from the resolved source contracts before staging generated artifacts, and re-run evidence fingerprint checks whenever the lockfile changes.
 
 After a conflict-heavy browser-test replay, also run the browser spec inventory/parse check. Package typecheck may exclude end-to-end specs, and a transpile-only check can miss syntax diagnostics; a malformed spec once survived both checks after a rebase.
+
+This also applies to unit-test files excluded from package typechecking, and to
+base updates performed during task completion.
+
+**Why:** Completion validation passed while a refreshed base contained a unit
+test with duplicated declarations, missing suite boundaries, and a truncated
+test body. The earlier test result belonged to the pre-refresh tree.
+
+**How to apply:** After completion refreshes a base, inspect the current test
+sources and run their owning suite when they changed; a passing root typecheck
+does not establish that excluded test files can parse or execute.
+
+Treat persisted browser pass summaries as evidence for the tree that produced them, not automatically for the post-sync tree.
+
+**Why:** A saved Playwright pass result remained present after a managed sync malformed the corresponding spec. The old result could not establish that the new source even parsed.
+
+**How to apply:** After a sync changes a spec, inventory/parse that spec and rerun its required matrix before claiming the new tree passes. A saved result without matching source provenance is insufficient.
 
 In managed rebases, an `INDEX_LOCKED` response can occur while the operation is advancing to another conflict. Inspect the managed operation and current conflict state before treating that response alone as a stuck rebase.
 
@@ -18,6 +39,12 @@ In managed rebases, an `INDEX_LOCKED` response can occur while the operation is 
 **How to apply:** Re-check merge status and the current index, then continue only through the managed merge-resolution flow. Do not run manual `git rebase --continue`, reset, or checkout commands.
 
 A task rebase also requires a clean worktree before it can start. Preserve intentional untracked workspace files; do not delete or locally ignore them just to satisfy the precondition. If they are not part of the task, ask before committing them or changing their visibility to Git. A GitHub backup operation is not a substitute for the managed rebase source.
+
+After resuming a paused task, a clean shell worktree does not prove that a managed conflict-resolution session is finished.
+
+**Why:** A resumed workspace showed a clean task branch while the managed continuation still held an unresolved generated-file conflict; continuing through the managed callback restored the active conflict state.
+
+**How to apply:** Use the managed continuation to synchronize its state, inspect any returned conflicts again, and resolve those before finalizing. Do not force or manually restart the rebase based only on shell status.
 
 **Why:** The managed rebase rejected a worktree containing workspace custom-skill files, and the repository intentionally leaves those files visible to Git.
 
@@ -52,3 +79,40 @@ failure stages; neither established that the existing GitHub credential was bad.
 **How to apply:** Use bounded, noninteractive read-only checks against existing
 routes. Preserve host-key verification, never accept an unverified key to unblock
 completion, and never send a GitHub token to an unrelated Replit SSH endpoint.
+
+When a managed conflict affects a test file, inspect the full file and both
+staged versions before editing. Conflict markers can split related test bodies
+and leave duplicate fragments outside the test suite; broad hunks may fail to
+match the conflict's exact text.
+
+**Why:** Combining independently added tests can leave valid-looking fragments
+outside their suites or accidentally couple fixtures that must stay independent.
+
+**How to apply:** Use the exact conflict text from the file and compare both
+staged versions. Resolve one boundary at a time, then scan the entire file for
+markers and trailing fragments and rerun the owning tests before continuing.
+
+For additive test changes, compare the resolved file against the refreshed base,
+not only against the task's earlier file. Existing unrelated test bodies should
+remain intact, and independently merged regressions must remain present.
+
+**Why:** A marker-free resolution can still drop unrelated test coverage or
+replace independent fixtures. Earlier passing results do not validate that
+resolved tree.
+
+**How to apply:** Preserve both baseline tips, restore only the damaged test
+boundaries, and verify the final diff consists of the intended additions plus
+explicitly justified fixture changes. Run the focused file and package typecheck
+again on the resolved tree before resubmitting completion.
+
+Ignored build-stage identity records can also become incompatible when a base
+refresh changes the source-fingerprint policy.
+
+**Why:** A retained stage record from the older policy made the production-mode
+Vite config-loader check fail before TypeScript started. The application source
+and normal development server were not the cause.
+
+**How to apply:** Distinguish a stale generated record from a source failure.
+For local checks, preserve/quarantine the ignored stale stage metadata and rerun
+the failed check. For publishing, regenerate identity through its canonical
+preparation flow; never edit identity fields or weaken their validation.

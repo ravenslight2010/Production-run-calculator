@@ -1,37 +1,52 @@
-// Supervisor PIN — web platform glue.
-//
-// The 4-digit PIN that gates supervisor actions used to live only in this
-// device's localStorage, so changing it on one device left every other device on
-// the old PIN. It is now a facility-wide server setting (one per facility) so it
-// follows the facility. Reading is open to any signed-in user (both apps do a
-// local compare to gate supervisor actions — the PIN is a low-security
-// convenience gate, not a secret); changing it is manager-only (the server
-// enforces "manage-staff").
-//
-// Mirrors the mobile glue in
-// artifacts/run-calculator-mobile/context/supervisorPinApi.ts (replit.md parity).
-
 import { inventoryClientId } from "./inventoryShared";
 
-export async function fetchSupervisorPin(): Promise<string> {
-  const res = await fetch("/api/supervisor-pin", {
-    headers: { "x-client-id": inventoryClientId() },
-  });
-  if (!res.ok) throw new Error(`Get supervisor PIN failed (${res.status})`);
-  const data = (await res.json()) as { pin: unknown };
-  return typeof data.pin === "string" ? data.pin : "";
+export type SupervisorPinStatus = { configured: boolean };
+
+async function pinRequest(method: string, pin?: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    return await fetch(`/api/supervisor-pin${method === "POST" ? "/verify" : ""}`, {
+      method,
+      cache: "no-store",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", "x-client-id": inventoryClientId() },
+      ...(pin === undefined ? {} : { body: JSON.stringify({ pin }) }),
+    });
+  } catch (error) {
+    throw new Error(controller.signal.aborted
+      ? "PIN verification timed out. Check your connection and retry."
+      : "Server unavailable. Connect online and retry.");
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-export async function updateSupervisorPin(pin: string): Promise<string> {
-  const res = await fetch("/api/supervisor-pin", {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "x-client-id": inventoryClientId(),
-    },
-    body: JSON.stringify({ pin }),
-  });
-  if (!res.ok) throw new Error(`Update supervisor PIN failed (${res.status})`);
-  const data = (await res.json()) as { pin: unknown };
-  return typeof data.pin === "string" ? data.pin : pin;
+function responseError(res: Response): Error {
+  return new Error(res.status === 401 ? "Your session expired. Sign in again."
+    : res.status === 429 ? "Too many attempts. Wait before trying again."
+    : res.status === 403 ? "Incorrect PIN or insufficient permission (403)."
+    : "PIN service unavailable. Retry online.");
+}
+
+async function statusResponse(res: Response): Promise<SupervisorPinStatus> {
+  if (!res.ok) throw responseError(res);
+  const body = await res.json();
+  if (typeof body?.configured !== "boolean") throw new Error("PIN status unavailable. Update this app and retry.");
+  return { configured: body.configured };
+}
+
+export async function fetchSupervisorPin(): Promise<SupervisorPinStatus> {
+  return statusResponse(await pinRequest("GET"));
+}
+
+export async function updateSupervisorPin(pin: string): Promise<SupervisorPinStatus> {
+  return statusResponse(await pinRequest("PUT", pin));
+}
+
+export async function verifySupervisorPin(pin: string): Promise<void> {
+  const res = await pinRequest("POST", pin);
+  if (!res.ok) throw responseError(res);
+  const body = await res.json();
+  if (body?.verified !== true) throw new Error("PIN verification failed. Retry online.");
 }

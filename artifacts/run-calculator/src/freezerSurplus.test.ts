@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { getFreezerSurplusRemainingMs, parseFreezerSurplusLedger } from "./freezerSurplus";
+// @vitest-environment node
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  confirmFreezerSurplusOutcome,
+  fetchFreezerSurplusConfirmations,
+  getFreezerSurplusRemainingMs,
+  parseFreezerSurplusLedger,
+} from "./freezerSurplus";
 
 describe("getFreezerSurplusRemainingMs", () => {
   const endedAt = Date.UTC(2026, 8, 1, 12, 0, 0);
@@ -63,5 +69,69 @@ describe("getFreezerSurplusRemainingMs", () => {
     expect(ledger).toEqual(before);
     expect(ledger.lots[0].remainingCases).toBe(12);
     expect(ledger.allocations[0].cases).toBe(4);
+  });
+});
+
+describe("run-bound freezer surplus confirmations", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const savedNone = {
+    runId: "run-1",
+    runDate: "2026-09-01",
+    brand: "Northstar",
+    flavor: "Pepperoni",
+    cases: 0,
+    productionDate: null,
+    lotId: null,
+    createdAt: "2026-09-01T12:00:00.000Z",
+  };
+
+  it("accepts a valid zero outcome and omits lot-only date data", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ confirmation: savedNone }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    await expect(confirmFreezerSurplusOutcome({ runId: "run-1", cases: 0 })).resolves.toEqual(savedNone);
+    expect(JSON.parse(fetch.mock.calls[0][1].body as string)).toEqual({
+      runId: "run-1",
+      cases: 0,
+    });
+  });
+
+  it("rejects non-OK and malformed acknowledgments instead of adopting them", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "Save rejected. Retry after checking the run." }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ).mockResolvedValueOnce(
+        new Response(JSON.stringify({ confirmation: { ...savedNone, runId: "other-run" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(confirmFreezerSurplusOutcome({ runId: "run-1", cases: 0 }))
+      .rejects.toThrow("Save rejected. Retry after checking the run.");
+    await expect(confirmFreezerSurplusOutcome({ runId: "run-1", cases: 0 }))
+      .rejects.toThrow(/did not match this form/i);
+  });
+
+  it("loads and validates persisted confirmation receipts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ confirmations: [savedNone] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(fetchFreezerSurplusConfirmations()).resolves.toEqual([savedNone]);
   });
 });

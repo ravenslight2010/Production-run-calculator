@@ -290,7 +290,50 @@ describe("POST /sync/reset", () => {
         scope: "sandbox", operationId: "reset-component-sandbox", recordId: "sandbox-component-record",
         eventType: "component-check", runId: "reset-run", actorId: MANAGER, payload: { outcome: "not-evaluated" },
       },
+      {
+        scope: "live", operationId: "reset-brix-live", recordId: "live-brix-record",
+        eventType: "brix-check", runId: "reset-run", actorId: MANAGER,
+        payload: { measurementKind: "brix", actualBrix: 12.5, outcome: "not-evaluated" },
+      },
+      {
+        scope: "sandbox", operationId: "reset-brix-sandbox", recordId: "sandbox-brix-record",
+        eventType: "brix-check", runId: "reset-run", actorId: MANAGER,
+        payload: { measurementKind: "brix", actualBrix: 8, outcome: "not-evaluated" },
+      },
+      ...(["live", "sandbox"] as const).flatMap((scope) =>
+        (["date-code-check", "date-code-reference", "date-code-reference-review"] as const).map((eventType) => ({
+          scope, eventType, operationId: `reset-${scope}-${eventType}`, recordId: `${scope}-${eventType}`,
+          runId: eventType === "date-code-check" ? "reset-run" : null, actorId: MANAGER,
+          payload: { outcome: "not-evaluated", fixture: true },
+        }))),
     ]);
+    const recipeCaptures = await db.insert(qcWorkflowEventsTable).values(
+      (["live", "sandbox"] as const).map((scope) => ({
+        scope,
+        operationId: `reset-recipe-capture-${scope}`,
+        recordId: `mix:reset-recipe-${scope}`,
+        eventType: "recipe-committed" as const,
+        runId: null,
+        actorId: MANAGER,
+        payload: {
+          recipeType: "mix",
+          recipeId: `reset-recipe-${scope}`,
+          displayName: `Synthetic recipe ${scope}`,
+          resultHash: "a".repeat(64),
+          changedFields: ["batchSize"],
+        },
+      })),
+    ).returning();
+    await db.insert(qcWorkflowEventsTable).values(recipeCaptures.map((capture) => ({
+      scope: capture.scope,
+      operationId: `reset-recipe-review-${capture.scope}`,
+      recordId: capture.recordId,
+      eventType: "recipe-review" as const,
+      relatedEventId: String(capture.id),
+      runId: null,
+      actorId: capture.actorId,
+      payload: { status: "verified", resultHash: "a".repeat(64), reason: "Synthetic retained decision" },
+    })));
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
       headers: authHeaders(MANAGER),
@@ -310,6 +353,16 @@ describe("POST /sync/reset", () => {
       .toEqual(["live", "sandbox"]);
     expect(qcEvents.filter((event) => event.eventType === "component-check").map((event) => event.scope).sort())
       .toEqual(["live", "sandbox"]);
+    expect(qcEvents.filter((event) => event.eventType === "brix-check").map((event) => event.scope).sort())
+      .toEqual(["live", "sandbox"]);
+    for (const type of ["date-code-check", "date-code-reference", "date-code-reference-review"]) {
+      expect(qcEvents.filter((event) => event.eventType === type).map((event) => event.scope).sort())
+        .toEqual(["live", "sandbox"]);
+    }
+    for (const type of ["recipe-committed", "recipe-review"]) {
+      expect(qcEvents.filter((event) => event.eventType === type).map((event) => event.scope).sort())
+        .toEqual(["live", "sandbox"]);
+    }
   });
 
   it("increments the epoch on each reset", async () => {

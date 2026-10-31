@@ -1,3 +1,5 @@
+import { browserStorage as localStorage } from "./adapters/browserRecordStore";
+import { resetFactoryDataSyncForTests, setFactoryDataIdentity, hydrateFromServer } from "./factoryDataSync";
 // @vitest-environment jsdom
 //
 // End-to-end sync-receive regression guard for the recipe-name merge. A merge
@@ -91,7 +93,10 @@ function rejectedStaleAdvance(
 }
 
 beforeEach(() => {
-  localStorage.clear();
+  window.localStorage.clear();
+  resetFactoryDataSyncForTests();
+  setFactoryDataIdentity("live:merge-fixture", true);
+  hydrateFromServer({});
 });
 
 describe("recipe-name merge survives a stale incoming sync (receive path)", () => {

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { omitArchivedSyncHistory } from "../sharedRecordMigration";
 import { createSyncBaselineGate } from "../domain/runSyncPolicy";
 import type { ForegroundStopIntent } from "../foregroundLifecycleIntent";
 import { SingleFlightSyncQueue } from "../syncPushQueue";
@@ -64,6 +65,8 @@ type ForegroundScheduler = {
 
 export type ForegroundRecoveryAttemptContext = {
   trigger: WakeRecoveryTrigger;
+  /** Cancel an obsolete read immediately when sleep/offline/owner changes. */
+  signal: AbortSignal;
   /** False if another sleep/offline boundary superseded this request. */
   isCurrent: () => boolean;
   classify: (outcome: Extract<
@@ -316,7 +319,7 @@ export function useHomeSyncCoordination() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             senderId: clientId,
-            payload,
+            payload: omitArchivedSyncHistory(payload),
             snapshotId: snapshotId || undefined,
             ...(queuedAtEpoch ? { syncMeta: { queuedAt: queuedAtEpoch } } : {}),
           }),
@@ -349,8 +352,13 @@ export function useHomeSyncCoordination() {
     let disposed = false;
     let retryConnectivity = false;
     let boundaryGeneration = 0;
+    let attemptController: AbortController | null = null;
+    let recoveryInFlight = false;
     let wasHidden = document.hidden;
-    const invalidateBoundary = () => { boundaryGeneration += 1; };
+    const invalidateBoundary = () => {
+      boundaryGeneration += 1;
+      attemptController?.abort();
+    };
     const onVisibilityBoundary = () => {
       if (wasHidden !== document.hidden) {
         wasHidden = document.hidden;
@@ -382,9 +390,12 @@ export function useHomeSyncCoordination() {
         "connectivity-retry" | "non-retryable-http" | "cancelled"
       > = "connectivity-retry";
       const attemptBoundary = boundaryGeneration;
+      const controller = new AbortController();
+      attemptController = controller;
       const recovered = await recover({
         trigger,
-        isCurrent: () => !disposed && attemptBoundary === boundaryGeneration,
+        signal: controller.signal,
+        isCurrent: () => !disposed && !controller.signal.aborted && attemptBoundary === boundaryGeneration,
         classify: (outcome) => { classified = outcome; },
       });
       // A successful response from BEFORE a second sleep/offline transition
@@ -403,14 +414,20 @@ export function useHomeSyncCoordination() {
     let nextTrigger: WakeRecoveryTrigger = "manual";
     const reconcile = createForegroundSyncWakeGuard(() => recoverAttempt(
       episode ? "retry" : nextTrigger,
-    ));
+    ), () => retryConnectivity);
     const requestRecovery = async (trigger: WakeRecoveryTrigger): Promise<boolean> => {
       if (disposed) return false;
       clearRetry();
-      if (trigger !== "retry") retries = 0;
+      if (trigger !== "retry" && !recoveryInFlight) retries = 0;
       unreconciled = true;
       if (!episode) nextTrigger = trigger;
-      const recovered = await reconcile();
+      recoveryInFlight = true;
+      let recovered: boolean;
+      try {
+        recovered = await reconcile();
+      } finally {
+        recoveryInFlight = false;
+      }
       if (recovered || !retryConnectivity) unreconciled = false;
       // Retry from completion, not from a shared periodic job that may itself
       // be blocked by profile/factory requests. All signals share one guard.
@@ -453,6 +470,7 @@ export function useHomeSyncCoordination() {
       reconcile: requestManualRecovery,
       dispose: () => {
         disposed = true;
+        attemptController?.abort();
         clearRetry();
         unreconciled = false;
         finishEpisode("background-stop");

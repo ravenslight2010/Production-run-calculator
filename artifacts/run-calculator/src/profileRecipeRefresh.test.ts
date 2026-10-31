@@ -6,6 +6,8 @@ import {
   isRunRecipeRefreshEligible,
   loadProfile,
   mergeProfileIntoOpenForm,
+  refreshCheeseOrMixProfileRows,
+  refreshProfilesFromNamedRecipes,
 } from "./storage";
 import { DEFAULT_VALUES, PROFILE_KEY, type FormValues } from "./types";
 
@@ -64,4 +66,86 @@ describe("initial named-recipe pool propagation", () => {
     expect(started).toBe(startedV1);
     expect(started.frontlineRecipe[0].lbs).toBe(10);
   });
+});
+
+describe("passive cheese/mix pool refresh", () => {
+  it("fills empty or all-zero linked rows without replacing populated rows", () => {
+    const targetRows = [{ ingredient: "Tomato", lbs: 2.5 }];
+    localStorage.setItem(PROFILE_KEY("Populated Brand", "Flavor"), JSON.stringify({
+      app1CheeseRecipeName: "Shared Mix",
+      app1CheeseRecipe: [{ ingredient: "Manager Choice", lbs: 8 }],
+    }));
+    localStorage.setItem(PROFILE_KEY("Empty Brand", "Flavor"), JSON.stringify({
+      app2CheeseRecipeName: "Shared Mix",
+      app2CheeseRecipe: [],
+    }));
+    localStorage.setItem(PROFILE_KEY("Zero Brand", "Flavor"), JSON.stringify({
+      app3CheeseRecipeName: "Shared Mix",
+      app3CheeseRecipe: [{ ingredient: "Placeholder", lbs: 0 }],
+    }));
+
+    const passivelyUpdated = refreshCheeseOrMixProfileRows(
+      "Shared Mix",
+      targetRows,
+      { emptyRowsOnly: true },
+    );
+
+    expect(passivelyUpdated).toHaveLength(2);
+    expect(loadProfile("Populated Brand", "Flavor")?.app1CheeseRecipe).toEqual([
+      { ingredient: "Manager Choice", lbs: 8 },
+    ]);
+    expect(loadProfile("Empty Brand", "Flavor")?.app2CheeseRecipe).toEqual(targetRows);
+    expect(loadProfile("Zero Brand", "Flavor")?.app3CheeseRecipe).toEqual(targetRows);
+
+    // The default path remains authoritative for explicit manager saves.
+    const explicitlyUpdated = refreshCheeseOrMixProfileRows("Shared Mix", targetRows);
+    expect(explicitlyUpdated).toHaveLength(1);
+    expect(loadProfile("Populated Brand", "Flavor")?.app1CheeseRecipe).toEqual(targetRows);
+  });
+});
+
+describe("passive dough/sauce pool refresh", () => {
+  it.each(["dough", "sauce"] as const)(
+    "fills empty or all-zero %s rows without replacing populated profile rows",
+    (kind) => {
+      const nameField = kind === "dough" ? "doughRecipeName" : "frontlineRecipeName";
+      const rowsField = kind === "dough" ? "doughRecipe" : "frontlineRecipe";
+      const targetRows = [{ ingredient: "Canonical Ingredient", lbs: 2.5 }];
+      const profileRows = (brand: string) =>
+        (loadProfile(brand, FLAVOR) as unknown as Record<string, unknown> | null)?.[
+          rowsField
+        ];
+      const seedProfile = (brand: string, rows: unknown[]) =>
+        localStorage.setItem(
+          PROFILE_KEY(brand, FLAVOR),
+          JSON.stringify({
+            [nameField]: "Shared Recipe",
+            [rowsField]: rows,
+          }),
+        );
+
+      seedProfile("Populated Brand", [{ ingredient: "Manager Choice", lbs: 8 }]);
+      seedProfile("Empty Brand", []);
+      seedProfile("Zero Brand", [{ ingredient: "Placeholder", lbs: 0 }]);
+
+      const passive = refreshProfilesFromNamedRecipes(
+        kind,
+        [{ name: "Shared Recipe", rows: targetRows }],
+        { emptyRowsOnly: true },
+      );
+
+      expect(passive).toHaveLength(2);
+      expect(profileRows("Populated Brand")).toEqual([
+        { ingredient: "Manager Choice", lbs: 8 },
+      ]);
+      expect(profileRows("Empty Brand")).toEqual(targetRows);
+      expect(profileRows("Zero Brand")).toEqual(targetRows);
+
+      const explicitlyUpdated = refreshProfilesFromNamedRecipes(kind, [
+        { name: "Shared Recipe", rows: targetRows },
+      ]);
+      expect(explicitlyUpdated).toHaveLength(1);
+      expect(profileRows("Populated Brand")).toEqual(targetRows);
+    },
+  );
 });

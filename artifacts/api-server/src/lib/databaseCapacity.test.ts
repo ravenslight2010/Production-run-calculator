@@ -8,6 +8,7 @@ function fixture(row: Record<string, unknown> = {}) {
     rows: text.startsWith("\nSELECT") ? [{
       replica: false, max_connections: 100, superuser_reserved: 3, role_reserved: 2,
       client_backends: 20, active_backends: 4, idle_backends: 16, visible_states: 20,
+      active_wait_backends: 0, lock_wait_backends: 0,
       ...row,
     }] : [],
   }));
@@ -25,7 +26,7 @@ describe("read-only database capacity collection", () => {
     const f = fixture();
     expect(await collectDatabaseCapacity(f.pool)).toMatchObject({
       status: "observed", primaryVerified: true, estimatedOrdinarySlotsRemaining: 75,
-      stateVisibilityComplete: true,
+      stateVisibilityComplete: true, activeWaitingBackends: 0, lockWaitingBackends: 0,
     });
     expect(f.query.mock.calls.map(([q]) => q.text)).toEqual([
       "BEGIN READ ONLY", "SET LOCAL statement_timeout = '1000ms'",
@@ -40,6 +41,31 @@ describe("read-only database capacity collection", () => {
       status: "non_primary", primaryVerified: false,
       estimatedOrdinarySlotsRemaining: null, stateVisibilityComplete: false,
     });
+  });
+
+  it("accepts bounded active and lock wait counts only when internally consistent", async () => {
+    const waiting = await collectDatabaseCapacity(fixture({
+      active_backends: 5,
+      active_wait_backends: 3,
+      lock_wait_backends: 2,
+    }).pool);
+    expect(waiting).toMatchObject({
+      status: "observed",
+      activeBackends: 5,
+      activeWaitingBackends: 3,
+      lockWaitingBackends: 2,
+    });
+
+    const invalid = fixture({
+      active_backends: 4,
+      active_wait_backends: 3,
+      lock_wait_backends: 5,
+    });
+    expect(await collectDatabaseCapacity(invalid.pool)).toMatchObject({
+      status: "unavailable",
+      unavailableReason: "invalid_capacity_result",
+    });
+    expect(invalid.release).toHaveBeenCalledWith(true);
   });
 
   it("classifies checkout failures without retrying or leaking the error", async () => {
@@ -136,6 +162,7 @@ describe("read-only database capacity collection", () => {
       event: "database_capacity_sample",
       schemaVersion: 2,
       pool: { max: 10, total: 10, idle: 2, waiting: 4 },
+      database: { activeWaitingBackends: 0, lockWaitingBackends: 0 },
       build: { appBuildId: "app-build:test", platformBuildId: null },
       limitations: { autoscaleCurrentInstances: null, autoscaleMaximumInstances: null },
     });

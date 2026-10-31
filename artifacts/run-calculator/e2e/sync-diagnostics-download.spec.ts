@@ -293,13 +293,17 @@ test("keeps the diagnostic report on the active date across local midnight", asy
   expect(downloadPath).not.toBeNull();
   const report = JSON.parse(await readFile(downloadPath as string, "utf8"));
   expect(report.productionDate).toBe(dates.current);
-  expect(report.events).toEqual([
+  expect(report.events).toEqual(expect.arrayContaining([
     expect.objectContaining({
       id: seededEvents.current.id,
       date: dates.current,
       message: seededEvents.current.message,
     }),
-  ]);
+  ]));
+  // Real foreground reconciliation can add current-day diagnostics. The
+  // boundary is the active date, not an assumption that its log stays idle.
+  expect(report.events.every((event: { date: string }) => event.date === dates.current)).toBe(true);
+  expect(report.events.filter((event: { id: string }) => event.id === seededEvents.current.id)).toHaveLength(1);
   expect(report.events).not.toEqual(
     expect.arrayContaining([
       expect.objectContaining({ id: seededEvents.prior.id }),

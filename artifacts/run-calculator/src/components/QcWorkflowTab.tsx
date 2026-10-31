@@ -30,6 +30,8 @@ import type {
   ExportQcHistoryCsvParams,
   GetQcHistoryParams,
   QcAllergenReviewInput,
+  QcBrixCheckInput,
+  QcBrixTargetInput,
   QcCleaningInput,
   QcComponentCheckInput,
   QcComponentCheckInputObservationsItemObservation,
@@ -51,10 +53,12 @@ import {
   useRecordQcAllergenReview,
   useRecordQcComponentCheck,
   useRecordQcCleaning,
+  useRecordQcBrixCheck,
   useRecordQcLot,
   useRecordQcWeightCheck,
   useRedactQcEvent,
   useSetQcTarget,
+  useSetQcBrixTarget,
   useSignoffQcRun,
   useVerifyQcCleaning,
 } from "@workspace/api-client-react";
@@ -68,8 +72,14 @@ import {
   QC_WEIGHT_CHECK_OVERDUE_GRACE_MS,
 } from "../qcWeightCheckSchedule";
 import QcAllergenActivityReport from "./QcAllergenActivityReport";
+import QcLabelVerification, { QcLabelComparison } from "./QcLabelVerification";
+import QcDateCodeVerification, { QcDateCodeComparison } from "./QcDateCodeVerification";
 import QualityHistoryTab from "./QualityHistoryTab";
+import QcImportReview from "./QcImportReview";
+import QcRecipeReview from "./QcRecipeReview";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
+import QcPlanningView from "./QcPlanningView";
+import QcIntelligenceReport from "./QcIntelligenceReport";
 
 export type QcWorkflowTabProps = {
   runId: string;
@@ -85,12 +95,12 @@ export type QcWorkflowTabProps = {
   canViewPhotos: boolean;
 };
 
-type ViewName = "lots" | "weights";
+type ViewName = "lots" | "weights" | "brix";
 type Unit = "oz" | "g" | "lb" | "kg";
 
-const panelClass = "rounded-xl border border-border/80 bg-card shadow-sm";
+const panelClass = "min-w-0 rounded-xl border border-border/80 bg-card shadow-sm";
 const labelClass = "mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
-const controlClass = "min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none";
+const controlClass = "min-h-10 w-full min-w-0 max-w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none";
 const actionClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
 const quietButtonClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50";
 function operationId(): string {
@@ -109,7 +119,9 @@ function Input({
   type = "text",
   placeholder,
   min,
+  max,
   step,
+  maxLength,
   disabled,
 }: {
   label: string;
@@ -118,7 +130,9 @@ function Input({
   type?: string;
   placeholder?: string;
   min?: string;
+  max?: string;
   step?: string;
+  maxLength?: number;
   disabled?: boolean;
 }) {
   return (
@@ -129,7 +143,9 @@ function Input({
         type={type}
         value={value}
         min={min}
+        max={max}
         step={step}
+        maxLength={maxLength}
         placeholder={placeholder}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
@@ -208,9 +224,9 @@ function MutationAlert({
     <div className="flex flex-col gap-2 rounded-lg border border-rose-300/70 bg-rose-50 px-3 py-2.5 text-sm text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200" role="alert">
       <div className="flex items-start gap-2">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{errorMessage(error)}</span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{errorMessage(error)}</span>
       </div>
-      <button type="button" className="inline-flex w-fit items-center gap-1.5 text-xs font-semibold underline underline-offset-2" onClick={onRetry}>
+      <button type="button" className="inline-flex min-h-10 w-fit items-center gap-1.5 py-2 text-xs font-semibold underline underline-offset-2" onClick={onRetry}>
         <RotateCcw className="h-3 w-3" /> Retry or correct the input
       </button>
     </div>
@@ -223,8 +239,8 @@ function QueryFailure({ message, retry }: { message: string; retry: () => void }
       <div className="flex items-start gap-2">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">{message}</p>
-          <button type="button" className="mt-2 inline-flex items-center gap-1.5 font-semibold underline underline-offset-2" onClick={retry}>
+          <p className="break-words font-semibold [overflow-wrap:anywhere]">{message}</p>
+          <button type="button" className="mt-2 inline-flex min-h-10 items-center gap-1.5 py-2 font-semibold underline underline-offset-2" onClick={retry}>
             <RotateCcw className="h-3.5 w-3.5" /> Retry loading
           </button>
         </div>
@@ -272,6 +288,10 @@ export default function QcWorkflowTab({
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewName>("lots");
   const [showDailyActivity, setShowDailyActivity] = useState(false);
+  const [showPlanning, setShowPlanning] = useState(false);
+  const [showIntelligence, setShowIntelligence] = useState(false);
+  const [showImportReview, setShowImportReview] = useState(false);
+  const [showRecipeReview, setShowRecipeReview] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [selectedIngredient, setSelectedIngredient] = useState("");
   const [lotNumber, setLotNumber] = useState("");
@@ -288,8 +308,31 @@ export default function QcWorkflowTab({
   const [actualValue, setActualValue] = useState("");
   const [actualUnit, setActualUnit] = useState<Unit>("oz");
   const [weightNote, setWeightNote] = useState("");
+  const [brixIngredient, setBrixIngredient] = useState("");
+  const [brixCheckType, setBrixCheckType] = useState<QcBrixCheckInput["checkType"]>(
+    runIsActive ? "interval" : "pre-run",
+  );
+  const [brixStation, setBrixStation] = useState<QcBrixCheckInput["station"]>("dough");
+  const [actualBrix, setActualBrix] = useState("");
+  const [brixInstrument, setBrixInstrument] = useState("");
+  const [brixNote, setBrixNote] = useState("");
+  const [brixOperationKey, setBrixOperationKey] = useState(() => operationId());
+  const [brixSaveAcknowledged, setBrixSaveAcknowledged] = useState(false);
+  const [brixTargetIngredient, setBrixTargetIngredient] = useState("");
+  const [brixTargetValue, setBrixTargetValue] = useState("");
+  const [brixTargetTolerance, setBrixTargetTolerance] = useState("");
+  const [brixTargetReason, setBrixTargetReason] = useState("");
+  const [brixSourceDocument, setBrixSourceDocument] = useState("");
+  const [brixSourceSection, setBrixSourceSection] = useState("");
+  const [brixTargetOperationKey, setBrixTargetOperationKey] = useState(() => operationId());
+  const [brixTargetSaveAcknowledged, setBrixTargetSaveAcknowledged] = useState(false);
   useEffect(() => {
     setCheckType(runIsActive ? "30-minute" : "pre-run");
+  }, [runId, runIsActive]);
+  useEffect(() => {
+    setBrixCheckType(runIsActive ? "interval" : "pre-run");
+    setBrixOperationKey(operationId());
+    setBrixSaveAcknowledged(false);
   }, [runId, runIsActive]);
   useEffect(() => {
     if (!runIsActive) return;
@@ -325,9 +368,11 @@ export default function QcWorkflowTab({
   const [expandedEventId, setExpandedEventId] = useState<number | null>(null);
   const [correctionReason, setCorrectionReason] = useState("");
   const [replacementJson, setReplacementJson] = useState("");
+  const [correctionOperationKey, setCorrectionOperationKey] = useState(() => operationId());
   const [correctionInputError, setCorrectionInputError] = useState("");
   const [redactionReason, setRedactionReason] = useState("");
   const [redactionFields, setRedactionFields] = useState<string[]>([]);
+  const [redactionOperationKey, setRedactionOperationKey] = useState(() => operationId());
   const [exportError, setExportError] = useState("");
   const [exportPending, setExportPending] = useState(false);
   const ingredientsQuery = useMasterDataSlice("ingredients");
@@ -377,8 +422,34 @@ export default function QcWorkflowTab({
     ]);
   };
   const targetMutation = useSetQcTarget({ mutation: { onSuccess: refreshAfterWrite } });
+  const brixTargetMutation = useSetQcBrixTarget({
+    mutation: {
+      onSuccess: async () => {
+        setBrixTargetSaveAcknowledged(true);
+        setBrixTargetOperationKey(operationId());
+        setBrixTargetValue("");
+        setBrixTargetTolerance("");
+        setBrixTargetReason("");
+        setBrixSourceDocument("");
+        setBrixSourceSection("");
+        await refreshAfterWrite();
+      },
+    },
+  });
   const lotMutation = useRecordQcLot({ mutation: { onSuccess: refreshAfterWrite } });
   const weightMutation = useRecordQcWeightCheck({ mutation: { onSuccess: refreshAfterWrite } });
+  const brixMutation = useRecordQcBrixCheck({
+    mutation: {
+      onSuccess: async () => {
+        setBrixSaveAcknowledged(true);
+        setBrixOperationKey(operationId());
+        setActualBrix("");
+        setBrixInstrument("");
+        setBrixNote("");
+        await refreshAfterWrite();
+      },
+    },
+  });
   const allergenMutation = useRecordQcAllergenReview({ mutation: { onSuccess: refreshAfterWrite } });
   const componentCheckMutation = useRecordQcComponentCheck({
     mutation: {
@@ -392,8 +463,22 @@ export default function QcWorkflowTab({
   const cleaningMutation = useRecordQcCleaning({ mutation: { onSuccess: refreshAfterWrite } });
   const verificationMutation = useVerifyQcCleaning({ mutation: { onSuccess: refreshAfterWrite } });
   const signoffMutation = useSignoffQcRun({ mutation: { onSuccess: refreshAfterWrite } });
-  const correctionMutation = useCorrectQcEvent({ mutation: { onSuccess: refreshAfterWrite } });
-  const redactionMutation = useRedactQcEvent({ mutation: { onSuccess: refreshAfterWrite } });
+  const correctionMutation = useCorrectQcEvent({
+    mutation: {
+      onSuccess: async () => {
+        setCorrectionOperationKey(operationId());
+        await refreshAfterWrite();
+      },
+    },
+  });
+  const redactionMutation = useRedactQcEvent({
+    mutation: {
+      onSuccess: async () => {
+        setRedactionOperationKey(operationId());
+        await refreshAfterWrite();
+      },
+    },
+  });
 
   useEffect(() => {
     setComponentObservations({});
@@ -418,6 +503,7 @@ export default function QcWorkflowTab({
   }, [catalog, components]);
 
   const targets = targetsQuery.data?.targets;
+  const brixTargets = targetsQuery.data?.brixTargets;
   const runItems = runQuery.data?.items;
   const historyItems = historyQuery.data?.items;
   const runEvidenceMatchesSelection = runQuery.data?.runId === runId;
@@ -469,6 +555,64 @@ export default function QcWorkflowTab({
     && Number(actualValue) > 0
     && Math.abs(Number(actualValue) - weightTarget.targetValue) > (weightTarget.toleranceValue ?? 0);
   const needsWeightReason = Boolean(deviation && !weightNote.trim());
+  const brixTarget = brixTargets?.find((target) => target.ingredientId === brixIngredient);
+  const submitBrix = () => {
+    const actual = Number(actualBrix);
+    if (
+      !runId
+      || !profileKey
+      || !brixIngredient
+      || !actualBrix.trim()
+      || !Number.isFinite(actual)
+      || actual < 0
+      || actual > 100
+    ) return;
+    const data: QcBrixCheckInput = {
+      operationId: brixOperationKey,
+      runId,
+      profileKey,
+      ingredientId: brixIngredient,
+      station: brixStation,
+      checkType: brixCheckType,
+      actualBrix: actual,
+      ...(brixInstrument.trim() ? { instrument: brixInstrument.trim() } : {}),
+      ...(brixNote.trim() ? { note: brixNote.trim() } : {}),
+    };
+    setBrixSaveAcknowledged(false);
+    brixMutation.mutate({ data });
+  };
+
+  const submitBrixTarget = () => {
+    const hasTarget = Boolean(brixTargetValue.trim());
+    const hasTolerance = Boolean(brixTargetTolerance.trim());
+    const target = Number(brixTargetValue);
+    const tolerance = Number(brixTargetTolerance);
+    if (
+      !brixTargetIngredient
+      || !brixTargetReason.trim()
+      || hasTarget !== hasTolerance
+      || (hasTarget && (
+        !Number.isFinite(target)
+        || !Number.isFinite(tolerance)
+        || target < 0
+        || target > 100
+        || tolerance < 0
+        || tolerance > 100
+      ))
+    ) return;
+    const data: QcBrixTargetInput = {
+      operationId: brixTargetOperationKey,
+      profileKey,
+      ingredientId: brixTargetIngredient,
+      targetBrix: hasTarget ? target : null,
+      toleranceBrix: hasTolerance ? tolerance : null,
+      reason: brixTargetReason.trim(),
+      ...(brixSourceDocument.trim() ? { sourceDocument: brixSourceDocument.trim() } : {}),
+      ...(brixSourceSection.trim() ? { sourceSection: brixSourceSection.trim() } : {}),
+    };
+    setBrixTargetSaveAcknowledged(false);
+    brixTargetMutation.mutate({ data });
+  };
 
   const submitLot = () => {
     if (!runId || !selectedIngredient || !lotNumber.trim()) return;
@@ -656,6 +800,7 @@ export default function QcWorkflowTab({
     setExpandedEventId(next);
     if (next !== null) {
       setCorrectionReason("");
+      setCorrectionOperationKey(operationId());
       const componentReplacement = {
         observations: Array.isArray(event.payload.results)
           ? event.payload.results.flatMap((candidate) => {
@@ -669,14 +814,40 @@ export default function QcWorkflowTab({
           : [],
         note: typeof event.payload.note === "string" ? event.payload.note : "",
       };
+      const labelReplacement = {
+        observed: event.payload.observed && typeof event.payload.observed === "object"
+          ? Object.fromEntries(Object.entries(event.payload.observed as Record<string, unknown>)
+            .filter(([field, value]) => ["productName", "lotText", "dateText"].includes(field)
+              && typeof value === "string"
+              && !event.redactedFields?.includes(`payload.observed.${field}`)))
+          : {},
+        ...(!event.redactedFields?.includes("payload.note")
+          && typeof event.payload.note === "string"
+          ? { note: event.payload.note }
+          : {}),
+      };
       setReplacementJson(JSON.stringify(
-        event.eventType === "component-check" ? componentReplacement : event.payload,
+        event.eventType === "component-check"
+          ? componentReplacement
+          : event.eventType === "date-code-check"
+            ? {
+              observed: Object.fromEntries(Object.entries(
+                event.payload.observed && typeof event.payload.observed === "object" ? event.payload.observed : {},
+              ).filter(([field, value]) => ["productionCode", "bestByCode", "otherCode"].includes(field)
+                && typeof value === "string" && !event.redactedFields?.includes(`payload.observed.${field}`))),
+              readability: event.payload.readability,
+              ...(!event.redactedFields?.includes("payload.note") ? { note: event.payload.note } : {}),
+            }
+          : event.eventType === "label-check"
+            ? labelReplacement
+            : event.payload,
         null,
         2,
       ));
       setCorrectionInputError("");
       setRedactionReason("");
       setRedactionFields([]);
+      setRedactionOperationKey(operationId());
     }
   };
 
@@ -696,7 +867,7 @@ export default function QcWorkflowTab({
     setCorrectionInputError("");
     correctionMutation.mutate({
       eventId: event.id,
-      data: { operationId: operationId(), reason: correctionReason.trim(), replacement },
+      data: { operationId: correctionOperationKey, reason: correctionReason.trim(), replacement },
     });
   };
 
@@ -705,7 +876,7 @@ export default function QcWorkflowTab({
     redactionMutation.mutate({
       eventId: event.id,
       data: {
-        operationId: operationId(),
+        operationId: redactionOperationKey,
         reason: redactionReason.trim(),
         fields: redactionFields as QcRedactionInput["fields"],
       },
@@ -716,7 +887,7 @@ export default function QcWorkflowTab({
   const isReadOnly = !canRecordQc;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5 px-3 pb-24 pt-4 sm:px-5" data-testid="qc-workflow-tab">
+    <div className="mx-auto w-full min-w-0 max-w-6xl space-y-5 px-0 pb-24 pt-4 sm:px-2" data-testid="qc-workflow-tab">
       <header className="relative overflow-hidden rounded-2xl border border-[#c9d8d4] bg-[#e8f1ee] px-4 py-5 dark:border-emerald-900/50 dark:bg-[#132522] sm:px-6">
         <div className="absolute -right-8 -top-16 h-48 w-48 rounded-full border-[28px] border-[#b8d2ca]/35 dark:border-emerald-800/20" aria-hidden="true" />
         <div className="relative flex flex-wrap items-start justify-between gap-4">
@@ -730,11 +901,11 @@ export default function QcWorkflowTab({
               Durable evidence for this run. QC and allergen notes are advisory; they do not change run allergen settings or sequencing warnings.
             </p>
           </div>
-          <div className="flex min-w-40 items-center gap-2 rounded-xl border border-[#bfd3cd] bg-[#f3f8f6]/80 px-3 py-2 dark:border-emerald-900/60 dark:bg-[#1a302b]">
+          <div className="flex min-w-0 items-center gap-2 rounded-xl border border-[#bfd3cd] bg-[#f3f8f6]/80 px-3 py-2 dark:border-emerald-900/60 dark:bg-[#1a302b] sm:min-w-40">
             <ClipboardCheck className="h-4 w-4 text-[#397065] dark:text-emerald-300" />
             <div className="min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Run reference</p>
-              <p className="truncate font-mono text-xs font-semibold" data-testid="text-qc-run-id">{runId || "No run selected"}</p>
+              <p className="break-all font-mono text-xs font-semibold" data-testid="text-qc-run-id">{runId || "No run selected"}</p>
             </div>
           </div>
           {(canRecordQc || canManageQc) && (
@@ -742,22 +913,88 @@ export default function QcWorkflowTab({
               type="button"
               className={quietButtonClass}
               aria-pressed={showDailyActivity}
-              onClick={() => setShowDailyActivity((current) => !current)}
+              onClick={() => {
+                setShowDailyActivity((current) => !current);
+                setShowPlanning(false);
+                setShowIntelligence(false);
+              }}
               data-testid="button-toggle-allergen-activity"
             >
               {showDailyActivity ? "Back to run QC" : "Daily allergen activity"}
             </button>
           )}
+          {(canRecordQc || canManageQc) && (
+            <button
+              type="button"
+              className={quietButtonClass}
+              aria-pressed={showPlanning}
+              onClick={() => {
+                setShowPlanning((current) => !current);
+                setShowDailyActivity(false);
+                setShowIntelligence(false);
+              }}
+              data-testid="button-toggle-qc-planning"
+            >
+              {showPlanning ? "Hide upcoming production" : "Upcoming production"}
+            </button>
+          )}
+          {canManageQc && (
+            <button
+              type="button"
+              className={quietButtonClass}
+              aria-pressed={showIntelligence}
+              onClick={() => {
+                setShowIntelligence((current) => !current);
+                setShowDailyActivity(false);
+                setShowPlanning(false);
+              }}
+              data-testid="button-toggle-qc-intelligence"
+            >
+              {showIntelligence ? "Back to run QC" : "QC intelligence"}
+            </button>
+          )}
         </div>
       </header>
 
-      {showDailyActivity ? (
+      {showIntelligence && canManageQc ? (
+        <QcIntelligenceReport canManageQc={canManageQc} />
+      ) : showDailyActivity ? (
         <QcAllergenActivityReport
           canRead={canRecordQc || canManageQc}
           canManageQc={canManageQc}
         />
+      ) : showPlanning ? (
+        <QcPlanningView />
       ) : (
       <>
+      {(canRecordQc || canManageQc) && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            className={quietButtonClass}
+            aria-expanded={showRecipeReview}
+            onClick={() => setShowRecipeReview((value) => !value)}
+            data-testid="button-toggle-qc-recipe-review"
+          >
+            <ClipboardCheck className="h-4 w-4" /> {showRecipeReview ? "Hide recipe review" : "Recipe review"}
+          </button>
+          {showRecipeReview && <QcRecipeReview canManageQc={canManageQc} />}
+        </div>
+      )}
+      {canManageQc && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            className={quietButtonClass}
+            aria-expanded={showImportReview}
+            onClick={() => setShowImportReview((value) => !value)}
+            data-testid="button-toggle-qc-import-review"
+          >
+            <FileClock className="h-4 w-4" /> {showImportReview ? "Hide import review" : "Import review"}
+          </button>
+          {showImportReview && <QcImportReview canManageQc={canManageQc} />}
+        </div>
+      )}
       {!canRecordQc && !canManageQc ? (
         <div className={`${panelClass} flex items-start gap-3 p-5`}>
           <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
@@ -768,6 +1005,20 @@ export default function QcWorkflowTab({
         </div>
       ) : (
         <>
+          <QcLabelVerification
+            runId={runId}
+            profileKey={profileKey}
+            canRecordQc={canRecordQc}
+            canManageQc={canManageQc}
+          />
+          <QcDateCodeVerification
+            key={runId}
+            runId={runId}
+            profileKey={profileKey}
+            canRecordQc={canRecordQc}
+            canManageQc={canManageQc}
+            labelChecks={runEvidenceMatchesSelection ? runItems?.filter((event) => event.eventType === "label-check") : []}
+          />
           {runIsActive && runStartedAt !== null && (
             <section
               className={`${panelClass} p-4 sm:p-5`}
@@ -794,7 +1045,7 @@ export default function QcWorkflowTab({
                   ) : weightCheckReminders.length === 0 ? (
                     <p className="mt-3 text-xs text-muted-foreground" role="status">No configured weight targets need timed checks.</p>
                   ) : (
-                    <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Next weight check times">
+                    <ul className="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2" aria-label="Next weight check times">
                       {weightCheckReminders.map((reminder) => {
                         const overdueAt = reminder.nextCheckAt + QC_WEIGHT_CHECK_OVERDUE_GRACE_MS;
                         const status = clockNowMs > overdueAt
@@ -813,7 +1064,7 @@ export default function QcWorkflowTab({
                             className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2.5"
                             data-testid={`qc-weight-reminder-${reminder.ingredientId}`}
                           >
-                            <span className="min-w-0 truncate text-xs font-semibold">{reminder.ingredientName}</span>
+                            <span className="min-w-0 break-words text-xs font-semibold [overflow-wrap:anywhere]">{reminder.ingredientName}</span>
                             <span className="flex shrink-0 items-center gap-2">
                               <StatusPill tone={status === "overdue" ? "rose" : status === "due" ? "amber" : "neutral"}>
                                 {statusText}
@@ -832,7 +1083,7 @@ export default function QcWorkflowTab({
             </section>
           )}
           <section
-            className={`${panelClass} p-4 sm:p-5`}
+            className={`${panelClass} p-[min(1rem,4vw)] sm:p-5`}
             aria-labelledby="qc-component-check-title"
             data-testid="qc-component-checklist"
           >
@@ -858,7 +1109,7 @@ export default function QcWorkflowTab({
                 {(componentChecklist.reason || componentChecklist.issues.length > 0) && (
                   <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-900 dark:text-amber-200" role="status" data-testid="status-qc-component-settings">
                     {componentChecklist.reason && (
-                      <p>
+                      <p className="break-words [overflow-wrap:anywhere]">
                         {componentChecklist.reason} The checklist cannot pass while expected components are incomplete or ambiguous.
                       </p>
                     )}
@@ -867,7 +1118,7 @@ export default function QcWorkflowTab({
                         <p className="font-semibold">Saved settings to review</p>
                         <ul className="mt-1 list-disc space-y-1 pl-5">
                           {componentChecklist.issues.map((item, index) => (
-                            <li key={`${item.setting}-${index}`} data-testid={`qc-component-setting-issue-${index}`}>
+                            <li key={`${item.setting}-${index}`} className="break-words [overflow-wrap:anywhere]" data-testid={`qc-component-setting-issue-${index}`}>
                               <span className="font-semibold">{item.setting}:</span> {item.message}
                             </li>
                           ))}
@@ -891,7 +1142,7 @@ export default function QcWorkflowTab({
                 ) : (
                   <div className="mt-4 space-y-2">
                     {componentChecklist.expectedComponents.map((component) => (
-                      <div key={component.componentId} className="grid gap-2 rounded-lg border border-border/70 bg-background/70 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,.7fr)] sm:items-center">
+                      <div key={component.componentId} className="grid min-w-0 grid-cols-1 gap-2 rounded-lg border border-border/70 bg-background/70 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,.7fr)] sm:items-center">
                         <div className="min-w-0">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{component.group}</p>
                           <p className="break-words text-sm font-medium">{component.name}</p>
@@ -938,7 +1189,7 @@ export default function QcWorkflowTab({
               </>
             )}
           </section>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,.75fr)]">
+          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,.75fr)]">
             <section className={`${panelClass} overflow-hidden`} aria-labelledby="qc-record-title">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
                 <div>
@@ -946,17 +1197,17 @@ export default function QcWorkflowTab({
                   <p className="mt-0.5 text-xs text-muted-foreground">Choose one focused record type at a time.</p>
                 </div>
                 <div className="flex rounded-lg border border-border bg-muted/50 p-1" role="tablist" aria-label="QC record type">
-                  {(["lots", "weights"] as const).map((item) => (
+                  {(["lots", "weights", "brix"] as const).map((item) => (
                     <button
                       key={item}
                       type="button"
                       role="tab"
                       aria-selected={view === item}
-                      className={`min-h-9 rounded-md px-3 text-xs font-semibold transition ${view === item ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      className={`min-h-10 rounded-md px-3 text-xs font-semibold transition ${view === item ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                       onClick={() => setView(item)}
                       data-testid={`tab-qc-${item}`}
                     >
-                      {item === "lots" ? "Lots" : "Weights"}
+                      {item === "lots" ? "Lots" : item === "weights" ? "Weights" : "Brix"}
                     </button>
                   ))}
                 </div>
@@ -977,7 +1228,7 @@ export default function QcWorkflowTab({
                   </div>
                 ) : view === "lots" ? (
                   <div className="space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                       <Select label="Ingredient" value={selectedIngredient} onChange={setSelectedIngredient} disabled={isReadOnly}>
                         <option value="">Choose ingredient…</option>
                         {availableIngredients.map((ingredient) => <option key={ingredient.id} value={ingredient.id}>{ingredient.name}</option>)}
@@ -997,7 +1248,7 @@ export default function QcWorkflowTab({
                       </button>
                     </div>
                   </div>
-                ) : (
+                ) : view === "weights" ? (
                   <div className="space-y-4">
                     {targetsQuery.isLoading ? (
                       <div className="animate-pulse space-y-3"><div className="h-10 rounded-lg bg-muted" /><div className="h-10 rounded-lg bg-muted" /></div>
@@ -1005,7 +1256,7 @@ export default function QcWorkflowTab({
                       <QueryFailure message="QC targets could not be loaded. Weight results remain unevaluated until target data is available." retry={() => void targetsQuery.refetch()} />
                     ) : (
                       <>
-                        <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                           <Select label="Ingredient" value={weightIngredient} onChange={(id) => {
                             setWeightIngredient(id);
                             const target = targets?.find((entry) => entry.ingredientId === id);
@@ -1048,12 +1299,73 @@ export default function QcWorkflowTab({
                       </>
                     )}
                   </div>
+                ) : (
+                  <div className="space-y-4" data-testid="qc-brix-entry">
+                    {targetsQuery.isLoading ? (
+                      <div className="animate-pulse space-y-3" role="status" aria-label="Loading Brix targets">
+                        <div className="h-10 rounded-lg bg-muted" /><div className="h-10 rounded-lg bg-muted" />
+                      </div>
+                    ) : targetsQuery.isError ? (
+                      <QueryFailure message="Brix targets could not be loaded. Readings remain not evaluated until reviewed configuration is available." retry={() => void targetsQuery.refetch()} />
+                    ) : (
+                      <>
+                        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                          <Select label="Brix ingredient" value={brixIngredient} onChange={setBrixIngredient} disabled={!canRecordQc}>
+                            <option value="">Choose ingredient…</option>
+                            {availableIngredients.map((ingredient) => <option key={ingredient.id} value={ingredient.id}>{ingredient.name}</option>)}
+                          </Select>
+                          <Select label="Brix timing" value={brixCheckType} onChange={(value) => setBrixCheckType(value as QcBrixCheckInput["checkType"])} disabled={!canRecordQc}>
+                            <option value="pre-run">Pre-run check</option>
+                            <option value="interval">Interval check</option>
+                          </Select>
+                          <Select label="Brix station" value={brixStation} onChange={(value) => setBrixStation(value as QcBrixCheckInput["station"])} disabled={!canRecordQc}>
+                            <option value="dough">Dough</option><option value="sauce">Sauce</option><option value="frontline">Frontline</option><option value="warehouse">Warehouse</option><option value="packaging">Packaging</option><option value="other">Other</option>
+                          </Select>
+                          <Input label="Actual Brix (°Bx)" value={actualBrix} onChange={(value) => {
+                            setActualBrix(value);
+                            setBrixSaveAcknowledged(false);
+                          }} type="number" min="0" max="100" step="any" placeholder="0–100 °Bx" disabled={!canRecordQc} />
+                          <Input label="Instrument (optional)" value={brixInstrument} onChange={setBrixInstrument} maxLength={120} placeholder="Instrument ID or name" disabled={!canRecordQc} />
+                        </div>
+                        {brixIngredient && (
+                          <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs ${brixTarget?.state === "configured" ? "border-[#cbd8d4] bg-[#f2f7f5] text-[#48675f] dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-200" : "border-amber-500/30 bg-amber-500/5 text-amber-900 dark:text-amber-200"}`} data-testid="qc-brix-target-status">
+                            {brixTarget?.state === "configured" ? <Weight className="mt-0.5 h-4 w-4 shrink-0" /> : <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />}
+                            <span>
+                              {brixTarget?.state !== "configured" || brixTarget.targetBrix === null || brixTarget.toleranceBrix === null
+                                ? `Not evaluated — ${brixTarget?.reason ?? "no manager-reviewed Brix target is configured."}`
+                                : `Reviewed target ${brixTarget.targetBrix} °Bx · tolerance ±${brixTarget.toleranceBrix} °Bx`}
+                            </span>
+                          </div>
+                        )}
+                        <Textarea label="Brix note (optional)" value={brixNote} onChange={setBrixNote} placeholder="Context for this reading" rows={2} />
+                        {!canRecordQc && <p className="text-xs text-muted-foreground">You need QC recording access to add a Brix reading.</p>}
+                        <MutationAlert error={brixMutation.error} onRetry={submitBrix} />
+                        {brixSaveAcknowledged && (
+                          <p className="rounded-lg border border-emerald-300/70 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200" role="status">
+                            Brix reading saved and acknowledged by the server.
+                          </p>
+                        )}
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            className={actionClass}
+                            onClick={submitBrix}
+                            disabled={!canRecordQc || !runId || !profileKey || !brixIngredient || !actualBrix.trim() || !Number.isFinite(Number(actualBrix)) || Number(actualBrix) < 0 || Number(actualBrix) > 100 || brixMutation.isPending}
+                            data-testid="button-record-brix-check"
+                          >
+                            {brixMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                            Record Brix reading
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </section>
 
-            <section className={`${panelClass} p-4 sm:p-5`} aria-labelledby="qc-target-title">
-              <div className="flex items-start justify-between gap-3">
+            <section className={`${panelClass} p-[min(1rem,4vw)] sm:p-5`} aria-labelledby="qc-target-title">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 id="qc-target-title" className="flex items-center gap-2 text-sm font-bold">
                     <FlaskConical className="h-4 w-4 text-[#548f80]" /> Reviewed targets
@@ -1068,14 +1380,14 @@ export default function QcWorkflowTab({
                 <div className="mt-4"><QueryFailure message="Target settings unavailable." retry={() => void targetsQuery.refetch()} /></div>
               ) : (
                 <>
-                  <div className="mt-4 max-h-48 space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-4 max-h-48 space-y-2 overflow-y-auto pr-1" data-testid="qc-weight-target-list">
                     {(targets ?? []).length === 0 ? (
                       <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No target rows are configured for this profile.</p>
                     ) : targets?.map((target) => (
                       <div key={target.ingredientId} className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2.5">
                         <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold">{target.ingredientName}</p>
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          <p className="break-words text-xs font-semibold [overflow-wrap:anywhere]">{target.ingredientName}</p>
+                          <p className="mt-0.5 break-words text-[10px] text-muted-foreground [overflow-wrap:anywhere]">
                             {target.state !== "configured" || target.targetValue === null || !target.unit
                               ? target.reason || "Not evaluated · target not configured"
                               : `${target.targetValue} ${target.unit}${target.toleranceValue === null ? "" : ` ±${target.toleranceValue}`} · ${target.source === "qc-override" ? "QC override" : "spec import"}`}
@@ -1092,7 +1404,7 @@ export default function QcWorkflowTab({
                         <option value="">Choose target…</option>
                         {(targets ?? []).map((target) => <option key={target.ingredientId} value={target.ingredientId}>{target.ingredientName}</option>)}
                       </Select>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-2">
                         <Input label="Target value" value={targetValue} onChange={setTargetValue} type="number" min="0" step="any" placeholder="Blank to clear" />
                         <Select label="Target unit" value={targetUnit} onChange={(value) => setTargetUnit(value as Unit)}>
                           <option value="oz">oz</option><option value="g">g</option><option value="lb">lb</option><option value="kg">kg</option>
@@ -1114,6 +1426,86 @@ export default function QcWorkflowTab({
                       <p className="text-[10px] leading-4 text-muted-foreground">Leave target and tolerance blank together to return to the spec-import target. A reason is required.</p>
                     </div>
                   )}
+                  <div className="mt-5 space-y-3 border-t border-border/70 pt-4" data-testid="qc-brix-target-settings">
+                    <div>
+                      <p className="text-xs font-semibold">Reviewed Brix targets</p>
+                      <p className="mt-1 text-[10px] leading-4 text-muted-foreground">Separate from weight targets. Both values require explicit manager review; missing configuration is not evaluated.</p>
+                    </div>
+                    <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                      {(brixTargets ?? []).length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No active ingredients are available for Brix review.</p>
+                      ) : brixTargets?.map((target) => (
+                        <div key={target.ingredientId} className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className="break-words text-xs font-semibold [overflow-wrap:anywhere]">{target.ingredientName}</p>
+                            <p className="mt-0.5 break-words text-[10px] text-muted-foreground [overflow-wrap:anywhere]">
+                              {target.state !== "configured" || target.targetBrix === null || target.toleranceBrix === null
+                                ? target.reason || "Not evaluated · no reviewed Brix target"
+                                : `${target.targetBrix} °Bx ±${target.toleranceBrix} °Bx · manager reviewed`}
+                            </p>
+                            {(target.sourceDocument || target.sourceSection) && (
+                              <p className="mt-1 break-words text-[10px] text-muted-foreground">
+                                Approved source: {[target.sourceDocument, target.sourceSection].filter(Boolean).join(" · ")}
+                              </p>
+                            )}
+                          </div>
+                          <StatusPill tone={target.state === "configured" ? "green" : "amber"}>{target.state === "configured" ? "Set" : "Not evaluated"}</StatusPill>
+                        </div>
+                      ))}
+                    </div>
+                    {canManageQc && (
+                      <div className="space-y-3 border-t border-border/70 pt-4">
+                        <Select label="Brix target ingredient" value={brixTargetIngredient} onChange={(value) => {
+                          setBrixTargetIngredient(value);
+                          setBrixTargetSaveAcknowledged(false);
+                        }}>
+                          <option value="">Choose ingredient…</option>
+                          {(brixTargets ?? []).map((target) => <option key={target.ingredientId} value={target.ingredientId}>{target.ingredientName}</option>)}
+                        </Select>
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-2">
+                          <Input label="Target Brix (°Bx)" value={brixTargetValue} onChange={(value) => {
+                            setBrixTargetValue(value);
+                            setBrixTargetSaveAcknowledged(false);
+                          }} type="number" min="0" max="100" step="any" placeholder="0–100" />
+                          <Input label="Brix tolerance (°Bx)" value={brixTargetTolerance} onChange={(value) => {
+                            setBrixTargetTolerance(value);
+                            setBrixTargetSaveAcknowledged(false);
+                          }} type="number" min="0" max="100" step="any" placeholder="Required; may be 0" />
+                        </div>
+                        <button type="button" className={`${quietButtonClass} w-full`} onClick={() => {
+                          setBrixTargetValue("");
+                          setBrixTargetTolerance("");
+                          setBrixTargetSaveAcknowledged(false);
+                        }}>
+                          <Trash2 className="h-3.5 w-3.5" /> Clear Brix target and tolerance
+                        </button>
+                        <Input label="Brix approved document name or ID (optional)" value={brixSourceDocument} onChange={(value) => {
+                          setBrixSourceDocument(value);
+                          setBrixTargetSaveAcknowledged(false);
+                        }} maxLength={300} placeholder="Document name or identifier" />
+                        <Input label="Brix source section or page (optional)" value={brixSourceSection} onChange={(value) => {
+                          setBrixSourceSection(value);
+                          setBrixTargetSaveAcknowledged(false);
+                        }} maxLength={200} placeholder="Section, page, or clause" />
+                        <Textarea label="Brix target review reason" value={brixTargetReason} onChange={setBrixTargetReason} placeholder="Why this target was reviewed or changed" rows={2} />
+                        <MutationAlert error={brixTargetMutation.error} onRetry={submitBrixTarget} />
+                        {brixTargetSaveAcknowledged && (
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300" role="status">Brix target change saved and acknowledged by the server.</p>
+                        )}
+                        <button
+                          type="button"
+                          className={`${actionClass} w-full`}
+                          onClick={submitBrixTarget}
+                          disabled={!brixTargetIngredient || !brixTargetReason.trim() || brixTargetMutation.isPending || (Boolean(brixTargetValue.trim()) !== Boolean(brixTargetTolerance.trim())) || (Boolean(brixTargetValue.trim()) && (!Number.isFinite(Number(brixTargetValue)) || !Number.isFinite(Number(brixTargetTolerance)) || Number(brixTargetValue) < 0 || Number(brixTargetValue) > 100 || Number(brixTargetTolerance) < 0 || Number(brixTargetTolerance) > 100))}
+                          data-testid="button-save-brix-target"
+                        >
+                          {brixTargetMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
+                          Save reviewed Brix target
+                        </button>
+                        <p className="text-[10px] leading-4 text-muted-foreground">Leave target and tolerance blank together to clear. No default tolerance is applied. A reason is required.</p>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </section>
@@ -1130,7 +1522,7 @@ export default function QcWorkflowTab({
               </div>
               <StatusPill tone={footprint?.isComplete ? "green" : "amber"}>{footprint?.isComplete ? "Mapping complete" : "Coverage unknown / incomplete"}</StatusPill>
             </div>
-            <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[1.1fr_.9fr]">
+            <div className="grid min-w-0 grid-cols-1 gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
               <RunAllergenFootprintPanel
                 runId={runId}
                 footprint={ingredientsQuery.isError ? null : footprint}
@@ -1182,16 +1574,16 @@ export default function QcWorkflowTab({
             </div>
           </section>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <section className={`${panelClass} p-4 sm:p-5`} aria-labelledby="cleaning-record-title">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 id="cleaning-record-title" className="flex items-center gap-2 text-sm font-bold"><Archive className="h-4 w-4 text-[#548f80]" /> Cleaning record</h2>
                   <p className="mt-1 text-xs text-muted-foreground">A second authenticated person must verify; the server rejects self-verification.</p>
                 </div>
                 <StatusPill>Two-person record</StatusPill>
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                 <Select label="Method" value={cleaningMethod} onChange={(value) => setCleaningMethod(value as QcCleaningInput["method"])} disabled={!canRecordQc}>
                   <option value="standard">Standard</option><option value="deep">Deep</option><option value="chemical">Chemical</option><option value="other">Other</option>
                 </Select>
@@ -1209,7 +1601,7 @@ export default function QcWorkflowTab({
             </section>
 
             <section className={`${panelClass} p-4 sm:p-5`} aria-labelledby="run-signoff-title">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 id="run-signoff-title" className="flex items-center gap-2 text-sm font-bold"><BadgeCheck className="h-4 w-4 text-[#548f80]" /> QC run sign-off</h2>
                   <p className="mt-1 text-xs text-muted-foreground">Sign-off applies to the currently reviewed QC event set. Any new QC event reopens it.</p>
@@ -1259,7 +1651,7 @@ export default function QcWorkflowTab({
           )}
         </div>
         <div className="space-y-4 p-4 sm:p-5">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Input label="From date" value={historyFrom} onChange={setHistoryFrom} type="date" />
             <Input label="To date" value={historyTo} onChange={setHistoryTo} type="date" />
             <Input label="Run ID filter" value={historyRunId} onChange={setHistoryRunId} placeholder="All facility runs" />
@@ -1289,7 +1681,7 @@ export default function QcWorkflowTab({
                   <article key={event.id} className="overflow-hidden rounded-xl border border-border/75 bg-background/70" data-testid={`qc-history-event-${event.id}`}>
                     <button type="button" className="flex min-h-[64px] w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/30" onClick={() => toggleExpandedEvent(event)}>
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#e9f1ef] text-[#397065] dark:bg-emerald-950/40 dark:text-emerald-300">
-                        {event.eventType === "weight" ? <Weight className="h-4 w-4" /> : event.eventType === "allergen-review" ? <ShieldCheck className="h-4 w-4" /> : event.eventType === "component-check" ? <ClipboardCheck className="h-4 w-4" /> : <FileClock className="h-4 w-4" />}
+                        {event.eventType === "weight" || event.eventType === "brix-check" ? <Weight className="h-4 w-4" /> : event.eventType === "allergen-review" ? <ShieldCheck className="h-4 w-4" /> : event.eventType === "component-check" ? <ClipboardCheck className="h-4 w-4" /> : <FileClock className="h-4 w-4" />}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1306,14 +1698,48 @@ export default function QcWorkflowTab({
                     </button>
                     {isExpanded && (
                       <div className="space-y-3 border-t border-border/70 bg-muted/15 p-3 sm:p-4">
-                        <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
                           <div className="rounded-lg border border-border/70 bg-background p-2.5"><p className={labelClass}>Record ID</p><p className="break-all font-mono text-[10px]">{event.recordId}</p></div>
                           <div className="rounded-lg border border-border/70 bg-background p-2.5"><p className={labelClass}>Actor</p><p className="break-all font-mono text-[10px]">{event.redactedFields?.includes("actorId") ? "Redacted" : event.actorId || "Not provided"}</p></div>
                           <div className="rounded-lg border border-border/70 bg-background p-2.5"><p className={labelClass}>Payload</p><p className="text-xs">{Object.keys(event.payload ?? {}).length ? Object.entries(event.payload).map(([key, value]) => {
                             const hidden = event.redactedFields?.includes(`payload.${key}`);
-                            return <span key={key} className="mr-2 inline-block"><span className="font-semibold">{key}:</span> {hidden ? "Redacted" : typeof value === "object" ? JSON.stringify(value) : String(value)}</span>;
+                            const fieldLabel = key === "sourceDocument" ? "Approved document" : key === "sourceSection" ? "Section/page" : key;
+                            return <span key={key} className="mr-2 inline-block max-w-full break-words"><span className="font-semibold">{fieldLabel}:</span> {hidden ? "Redacted" : typeof value === "object" ? JSON.stringify(value) : String(value)}</span>;
                           }) : "No payload fields"}</p></div>
                         </div>
+                        {event.eventType === "brix-check" && (
+                          <div className="rounded-lg border border-border/70 bg-background p-3" data-testid={`qc-brix-history-${event.id}`}>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-xs font-bold">Brix reading</p>
+                              <StatusPill tone={event.payload.outcome === "pass" ? "green" : event.payload.outcome === "fail" ? "rose" : "amber"}>
+                                {typeof event.payload.outcome === "string" ? event.payload.outcome : "not-evaluated"}
+                              </StatusPill>
+                              <span className="text-[10px] text-muted-foreground">
+                                {event.payload.checkType === "interval" ? "Interval" : "Pre-run"}
+                                {typeof event.payload.instrument === "string" && event.payload.instrument
+                                  ? ` · ${event.redactedFields?.includes("payload.instrument") ? "Instrument redacted" : event.payload.instrument}`
+                                  : ""}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-sm font-semibold">
+                              {typeof event.payload.actualBrix === "number" ? `${event.payload.actualBrix} °Bx` : "Reading unavailable"}
+                              {typeof event.payload.targetBrix === "number" && typeof event.payload.toleranceBrix === "number"
+                                ? ` · target ${event.payload.targetBrix} °Bx ±${event.payload.toleranceBrix} °Bx`
+                                : " · target not configured"}
+                            </p>
+                            {typeof event.payload.note === "string" && event.payload.note && (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {event.redactedFields?.includes("payload.note") ? "Note redacted" : event.payload.note}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {event.eventType === "label-check" && (
+                          <QcLabelComparison event={event} />
+                        )}
+                        {event.eventType === "date-code-check" && (
+                          <QcDateCodeComparison event={event} />
+                        )}
                         {event.eventType === "component-check" && (
                           <div className="rounded-lg border border-border/70 bg-background p-3" data-testid={`qc-component-history-${event.id}`}>
                             <div className="flex flex-wrap items-center gap-2">
@@ -1354,13 +1780,17 @@ export default function QcWorkflowTab({
                           </div>
                         )}
                         {canManageQc && (
-                          <div className="grid gap-4 border-t border-border/70 pt-3 lg:grid-cols-2">
+                          <div className="grid min-w-0 grid-cols-1 gap-4 border-t border-border/70 pt-3 lg:grid-cols-2">
                             <div className="space-y-2">
                               <p className="text-xs font-bold">Append correction</p>
-                              <Textarea label="Correction reason" value={correctionReason} onChange={setCorrectionReason} placeholder="What was inaccurate?" rows={2} />
+                              <Textarea label="Correction reason" value={correctionReason} onChange={(value) => {
+                                setCorrectionReason(value);
+                                setCorrectionOperationKey(operationId());
+                              }} placeholder="What was inaccurate?" rows={2} />
                               <Textarea label="Replacement payload JSON" value={replacementJson} onChange={(value) => {
                                 setReplacementJson(value);
                                 setCorrectionInputError("");
+                                setCorrectionOperationKey(operationId());
                               }} rows={5} />
                               {correctionInputError && <p className="text-xs text-rose-700 dark:text-rose-300" role="alert">{correctionInputError} Correct the JSON before appending.</p>}
                               <MutationAlert error={correctionMutation.error} onRetry={() => submitCorrection(event)} />
@@ -1370,17 +1800,57 @@ export default function QcWorkflowTab({
                             </div>
                             <div className="space-y-2">
                               <p className="text-xs font-bold">Append privacy redaction</p>
-                              <Textarea label="Redaction reason" value={redactionReason} onChange={setRedactionReason} placeholder="Why does this field need redaction?" rows={2} />
+                              <Textarea label="Redaction reason" value={redactionReason} onChange={(value) => {
+                                setRedactionReason(value);
+                                setRedactionOperationKey(operationId());
+                              }} placeholder="Why does this field need redaction?" rows={2} />
                               <div className="space-y-1.5">
-                                {[
+                                {(event.eventType === "date-code-check" ? [
+                                  ["actorId", "Actor identifier"],
+                                  ["payload.note", "Observation note"],
+                                  ["payload.batchContext", "Batch / pack context"],
+                                  ...["productionCode", "bestByCode", "otherCode"].flatMap((field) => [
+                                    [`payload.observed.${field}`, `${field} observed text`],
+                                    [`payload.fieldResults.${field}.observed`, `${field} result observation`],
+                                    [`payload.fieldResults.${field}.expected`, `${field} result expected text`],
+                                    [`payload.referenceSnapshot.expected.${field}`, `${field} reference expected text`],
+                                  ]),
+                                  ["payload.referenceSnapshot.batchContext", "Reference batch / pack context"],
+                                  ["payload.referenceSnapshot.sourceIdentity", "Reference source identity"],
+                                  ["payload.referenceSnapshot.sourceVersion", "Reference source version"],
+                                  ["payload.referenceSnapshot.sourceDescription", "Reference source description"],
+                                ] : event.eventType === "label-check" ? [
+                                  ["actorId", "Actor identifier"],
+                                  ["payload.note", "Observation note"],
+                                  ["payload.observed.productName", "Observed product name"],
+                                  ["payload.observed.lotText", "Observed lot text"],
+                                  ["payload.observed.dateText", "Observed date text"],
+                                  ["payload.fieldResults.productName.observed", "Product name result text"],
+                                  ["payload.fieldResults.productName.expected", "Product name expected text"],
+                                  ["payload.fieldResults.lotText.observed", "Lot result text"],
+                                  ["payload.fieldResults.lotText.expected", "Lot expected text"],
+                                  ["payload.fieldResults.dateText.observed", "Date result text"],
+                                  ["payload.fieldResults.dateText.expected", "Date expected text"],
+                                  ["payload.referenceSnapshot.expected.productName", "Reference product name"],
+                                  ["payload.referenceSnapshot.expected.lotText", "Reference lot text"],
+                                  ["payload.referenceSnapshot.expected.dateText", "Reference date text"],
+                                  ["payload.referenceSnapshot.sourceIdentity", "Reference source identity"],
+                                  ["payload.referenceSnapshot.sourceDescription", "Reference source description"],
+                                ] : [
                                   ["actorId", "Actor identifier"],
                                   ["ingredientName", "Ingredient name"],
                                   ["payload.note", "Payload note"],
+                                  ["payload.instrument", "Instrument"],
                                   ["payload.lotNumber", "Lot number"],
                                   ["payload.expectedComponents", "Expected component identities"],
-                                ].map(([field, text]) => (
+                                  ["payload.sourceDocument", "Brix source document"],
+                                  ["payload.sourceSection", "Brix source section/page"],
+                                ]).map(([field, text]) => (
                                   <label key={field} className="flex items-center gap-2 text-xs">
-                                    <input type="checkbox" className="h-4 w-4 accent-[#548f80]" checked={redactionFields.includes(field)} onChange={(event) => setRedactionFields((current) => event.target.checked ? [...current, field] : current.filter((item) => item !== field))} />
+                                    <input type="checkbox" className="h-4 w-4 accent-[#548f80]" checked={redactionFields.includes(field)} onChange={(event) => {
+                                      setRedactionFields((current) => event.target.checked ? [...current, field] : current.filter((item) => item !== field));
+                                      setRedactionOperationKey(operationId());
+                                    }} />
                                     {text}
                                   </label>
                                 ))}

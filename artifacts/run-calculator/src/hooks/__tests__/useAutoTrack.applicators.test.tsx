@@ -5,7 +5,9 @@ import { useAutoTrack } from "../useAutoTrack";
 function form() {
   const values: Record<string, number> = {
     app1StockLbs: 50, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
+    app1StockConsumedLbs: 0,
     app2StockLbs: 100, app2StockAnchorNetSec: 0, app2StockCorrectionGeneration: 0,
+    app2StockConsumedLbs: 0,
   };
   return {
     values,
@@ -32,9 +34,11 @@ function values(overrides: Record<string, unknown> = {}) {
     app1Type: "Mozzarella", app1OzPerPizza: 4, app1BatchLbs: 25, app1CheeseRecipe: [],
     app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
     app1StockLbs: 50, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
+    app1StockConsumedLbs: 0,
     app2Type: "Cheese Mix", app2OzPerPizza: 4, app2BatchLbs: 25, app2CheeseRecipe: [],
     app2BatchesMade: 0, app2BatchAnchorNetSec: 0, app2BatchCorrectionGeneration: 0,
     app2StockLbs: 100, app2StockAnchorNetSec: 0, app2StockCorrectionGeneration: 0,
+    app2StockConsumedLbs: 0,
     app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
     app3BatchesMade: 0, app3BatchAnchorNetSec: 0, app3BatchCorrectionGeneration: 0,
     app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
@@ -119,25 +123,44 @@ describe("useAutoTrack applicator stock", () => {
     const { form: fakeForm, values: stored } = form();
     stored.app1BatchesMade = 7;
     stored.app2BatchesMade = 9;
+    stored.app1StockLbs = 25;
     const claim = vi.fn(async (event: any) => ({
       outcome: "accepted" as const,
       state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
       values: Object.fromEntries(event.mutations.map((m: any) => [m.field, m.to])),
     }));
     // App 1 checks every quarter of its 25 lb batch: 25 lb / (7 oz × 100 ppm) / 4.
-    renderHook(() => useAutoTrack({
-      runId: "app-run", runStatus: "running", nowTime: new Date(1_700_000_000_000),
-      elapsedBatchSec: 35, calc, v: values({ app1OzPerPizza: 7, app1BatchesMade: 7, app2BatchesMade: 9 }), form: fakeForm, claimAutoTrackEvent: claim,
-    }));
+    const input = (current: Record<string, unknown>) => ({
+      runId: "app-run", runStatus: "running" as const, nowTime: new Date(1_700_000_000_000),
+      elapsedBatchSec: 9, calc, v: current as any, form: fakeForm, claimAutoTrackEvent: claim,
+    });
+    const { rerender } = renderHook(
+      ({ value }) => useAutoTrack(value),
+      { initialProps: { value: input(values({ app1OzPerPizza: 7, app1BatchesMade: 7, app1StockLbs: 25, app2BatchesMade: 9 })) } },
+    );
     await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app1-stock")).toBe(true));
     const appClaim = claim.mock.calls.map(([event]) => event).find((event) => event.channel === "app1-stock");
     expect(appClaim.dueAt).toBeCloseTo(60 / 7);
     expect(appClaim.mutations).toEqual([
-      { field: "app1StockLbs", from: 50, to: 43.75 },
+      { field: "app1StockLbs", from: 25, to: 18.75 },
       { field: "app1StockAnchorNetSec", from: 0, to: 60 / 7 },
       { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+      { field: "app1StockConsumedLbs", from: 0, to: 6.25 },
     ]);
-    await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app2-stock")).toBe(true));
+    expect(stored.app1StockLbs).toBe(18.75);
+    expect(stored.app1StockConsumedLbs).toBe(6.25);
+    expect(stored.app1BatchesMade).toBe(7);
+    // Adopt the later canonical anchor before the production cadence matures.
+    // The production and depletion channels must never be acknowledged against
+    // the same stale stock baseline.
+    rerender({ value: { ...input(values({
+      app1OzPerPizza: 7, app1BatchesMade: 7, app1StockLbs: 18.75,
+      app1StockConsumedLbs: 6.25, app1StockAnchorNetSec: 35, app2BatchesMade: 9,
+      app2StockAnchorNetSec: 35,
+    })), elapsedBatchSec: 35 } });
+    await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app1-batch")).toBe(true));
+    expect(claim.mock.calls.map(([event]) => event).find((event) => event.channel === "app1-batch")?.mutations)
+      .toContainEqual({ field: "app1StockLbs", from: 18.75, to: 43.75 });
     expect(stored.app1StockLbs).toBe(43.75);
     expect(stored.app1BatchesMade).toBe(8);
     expect(stored.app2BatchesMade).toBe(9);
@@ -345,17 +368,23 @@ describe("useAutoTrack applicator stock", () => {
     },
   );
 
-  it("does not claim while a manual correction suppression window is open", async () => {
-    const { form: fakeForm } = form();
-    const claim = vi.fn();
+  it("continues acknowledged Frontline consumption during a Packaging-only correction hold", async () => {
+    const { form: fakeForm, values: stored } = form();
+    const claim = vi.fn(async (event) => ({
+      outcome: "accepted",
+      state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+      values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
     const suppression = { current: Date.now() + 60_000 };
     renderHook(() => useAutoTrack({
       runId: "suppressed-app", runStatus: "running", nowTime: new Date(),
       elapsedBatchSec: 61, calc, v: values(), form: fakeForm, claimAutoTrackEvent: claim,
       externalAutoSuppressRef: suppression,
     }));
-    await Promise.resolve();
-    expect(claim).not.toHaveBeenCalled();
+    await waitFor(() => expect(stored.app1StockConsumedLbs).toBeGreaterThan(0));
+    expect(claim.mock.calls.some(([event]) => event.channel === "app1-stock")).toBe(true);
+    expect(stored.app1StockLbs).toBe(43.75);
+    expect(suppression.current).toBeGreaterThan(Date.now());
   });
 
   it("does not arm Sauce or applicator claims when requested cases have no pizzas per case", async () => {

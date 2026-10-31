@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Focused tests for the merge confirmation preview count, especially the
 // server master-data rows (ciRowLists) that are matched case-insensitively to
 // mirror the server re-point helpers. A name that lives ONLY in factory

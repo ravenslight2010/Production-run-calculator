@@ -32,3 +32,14 @@ Verify runtime approval bundles with the canonical loader against the assembled 
 **Why:** Development can resolve reviewed evidence from the repository while production resolves it from the compiled directory. A source-only test can pass even when the publish build copies an obsolete manifest or omits its referenced evidence.
 
 **How to apply:** Derive the copied bundle from the active reviewed manifest, validate its pinned files before and after copying, and test the packaged loader. Keep zero-database metadata assertions separate from the CLI's readiness probes, which legitimately check database health.
+
+Fresh-only build helpers must be loaded only after explicitly selecting the
+fresh profile. Legacy producers in an isolated production fingerprint copy must
+not import modules that intentionally lie outside that source boundary.
+
+**Why:** Unconditional fresh identity/graph imports made the real legacy API/web
+integration fail before building, even though fresh runtime CI passed.
+**How to apply:** Dynamically import fresh helpers only in self-host-fresh mode,
+assert the legacy fixture lacks the fresh-only tree, and retain both the real
+producer integration and fresh graph/identity tests. Do not broaden production
+source identity or confer historical authority on a fresh installation.

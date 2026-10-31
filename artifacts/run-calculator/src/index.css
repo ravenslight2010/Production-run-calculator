@@ -349,6 +349,21 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+.station-nav [role="tab"] {
+  min-width: 0;
+  white-space: normal;
+  padding-inline: 1px;
+  padding-block: 2px;
+}
+
+.station-nav [role="tab"] > span {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .responsive-dialog-overlay {
   padding: max(0.75rem, env(safe-area-inset-top))
     max(0.75rem, env(safe-area-inset-right))
@@ -392,13 +407,20 @@
     margin-right: auto;
   }
 
-  .station-nav {
-    --app-bottom-nav-space: calc(4.5rem + env(safe-area-inset-bottom));
+  :root {
+    /* Keep the 72px default, but reserve room for full wrapped station labels
+     * when text is enlarged. The page and fixed bar share this clearance. */
+    --app-bottom-nav-space: calc(max(4.5rem, 8rem - 56px) + env(safe-area-inset-bottom));
   }
 
   .station-nav [role="tab"] {
     min-height: 3.5rem;
     padding-inline: 0.125rem;
+  }
+
+  .station-nav [role="tab"][data-testid="tab-warehouse"] > span {
+    /* Keep the longest label readable on phone widths without changing its name. */
+    font-size: 0.625rem;
   }
 }
 
