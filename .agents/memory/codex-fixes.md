@@ -1609,3 +1609,14 @@ Complete release-evidence contract exposed API package.json's existing schedule-
 dependency missing from artifacts/api-server/tsconfig.json references. Add that one
 buildable reference; preserve exact graph-completeness assertion and routes-only
 diagnostic config. Full root types/contract rerun required; no dependency changes.
+
+
+Main-green PR audit: inventoried all143open/closed PRs, inspected all open/closed-
+unmerged deltas and selected merged safety/runtime work. Preserve useful fixes
+already present; no bulk stale-branch or dependency merges. Main Docker/Caddy
+41252544790 requested host build networking unconditionally. Extract a tested
+context builder: default isolated networking, CI host opt-in refused, explicit
+local-only Replit workaround retained, YAML-safe JSON path quoting. Four focused
+contracts pass under pinned Node24.21.0. Restored local typecheck initially exited
+127due missing ShellCheck; restore publisher-digest-verified0.11.0 and rerun before
+push. Details/failure ledger: docs/self-host/pr-usefulness-and-main-green.md.
