@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
@@ -164,7 +164,29 @@ test('fresh Git binding uses its own source inputs, not historical approval asse
     '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'Synthetic source']);
   const revision = git(['rev-parse', 'HEAD']);
   const captured = snapshot(root);
-  assert.equal(verifiedGitRevision(root, captured), revision);
+  const binding = verifiedGitRevision(root, captured);
+  let diagnostic = '';
+  if (binding === null) {
+    // Only this temporary synthetic fixture is inspected. Emit booleans/counts,
+    // never local paths, committed contents or environment values.
+    const top = path.resolve(git(['rev-parse', '--show-toplevel']));
+    const entries = git(['ls-tree', '-r', '-z', '--full-tree', revision]).split('\0')
+      .filter(entry => entry.includes('\t')).map(entry => {
+        const [header, file] = entry.split('\t');
+        const [mode, type, objectId] = header.split(' ');
+        return { file, mode, type, objectId };
+      }).filter(entry => entry.type === 'blob' && isSourceInput(entry.file, POLICY));
+    const modesMatch = entries.every(entry => captured.gitFilesSha256.get(entry.file)?.mode === entry.mode);
+    const blobsMatch = entries.every(entry => execFileSync('git', ['cat-file', 'blob', entry.objectId],
+      { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).equals(readFileSync(path.join(root, entry.file))));
+    const batch = execFileSync('git', ['cat-file', '--batch'], { cwd: root,
+      input: entries.map(entry => entry.objectId).join('\n') + '\n', stdio: ['pipe', 'pipe', 'ignore'] });
+    diagnostic = JSON.stringify({ rootSpellingMatch: top === path.resolve(root),
+      rootCanonicalMatch: realpathSync.native(top) === realpathSync.native(root),
+      sourceCountMatch: entries.length === captured.files.length, modesMatch, blobsMatch,
+      batchHeaderHasCR: batch[batch.indexOf(10) - 1] === 13 });
+  }
+  assert.equal(binding, revision, `Synthetic Git binding diagnosis: ${diagnostic}`);
   assert.equal(createFreshSourceRecord(root).gitRevision, revision);
   put(root, 'attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json', 'not evidence');
   assert.equal(createFreshSourceRecord(root).gitRevision, revision);

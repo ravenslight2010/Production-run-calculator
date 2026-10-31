@@ -4,7 +4,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import reporter, { failureAnnotation } from './ci-test-reporter.mjs';
 
 test('synthetic CI annotations escape commands and bound diagnostic length', () => {
@@ -30,13 +29,13 @@ test('custom reporter preserves the failing Node exit and names the real synthet
   const file = path.join(root, 'failure.test.mjs');
   writeFileSync(file, "import{test}from'node:test';test('synthetic diagnostic',()=>{throw new Error('bounded synthetic assertion')});\n");
   const result = spawnSync(process.execPath, ['--test',
-    `--test-reporter=${fileURLToPath(new URL('./ci-test-reporter.mjs', import.meta.url))}`, file],
+    `--test-reporter=${new URL('./ci-test-reporter.mjs', import.meta.url).href}`, file],
   { encoding: 'utf8', timeout: 15000,
     // A nested CLI must not inherit the parent runner's NODE_TEST_CONTEXT,
     // NODE_OPTIONS, credentials or provider configuration.
     env: Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'HOME', 'USERPROFILE']
       .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]])),
   });
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 1, result.stderr.slice(0, 1800));
   assert(result.stdout.includes('::error title=Self-host synthetic contract::synthetic diagnostic: bounded synthetic assertion'));
 });
