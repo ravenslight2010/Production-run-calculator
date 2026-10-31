@@ -1115,6 +1115,8 @@ export const listImportGoldRetentionQueryLimitMax = 100;
 export const listImportGoldRetentionQueryOffsetDefault = 0;
 export const listImportGoldRetentionQueryOffsetMin = 0;
 export const listImportGoldRetentionQueryOffsetMax = 10000;
+export const listImportGoldRetentionQueryRevisionRegExp = new RegExp('^[a-f0-9]{64}$');
+export const listImportGoldRetentionResponseRevisionRegExp = new RegExp('^[a-f0-9]{64}$');
 export const scoreImportGoldCasesBodyCaseIdsMax = 3;
 export const previewImportOperationBodyImportTypeMax = 40;
 export const previewImportOperationBodySourceKeyMax = 300;
@@ -10572,10 +10574,12 @@ export const DeleteImportGoldCleanupCaseResponse = zod.void()
 export const ListImportGoldRetentionQueryParams = zod.object({
   "limit": zod.coerce.number().int().min(1).max(listImportGoldRetentionQueryLimitMax).default(listImportGoldRetentionQueryLimitDefault),
   "offset": zod.coerce.number().int().min(listImportGoldRetentionQueryOffsetMin).max(listImportGoldRetentionQueryOffsetMax).default(listImportGoldRetentionQueryOffsetDefault),
-  "status": zod.enum(['within_limit', 'due_soon', 'overdue', 'deletion_incomplete', 'verification_needed', 'verified']).optional().describe('Return only records with this current retention status; filtering is applied before pagination.')
+  "status": zod.enum(['within_limit', 'due_soon', 'overdue', 'deletion_incomplete', 'verification_needed', 'verified']).optional().describe('Return only records with this current retention status; filtering is applied before pagination.'),
+  "revision": zod.coerce.string().regex(listImportGoldRetentionQueryRevisionRegExp).optional().describe('Pass the first page\'s revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.')
 })
 
 export const ListImportGoldRetentionResponse = zod.object({
+  "revision": zod.string().regex(listImportGoldRetentionResponseRevisionRegExp),
   "records": zod.array(zod.object({
   "caseId": zod.int().min(1),
   "capturedAt": zod.coerce.date(),

@@ -7075,6 +7075,10 @@ paths:
           name: status
           description: Return only records with this current retention status; filtering is applied before pagination.
           schema: { $ref: "#/components/schemas/ImportGoldRetentionStatus" }
+        - in: query
+          name: revision
+          description: Pass the first page's revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
       responses:
         "200":
           description: Capture deadlines and manual application-deletion verification metadata
@@ -7083,6 +7087,15 @@ paths:
               schema: { $ref: "#/components/schemas/ImportGoldRetentionResponse" }
         "400": { description: Invalid pagination or retention status }
         "403": { description: Manager or QC Manager role required }
+        "409":
+          description: Register changed since the supplied revision; restart pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
   /import-gold/retention/{caseId}/verification:
     post:
       operationId: recordImportGoldDeletionVerification
@@ -8198,8 +8211,9 @@ components:
         verifiedBy: { type: string, nullable: true }
     ImportGoldRetentionResponse:
       type: object
-      required: [records, hasMore, nextOffset]
+      required: [records, hasMore, nextOffset, revision]
       properties:
+        revision: { type: string, pattern: "^[a-f0-9]{64}$" }
         records:
           type: array
           items: { $ref: "#/components/schemas/ImportGoldRetentionRecord" }

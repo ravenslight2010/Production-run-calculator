@@ -22,4 +22,9 @@ offset?: number;
  * Return only records with this current retention status; filtering is applied before pagination.
  */
 status?: ImportGoldRetentionStatus;
+/**
+ * Pass the first page's revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.
+ * @pattern ^[a-f0-9]{64}$
+ */
+revision?: string;
 };

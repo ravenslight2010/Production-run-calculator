@@ -148,3 +148,4 @@
 - [Prep](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) + [stock corrections](completed-run-stock-corrections.md) — prepare from raw; use prepared stock; reconcile edits durably.
 - [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require run-bound activity, Tunnel/Warehouse confirmation and serving-revision logs.
 - [Staging test handoff](staging-test-handoff.md) — owner created a dedicated testing environment; stale isolated copies may lack its setup.
+- [Retention pagination](retention-pagination-consistency.md) — shifted offset pages require scoped revision checks and bounded full restarts, not deduplication.

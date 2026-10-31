@@ -8,6 +8,8 @@
 import type { ImportGoldRetentionRecord } from './importGoldRetentionRecord';
 
 export interface ImportGoldRetentionResponse {
+  /** @pattern ^[a-f0-9]{64}$ */
+  revision: string;
   records: ImportGoldRetentionRecord[];
   hasMore: boolean;
   /** @nullable */

@@ -32,6 +32,7 @@ export default function ImportGoldRetentionCard({
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const requestIdRef = useRef(0);
+  const revisionRef = useRef<string | undefined>(undefined);
 
   const setActionBusy = (next: boolean) => {
     busyRef.current = next;
@@ -45,6 +46,7 @@ export default function ImportGoldRetentionCard({
       setError(null);
       const page = await fetchImportGoldRetention(0, statusFilter === "all" ? undefined : statusFilter);
       if (requestId !== requestIdRef.current) return;
+      revisionRef.current = page.revision;
       setRecords(page.records);
       setNextOffset(page.nextOffset);
     } catch (cause) {
@@ -77,12 +79,19 @@ export default function ImportGoldRetentionCard({
     setActionBusy(true);
     setError(null);
     try {
-      const page = await fetchImportGoldRetention(nextOffset, statusFilter === "all" ? undefined : statusFilter);
+      const page = await fetchImportGoldRetention(nextOffset, statusFilter === "all" ? undefined : statusFilter, revisionRef.current);
       if (requestId !== requestIdRef.current) return;
       setRecords((current) => [...current, ...page.records]);
       setNextOffset(page.nextOffset);
     } catch (cause) {
       if (requestId !== requestIdRef.current) return;
+      if (cause && typeof cause === "object" && "status" in cause && cause.status === 409) {
+        setRecords([]);
+        setNextOffset(null);
+        revisionRef.current = undefined;
+        await refresh(true);
+        return;
+      }
       setError(cause instanceof Error ? cause.message : "Could not load more deadlines.");
     } finally {
       setActionBusy(false);

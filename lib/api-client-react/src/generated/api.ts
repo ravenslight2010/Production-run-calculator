@@ -181,6 +181,7 @@ import type {
   ListFinalizedOperationalReportsParams,
   ListImportGoldApprovalsParams,
   ListImportGoldCasesParams,
+  ListImportGoldRetention409,
   ListImportGoldRetentionParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
@@ -26614,7 +26615,7 @@ export const getListImportGoldRetentionQueryKey = (params?: ListImportGoldRetent
     }
 
 
-export const getListImportGoldRetentionQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getListImportGoldRetentionQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -26633,10 +26634,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListImportGoldRetentionQueryResult = NonNullable<Awaited<ReturnType<typeof listImportGoldRetention>>>
-export type ListImportGoldRetentionQueryError = ErrorType<void>
+export type ListImportGoldRetentionQueryError = ErrorType<void | ListImportGoldRetention409>
 
 
-export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params: undefined |  ListImportGoldRetentionParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listImportGoldRetention>>,
@@ -26646,7 +26647,7 @@ export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listImportGoldRetention>>,
@@ -26656,7 +26657,7 @@ export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -26664,7 +26665,7 @@ export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof lis
  * @summary List scoped Gold Lab deadlines for Managers and QC Managers
  */
 
-export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

@@ -130,8 +130,16 @@ export async function deleteImportGoldCleanupCase(id: number): Promise<void> {
 export async function fetchImportGoldRetention(
   offset = 0,
   status?: ImportGoldRetentionRecord["status"],
+  revision?: string,
 ): Promise<ImportGoldRetentionResponse> {
-  return listImportGoldRetention({ limit: 100, offset, ...(status ? { status } : {}) });
+  const page = await listImportGoldRetention({
+    limit: 100, offset, ...(status ? { status } : {}), ...(revision ? { revision } : {}),
+  });
+  if (typeof page.revision !== "string" || !/^[a-f0-9]{64}$/.test(page.revision) ||
+      (revision !== undefined && page.revision !== revision)) {
+    throw new Error("The retention register changed or returned an unreadable revision. Refresh to retry.");
+  }
+  return page;
 }
 
 export async function fetchImportGoldRetentionReminderCounts(): Promise<{
@@ -141,9 +149,26 @@ export async function fetchImportGoldRetentionReminderCounts(): Promise<{
   let offset = 0;
   let dueSoonCount = 0;
   let overdueCount = 0;
+  let revision: string | undefined;
+  let restarts = 0;
 
   while (true) {
-    const page = await fetchImportGoldRetention(offset);
+    let page: ImportGoldRetentionResponse;
+    try {
+      page = await fetchImportGoldRetention(offset, undefined, revision);
+    } catch (error) {
+      if (revision && error && typeof error === "object" &&
+          "status" in error && error.status === 409 && restarts < 2) {
+        offset = 0;
+        dueSoonCount = 0;
+        overdueCount = 0;
+        revision = undefined;
+        restarts += 1;
+        continue;
+      }
+      throw error;
+    }
+    revision = page.revision;
     let reachedPastReminderWindow = false;
 
     for (const record of page.records) {

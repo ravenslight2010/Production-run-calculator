@@ -391,6 +391,7 @@ export * from './listFinalizedOperationalReportsParams';
 export * from './listFinalizedOperationalReportsScope';
 export * from './listImportGoldApprovalsParams';
 export * from './listImportGoldCasesParams';
+export * from './listImportGoldRetention409';
 export * from './listImportGoldRetentionParams';
 export * from './listImportHistoryParams';
 export * from './listImportHistoryStatus';

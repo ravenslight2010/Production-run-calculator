@@ -2386,7 +2386,7 @@ describe("atomic import operations", () => {
         headers: headers(),
       });
       expect(first.status).toBe(200);
-      const firstBody = await first.json() as { records: Array<{ caseId: number; status: string }>; hasMore: boolean; nextOffset: number | null };
+      const firstBody = await first.json() as { records: Array<{ caseId: number; status: string }>; hasMore: boolean; nextOffset: number | null; revision: string };
       expect(firstBody.records).toHaveLength(1);
       expect(firstBody.records[0]).toMatchObject({ caseId: expectedIds.get(status)![0], status });
       expect(Object.keys(firstBody.records[0]!).sort())
@@ -2394,7 +2394,7 @@ describe("atomic import operations", () => {
       expect(JSON.stringify(firstBody)).not.toMatch(/SYNTHETIC_PRIVATE|sourceLabel|fieldDiffs|evaluatedInput|expectedResult/);
       expect(firstBody.hasMore).toBe(true);
       expect(firstBody.nextOffset).toBe(1);
-      const next = await fetch(`${baseUrl}/api/import-gold/retention?status=${status}&limit=1&offset=1`, {
+      const next = await fetch(`${baseUrl}/api/import-gold/retention?status=${status}&limit=1&offset=1&revision=${firstBody.revision}`, {
         headers: headers("qc-reviewer"),
       });
       expect(next.status).toBe(200);
@@ -2406,10 +2406,10 @@ describe("atomic import operations", () => {
       const empty = await fetch(`${baseUrl}/api/import-gold/retention?status=${status}&limit=1&offset=2`, {
         headers: headers(),
       });
-      expect(await empty.json()).toEqual({ records: [], hasMore: false, nextOffset: null });
+      expect(await empty.json()).toMatchObject({ records: [], hasMore: false, nextOffset: null });
     }
     const sandbox = await fetch(`${baseUrl}/api/import-gold/retention?status=verified`, { headers: headers("sandbox") });
-    expect(await sandbox.json()).toEqual({ records: [], hasMore: false, nextOffset: null });
+    expect(await sandbox.json()).toMatchObject({ records: [], hasMore: false, nextOffset: null });
     expect((await fetch(`${baseUrl}/api/import-gold/retention?status=overdue`, { headers: headers("profiles") })).status).toBe(403);
     expect((await fetch(`${baseUrl}/api/import-gold/retention?status=overdue`)).status).toBe(401);
     for (const query of ["status=unknown", "status=", "status=overdue&status=due_soon"]) {
@@ -2417,6 +2417,87 @@ describe("atomic import operations", () => {
       expect(invalid.status).toBe(400);
       expect(await invalid.json()).toEqual({ error: "Invalid retention status" });
     }
+  });
+
+  it.each([
+    ["inventory", "capture"],
+    ["inventory", "backfill"],
+    ["qc-reviewer", "capture"],
+    ["qc-reviewer", "backfill"],
+  ])("rejects retention pagination changes for %s during concurrent %s", async (role, arrival) => {
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const caseValue = (label: string, age: number, scope = "live") => ({
+      scope, operationId: `retention-concurrent-${label}`, importType: "spec" as const,
+      sourceLabel: "Synthetic fixture", evaluatedInput: { synthetic: true },
+      expectedResult: { synthetic: true }, createdAt: new Date(now - age * day),
+    });
+    const originals = await db.insert(tables.importGoldCasesTable).values([
+      caseValue("first", 40), caseValue("second", 38), caseValue("third", 28),
+    ]).returning({ id: tables.importGoldCasesTable.id });
+    type Page = {
+      revision: string; records: Array<{ caseId: number; status: string }>;
+      hasMore: boolean; nextOffset: number | null;
+    };
+    const getPage = (offset: number, revision?: string, actor = role) =>
+      fetch(`${baseUrl}/api/import-gold/retention?limit=2&offset=${offset}${revision ? `&revision=${revision}` : ""}`,
+        { headers: headers(actor) });
+    const firstResponse = await getPage(0);
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as Page;
+    expect(first.revision).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.records.map((record) => record.caseId)).toEqual(originals.slice(0, 2).map((row) => row.id));
+
+    // An unrelated scope must neither invalidate this traversal nor leak rows.
+    await db.insert(tables.importGoldCasesTable).values(caseValue("sandbox", 50, "sandbox"));
+    const unchanged = await getPage(2, first.revision);
+    expect(unchanged.status).toBe(200);
+    expect((await unchanged.json() as Page).revision).toBe(first.revision);
+
+    const [earlier] = await db.insert(tables.importGoldCasesTable).values(caseValue("earlier", 45))
+      .returning({ id: tables.importGoldCasesTable.id, createdAt: tables.importGoldCasesTable.createdAt });
+    if (arrival === "capture") {
+      await db.insert(tables.importGoldRetentionTable).values({
+        scope: "live", caseId: earlier!.id, capturedAt: earlier!.createdAt,
+        deleteBy: new Date(earlier!.createdAt.getTime() + 30 * day),
+      });
+    } // Otherwise the next request must notice the legacy metadata backfill too.
+    const stale = await getPage(2, first.revision);
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ error: "Retention register changed. Restart pagination from the first page." });
+
+    const restart = await getPage(0);
+    expect(restart.status).toBe(200);
+    const restarted = await restart.json() as Page;
+    expect(restarted.revision).not.toBe(first.revision);
+    const next = await getPage(restarted.nextOffset!, restarted.revision);
+    expect(next.status).toBe(200);
+    const last = await next.json() as Page;
+    const records = [...restarted.records, ...last.records];
+    expect(records.map((record) => record.caseId)).toEqual([earlier!.id, ...originals.map((row) => row.id)]);
+    expect(new Set(records.map((record) => record.caseId)).size).toBe(4);
+    expect(records.map((record) => record.status)).toEqual(["overdue", "overdue", "overdue", "due_soon"]);
+    expect(last).toMatchObject({ revision: restarted.revision, hasMore: false, nextOffset: null });
+    for (const record of records) {
+      expect(Object.keys(record).sort()).toEqual(["capturedAt", "caseId", "deleteBy", "status", "verifiedAt", "verifiedBy"]);
+    }
+    expect((await getPage(0, restarted.revision, "sandbox")).status).toBe(409);
+    expect((await getPage(0, restarted.revision, "profiles")).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention?status=due_soon&revision=${restarted.revision}`, {
+      headers: headers(role),
+    })).status).toBe(409);
+    expect((await getPage(0, "invalid")).status).toBe(400);
+    // Pagination/backfill only: no cases removed and no scoring/delivery invoked.
+    expect(await db.select({ id: tables.importGoldCasesTable.id }).from(tables.importGoldCasesTable)).toHaveLength(5);
+    expect(await db.select().from(tables.importGoldScoresTable)).toHaveLength(0);
+    // Verification changes the ordering bucket too, not just row insertions.
+    await db.update(tables.importGoldRetentionTable).set({
+      verifiedAt: new Date(), verifiedBy: "synthetic-reviewer",
+    }).where(and(
+      eq(tables.importGoldRetentionTable.scope, "live"),
+      eq(tables.importGoldRetentionTable.caseId, earlier!.id),
+    ));
+    expect((await getPage(2, restarted.revision)).status).toBe(409);
   });
 
   it("gates capture and manager controls, bounds input, and records provider errors without failing the batch", async () => {

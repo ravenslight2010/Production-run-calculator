@@ -1307,6 +1307,11 @@ router.get("/import-gold/retention", requireGoldRetentionCapability, requireGold
     (typeof statusParam !== "string" || !IMPORT_GOLD_RETENTION_STATUSES.includes(statusParam as ImportGoldRetentionStatus))) {
     res.status(400).json({ error: "Invalid retention status" }); return;
   }
+  const requestedRevision = req.query.revision;
+  if (requestedRevision !== undefined &&
+      (typeof requestedRevision !== "string" || !/^[a-f0-9]{64}$/.test(requestedRevision))) {
+    res.status(400).json({ error: "Revision must be a retention register token" }); return;
+  }
 
   const scope = currentScope();
   // Backfill metadata for cases captured before the register existed. Only case
@@ -1360,7 +1365,20 @@ router.get("/import-gold/retention", requireGoldRetentionCapability, requireGold
         verified: isNotNull(importGoldRetentionTable.verifiedAt),
       }[status]
     : undefined;
-  const rows = await db.select().from(importGoldRetentionTable)
+  // Fingerprint, filtered membership and page must share one database snapshot.
+  // Include membership so clock-driven status-filter changes also fence offsets.
+  const result = await db.transaction(async (tx) => {
+    const [fingerprint] = await tx.select({
+      value: sql<string>`md5(coalesce(string_agg(jsonb_build_array(
+        ${importGoldRetentionTable.id}, ${importGoldRetentionTable.caseId},
+        ${importGoldRetentionTable.capturedAt}, ${importGoldRetentionTable.deleteBy},
+        ${importGoldRetentionTable.verifiedAt}, ${importGoldRetentionTable.verifiedBy},
+        ${caseExists}, ${scoreHistoryExists}, ${statusCondition ?? sql`true`}
+      )::text, ',' order by ${importGoldRetentionTable.id}), ''))`,
+    }).from(importGoldRetentionTable).where(eq(importGoldRetentionTable.scope, scope));
+    const revision = createHash("sha256").update(`${scope}:${status ?? "all"}:${fingerprint!.value}`).digest("hex");
+    if (requestedRevision !== undefined && requestedRevision !== revision) return null;
+  const rows = await tx.select().from(importGoldRetentionTable)
     .where(and(eq(importGoldRetentionTable.scope, scope), ...(statusCondition ? [statusCondition] : [])))
     .orderBy(
       asc(sql`CASE WHEN ${importGoldRetentionTable.verifiedAt} IS NULL THEN 0 ELSE 1 END`),
@@ -1372,18 +1390,19 @@ router.get("/import-gold/retention", requireGoldRetentionCapability, requireGold
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
   const presentIds = page.length
-    ? new Set((await db.select({ id: importGoldCasesTable.id }).from(importGoldCasesTable).where(and(
+    ? new Set((await tx.select({ id: importGoldCasesTable.id }).from(importGoldCasesTable).where(and(
       eq(importGoldCasesTable.scope, scope),
       inArray(importGoldCasesTable.id, page.map((row) => row.caseId)),
     ))).map((row) => row.id))
     : new Set<number>();
   const scoreHistoryIds = page.length
-    ? new Set((await db.select({ caseId: importGoldScoresTable.caseId }).from(importGoldScoresTable).where(and(
+    ? new Set((await tx.select({ caseId: importGoldScoresTable.caseId }).from(importGoldScoresTable).where(and(
       eq(importGoldScoresTable.scope, scope),
       inArray(importGoldScoresTable.caseId, page.map((row) => row.caseId)),
     ))).map((row) => row.caseId))
     : new Set<number>();
-  res.json({
+  return {
+    revision,
     records: page.map((row) => ({
       caseId: row.caseId,
       capturedAt: row.capturedAt.toISOString(),
@@ -1399,7 +1418,12 @@ router.get("/import-gold/retention", requireGoldRetentionCapability, requireGold
     })),
     hasMore,
     nextOffset: hasMore ? offset + limit : null,
-  });
+  };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
+  if (result === null) {
+    res.status(409).json({ error: "Retention register changed. Restart pagination from the first page." }); return;
+  }
+  res.json(result);
 });
 
 router.post(

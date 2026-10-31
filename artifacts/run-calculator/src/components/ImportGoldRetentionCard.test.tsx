@@ -20,7 +20,7 @@ const record = (caseId: number, status: ImportGoldRetentionRecord["status"]): Im
   verifiedBy: null,
 });
 const page = (records: ImportGoldRetentionRecord[], nextOffset: number | null = null) => ({
-  records, nextOffset, hasMore: nextOffset !== null,
+  records, nextOffset, hasMore: nextOffset !== null, revision: "a".repeat(64),
 });
 
 afterEach(() => {
@@ -43,7 +43,7 @@ describe("retention register status filtering", () => {
     expect(list).toHaveBeenLastCalledWith(0, "due_soon");
     fireEvent.click(screen.getByTestId("button-load-more-gold-retention"));
     await screen.findByTestId("gold-retention-record-3");
-    expect(list).toHaveBeenLastCalledWith(100, "due_soon");
+    expect(list).toHaveBeenLastCalledWith(100, "due_soon", "a".repeat(64));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "all" } });
     await screen.findByTestId("gold-retention-record-1");
     expect(screen.queryByTestId("gold-retention-record-2")).toBeNull();
