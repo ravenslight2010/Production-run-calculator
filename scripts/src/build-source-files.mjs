@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "./source-library-pool-approval-assets.mjs";
 
@@ -133,7 +133,14 @@ export function verifiedGitRevision(root, snapshot) {
     const run = (args) => execFileSync("git", args, {
       cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000,
     }).trim();
-    if (path.resolve(run(["rev-parse", "--show-toplevel"])) !== path.resolve(root)) return null;
+    const gitRoot = path.resolve(run(["rev-parse", "--show-toplevel"]));
+    const sourceRoot = path.resolve(root);
+    // Git for Windows may expand an 8.3 spelling used by the temporary/source
+    // directory. Accept only an exact native realpath match, never any parent,
+    // string-prefix match, case-folding guess or unchecked repository label.
+    // Keep the existing strict spelling comparison on other platforms.
+    if (gitRoot !== sourceRoot && (process.platform !== "win32" ||
+        realpathSync.native(gitRoot) !== realpathSync.native(sourceRoot))) return null;
     const sha = run(["rev-parse", "HEAD"]);
     if (!/^[a-f0-9]{40}$/.test(sha)) return null;
     // Compare captured bytes/modes to one immutable commit tree, not a mutable

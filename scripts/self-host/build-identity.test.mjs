@@ -187,6 +187,8 @@ test('fresh Git binding uses its own source inputs, not historical approval asse
       batchHeaderHasCR: batch[batch.indexOf(10) - 1] === 13 });
   }
   assert.equal(binding, revision, `Synthetic Git binding diagnosis: ${diagnostic}`);
+  assert.equal(verifiedGitRevision(path.join(root, 'lib'), captured), null,
+    'a repository subdirectory cannot impersonate the captured source root');
   assert.equal(createFreshSourceRecord(root).gitRevision, revision);
   put(root, 'attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json', 'not evidence');
   assert.equal(createFreshSourceRecord(root).gitRevision, revision);
