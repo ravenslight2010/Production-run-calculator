@@ -1083,7 +1083,15 @@ test.describe("accessibility smoke", () => {
     });
     await signUp(page);
     await seedBreakSchedule(true);
-    await page.clock.setFixedTime(new Date());
+    // Keep the fixture's local date, but make its planning hour deterministic.
+    // At late CI hours the 23:00 break can correctly land inside an unfinished
+    // run, which intentionally withholds the dependable day-finish preview.
+    const planningNow = await page.evaluate(() => {
+      const date = new Date();
+      date.setHours(6, 0, 0, 0);
+      return date.getTime();
+    });
+    await page.clock.setFixedTime(planningNow);
     await page.evaluate(() => {
       for (const key of Object.keys(localStorage)) {
         if (key.startsWith("run-calc")) localStorage.removeItem(key);

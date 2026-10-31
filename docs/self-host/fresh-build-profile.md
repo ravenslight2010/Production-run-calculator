@@ -817,3 +817,35 @@ Pre-push diagnostics correction: focused existing API contract1/1 PASS (disposab
 nonconnecting placeholder URL; handler dependencies mocked, no DB connection),
 5navigation classifier tests PASS, authoritative root typecheck PASS (exit0),
 workflow policy/actionlint PASS. No auth route or production data was modified.
+
+### Deterministic break-planning clock after cb271880 release failure
+
+Required CI41241133763 PASS at cb271880, including full Postgres API tests.
+Standard release41241133881 remains FAIL:44 accessibility cases PASS and4 failed
+at the saved-draft fixture's missing day-finish preview, before recovery checks.
+The fixture froze the actual CI hour while selecting a23:00 break. After21:00,
+two45-minute pending runs plus the first30-minute break can put23:00 inside an
+unfinished run. The production planner correctly marks that break pending and
+withholds a dependable finish; changing the planner would hide valid behavior.
+
+Pin only this fixture's browser clock to06:00 on its current local date. Keep
+signup, disposable DB seed, date/reset fences, save/reload, all four viewports,
+and strict HTTP/diagnostics assertions unchanged. Add a pure timeline regression
+for both the complete morning projection and the correctly incomplete21:15
+projection. No production source, credentials, timing budget or failure exemptions
+change. The previous failed release and downstream privacy failure are not waived.
+Full new-head CI and uninterrupted standard release must close this failure.
+
+Compatibility plan remains the existing isolated manager/live-scope journey:
+Schedule → break placement/run/time pickers → Save Schedule → reload/reopen;
+seed two unique complete-input runs in disposable DB, authenticate the existing
+unique manager, verify draft values/projected finish and fresh authenticated reads.
+Chromium desktop1280×900, phone390×844, tablet768×1024 and landscape1024×768
+are required; WebKit smoke/inventory remain separate standard-release gates.
+Physical iOS/Android/Windows hardware remains not run (no device service), not a
+pass. Owner: agent for fixture/CI closure; user for an independent eligible reviewer.
+Main remains unmodified; original report environment and protections unchanged.
+
+Pre-push clock repair: all18timeline tests PASS, full authoritative root typecheck
+PASS with pinned Node24.21.0/pnpm12.8.1 and ShellCheck toolchain. Real browser,
+required hosted CI and standard release remain pending for this replacement head.

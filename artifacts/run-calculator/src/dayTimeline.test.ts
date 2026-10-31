@@ -11,6 +11,31 @@ const day = "2026-09-18";
 const at = (time: string) => new Date(`${day}T${time}:00`).getTime();
 
 describe("day timeline", () => {
+  it("projects the morning browser fixture but refuses a late-day clock break inside a run", () => {
+    const plan = {
+      date: day,
+      productionStartTime: "06:00",
+      runs: [
+        { run: { id: "a", brand: "A", flavor: "" }, durationSec: 45 * 60 },
+        { run: { id: "b", brand: "B", flavor: "" }, durationSec: 45 * 60 },
+      ],
+      breaks: [
+        { enabled: true, mode: "after-run", runId: "a" },
+        { enabled: true, mode: "at-time", atTime: "23:00" },
+      ],
+    };
+    const morning = calculateDayTimeline({ ...plan, nowMs: at("06:00") });
+    expect(morning.incomplete).toBe(false);
+    expect(morning.projectedFinishMs).toBe(at("23:30"));
+    expect(morning.breaks[1]).toMatchObject({ status: "scheduled", startMs: at("23:00") });
+
+    const evening = calculateDayTimeline({ ...plan, nowMs: at("21:15") });
+    expect(evening.runs[1]).toMatchObject({ startMs: at("22:30"), finishMs: at("23:15") });
+    expect(evening.breaks[1]).toMatchObject({ status: "pending", reason: "during-run" });
+    expect(evening.incomplete).toBe(true);
+    expect(evening.projectedFinishMs).toBeUndefined();
+  });
+
   it("normalizes legacy and malformed break data to three fixed slots", () => {
     const breaks = normalizeDayBreaks([
       { enabled: true, mode: "at-time", atTime: "08:30", durationMin: 5 },

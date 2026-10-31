@@ -1578,3 +1578,11 @@ remove historical404 response/console exemption altogether. Every real HTTP
 failure now fails; no product or auth change. Required CI/timing132.8s passed at
 841090be; next-head release must still run uninterrupted. Independent review
 remains required and no other eligible collaborator exists; main unmodified.
+
+Break-planning release fixture clock: cb271880 required CI passed, but standard
+release41241133881 had44a11y PASS/4FAIL because actual late CI time put23:00 inside
+an unfinished run and correctly withheld day finish. In accessibility-smoke.spec.ts
+freeze only this journey to06:00 on its same local date. dayTimeline.test.ts now
+covers both morning completion and21:15 pending/during-run refusal. No production
+planner or HTTP exception changes; save/reload assertions and all viewports retained.
+Full replacement-head gates still required; prior release remains FAIL until closed.
