@@ -117,7 +117,13 @@ the authoritative root typecheck were rerun successfully before the repair push.
 This closes the newly introduced foundation CI failure; it does **not** close
 the existing private-input/full-CI or actual installation/runtime blockers.
 
-## Build architecture decision still open
+## Build architecture proposal (approved; implementation in progress)
+
+Donald subsequently approved the fresh-profile separation. See
+[`fresh-build-profile.md`](fresh-build-profile.md) for implementation, evidence
+and remaining runtime/package blockers. The proposal below is retained as the
+decision context; it is not a second approval request. The original installer
+still refuses until the complete fresh runtime boundary is implemented.
 
 There are two different absent input classes:
 
@@ -145,6 +151,6 @@ Replit repair material into the package, which may be undesirable for a fresh
 self-host installation.
 
 **A fresh database choice does not itself supply or authorize fabricating those
-production review records.** Profile separation needs an explicit approved design
-before changing that trust boundary. Until then the installer correctly refuses,
+production review records.** Approval alone does not establish a tested runtime boundary. Until that boundary
+is implemented and verified, the installer correctly refuses,
 PR #142 stays draft, and main merge/deployment/automatic updates remain NO-GO.

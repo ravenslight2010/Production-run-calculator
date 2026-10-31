@@ -55,3 +55,39 @@ cb10c806 after explicit native-exit handling repair. Windows executes the blocke
 initializer and verifies Docker is not reached and no state directory exists.
 Initial Windows failure is retained in the preflight report ledger; actual
 installation and full/private-input CI remain unqualified.
+
+
+## Approved fresh-profile identity checkpoint (not runtime activation)
+
+Donald approved separating fresh self-host builds from Replit's historical audit
+material. Added `self-host-fresh-source-v1` to the shared source fingerprint
+engine with an explicit, separate policy; default production required inputs,
+source selection and synthetic fingerprint bytes are unchanged. Fresh includes
+Docker/deployment/installer source inputs, retains source/Git/symlink/budget
+checks, and does not require retained historical audit/pool-approval assets.
+
+`scripts/self-host/build-identity.mjs` has separate strict fresh validators,
+preparation/expectation paths, domain-separated record digest and two-stage
+output sealing. Reuses only bounded record IO and output fingerprinting from
+existing identity code; production validators remain production-only. Fresh
+records and mixed stages fail production validators, preparation/finalization,
+release assessment and live source-handoff verification. No environment flag
+converts profiles or grants legacy repair authority.
+
+31 new contracts / 127 combined Linux tests passed, plus 15-workflow policy and
+lint. The full authoritative root typecheck rerun passed, exit 0. Initial new Dockerfile typing failure repaired without weakening checks.
+A local lint wrapper invocation mistake caused recursion/memory pressure and
+killed one root typecheck; cleaned up processes and reran the full command.
+See `docs/self-host/fresh-build-profile.md` for final root/hosted evidence and the
+complete owning-task ledger. Keep initial failures visible, not relabeled pass.
+
+IMPORTANT: this is identity infrastructure only. Existing API/web build commands,
+Docker targets and launcher/preflight still choose the production contract and
+refuse missing inputs. Do not enable fresh runtime before compile-time legacy
+repair/capture restrictions, honest health/status/schema, runtime/migration
+packaging/privacy tests and installer qualification. Fingerprinting tracked
+legacy source is NOT proof that its private payloads are absent from a build.
+No API generated files changed yet; large generated aggregates exceed connected
+write-request bounds, so establish an authorized publication route before schema
+changes. Full CI/private workbook/Windows/device/import/offline/update evidence
+is still open in the same objective; PR #142 remains draft and deployment NO-GO.
