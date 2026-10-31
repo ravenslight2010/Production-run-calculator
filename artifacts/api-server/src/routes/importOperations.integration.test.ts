@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import express from "express";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 import { goldSourceDigest } from "../lib/importGoldApproval";
 
@@ -1672,6 +1672,71 @@ describe("atomic import operations", () => {
     expect(JSON.stringify(deletionAudit[0])).not.toMatch(/Synthetic input|Synthetic expected result|fieldDiffs/);
     expect(await db.select().from(tables.importGoldCasesTable)
       .where(eq(tables.importGoldCasesTable.id, sandboxCase!.id))).toHaveLength(1);
+  });
+
+  it("returns safe JSON without changing cleanup records when the inventory read fails", async () => {
+    process.env.IMPORT_GOLD_ENABLED = "false";
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "false";
+    process.env.IMPORT_GOLD_RETENTION_APPROVED = "false";
+    process.env.IMPORT_GOLD_CLEANUP_ENABLED = "true";
+    const [goldCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "live",
+      operationId: "synthetic-cleanup-read-failure-001",
+      importType: "premix",
+      sourceLabel: "SYNTHETIC_PRIVATE_SOURCE",
+      evaluatedInput: { candidates: [{ name: "SYNTHETIC_PRIVATE_INPUT" }] },
+      expectedResult: { mixes: [{ name: "SYNTHETIC_PRIVATE_EXPECTED" }] },
+      createdBy: "inventory",
+    }).returning({ id: tables.importGoldCasesTable.id });
+    await db.insert(tables.importGoldScoresTable).values({
+      scope: "live",
+      caseId: goldCase!.id,
+      provider: "local",
+      status: "scored",
+      accuracy: 1,
+      comparedFields: 1,
+      equalFields: 1,
+    });
+    const snapshot = async () => ({
+      cases: await db.select().from(tables.importGoldCasesTable),
+      scores: await db.select().from(tables.importGoldScoresTable),
+      retention: await db.select().from(tables.importGoldRetentionTable),
+      audits: await db.select().from(tables.auditLogsTable),
+    });
+    const before = await snapshot();
+    const originalSelect = db.select.bind(db);
+    let failedReads = 0;
+    // Only fail the cleanup projection; authentication/authorization still use
+    // real database reads and the request reaches the real terminal middleware.
+    const selectSpy = vi.spyOn(db, "select").mockImplementation((fields) => {
+      if (fields?.id === tables.importGoldCasesTable.id &&
+          fields?.importType === tables.importGoldCasesTable.importType) {
+        failedReads++;
+        throw new Error(
+          "SELECT id, import_type FROM import_gold_cases SYNTHETIC_PRIVATE_INPUT SECRET_STACK_TRACE",
+        );
+      }
+      return originalSelect(fields!);
+    });
+    try {
+      const response = await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers() });
+      expect(response.status).toBe(500);
+      expect(response.headers.get("content-type")).toMatch(/^application\/json\b/);
+      const body = await response.text();
+      expect(JSON.parse(body)).toEqual({
+        error: "Something went wrong on the server. Our team has been notified. Please try again later.",
+      });
+      expect(body).not.toMatch(/SELECT|import_gold_cases|SYNTHETIC_PRIVATE|SECRET_STACK_TRACE|stack|<!doctype|<html/i);
+      expect(failedReads).toBe(1);
+    } finally {
+      selectSpy.mockRestore();
+    }
+    expect(await snapshot()).toEqual(before);
+    const retry = await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers() });
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({
+      cases: [{ id: goldCase!.id, importType: "premix", createdAt: before.cases[0]!.createdAt.toISOString() }],
+    });
   });
 
   it("allows scoped metadata-only cleanup after approval withdrawal without reopening Gold Lab reads", async () => {
