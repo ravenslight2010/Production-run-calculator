@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import express from "express";
+import { noStoreMiddleware } from "../lib/cacheControl";
 import { once } from "node:events";
 import type { Server } from "node:http";
 const log = vi.hoisted(() => vi.fn());
@@ -53,6 +54,7 @@ describe("fresh compiled runtime authority", () => {
     "rejects every capture/diagnostics method with the %s router before DB/report work",
     async (name) => {
       const app = express();
+      app.use(noStoreMiddleware);
       app.use(
         "/api",
         name === "public"
@@ -79,7 +81,12 @@ describe("fresh compiled runtime authority", () => {
             { method },
           );
           expect(response.status).toBe(409);
-          expect(response.headers.get("cache-control")).toBe("no-store");
+          expect(
+            response.headers
+              .get("cache-control")
+              ?.split(",")
+              .map((value) => value.trim()),
+          ).toContain("no-store");
           if (method !== "HEAD")
             expect(await response.json()).toEqual({
               status: "not-applicable",

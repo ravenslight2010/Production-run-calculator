@@ -164,7 +164,9 @@ try {
     assert.equal(info.platformIdentitySource,'unavailable');
     for(const endpoint of ['capture','diagnostics']) for(const method of ['GET','POST','PUT','DELETE','OPTIONS','HEAD']) {
       const response=await fetch(base+'/profile-data/source-library-reconciliation/'+endpoint,{method});
-      assert.equal(response.status,409); assert.equal(response.headers.get('cache-control'),'no-store');
+      assert.equal(response.status,409);
+      assert.ok(response.headers.get('cache-control')?.split(',').map(value=>value.trim()).includes('no-store'));
+      if(method!=='HEAD') assert.deepEqual(await response.json(),{status:'not-applicable',buildProfile:'self-host-fresh',reason:'legacy-production-audit-not-packaged'});
     }
     const response=await fetch(base+'/auth/sign-up',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({username:'qualification_manager',password:'Disposable-test-password-123',accessCode:process.env.INITIAL_MANAGER_ACCESS_CODE})});

@@ -130,7 +130,8 @@ record_lock_wait_event() {
   exec {history_lock_fd}>&-
 }
 
-# shellcheck disable=SC2317
+# Invoked by traps (or their cleanup callback); covered by signal/cleanup tests.
+# shellcheck disable=SC2317,SC2329
 handle_lock_wait_signal() {
   local signal="$1"
   local exit_code="$2"
@@ -336,7 +337,8 @@ mkdir -m 700 -- "$fallback_npm_cache"
 trap 'rm -rf "$fallback_marker_dir"' EXIT
 active_child_pid=""
 
-# shellcheck disable=SC2317
+# Invoked by traps (or their cleanup callback); covered by signal/cleanup tests.
+# shellcheck disable=SC2317,SC2329
 stop_active_child() {
   local signal="$1"
   local process_group="$active_child_pid"
@@ -357,7 +359,8 @@ stop_active_child() {
   done
 }
 
-# shellcheck disable=SC2317
+# Invoked by traps (or their cleanup callback); covered by signal/cleanup tests.
+# shellcheck disable=SC2317,SC2329
 handle_signal() {
   local signal="$1"
   local exit_code="$2"

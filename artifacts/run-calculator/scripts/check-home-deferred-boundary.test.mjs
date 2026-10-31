@@ -386,7 +386,8 @@ test("source boundary does not scan dynamic imports inside workspace package exp
     homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
     helperSource: "",
     packageSource: [
-      'import "third-party-package";',
+      // Use a declared external package: the audit scans literal fixture imports too.
+      'import "react";',
       'export type { SetupContentProps } from "../../../../../../src/components/SetupContent";',
       'export const loadSetupContent = () => import("../../../../../../src/components/SetupContent");',
       "export const loadPanel = (panel) => import(panel);",
@@ -409,7 +410,8 @@ test("source boundary discovers packages under nested pnpm workspace patterns", 
     homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
     helperSource: "",
     packageSource: [
-      'import "third-party-package";',
+      // Use a declared external package: the audit scans literal fixture imports too.
+      'import "react";',
       'export { default as bridge } from "../../../../../../src/components/SetupContent";',
     ].join("\n"),
     workspacePatterns: ["modules/**/packages/*"],

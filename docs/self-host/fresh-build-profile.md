@@ -316,3 +316,65 @@ Docker lane does not test imports, Caddy trust or full-stack restart and must no
 be described as doing so. Existing full production/private-workbook failures
 are unchanged and are not skipped/replaced by fresh-profile passes. PR #142
 remains draft; main merge, Replit publication and live deployment remain NO-GO.
+
+### First hosted runtime qualification and corrective verification
+
+On implementation `de768644`, native Windows and Linux safety jobs passed.
+Windows ran 114 tests plus two explicit symlink-privilege skips, parsed the
+launcher, and proved both invalid-setup refusal and fresh check-only perform no
+setup mutations. The three new fresh Docker images built successfully and the
+isolated schema/core readiness completed without WAN/AI. The runtime probe then
+**FAILED**: it expected an exact `Cache-Control: no-store`, while the real global
+middleware correctly strengthened it to `no-store, no-cache, must-revalidate`.
+This is a test expectation bug, not permission to weaken caching. Changed the
+probe to require the no-store directive, assert the exact refusal body as well,
+and exercise the real cache middleware in both focused router tests. Re-run
+results must be recorded, not inferred from the earlier partial pass.
+
+Further fixture/environment findings: visual review found the **isolated HTML
+fixture**, not the application, lacked a UTF-8 declaration. Added it, repeated
+all five Chromium viewports with an explicit `Replit’s historical audit` text
+assertion, and inspected the corrected phone screenshot. No product text/encoding
+change was needed. WebKit was downloaded through the official test runtime;
+launch is still BLOCKED by unsupported Amazon Linux / missing GTK4, GStreamer,
+ICU74 and other native libraries. No host security/package-manager changes were
+made to force a pass; actual Safari/device evidence remains open.
+
+Authenticated hosted logs also now confirm the separate original production
+build fails at the source-identity prerequisite; production Docker and rollback
+image rehearsal fail in `prepare:publish` with unreadable/missing required source
+inputs. Those gates remain strict and are not replaced with a fresh-profile pass.
+Current run: 41210805413; job IDs 124565180482, 124565180354, 124565180331.
+
+Hosted Typecheck's later scripts-routine step exposed an inherited synthetic
+fixture problem (not a TypeScript compile error): literal `third-party-package`
+imports in two Home boundary fixtures were counted as an undeclared dependency.
+Changed those fixture imports to the already-declared external package `react`;
+the tests still exercise ignored third-party imports and nested workspace export
+boundaries. No dependency was added and the strict inventory/checker was not
+weakened. This safely actionable finding is repaired in the same objective.
+
+The extra local scripts-routine run initially stopped on missing `.config/bashrc`.
+Inspection proved the file is tracked at HEAD but deliberately absent from this
+sandbox's sparse checkout (`S` / skip-worktree), not a missing upstream fixture.
+Expanded only the local sparse checkout to include the real tracked `.config`
+folder; no shell content was invented or product check relaxed. Repeat the
+routine suite using that restored exact source.
+
+With the exact sparse-omitted file restored, local scripts-routine progressed
+through the dependency and shell signal tests, then ShellCheck 0.11 emitted
+SC2329 for four existing trap-only callbacks. Each already had a narrowly scoped
+SC2317 annotation; extended those same function annotations to SC2329 with an
+explicit trap/callback explanation. No shell logic, global warning configuration
+or test gate changed. Existing fallback interruption/cleanup regression checks
+passed before this lint point; the complete suite is repeated after annotation.
+
+Corrective local gates: 22 focused API tests PASS including real cache middleware;
+root typecheck PASS; 102 Home boundary tests PASS; strict dependency inventory PASS;
+complete maintained shell inventory lint PASS. Scripts-routine then reached and
+failed its existing `reports an unreadable document` test: sandbox chmod(000)
+files remain readable by Node (isolated synthetic probe: uid 1000, mode 0,
+readable true). This is a local filesystem capability limitation, not evidence
+that the checker mishandles an actual EACCES. Do not change the checker, fake an
+error, or skip this required test. Hosted Ubuntu verification remains required;
+later routine commands were not reached in this local full-suite attempt.
