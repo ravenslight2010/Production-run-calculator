@@ -78,12 +78,33 @@ test("Schedule access and nested brand picker work across browser sizes", async 
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+    // The manager only seeds/restores fixtures. The browser actor must not
+    // inherit unrelated manager permissions (especially manage-profiles).
+    const scheduler = await fixtures.createAccount({
+      username: uniqueTestId("schedule_picker_only"),
+      password: PASSWORD,
+      capabilities: ["manage-factory-settings"],
+      onboardingSeen: true,
+    });
     const restricted = await fixtures.createAccount({
       username: uniqueTestId("schedule_picker_restricted"),
       password: PASSWORD,
       capabilities: [],
       onboardingSeen: true,
     });
+
+    for (const [account, capabilities] of [
+      [scheduler, ["manage-factory-settings"]],
+      [restricted, []],
+    ] as const) {
+      const session = await page.request.get(`${API_BASE}/api/me`, {
+        headers: account.cookieHeader,
+      });
+      expect(session.ok()).toBe(true);
+      const user = await session.json();
+      expect(user.userId).toBe(account.userId);
+      expect(user.capabilities).toEqual(capabilities);
+    }
 
     managerHeaders = { Cookie: `rc_auth=${manager.token}` };
     const factoryDataResponse = await page.request.get(`${API_BASE}/api/factory-data`, {
@@ -128,7 +149,7 @@ test("Schedule access and nested brand picker work across browser sizes", async 
 
     await page.context().addCookies([{
       name: "rc_auth",
-      value: manager.token,
+      value: scheduler.token,
       url: WEB_BASE,
     }]);
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -219,7 +240,7 @@ test("Schedule access and nested brand picker work across browser sizes", async 
     await scheduleDialog.getByRole("button", { name: "Close scheduled days" }).click();
     await expect(scheduleDialog).toBeHidden();
 
-    // Replace the manager session with a clean account that lacks the exact
+    // Replace the Schedule-only session with a clean account that lacks the exact
     // Schedule capability, then verify the entry point is not offered.
     await page.context().clearCookies();
     await page.context().addCookies([{
