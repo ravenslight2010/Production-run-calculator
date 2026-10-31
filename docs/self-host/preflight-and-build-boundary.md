@@ -95,6 +95,28 @@ fingerprinting and report validation were not loosened to turn the result green.
 Desktop/phone/tablet, portrait/landscape, Chromium/WebKit and physical Android/
 iOS Safari/PWA behavior: **not run**, unchanged runtime/deployment qualification.
 
+### Hosted Windows/Linux outcome and repaired CI finding
+
+The first new native Windows refusal-path check failed while Linux passed
+([initial run](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/41203316741)).
+Repaired explicit handling of the deliberately failing native command:
+`Invoke-Checked` normalizes native error-action preference locally but still
+throws every nonzero exit; the test resets the expected, handled exit code only
+AFTER asserting the correct refusal and absent state directory. Unexpected
+exceptions still fail and produce a bounded diagnostic category. No failure
+check, privacy guard or state assertion was removed.
+
+Code commit `cb10c8065e1df38bc147cebfd882a88bb45bf965` then passed both native
+Windows and Linux jobs in [run 41203690930](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/41203690930)
+and [run 41203685073](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/41203685073).
+The Windows launcher refusal path executed successfully without Docker or state
+creation. The deliberate symlink-privilege unit exception remains explicit on
+Windows; Linux covers the symlink case. Workflow checks, 61 Linux Node tests and
+the authoritative root typecheck were rerun successfully before the repair push.
+
+This closes the newly introduced foundation CI failure; it does **not** close
+the existing private-input/full-CI or actual installation/runtime blockers.
+
 ## Build architecture decision still open
 
 There are two different absent input classes:

@@ -50,3 +50,8 @@ No production source/promotion checks or private workbook tests weakened.
 `docs/self-host/preflight-and-build-boundary.md` for the current blocked input
 result and proposed separate fresh-install build-identity contract. A fresh DB
 is not approval to fabricate existing production review evidence.
+Native Windows/Linux foundation runs 41203690930 and 41203685073 passed on
+cb10c806 after explicit native-exit handling repair. Windows executes the blocked
+initializer and verifies Docker is not reached and no state directory exists.
+Initial Windows failure is retained in the preflight report ledger; actual
+installation and full/private-input CI remain unqualified.
