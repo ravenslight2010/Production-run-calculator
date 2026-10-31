@@ -57,6 +57,17 @@ See [branch comparison](branch-audit.md) and
 - First installation needs WAN to fetch container images/build dependencies and
   models. Cached restart is offline; first installation is not an air-gap bundle.
 
+## Read-only check before initialization
+
+Run `node scripts/self-host/preflight.mjs --root .` with the pinned Node version,
+or use the Windows launcher with `-CheckOnly` and an external StateDirectory.
+Blocked prerequisites return exit 2 **before** creating credentials/changing ACLs,
+downloading images or touching data. Normal cached restart does not run this
+build-input check. A ready preflight is not deployment approval.
+
+See [preflight and build-input boundary](preflight-and-build-boundary.md) for
+current missing inputs and the proposed separate fresh-install build contract.
+
 ## Disposable fresh-install rehearsal
 
 Run from PowerShell 7 on the **intended Windows machine**, using a NEW dedicated
@@ -172,7 +183,7 @@ Required remaining implementation in this same self-hosting objective:
 ## Local verification
 
 ```text
-node --test scripts/self-host/self-host.test.mjs
+node --test scripts/self-host/self-host.test.mjs scripts/self-host/preflight.test.mjs
 pnpm --filter @workspace/run-calculator exec vitest run src/runTemplatesRepository.test.ts
 pnpm --filter @workspace/integrations-openai-ai-server exec vitest run
 CI=true pnpm run typecheck

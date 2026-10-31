@@ -37,3 +37,16 @@ suite: 3,776 passed, 23 failed due to absent workbook paths, 1 skipped. Reviewed
 build inputs are absent; do not fetch/recommit historical private material or
 weaken source policy. Full CI/build/browser and Windows/device qualification
 remain unresolved. Earlier first-pass counts/blockers above are historical.
+
+
+## Read-only first-install preflight
+
+Added `scripts/self-host/preflight.mjs`, canonical reviewed-input pin re-export
+and focused tests. Windows fresh initialization now checks Node/configuration,
+reviewed report digest and real source prerequisites BEFORE ACL/credential/image/DB
+effects; CheckOnly is read-only. Cached normal restart does not require build inputs.
+No production source/promotion checks or private workbook tests weakened.
+61 combined Node tests passed locally; see
+`docs/self-host/preflight-and-build-boundary.md` for the current blocked input
+result and proposed separate fresh-install build-identity contract. A fresh DB
+is not approval to fabricate existing production review evidence.
