@@ -1,5 +1,9 @@
 # Branch integration audit
 
+> Historical first-pass record. The approved refreshed Replit/main integration
+> is now complete and source conflicts are resolved. Current results and remaining
+> CI/input blockers: [2026-10-31 integration report](integration-2026-10-31.md).
+
 ## Scope and method
 
 Fetched all **25 pre-existing remote heads** and full ancestry (not a shallow

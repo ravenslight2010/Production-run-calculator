@@ -1,5 +1,9 @@
 # Self-hosting qualification and owning failure ledger
 
+> Historical first-pass record. The approved refreshed Replit/main integration
+> is now complete and source conflicts are resolved. Current results and remaining
+> CI/input blockers: [2026-10-31 integration report](integration-2026-10-31.md).
+
 ## Agent-owned execution
 
 **Objective:** integrate the current Replit application into a Windows-first LAN
