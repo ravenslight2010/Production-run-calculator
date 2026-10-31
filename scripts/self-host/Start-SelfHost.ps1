@@ -11,6 +11,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
+  # Normalize PS 7 native-command error preferences only in this function.
+  # Exit codes remain mandatory: every nonzero result is explicitly thrown.
+  $PSNativeCommandUseErrorActionPreference = $false
   & $Program @Arguments
   if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit $LASTEXITCODE" }
 }

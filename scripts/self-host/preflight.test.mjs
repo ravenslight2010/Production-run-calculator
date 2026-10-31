@@ -89,6 +89,8 @@ test('report and root symlinks fail closed', {skip:process.platform==='win32'?'W
 }));
 test('Windows launcher gates fresh setup before all mutations, not cached restarts', () => {
   const text=readFileSync(new URL('./Start-SelfHost.ps1',import.meta.url),'utf8');
+  assert.ok(text.includes('$PSNativeCommandUseErrorActionPreference = $false'));
+  assert.ok(text.includes('if ($LASTEXITCODE -ne 0)'));
   const position=text.indexOf("Invoke-Checked 'node' $preflight");
   for (const token of ['New-Item -ItemType Directory','Set-Acl -LiteralPath',"'config.mjs'", "'pull', 'db'"])
     assert.ok(position >= 0 && position < text.indexOf(token),token);

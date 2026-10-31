@@ -60,11 +60,17 @@ jobs:
             & ./scripts/self-host/Start-SelfHost.ps1 -StateDirectory $state -InitializeFresh `
               -Site runcalc.test.lan -TimeZone America/Chicago -Manager testmanager
           } catch {
-            if ($_.Exception.Message -ne 'node failed with exit 2') { throw }
+            if ($_.Exception.Message -ne 'node failed with exit 2') {
+              $category = ($_.FullyQualifiedErrorId -replace '[^A-Za-z0-9_. :,()-]', '_')
+              Write-Output ('::error title=Windows preflight refusal-path failure::' + $category.Substring(0, [Math]::Min(300, $category.Length)))
+              throw
+            }
             $blocked = $true
           }
           if (-not $blocked) { throw 'Expected missing reviewed inputs to block fresh setup' }
           if (Test-Path $state) { throw 'Blocked preflight created a state directory' }
+          # The expected/handled native exit 2 must not leak to the runner trailer.
+          $global:LASTEXITCODE = 0
       - name: Validate isolated Compose configuration (does not start services)
         if: runner.os == 'Linux'
         shell: bash
