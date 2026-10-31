@@ -1076,7 +1076,17 @@ test.describe("accessibility smoke", () => {
     let requestPhase = "post-auth journey";
     // Track requests from the first document, including those started before
     // auth hydration; otherwise a later reload cannot identify their aborts.
-    page.on("request", request => inFlight.add(request));
+    page.on("request", request => {
+      inFlight.add(request);
+      // A destination component can start and cancel its own read while
+      // navigation is mounting it (including StrictMode effect cleanup).
+      // Retain request identity: requestfailed may arrive after the UI settles
+      // and requestPhase has returned to normal operation.
+      if (["persistence reload", "summary navigation"].includes(requestPhase)) {
+        navigationRequests.add(request);
+        navigationPaths.add(new URL(request.url()).pathname);
+      }
+    });
     page.on("requestfinished", request => inFlight.delete(request));
     page.on("response", response => {
       if (response.ok()) successfulOrigins.add(new URL(response.url()).origin);
@@ -1301,10 +1311,22 @@ test.describe("accessibility smoke", () => {
     await cancelled.getByRole("button", { name: "Close schedule editor", exact: true }).click();
     requestPhase = "summary navigation";
     markNavigation();
+    const summaryReads = [
+      "/api/background-operations/diagnostics",
+      "/api/reports/operational-view",
+    ].map(pathname => page.waitForResponse(response =>
+      new URL(response.url()).pathname === pathname
+      && response.request().method() === "GET" && response.status() === 200));
     await page.getByRole("button", { name: "More" }).click();
     await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
     await expect(page.getByRole("menu")).toHaveCount(0);
     await expect(page.getByTestId("day-timeline")).toContainText(projectedFinish!);
+    // The timeline renders before the manager's destination effects finish.
+    // Do not call navigation settled until their real reads and snapshot UI
+    // complete; merely seeing the timeline loses late abort event ownership.
+    await Promise.all(summaryReads);
+    await expect(page.getByTestId("canonical-run-view")).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByTestId("canonical-run-view")).toContainText("server snapshot");
     requestPhase = "post-auth journey";
     if (test.info().project.name === "android-touch") {
       await page.getByTestId("day-timeline").screenshot({ path: "../../.local/evidence/break-planning/break-summary.png" });

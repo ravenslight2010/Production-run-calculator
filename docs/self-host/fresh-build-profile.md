@@ -849,3 +849,29 @@ Main remains unmodified; original report environment and protections unchanged.
 Pre-push clock repair: all18timeline tests PASS, full authoritative root typecheck
 PASS with pinned Node24.21.0/pnpm12.8.1 and ShellCheck toolchain. Real browser,
 required hosted CI and standard release remain pending for this replacement head.
+
+### Destination request ownership after b363400e release failure
+
+Required CI41244097186 PASS. Standard release41244096942 remains FAIL:46a11y
+PASS/2FAIL, only desktop and landscape at final unexpected-request assertions.
+All4save/reload/preview journeys now completed, closing the clock failure. The
+remaining exact aborts are GET diagnostics and operational-view, no HTTP responses
+or console errors. React StrictMode mounts destination effects then cancels their
+first reads; the test captured only requests already in flight before navigation,
+not those started during destination mounting. It also returned to normal phase
+when the timeline appeared, before the independent manager tools finished loading.
+
+Retain identity of requests started during either explicit reload or Summary
+navigation. Require real200responses for both Summary reads and a completed
+canonical snapshot UI before declaring Summary settled. Existing exact route,
+GET-only, known-origin, abort-code and navigation predicates stay unchanged, as
+do mandatory fresh authenticated recovery reads/diagnostics JSON checks and all
+HTTP/console failure assertions. No wider cancellation exemptions, retries,
+production changes or privacy-allowlist changes. Browser evidence remains FAIL
+until the new exact-head uninterrupted standard release closes it. Previous failed
+release contexts remain unexportable. This recurring evidence blocker is agent-owned;
+independent review remains a separate user-owned merge blocker.
+
+Pre-push navigation repair:23focused timeline/classifier tests PASS, authoritative
+root typecheck PASS under pinned toolchain. Real browser/hosted replacement-head
+gates remain pending. No failed run is relabeled as a pass.

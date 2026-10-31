@@ -1586,3 +1586,11 @@ freeze only this journey to06:00 on its same local date. dayTimeline.test.ts now
 covers both morning completion and21:15 pending/during-run refusal. No production
 planner or HTTP exception changes; save/reload assertions and all viewports retained.
 Full replacement-head gates still required; prior release remains FAIL until closed.
+
+Navigation request identity repair in accessibility-smoke.spec.ts: standard
+release41244096942 at b363400e closed all clock/preview failures (46PASS/2FAIL),
+but StrictMode destination reads could start after the pre-navigation snapshot
+and report abort after the timeline rendered. Record newly started requests during
+explicit navigation and wait for both actual200Summary reads plus ready canonical
+snapshot UI. Keep exact cancellation predicates, mandatory recovery, HTTP/console
+checks unchanged. No production/auth changes or blanket normal-operation exemption.
