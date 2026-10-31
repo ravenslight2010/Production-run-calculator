@@ -4,7 +4,7 @@ import {
   deleteImportGoldCleanupCase,
   deleteImportGoldCase,
   downloadImportGoldJsonl,
-  fetchImportGoldCleanupCases,
+  fetchImportGoldCleanupPage,
   fetchImportGoldCases,
   fetchImportGoldConfig,
   fetchImportGoldSyntheticReview,
@@ -23,6 +23,10 @@ export default function ImportGoldLabCard() {
   const [config, setConfig] = useState<ImportGoldConfig | null>(null);
   const [cases, setCases] = useState<ImportGoldCase[]>([]);
   const [cleanupCases, setCleanupCases] = useState<ImportGoldCleanupCase[]>([]);
+  const cleanupCursorRef = useRef<string | undefined>(undefined);
+  const [cleanupNextCursor, setCleanupNextCursor] = useState<string | null>(null);
+  const [cleanupLoaded, setCleanupLoaded] = useState(false);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
   const [syntheticReview, setSyntheticReview] = useState<ImportGoldSyntheticReview | null>(null);
   const [reviewedSynthetic, setReviewedSynthetic] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +42,7 @@ export default function ImportGoldLabCard() {
   const refresh = useCallback(async (allowWhileBusy = false) => {
     if (busyRef.current && !allowWhileBusy) return;
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    setCleanupLoading(true);
     const pending = (async () => {
       try {
         setError(null);
@@ -46,7 +51,11 @@ export default function ImportGoldLabCard() {
         if (nextConfig.cleanupEnabled) {
           setCases([]);
           setSyntheticReview(null);
-          setCleanupCases(await fetchImportGoldCleanupCases());
+          setCleanupLoading(true);
+          const page = await fetchImportGoldCleanupPage(cleanupCursorRef.current);
+          setCleanupCases(page.cases);
+          setCleanupNextCursor(page.nextCursor);
+          setCleanupLoaded(true);
         } else if (nextConfig.enabled || nextConfig.syntheticFixtureAvailable) {
           setCleanupCases([]);
           const [nextCases, nextReview] = await Promise.all([
@@ -63,6 +72,8 @@ export default function ImportGoldLabCard() {
         }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Could not load evaluation cases.");
+      } finally {
+        setCleanupLoading(false);
       }
     })();
     refreshInFlightRef.current = pending;
@@ -301,7 +312,7 @@ export default function ImportGoldLabCard() {
                 </div>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || cleanupLoading || !!error}
                   onClick={() => void removeCleanupCase(item)}
                   className="min-h-11 rounded-md border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive disabled:opacity-50"
                 >
@@ -309,9 +320,27 @@ export default function ImportGoldLabCard() {
                 </button>
               </article>
             ))}
-            {cleanupCases.length === 0 && (
+            {cleanupCases.length === 0 && cleanupLoaded && !error && !cleanupLoading && (
               <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">No retained cases are available for cleanup in this scope.</p>
             )}
+            {cleanupLoading && <p role="status" className="text-sm text-muted-foreground">Loading cleanup inventory…</p>}
+            {error && cleanupCases.length > 0 && (
+              <p className="text-sm text-muted-foreground">Previously loaded cases are shown. Refresh successfully before deleting.</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="min-h-11 rounded-md border px-3 py-2 text-sm"
+                disabled={busy || cleanupLoading}
+                onClick={() => { cleanupCursorRef.current = undefined; void refresh(); }}>
+                Newest cases
+              </button>
+              {cleanupNextCursor && (
+                <button type="button" className="min-h-11 rounded-md border px-3 py-2 text-sm"
+                  disabled={busy || cleanupLoading || !!error}
+                  onClick={() => { cleanupCursorRef.current = cleanupNextCursor; void refresh(); }}>
+                  Older cases
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

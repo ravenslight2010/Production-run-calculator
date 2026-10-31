@@ -105,7 +105,14 @@ export async function fetchImportGoldCases(): Promise<ImportGoldCase[]> {
 }
 
 export async function fetchImportGoldCleanupCases(): Promise<ImportGoldCleanupCase[]> {
-  const body = await (await goldFetch("/api/import-gold/cleanup-cases")).json() as unknown;
+  return (await fetchImportGoldCleanupPage()).cases;
+}
+
+export async function fetchImportGoldCleanupPage(cursor?: string): Promise<{
+  cases: ImportGoldCleanupCase[];
+  nextCursor: string | null;
+}> {
+  const body = await (await goldFetch(`/api/import-gold/cleanup-cases${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)).json() as unknown;
   if (!body || typeof body !== "object" || !Array.isArray((body as { cases?: unknown }).cases)) {
     throw new Error("The cleanup inventory returned an unreadable response. Refresh the lab before retrying.");
   }
@@ -120,7 +127,12 @@ export async function fetchImportGoldCleanupCases(): Promise<ImportGoldCleanupCa
   })) {
     throw new Error("The cleanup inventory returned invalid case metadata. Refresh the lab before retrying.");
   }
-  return cases as ImportGoldCleanupCase[];
+  const nextCursor = (body as { nextCursor?: unknown }).nextCursor;
+  if (nextCursor !== null && nextCursor !== undefined && (
+    typeof nextCursor !== "string" || nextCursor.length === 0 || nextCursor.length > 512
+  )) throw new Error("The cleanup inventory returned an invalid next page. Return to the newest cases and retry.");
+  // Older serving builds have one page and no cursor. Never invent a next page.
+  return { cases: cases as ImportGoldCleanupCase[], nextCursor: nextCursor as string | null | undefined ?? null };
 }
 
 export async function deleteImportGoldCleanupCase(id: number): Promise<void> {

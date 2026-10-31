@@ -9,7 +9,17 @@ import {
 import { useAuth } from "@/useAuth";
 import ApprovalRow from "./import-gold-approvals/ApprovalRow";
 import CreateApprovalForm from "./import-gold-approvals/CreateApprovalForm";
-import { Explainer, POLL_MS, Shell, Skeleton, btn, checkedApproval, checkedApprovalPage, safeMessage } from "./import-gold-approvals/shared";
+import ExpiryReminderPanel from "./import-gold-approvals/ExpiryReminderPanel";
+import LookupBar from "./import-gold-approvals/LookupBar";
+import {
+  Explainer, POLL_MS, Shell, Skeleton, btn, checkedApproval, checkedApprovalPage, checkedReminders, safeMessage,
+  type ExpiryReminders,
+} from "./import-gold-approvals/shared";
+
+// recordRef is an additive optional query parameter; typed locally until generated types include it.
+type ListParams = { before?: number; recordRef?: string };
+const listPage = (params: ListParams) =>
+  listImportGoldApprovals(params as Parameters<typeof listImportGoldApprovals>[0]);
 
 export { approvalStatus, EVALUATION_DIGEST_PATTERN, OPAQUE_REF_PATTERN } from "./import-gold-approvals/shared";
 
@@ -63,6 +73,11 @@ function ApprovalsInner() {
   const busyRef = useRef(false);
   const alive = useRef(true);
   const generation = useRef(0);
+  const [lookup, setLookup] = useState<string | null>(null);
+  const lookupRef = useRef<string | null>(null);
+  // undefined = not loaded yet, null = server did not provide (legacy) or malformed.
+  const [reminders, setReminders] = useState<ExpiryReminders | null | undefined>(undefined);
+  const baseParams = (): ListParams => (lookupRef.current ? { recordRef: lookupRef.current } : {});
 
   useEffect(() => {
     alive.current = true;
@@ -79,8 +94,10 @@ function ApprovalsInner() {
   const refresh = useCallback(async () => {
     const gen = ++generation.current;
     try {
-      const page = checkedApprovalPage(await listImportGoldApprovals());
+      const raw = await listPage(baseParams());
+      const page = checkedApprovalPage(raw);
       if (!alive.current || gen !== generation.current) return;
+      setReminders(checkedReminders((raw as { expiryReminders?: unknown }).expiryReminders));
       setApprovals(page.approvals);
       setNextBefore(page.nextBefore);
       setLoadError(null);
@@ -112,7 +129,7 @@ function ApprovalsInner() {
     setActionBusy(true);
     const gen = generation.current;
     try {
-      const page = checkedApprovalPage(await listImportGoldApprovals({ before: nextBefore }));
+      const page = checkedApprovalPage(await listPage({ ...baseParams(), before: nextBefore }));
       if (!alive.current || gen !== generation.current) return;
       setApprovals((cur) => {
         const seen = new Set(cur.map((a) => a.id));
@@ -124,6 +141,19 @@ function ApprovalsInner() {
     } finally {
       if (alive.current) setActionBusy(false);
     }
+  };
+
+  const applyLookup = (ref: string | null) => {
+    if (busyRef.current || ref === lookupRef.current) return;
+    lookupRef.current = ref;
+    setLookup(ref);
+    // Deliberately restart from the newest page: old cursor and rows belong to another query.
+    generation.current += 1;
+    setApprovals([]);
+    setNextBefore(null);
+    setLoadError(null);
+    setLoading(true);
+    void refresh();
   };
 
   const replaceApproval = (next: ImportGoldApproval) =>
@@ -155,6 +185,8 @@ function ApprovalsInner() {
   return (
     <Shell>
       <Explainer />
+      <ExpiryReminderPanel reminders={reminders} />
+      <LookupBar active={lookup} busy={busy} onApply={applyLookup} />
       <div aria-live="polite">
         {notice && (
           <p className="mt-3 rounded-md border border-emerald-600/40 bg-emerald-600/10 p-2 text-sm" data-testid="gold-approvals-notice">
@@ -221,7 +253,7 @@ function ApprovalsInner() {
         </div>
       ) : approvals.length === 0 ? (
         <div className="mt-3 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground" data-testid="gold-approvals-empty">
-          No approvals recorded in this scope yet. Record metadata once the owner and privacy review are complete.
+          {lookup ? <>No approval in this scope has record reference <span className="font-mono break-all">{lookup}</span>.</> : <>No approvals recorded in this scope yet.</>}{!lookup && " Record metadata once the owner and privacy review are complete."}
         </div>
       ) : (
         <>

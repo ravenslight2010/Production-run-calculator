@@ -476,6 +476,82 @@ async function withApprovalTransactionBarrier(
 }
 
 describe("source approval metadata", () => {
+  it("looks up exact scoped references and reports scope-wide seven-day expiry counts", async () => {
+    const post = (url: string, body: unknown) => fetch(`${baseUrl}/api${url}`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    const created = await post("/import-gold/approvals", {
+      ...approvalMetadata("a".repeat(64)), recordRef: "synthetic-expiring",
+      validUntil: new Date(Date.now() + 6 * 24 * 60 * 60_000).toISOString(),
+    });
+    expect(created.status).toBe(201);
+    const { approval } = await created.json() as { approval: { id: number } };
+    const list = async (ref?: string, user = "inventory") => {
+      const response = await fetch(`${baseUrl}/api/import-gold/approvals${ref ? `?recordRef=${encodeURIComponent(ref)}` : ""}`, {
+        headers: headers(user),
+      });
+      expect(response.status).toBe(200);
+      return await response.json() as {
+        approvals: Array<{ id: number }>;
+        expiryReminders: { windowDays: number; expiringCount: number; asOf: string };
+      };
+    };
+    expect((await list()).expiryReminders.expiringCount).toBe(0); // Pending is not verified.
+    expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true })).status).toBe(200);
+    const scoped = await list("synthetic-expiring");
+    expect(scoped.approvals.map((row) => row.id)).toEqual([approval.id]);
+    expect(scoped.expiryReminders).toMatchObject({ windowDays: 7, expiringCount: 1 });
+    expect(Number.isFinite(Date.parse(scoped.expiryReminders.asOf))).toBe(true);
+    const noMatch = await list("synthetic-other-reference");
+    expect(noMatch.approvals).toEqual([]);
+    expect(noMatch.expiryReminders.expiringCount).toBe(1);
+    expect((await list(undefined, "sandbox")).expiryReminders.expiringCount).toBe(0);
+    expect((await fetch(`${baseUrl}/api/import-gold/approvals?recordRef=${encodeURIComponent("https://example.invalid/private")}`, {
+      headers: headers(),
+    })).status).toBe(400);
+    expect((await post(`/import-gold/approvals/${approval.id}/revocation`, { reviewed: true })).status).toBe(200);
+    expect((await list()).expiryReminders.expiringCount).toBe(0);
+  });
+
+  it.each(["creation", "verification", "revocation"] as const)(
+    "rolls back approval %s when its audit insert fails and permits a deliberate safe retry",
+    async (phase) => {
+      const post = (url: string, body: unknown) => fetch(`${baseUrl}/api${url}`, {
+        method: "POST", headers: headers(), body: JSON.stringify(body),
+      });
+      const metadata = approvalMetadata("b".repeat(64));
+      let id: number | undefined;
+      if (phase !== "creation") {
+        const created = await post("/import-gold/approvals", metadata);
+        expect(created.status).toBe(201);
+        id = (await created.json() as { approval: { id: number } }).approval.id;
+        if (phase === "revocation") {
+          expect((await post(`/import-gold/approvals/${id}/verification`, { reviewed: true })).status).toBe(200);
+        }
+      }
+      await db.execute(sql`CREATE FUNCTION approval_audit_failure_fixture() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN
+          IF NEW.action LIKE 'import_gold_approval_%' THEN RAISE EXCEPTION 'synthetic approval audit failure'; END IF;
+          RETURN NEW;
+        END $$`);
+      await db.execute(sql`CREATE TRIGGER approval_audit_failure_fixture BEFORE INSERT ON audit_logs
+        FOR EACH ROW EXECUTE FUNCTION approval_audit_failure_fixture()`);
+      const url = phase === "creation" ? "/import-gold/approvals" : `/import-gold/approvals/${id}/${phase}`;
+      const body = phase === "creation" ? metadata : { reviewed: true };
+      try {
+        expect((await post(url, body)).status).toBe(500);
+        const rows = await db.select().from(tables.importGoldApprovalsTable);
+        if (phase === "creation") expect(rows).toHaveLength(0);
+        else if (phase === "verification") expect(rows.find((row) => row.id === id)?.verifiedAt).toBeNull();
+        else expect(rows.find((row) => row.id === id)?.revokedAt).toBeNull();
+      } finally {
+        await db.execute(sql`DROP TRIGGER approval_audit_failure_fixture ON audit_logs`);
+        await db.execute(sql`DROP FUNCTION approval_audit_failure_fixture()`);
+      }
+      expect((await post(url, body)).status).toBe(phase === "creation" ? 201 : 200);
+    },
+  );
+
   it.each(["capture", "revocation"] as const)(
     "serializes concurrent source capture and revocation with %s ordered first",
     async (first) => {
@@ -1736,7 +1812,55 @@ describe("atomic import operations", () => {
     expect(retry.status).toBe(200);
     expect(await retry.json()).toEqual({
       cases: [{ id: goldCase!.id, importType: "premix", createdAt: before.cases[0]!.createdAt.toISOString() }],
+      nextCursor: null,
     });
+  });
+
+  it("pages cleanup metadata beyond 100 cases without skipping microsecond ties or deleted cursor anchors", async () => {
+    process.env.IMPORT_GOLD_ENABLED = "false";
+    process.env.IMPORT_GOLD_CLEANUP_ENABLED = "true";
+    await db.insert(tables.importGoldCasesTable).values(Array.from({ length: 205 }, (_, i) => ({
+      scope: "live", operationId: `synthetic-paging-${i}`, importType: "premix" as const,
+      sourceLabel: "Synthetic cleanup pagination", evaluatedInput: {}, expectedResult: {}, createdBy: "inventory",
+    })));
+    await db.execute(sql`UPDATE ${tables.importGoldCasesTable}
+      SET created_at = '2026-01-01T00:00:00.123450Z'::timestamptz
+        + (id % 7) * interval '1 microsecond' WHERE scope = 'live'`);
+    const original = await db.select({ id: tables.importGoldCasesTable.id })
+      .from(tables.importGoldCasesTable)
+      .where(eq(tables.importGoldCasesTable.scope, "live"))
+      .orderBy(sql`${tables.importGoldCasesTable.createdAt} DESC`, sql`${tables.importGoldCasesTable.id} DESC`);
+    const seen: number[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const response = await fetch(`${baseUrl}/api/import-gold/cleanup-cases${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, {
+        headers: headers(),
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json() as { cases: Array<{ id: number }>; nextCursor: string | null };
+      expect(body.cases.length).toBeLessThanOrEqual(100);
+      seen.push(...body.cases.map((row) => row.id));
+      cursor = body.nextCursor;
+      if (++pages === 1) {
+        expect(cursor).toBeTruthy();
+        expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases?cursor=${encodeURIComponent(cursor!)}`, {
+          headers: headers("sandbox"),
+        })).status).toBe(400);
+        // Cursor evidence is self-contained; deleting the anchor cannot break
+        // later reads or shift the remaining range as offset pagination would.
+        expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${body.cases.at(-1)!.id}`, {
+          method: "DELETE", headers: headers(),
+        })).status).toBe(204);
+      }
+      expect(pages).toBeLessThan(5);
+    } while (cursor);
+    expect(pages).toBe(3);
+    expect(seen).toEqual(original.map((row) => row.id));
+    expect(new Set(seen).size).toBe(205);
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases?cursor=bad`, {
+      headers: headers(),
+    })).status).toBe(400);
   });
 
   it("allows scoped metadata-only cleanup after approval withdrawal without reopening Gold Lab reads", async () => {
@@ -1799,7 +1923,8 @@ describe("atomic import operations", () => {
 
     const listed = await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers() });
     expect(listed.status).toBe(200);
-    const listBody = await listed.json() as { cases: Array<Record<string, unknown>> };
+    const listBody = await listed.json() as { cases: Array<Record<string, unknown>>; nextCursor: string | null };
+    expect(listBody.nextCursor).toBeNull();
     expect(listBody.cases).toHaveLength(1);
     expect(listBody.cases[0]).toEqual(expect.objectContaining({
       id: liveCase!.id,

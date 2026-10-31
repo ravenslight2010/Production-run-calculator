@@ -276,6 +276,17 @@ async function req(
   pathname: string,
   body?: unknown,
 ): Promise<Response> {
+  // Existing permission/rename assertions still exercise the real reviewed-edit
+  // contract. Concurrency tests supply their own intentionally old baseline.
+  if (method === "PUT" && pathname.startsWith("/api/roles/") && body && typeof body === "object"
+    && !("expectedRole" in body)) {
+    const current = await req(MANAGER, "GET", "/api/roles");
+    if (current.ok) {
+      const roles = await current.json() as Array<{ name: string }>;
+      const expectedRole = roles.find((role) => role.name === decodeURIComponent(pathname.slice("/api/roles/".length)));
+      body = { ...body, expectedRole };
+    }
+  }
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
   if (userId) headers["authorization"] = `Bearer ${signLegacyTokenForTests(userId)}`;
@@ -1065,6 +1076,82 @@ const USER_BY_ROLE: Record<string, string> = {
   warehouse: WAREHOUSE,
   inventory: INVENTORY,
 };
+
+describe("role definition concurrency and atomic audit", () => {
+  it("accepts one concurrent reviewed edit and rejects the stale writer without losing permissions", async () => {
+    const created = await req(MANAGER, "POST", "/api/roles", {
+      name: "reviewed-concurrent-role", capabilities: [],
+    });
+    expect(created.status).toBe(201);
+    const expectedRole = await created.json();
+    const results = await Promise.all([
+      req(MANAGER, "PUT", "/api/roles/reviewed-concurrent-role", {
+        expectedRole, capabilities: ["manage-inventory"],
+      }),
+      req(MANAGER, "PUT", "/api/roles/reviewed-concurrent-role", {
+        expectedRole, capabilities: ["review-incidents"],
+      }),
+    ]);
+    expect(results.map((response) => response.status).sort()).toEqual([200, 409]);
+    const accepted = await results.find((response) => response.status === 200)!.json();
+    const roleResponse = await req(MANAGER, "GET", "/api/roles");
+    const roles = await roleResponse.json() as Array<{ name: string; capabilities: string[] }>;
+    expect(roles.find((role) => role.name === expectedRole.name)?.capabilities).toEqual(accepted.capabilities);
+    const events = (await auditLogs()).logs.filter((event) =>
+      event.action === "role_definition_updated" && event.resource === `role:${expectedRole.name}`,
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].actor).toBe(MANAGER);
+    expect(events[0].changes).toMatchObject({
+      beforeCapabilities: [], afterCapabilities: accepted.capabilities,
+      beforeName: expectedRole.name, afterName: expectedRole.name, outcome: "updated",
+    });
+  });
+
+  it("fails closed for an older caller without a reviewed baseline", async () => {
+    // Raw fetch intentionally does not use the convenience baseline fixture.
+    const response = await fetch(`${baseUrl}/api/roles/warehouse`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
+      },
+      body: JSON.stringify({ capabilities: ["manage-inventory"] }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("rolls back both a role rename and its evidence when audit insertion fails", async () => {
+    const created = await req(MANAGER, "POST", "/api/roles", {
+      name: "reviewed-audit-rollback", capabilities: ["manage-inventory"],
+    });
+    expect(created.status).toBe(201);
+    const expectedRole = await created.json();
+    await db.execute(sql`CREATE FUNCTION role_audit_failure_fixture() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.action = 'role_definition_updated' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF;
+        RETURN NEW;
+      END $$`);
+    await db.execute(sql`CREATE TRIGGER role_audit_failure_fixture BEFORE INSERT ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION role_audit_failure_fixture()`);
+    try {
+      const response = await req(MANAGER, "PUT", "/api/roles/reviewed-audit-rollback", {
+        expectedRole, name: "reviewed-audit-new-name", capabilities: [],
+      });
+      expect(response.status).toBe(500);
+      const roleResponse = await req(MANAGER, "GET", "/api/roles");
+      const roles = await roleResponse.json() as Array<{ name: string; capabilities: string[] }>;
+      expect(roles.find((role) => role.name === expectedRole.name)).toEqual(expectedRole);
+      expect(roles.find((role) => role.name === "reviewed-audit-new-name")).toBeUndefined();
+      expect((await auditLogs()).logs.filter((event) =>
+        event.action === "role_definition_updated" && event.resource === `role:${expectedRole.name}`,
+      )).toHaveLength(0);
+    } finally {
+      await db.execute(sql`DROP TRIGGER role_audit_failure_fixture ON audit_logs`);
+      await db.execute(sql`DROP FUNCTION role_audit_failure_fixture()`);
+    }
+  });
+});
 
 describe("capability-based access control", () => {
   it("keeps owned operations routes in the direct authorization inventory", async () => {

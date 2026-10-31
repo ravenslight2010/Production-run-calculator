@@ -252,6 +252,16 @@ const writes = (
 });
 
 export const mutationAuthorizationInventory: readonly MutationAuthorization[] = [
+  {
+    method: "POST", path: "/import-gold/approvals", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  },
+  ...["verification", "revocation"].map((operation): MutationAuthorization => ({
+    method: "POST", path: `/import-gold/approvals/:id/${operation}`, ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  })),
   ...["preview", "apply", "undo"].map((action): MutationAuthorization => ({
     method: "POST", path: `/master-data-operations/:operationId/${action}`,
     ownership: "manager-only", scope: "scoped", sandbox: "allowed", managerRole: true,

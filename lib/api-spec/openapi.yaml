@@ -6870,6 +6870,10 @@ paths:
         - name: before
           in: query
           schema: { type: integer, minimum: 1 }
+        - name: recordRef
+          in: query
+          schema: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+          description: Exact opaque approval reference, filtered on the server within the authenticated scope.
       responses:
         "200":
           description: At most 50 scoped approval records, newest first.
@@ -7036,6 +7040,11 @@ paths:
       operationId: listImportGoldCleanupCases
       tags: [specImport]
       summary: List minimal scoped case metadata when cleanup-only mode is enabled
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 512 }
+          description: Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
       responses:
         "200":
           description: Bounded case identifiers for cleanup; case and score contents are not returned
@@ -7044,6 +7053,7 @@ paths:
               schema: { $ref: "#/components/schemas/ImportGoldCleanupCasesResponse" }
         "403": { description: Manager capability required }
         "404": { description: Cleanup-only mode is unavailable }
+        "400": { description: Invalid or cross-scope cleanup cursor }
   /import-gold/cleanup-cases/{id}:
     delete:
       operationId: deleteImportGoldCleanupCase
@@ -8073,6 +8083,14 @@ components:
       type: object
       required: [approvals, nextBefore]
       properties:
+        expiryReminders:
+          type: object
+          description: Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension.
+          required: [windowDays, expiringCount, asOf]
+          properties:
+            windowDays: { type: integer, enum: [7] }
+            expiringCount: { type: integer, minimum: 0 }
+            asOf: { type: string, format: date-time }
         approvals:
           type: array
           maxItems: 50
@@ -8191,8 +8209,11 @@ components:
         createdAt: { type: string, format: date-time }
     ImportGoldCleanupCasesResponse:
       type: object
-      required: [cases]
+      required: [cases, nextCursor]
       properties:
+        nextCursor:
+          type: [string, "null"]
+          description: Cursor for older cases, or null when the scoped inventory ends.
         cases:
           type: array
           items: { $ref: "#/components/schemas/ImportGoldCleanupCase" }
@@ -11178,7 +11199,12 @@ components:
       type: object
       required:
         - capabilities
+        - expectedRole
       properties:
+        expectedRole:
+          allOf:
+            - $ref: "#/components/schemas/RoleDefinition"
+          description: Reviewed role baseline. A stale baseline is rejected without overwriting newer permissions. Older callers without a baseline must refresh before editing.
         capabilities:
           type: array
           items:

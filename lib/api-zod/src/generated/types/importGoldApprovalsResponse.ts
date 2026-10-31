@@ -6,8 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ImportGoldApproval } from './importGoldApproval';
+import type { ImportGoldApprovalsResponseExpiryReminders } from './importGoldApprovalsResponseExpiryReminders';
 
 export interface ImportGoldApprovalsResponse {
+  /** Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension. */
+  expiryReminders?: ImportGoldApprovalsResponseExpiryReminders;
   /** @maxItems 50 */
   approvals: ImportGoldApproval[];
   /** @nullable */

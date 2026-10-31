@@ -12,6 +12,24 @@ const metadata = {
 };
 
 describe("Gold source approval metadata", () => {
+  it.each(["recordRef", "ownerRef", "privacyReviewerRef", "conditionsRef", "externalCopiesRef", "backupHandlingRef"])(
+    "keeps %s opaque and rejects payload-like values",
+    (field) => {
+      for (const value of [
+        "synthetic@example.invalid", "https://example.invalid/private-document",
+        "/private/source.xlsx", "..\\source.xlsx", "Synthetic Person",
+        "opaque\npayload", "x".repeat(129), { sourceText: "synthetic" }, ["opaque"],
+      ]) expect(goldApprovalInput.safeParse({ ...metadata, [field]: value }).success).toBe(false);
+    },
+  );
+
+  it.each(["workbook", "sourceText", "parsedRows", "attachment", "scope", "createdBy", "verifiedAt", "revokedBy"])(
+    "rejects unknown or server-owned field %s rather than stripping it into persisted metadata",
+    (field) => {
+      expect(goldApprovalInput.safeParse({ ...metadata, [field]: "synthetic-untrusted-value" }).success).toBe(false);
+    },
+  );
+
   it("requires explicit privacy, manual deletion, external copy and backup records without accepting evidence payloads", () => {
     expect(goldApprovalInput.safeParse(metadata).success).toBe(true);
     for (const patch of [

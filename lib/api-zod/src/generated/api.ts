@@ -1042,6 +1042,9 @@ export const listOperationalIntentReceiptsQueryAfterMin = 0;
 export const listOperationalIntentReceiptsResponseCursorMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+export const listImportGoldApprovalsQueryRecordRefMax = 128;
+export const listImportGoldApprovalsQueryRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseExpiryRemindersExpiringCountMin = 0;
 export const listImportGoldApprovalsResponseApprovalsItemRecordRefMax = 128;
 export const listImportGoldApprovalsResponseApprovalsItemRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
 export const listImportGoldApprovalsResponseApprovalsItemSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -1110,6 +1113,7 @@ export const revokeImportGoldApprovalResponseApprovalBackupHandlingRefMax = 128;
 export const revokeImportGoldApprovalResponseApprovalBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
 export const listImportGoldCasesQueryLimitDefault = 50;
 export const listImportGoldCasesQueryLimitMax = 100;
+export const listImportGoldCleanupCasesQueryCursorMax = 512;
 export const listImportGoldRetentionQueryLimitDefault = 50;
 export const listImportGoldRetentionQueryLimitMax = 100;
 export const listImportGoldRetentionQueryOffsetDefault = 0;
@@ -9225,6 +9229,11 @@ export const UpdateRoleParams = zod.object({
 })
 
 export const UpdateRoleBody = zod.object({
+  "expectedRole": zod.object({
+  "name": zod.string().describe('Unique role name (also its identifier).'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
+}).describe('Reviewed role baseline. A stale baseline is rejected without overwriting newer permissions. Older callers without a baseline must refresh before editing.'),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "name": zod.string().min(1).max(updateRoleBodyNameMax).optional().describe('Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.')
 })
@@ -10291,10 +10300,16 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
  */
 
 export const ListImportGoldApprovalsQueryParams = zod.object({
-  "before": zod.coerce.number().int().min(1).optional()
+  "before": zod.coerce.number().int().min(1).optional(),
+  "recordRef": zod.coerce.string().max(listImportGoldApprovalsQueryRecordRefMax).regex(listImportGoldApprovalsQueryRecordRefRegExp).optional().describe('Exact opaque approval reference, filtered on the server within the authenticated scope.')
 })
 
 export const ListImportGoldApprovalsResponse = zod.object({
+  "expiryReminders": zod.object({
+  "windowDays": zod.literal(7),
+  "expiringCount": zod.int().min(listImportGoldApprovalsResponseExpiryRemindersExpiringCountMin),
+  "asOf": zod.coerce.date()
+}).optional().describe('Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension.'),
   "approvals": zod.array(zod.object({
   "id": zod.int(),
   "scope": zod.string(),
@@ -10549,7 +10564,12 @@ export const ListImportGoldCasesResponse = zod.object({
  * @summary List minimal scoped case metadata when cleanup-only mode is enabled
  */
 
+export const ListImportGoldCleanupCasesQueryParams = zod.object({
+  "cursor": zod.coerce.string().max(listImportGoldCleanupCasesQueryCursorMax).optional().describe('Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.')
+})
+
 export const ListImportGoldCleanupCasesResponse = zod.object({
+  "nextCursor": zod.string().nullable().describe('Cursor for older cases, or null when the scoped inventory ends.'),
   "cases": zod.array(zod.object({
   "id": zod.int().min(1),
   "importType": zod.enum(['spec', 'premix', 'cheese']),

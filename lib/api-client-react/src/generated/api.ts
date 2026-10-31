@@ -181,6 +181,7 @@ import type {
   ListFinalizedOperationalReportsParams,
   ListImportGoldApprovalsParams,
   ListImportGoldCasesParams,
+  ListImportGoldCleanupCasesParams,
   ListImportGoldRetention409,
   ListImportGoldRetentionParams,
   ListImportHistoryParams,
@@ -26400,20 +26401,27 @@ export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImp
 
 
 
-export const getListImportGoldCleanupCasesUrl = () => {
+export const getListImportGoldCleanupCasesUrl = (params?: ListImportGoldCleanupCasesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/import-gold/cleanup-cases`
+  return stringifiedParams.length > 0 ? `/api/import-gold/cleanup-cases?${stringifiedParams}` : `/api/import-gold/cleanup-cases`
 }
 
 /**
  * @summary List minimal scoped case metadata when cleanup-only mode is enabled
  */
-export const listImportGoldCleanupCases = async ( options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldCleanupCasesResponse> => {
+export const listImportGoldCleanupCases = async (params?: ListImportGoldCleanupCasesParams, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldCleanupCasesResponse> => {
 
-  return customFetch<ImportGoldCleanupCasesResponse>(getListImportGoldCleanupCasesUrl(),
+  return customFetch<ImportGoldCleanupCasesResponse>(getListImportGoldCleanupCasesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -26426,23 +26434,23 @@ export const listImportGoldCleanupCases = async ( options?: Parameters<typeof cu
 
 
 
-export const getListImportGoldCleanupCasesQueryKey = () => {
+export const getListImportGoldCleanupCasesQueryKey = (params?: ListImportGoldCleanupCasesParams,) => {
     return [
-    `/api/import-gold/cleanup-cases`
+    `/api/import-gold/cleanup-cases`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListImportGoldCleanupCasesQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getListImportGoldCleanupCasesQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(params?: ListImportGoldCleanupCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListImportGoldCleanupCasesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListImportGoldCleanupCasesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportGoldCleanupCases>>> = ({ signal }) => listImportGoldCleanupCases({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportGoldCleanupCases>>> = ({ signal }) => listImportGoldCleanupCases(params, { signal, ...requestOptions });
 
 
 
@@ -26456,7 +26464,7 @@ export type ListImportGoldCleanupCasesQueryError = ErrorType<void>
 
 
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
+ params: undefined |  ListImportGoldCleanupCasesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listImportGoldCleanupCases>>,
           TError,
@@ -26466,7 +26474,7 @@ export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof 
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
+ params?: ListImportGoldCleanupCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listImportGoldCleanupCases>>,
           TError,
@@ -26476,7 +26484,7 @@ export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof 
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ params?: ListImportGoldCleanupCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -26484,11 +26492,11 @@ export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof 
  */
 
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ params?: ListImportGoldCleanupCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListImportGoldCleanupCasesQueryOptions(options)
+  const queryOptions = getListImportGoldCleanupCasesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

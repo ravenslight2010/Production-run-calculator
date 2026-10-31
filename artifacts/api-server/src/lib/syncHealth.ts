@@ -9,7 +9,8 @@ import type { Scope } from "./requestScope";
 import {
   buildOperationalProjection,
   computeAutoTrackSchedule,
-  computeServerCalc,
+  computeSharedServerCalc,
+  selectCanonicalLiveRun,
   applyTemporaryOverrides,
   type AutoTrackScheduleInput,
 } from "@workspace/live-calc";
@@ -174,7 +175,9 @@ export async function buildSyncHealthReport(
   });
 
   const currentRun = isSyncDocument(data) && data.dayState && Array.isArray(data.dayState.runs)
-    ? data.dayState.runs[data.dayState.currentIndex ?? 0]
+    ? selectCanonicalLiveRun(data.dayState.runs.filter(
+      (run): run is Record<string, unknown> => !!run && typeof run === "object" && !Array.isArray(run),
+    ))
     : undefined;
   const runRecord = currentRun && typeof currentRun === "object" && !Array.isArray(currentRun)
     ? currentRun as Record<string, unknown>
@@ -189,12 +192,15 @@ export async function buildSyncHealthReport(
   let projectionNextAction = "Review the canonical-document check first.";
   if (row && hasDocument && currentRun === undefined) {
     projectionStatus = "warning";
-    projectionSummary = "The canonical day has no selected run; no operational projection is expected.";
+    projectionSummary = "The canonical day has no eligible operational run; no operational projection is expected.";
     projectionNextAction = "No action required.";
   } else if (row && hasDocument && hasRunValues && runRecord && typeof data?.runValues === "object") {
     try {
-      const payload = data as Parameters<typeof computeServerCalc>[0];
-      const serverCalc = computeServerCalc(payload, ["Pepperoni Stick", "Pepperoni Stick - NATURAL"], at.getTime());
+      // Manager diagnostics follow the same lifecycle identity as shared
+      // displays. A legacy device selection must not diagnose a different run
+      // than the one used for the calculation and schedule.
+      const payload = data as Parameters<typeof computeSharedServerCalc>[0];
+      const serverCalc = computeSharedServerCalc(payload, ["Pepperoni Stick", "Pepperoni Stick - NATURAL"], at.getTime());
       const runId = runRecord.id as string;
       const rawValues = data.runValues?.[runId] ?? {};
       const schedule = serverCalc

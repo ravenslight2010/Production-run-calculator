@@ -7,6 +7,7 @@ import {
   isImportGoldLocalConfigured,
 } from "../lib/importGoldEndpoint";
 import { Router, type IRouter, type NextFunction, type Request, type Response } from "express";
+import { requireGoldRetentionCapability, requireGoldRetentionRole } from "../lib/importGoldAccess";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, not, or, sql } from "drizzle-orm";
 import {
   db,
@@ -85,17 +86,6 @@ const LOCAL_GOLD_SCORING_SETTING = "importGoldLocalScoringEnabled";
 const SYNTHETIC_GOLD_SOURCE_LABEL = "Synthetic local scoring fixture";
 const SYNTHETIC_GOLD_OPERATION_ID = "dev-synthetic-local-score:v1";
 const SYNTHETIC_GOLD_FIXTURE_VERSION = "synthetic-mix-v1";
-const requireGoldRetentionCapability = requireAnyCapability(["manage-staff", "manage-qc"]);
-
-function requireGoldRetentionRole(req: Request, res: Response, next: NextFunction) {
-  // Share only the existing built-in Manager and QC Manager roles; do not
-  // grant a new global capability or expose the full Gold Lab to QC Managers.
-  if (req.role === "manager" || req.role === "qc-manager") {
-    next();
-    return;
-  }
-  res.status(403).json({ error: "Manager or QC Manager role required" });
-}
 const SYNTHETIC_GOLD_FIXTURE = {
   importType: "premix",
   input: {
@@ -123,7 +113,7 @@ const SYNTHETIC_GOLD_FIXTURE = {
     }],
   },
 } as const;
-router.use("/import-gold/approvals", requireGoldRetentionCapability, requireGoldRetentionRole, goldApprovalsRouter);
+router.use(goldApprovalsRouter);
 const TABLES = {
   mixes: { table: mixesTable, key: "id" },
   cheeseRecipes: { table: cheeseRecipesTable, key: "id" },
@@ -1536,25 +1526,57 @@ router.delete("/import-gold/cases/:id", requireCapability("manage-staff"), async
   res.status(204).end();
 });
 
-router.get("/import-gold/cleanup-cases", requireCapability("manage-staff"), async (_req, res) => {
+router.get("/import-gold/cleanup-cases", requireCapability("manage-staff"), async (req, res) => {
   if (!importGoldCleanupOnlyEnabled()) {
     res.status(404).json({ error: "Import gold cleanup is unavailable" });
     return;
   }
-  const cases = await db.select({
+  let cursor: { createdAt: string; id: number; scope: string } | undefined;
+  if (req.query.cursor !== undefined) {
+    try {
+      if (typeof req.query.cursor !== "string" || req.query.cursor.length > 512) throw new Error();
+      cursor = JSON.parse(Buffer.from(req.query.cursor, "base64url").toString("utf8"));
+      if (!cursor || Object.keys(cursor).sort().join(",") !== "createdAt,id,scope"
+        || !Number.isSafeInteger(cursor.id) || cursor.id < 1 || cursor.scope !== currentScope()
+        || typeof cursor.createdAt !== "string"
+        || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/u.test(cursor.createdAt)
+        || !Number.isFinite(Date.parse(cursor.createdAt))) throw new Error();
+    } catch {
+      res.status(400).json({ error: "Invalid cleanup cursor. Return to the newest cases and retry." });
+      return;
+    }
+  }
+  const rows = await db.select({
     id: importGoldCasesTable.id,
     importType: importGoldCasesTable.importType,
     createdAt: importGoldCasesTable.createdAt,
+    // A JS Date truncates PostgreSQL microseconds. Retain native ordering bytes
+    // in the cursor so same-millisecond cases cannot disappear between pages.
+    cursorCreatedAt: sql<string>`to_char(${importGoldCasesTable.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
   }).from(importGoldCasesTable)
-    .where(eq(importGoldCasesTable.scope, currentScope()))
+    .where(and(
+      eq(importGoldCasesTable.scope, currentScope()),
+      cursor ? or(
+        sql`${importGoldCasesTable.createdAt} < ${cursor.createdAt}::timestamptz`,
+        and(
+          sql`${importGoldCasesTable.createdAt} = ${cursor.createdAt}::timestamptz`,
+          sql`${importGoldCasesTable.id} < ${cursor.id}`,
+        ),
+      ) : undefined,
+    ))
     .orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id))
-    .limit(MAX_GOLD_CASES);
+    .limit(MAX_GOLD_CASES + 1);
+  const cases = rows.slice(0, MAX_GOLD_CASES);
+  const last = cases.at(-1);
   res.json({
     cases: cases.map((row) => ({
       id: row.id,
       importType: row.importType,
       createdAt: row.createdAt.toISOString(),
     })),
+    nextCursor: rows.length > MAX_GOLD_CASES && last ? Buffer.from(JSON.stringify({
+      createdAt: last.cursorCreatedAt, id: last.id, scope: currentScope(),
+    })).toString("base64url") : null,
   });
 });
 

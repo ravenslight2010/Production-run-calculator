@@ -5,10 +5,15 @@
  * API specification. Canonical shared-record GET responses expose X-Master-Data-Epoch. Shared-record mutations retain their original read epoch and return 409 after a guarded change if it is missing or stale. A fresh GET does not rebase an older queued intent.
  * OpenAPI spec version: 0.1.0
  */
+import type { ImportGoldOpaqueReference } from './importGoldOpaqueReference';
 
 export type ListImportGoldApprovalsParams = {
 /**
  * @minimum 1
  */
 before?: number;
+/**
+ * Exact opaque approval reference, filtered on the server within the authenticated scope.
+ */
+recordRef?: ImportGoldOpaqueReference;
 };

@@ -725,12 +725,30 @@ export async function updateRoleCapabilities(
   capabilities: unknown,
   actorCapabilities: Capability[],
   newName?: string,
+  options?: {
+    expectedRole: RoleDefinition;
+    onUpdated: (
+      tx: Parameters<typeof lockStaffAdminMutation>[0],
+      before: RoleDefinition,
+      after: RoleDefinition,
+    ) => Promise<void>;
+  },
 ): Promise<{ ok: true; row: RoleDefinition } | { ok: false; status: number; error: string }> {
   return db.transaction(async (tx) => {
     await lockStaffAdminMutation(tx);
     const def = await getRole(name, tx);
     if (!def) {
       return { ok: false, status: 404, error: "Role not found" };
+    }
+    if (options && (
+      options.expectedRole.name !== def.name
+      || options.expectedRole.builtin !== def.builtin
+      || [...options.expectedRole.capabilities].sort().join(",") !== [...def.capabilities].sort().join(",")
+    )) {
+      return {
+        ok: false, status: 409,
+        error: "This role changed after you opened it. Your draft has not been saved. Review the latest role before trying again.",
+      };
     }
     const caps = sanitizeCapabilities(capabilities);
     const missing = caps.filter((c) => !actorCapabilities.includes(c));
@@ -814,6 +832,7 @@ export async function updateRoleCapabilities(
         .set({ role: trimmedNew!, updatedAt: new Date() })
         .where(eq(userRolesTable.role, name));
       const updated = await getRole(trimmedNew!, tx);
+      if (updated && options) await options.onUpdated(tx, def, updated);
       return { ok: true, row: updated! };
     }
 
@@ -822,6 +841,7 @@ export async function updateRoleCapabilities(
       .set({ capabilities: caps, updatedAt: new Date() })
       .where(eq(rolesTable.name, name));
     const updated = await getRole(name, tx);
+    if (updated && options) await options.onUpdated(tx, def, updated);
     return { ok: true, row: updated! };
   });
 }

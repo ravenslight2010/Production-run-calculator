@@ -233,6 +233,21 @@ router.put("/roles/:name", requireLiveScope, requireCapability("manage-staff"), 
     parsed.data.capabilities,
     (req.capabilities ?? []) as Capability[],
     parsed.data.name,
+    {
+      expectedRole: parsed.data.expectedRole,
+      onUpdated: (tx, before, after) => writeAuditEvent(tx, {
+        action: "role_definition_updated",
+        resource: `role:${before.name}`,
+        changes: {
+          outcome: "updated",
+          beforeName: before.name,
+          afterName: after.name,
+          beforeCapabilities: before.capabilities,
+          afterCapabilities: after.capabilities,
+          builtin: after.builtin,
+        },
+      }),
+    },
   );
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });

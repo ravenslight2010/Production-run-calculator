@@ -1211,13 +1211,12 @@ export const updateRoleRequest = (
   name: string,
   capabilities: Capability[],
   newName?: string,
+  expectedRole?: RoleDefinition,
 ) =>
   api<RoleDefinition>(`/roles/${encodeURIComponent(name)}`, {
     method: "PUT",
     body: JSON.stringify(
-      newName !== undefined && newName !== name
-        ? { capabilities, name: newName }
-        : { capabilities },
+      { capabilities, expectedRole, ...(newName !== undefined && newName !== name ? { name: newName } : {}) },
     ),
   });
 export const deleteRoleRequest = (name: string) =>

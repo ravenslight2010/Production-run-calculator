@@ -1285,7 +1285,26 @@ export interface ImportGoldApprovalResponse {
   approval: ImportGoldApproval;
 }
 
+export type ImportGoldApprovalsResponseExpiryRemindersWindowDays = typeof ImportGoldApprovalsResponseExpiryRemindersWindowDays[keyof typeof ImportGoldApprovalsResponseExpiryRemindersWindowDays];
+
+
+export const ImportGoldApprovalsResponseExpiryRemindersWindowDays = {
+  NUMBER_7: 7,
+} as const;
+
+/**
+ * Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension.
+ */
+export type ImportGoldApprovalsResponseExpiryReminders = {
+  windowDays: ImportGoldApprovalsResponseExpiryRemindersWindowDays;
+  /** @minimum 0 */
+  expiringCount: number;
+  asOf: string;
+};
+
 export interface ImportGoldApprovalsResponse {
+  /** Optional during rollout. Scope-wide verified, unrevoked approvals expiring within seven days, independent of lookup and page. Not a delivery receipt or authorization extension. */
+  expiryReminders?: ImportGoldApprovalsResponseExpiryReminders;
   /** @maxItems 50 */
   approvals: ImportGoldApproval[];
   /** @nullable */
@@ -1448,6 +1467,11 @@ export interface ImportGoldCleanupCase {
 }
 
 export interface ImportGoldCleanupCasesResponse {
+  /**
+     * Cursor for older cases, or null when the scoped inventory ends.
+     * @nullable
+     */
+  nextCursor: string | null;
   cases: ImportGoldCleanupCase[];
 }
 
@@ -5733,6 +5757,8 @@ export interface CreateRole {
 }
 
 export interface RoleCapabilitiesUpdate {
+  /** Reviewed role baseline. A stale baseline is rejected without overwriting newer permissions. Older callers without a baseline must refresh before editing. */
+  expectedRole: RoleDefinition;
   capabilities: Capability[];
   /**
      * Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.
@@ -11232,6 +11258,10 @@ export type ListImportGoldApprovalsParams = {
  * @minimum 1
  */
 before?: number;
+/**
+ * Exact opaque approval reference, filtered on the server within the authenticated scope.
+ */
+recordRef?: ImportGoldOpaqueReference;
 };
 
 export type ListImportGoldCasesParams = {
@@ -11240,6 +11270,14 @@ export type ListImportGoldCasesParams = {
  * @maximum 100
  */
 limit?: number;
+};
+
+export type ListImportGoldCleanupCasesParams = {
+/**
+ * Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
+ * @maxLength 512
+ */
+cursor?: string;
 };
 
 export type ListImportGoldRetentionParams = {

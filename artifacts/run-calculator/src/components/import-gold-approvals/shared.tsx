@@ -259,3 +259,18 @@ export function MetadataList({ approval }: { approval: Displayable }) {
     </dl>
   );
 }
+
+// Seven-day expiry reminder summary. Additive response field; older servers omit it.
+export type ExpiryReminders = { windowDays: number; expiringCount: number; asOf: string };
+
+export function checkedReminders(value: unknown): ExpiryReminders | null {
+  if (!value || typeof value !== "object") return null;
+  const r = value as Record<string, unknown>;
+  if (r.windowDays !== 7 || !Number.isSafeInteger(r.expiringCount) || Number(r.expiringCount) < 0 ||
+      typeof r.asOf !== "string" || !Number.isFinite(Date.parse(r.asOf))) return null;
+  return { windowDays: 7, expiringCount: Number(r.expiringCount), asOf: r.asOf };
+}
+
+export function validLookup(value: string): boolean {
+  return OPAQUE_REF_PATTERN.test(value.trim());
+}

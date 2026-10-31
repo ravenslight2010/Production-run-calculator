@@ -8,5 +8,10 @@
 import type { ImportGoldCleanupCase } from './importGoldCleanupCase';
 
 export interface ImportGoldCleanupCasesResponse {
+  /**
+     * Cursor for older cases, or null when the scoped inventory ends.
+     * @nullable
+     */
+  nextCursor: string | null;
   cases: ImportGoldCleanupCase[];
 }

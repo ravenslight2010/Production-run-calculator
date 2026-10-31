@@ -196,4 +196,64 @@ describe("Gold approval manager workflow", () => {
     expect(screen.queryByTestId("gold-approval-form")).toBeNull();
     expect(within(screen.getByTestId("gold-approvals-explainer")).getByText(/does not grant Gemini or export permission/)).toBeTruthy();
   });
+
+  it("looks up by exact reference on the server and resets the cursor deliberately", async () => {
+    list.mockResolvedValueOnce({ approvals: [approval], nextBefore: 1 });
+    render(<ImportGoldApprovalsCard />);
+    await screen.findByTestId("button-load-more-gold-approvals");
+    fireEvent.change(screen.getByTestId("input-gold-lookup"), { target: { value: "https://x" } });
+    fireEvent.click(screen.getByTestId("button-gold-lookup"));
+    expect(list).toHaveBeenCalledTimes(1);
+    list.mockResolvedValueOnce({ approvals: [{ ...approval, id: 9, recordRef: "other-ref" }], nextBefore: 4 });
+    fireEvent.change(screen.getByTestId("input-gold-lookup"), { target: { value: "other-ref" } });
+    fireEvent.click(screen.getByTestId("button-gold-lookup"));
+    expect(await screen.findByTestId("gold-approval-9")).toBeTruthy();
+    expect(list).toHaveBeenLastCalledWith({ recordRef: "other-ref" });
+    expect(screen.queryByTestId("gold-approval-1")).toBeNull();
+    list.mockResolvedValueOnce({ approvals: [], nextBefore: null });
+    fireEvent.click(screen.getByTestId("button-load-more-gold-approvals"));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ recordRef: "other-ref", before: 4 }));
+    list.mockResolvedValueOnce({ approvals: [], nextBefore: null });
+    fireEvent.click(screen.getByTestId("button-gold-lookup-clear"));
+    expect(await screen.findByTestId("gold-approvals-empty")).toBeTruthy();
+    expect(list).toHaveBeenLastCalledWith({});
+  });
+
+  it("shows a missing lookup match factually", async () => {
+    render(<ImportGoldApprovalsCard />);
+    await screen.findByTestId("gold-approval-1");
+    list.mockResolvedValueOnce({ approvals: [], nextBefore: null });
+    fireEvent.change(screen.getByTestId("input-gold-lookup"), { target: { value: "missing-ref" } });
+    fireEvent.click(screen.getByTestId("button-gold-lookup"));
+    expect((await screen.findByTestId("gold-approvals-empty")).textContent).toContain("missing-ref");
+  });
+
+  it("distinguishes unavailable legacy reminder metadata from zero and shows scope-wide count", async () => {
+    const ui = render(<ImportGoldApprovalsCard />);
+    expect(await screen.findByTestId("gold-approvals-reminders-unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("gold-approvals-reminders")).toBeNull();
+    ui.unmount();
+    list.mockResolvedValue({ approvals: [approval], nextBefore: null, expiryReminders: { windowDays: 7, expiringCount: 0, asOf: "2024-01-01T00:00:00Z" } });
+    const ui2 = render(<ImportGoldApprovalsCard />);
+    expect((await screen.findByTestId("gold-approvals-reminders-count")).textContent).toBe("0");
+    ui2.unmount();
+    list.mockResolvedValue({ approvals: [], nextBefore: null, expiryReminders: { windowDays: 7, expiringCount: 3, asOf: "2024-01-01T00:00:00Z" } });
+    render(<ImportGoldApprovalsCard />);
+    const panel = await screen.findByTestId("gold-approvals-reminders");
+    expect(panel.textContent).toContain("3");
+    expect(panel.textContent).toMatch(/No reminder is sent/);
+    expect(panel.textContent).toMatch(/cannot be extended/);
+  });
+
+  it("keeps an unsent draft when a lookup fails, without showing an empty success", async () => {
+    render(<ImportGoldApprovalsCard />);
+    await screen.findByTestId("gold-approval-1");
+    await openCreate();
+    list.mockRejectedValueOnce({ status: 503 });
+    fireEvent.change(screen.getByTestId("input-gold-lookup"), { target: { value: "some-ref" } });
+    fireEvent.click(screen.getByTestId("button-gold-lookup"));
+    expect(await screen.findByTestId("gold-approvals-load-error")).toBeTruthy();
+    expect((screen.getByTestId("input-gold-recordRef") as HTMLInputElement).value).toBe(metadata.recordRef);
+    expect(create).not.toHaveBeenCalled();
+  });
 });
