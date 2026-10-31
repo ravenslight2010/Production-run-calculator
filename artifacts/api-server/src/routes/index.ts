@@ -140,6 +140,9 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/import-gold/config", "/import-gold/cases", "/import-gold/export.jsonl",
     "/import-gold/synthetic-review",
   ]),
+  ...reads(["manage-staff", "manage-qc"], "any", "scoped", [
+    "/import-gold/approvals", "/import-gold/retention",
+  ]),
   ...reads(["manage-staff"], "all", "live-only", ["/sync/health", "/health/diagnostics"]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
@@ -252,6 +255,15 @@ const writes = (
 });
 
 export const mutationAuthorizationInventory: readonly MutationAuthorization[] = [
+  {
+    method: "POST", path: "/import-gold/retention/:caseId/verification", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-staff", "manage-qc"], capabilityMatch: "any",
+  },
+  {
+    method: "DELETE", path: "/import-gold/cleanup-cases/:id", ownership: "capability-gated",
+    scope: "scoped", sandbox: "allowed", capabilities: ["manage-staff"], capabilityMatch: "all",
+  },
   {
     method: "POST", path: "/import-gold/approvals", ownership: "capability-gated",
     scope: "scoped", sandbox: "allowed",

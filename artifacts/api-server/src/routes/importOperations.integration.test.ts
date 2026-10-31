@@ -713,7 +713,10 @@ describe("source approval metadata", () => {
     expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true })).status).toBe(409);
     expect((await apply("source-approval-revoked-0001", capture)).status).toBe(403);
     const sandbox = await fetch(`${baseUrl}/api/import-gold/approvals`, { headers: headers("sandbox") });
-    expect(await sandbox.json()).toEqual({ approvals: [], nextBefore: null });
+    expect(await sandbox.json()).toMatchObject({
+      approvals: [], nextBefore: null,
+      expiryReminders: { windowDays: 7, expiringCount: 0 },
+    });
     const events = await db.select().from(tables.auditLogsTable);
     expect(events.filter((row) => row.resource === "import_gold_approval")).toHaveLength(3);
     expect(events.filter((row) => row.resource === "import_gold_approval").every((row) =>

@@ -122,7 +122,11 @@ function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anc
 function selectTrackingRun(
   payload: Payload,
   nowMs: number,
-  options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean },
+  options: {
+    allowEndedDrain?: boolean;
+    allowPausedPackagingDrain?: boolean;
+    targetRunId?: string;
+  },
 ): { run: Record<string, unknown>; index: number } | null {
   const runs = payload.dayState?.runs ?? [];
   const active: Array<{ run: Record<string, unknown>; index: number; startedAt: number }> = [];
@@ -130,6 +134,7 @@ function selectTrackingRun(
 
   runs.forEach((run, index) => {
     if (typeof run.id !== "string" || number(run.startedAt) <= 0) return;
+    if (options.targetRunId !== undefined && run.id !== options.targetRunId) return;
     const values = payload.runValues?.[run.id];
     if (!values) return;
     const endedAt = number(run.endedAt);
@@ -170,7 +175,11 @@ function selectTrackingRun(
 function schedule(
   payload: Payload,
   nowMs: number,
-  options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean } = {},
+  options: {
+    allowEndedDrain?: boolean;
+    allowPausedPackagingDrain?: boolean;
+    targetRunId?: string;
+  } = {},
 ): {
   schedule: AutoTrackSchedule;
   values: Record<string, unknown>;
@@ -419,11 +428,13 @@ export function buildWallClockServerClaims(
   raw: unknown,
   nowMs = Date.now(),
   eventIdNamespace?: string,
+  targetRunId?: string,
 ): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
   const built = schedule(payload, nowMs, {
     allowEndedDrain: true,
     allowPausedPackagingDrain: true,
+    targetRunId,
   });
   const run = built?.run;
   if (!built || !run || number(run.startedAt) <= 0) return null;

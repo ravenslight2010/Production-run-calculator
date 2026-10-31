@@ -1083,7 +1083,7 @@ describe("role definition concurrency and atomic audit", () => {
       name: "reviewed-concurrent-role", capabilities: [],
     });
     expect(created.status).toBe(201);
-    const expectedRole = await created.json();
+    const expectedRole = await created.json() as { name: string; builtin: boolean; capabilities: string[] };
     const results = await Promise.all([
       req(MANAGER, "PUT", "/api/roles/reviewed-concurrent-role", {
         expectedRole, capabilities: ["manage-inventory"],
@@ -1093,7 +1093,9 @@ describe("role definition concurrency and atomic audit", () => {
       }),
     ]);
     expect(results.map((response) => response.status).sort()).toEqual([200, 409]);
-    const accepted = await results.find((response) => response.status === 200)!.json();
+    const accepted = await results.find((response) => response.status === 200)!.json() as {
+      capabilities: string[];
+    };
     const roleResponse = await req(MANAGER, "GET", "/api/roles");
     const roles = await roleResponse.json() as Array<{ name: string; capabilities: string[] }>;
     expect(roles.find((role) => role.name === expectedRole.name)?.capabilities).toEqual(accepted.capabilities);
@@ -1126,7 +1128,7 @@ describe("role definition concurrency and atomic audit", () => {
       name: "reviewed-audit-rollback", capabilities: ["manage-inventory"],
     });
     expect(created.status).toBe(201);
-    const expectedRole = await created.json();
+    const expectedRole = await created.json() as { name: string; builtin: boolean; capabilities: string[] };
     await db.execute(sql`CREATE FUNCTION role_audit_failure_fixture() RETURNS trigger
       LANGUAGE plpgsql AS $$ BEGIN
         IF NEW.action = 'role_definition_updated' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF;

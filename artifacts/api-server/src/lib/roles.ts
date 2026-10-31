@@ -109,6 +109,8 @@ export type RoleDefinition = {
   builtin: boolean;
 };
 
+type RoleMutationTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 function toRoleDefinition(row: {
   name: string;
   capabilities: string[];
@@ -728,7 +730,7 @@ export async function updateRoleCapabilities(
   options?: {
     expectedRole: RoleDefinition;
     onUpdated: (
-      tx: Parameters<typeof lockStaffAdminMutation>[0],
+      tx: RoleMutationTransaction,
       before: RoleDefinition,
       after: RoleDefinition,
     ) => Promise<void>;
