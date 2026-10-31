@@ -59,7 +59,7 @@ test("cleanup validates whole set before deleting and preserves changed files", 
 });
 
 test("manifest has unique exact historical pins and bounded safe paths", (t) => {
-  assert.equal(manifest.length, 52); assert.equal(new Set(manifest.map((e) => e.path)).size, manifest.length);
+  assert.equal(manifest.length, 54); assert.equal(new Set(manifest.map((e) => e.path)).size, manifest.length);
   for (const e of manifest) { assert.match(e.sha256, /^[a-f0-9]{64}$/); assert.match(e.revision, /^[a-f0-9]{40}$/); }
   // Synthetic bytes validate every production path without reading historical data.
   const entries = manifest.map((e) => ({ ...e, sha256: sha(bytes) })); const dir = root(t); materialize(dir, entries, () => bytes); cleanup(dir, entries);

@@ -1486,3 +1486,13 @@ API routes/index.ts and capabilities/registration.test.ts: protected cleanup-cas
 GET was absent from read inventory and failed assembled-router CI. Recorded its
 already-enforced scoped manage-staff policy, without changing permissions or
 real-source Gold enablement. Focused and hosted verification pending.
+
+Restricted hosted follow-up: 3796 web tests passed; 4 still requested the old
+root-level Aldo workbook, and source comparison requested its retained audit.
+Both added as exact historical path/revision/hash metadata to the same PR-only
+manifest (54 payloads total), not copied into Git. Docker runtime failed an
+equivalent kernel CAP_NET_BIND_SERVICE spelling; check-docker-runtime now uses
+a JSON comparator plus synthetic tests to normalize only added CAP_ prefixes
+while rejecting extra/missing/wrong/duplicate capabilities, wrong UID and drop
+sets. Runtime permissions unchanged. Hosted rollback/build/browser/fresh lanes
+passed; broad revalidation remains pending.

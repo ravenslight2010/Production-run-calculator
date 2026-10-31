@@ -23,12 +23,12 @@ export function authorize(context, event, approvedHead, capability, expectedCapa
 }
 
 function checksumEntry() {
-  const report = manifest.find((entry) => entry.path.endsWith(".json"));
+  const report = manifest.find((entry) => entry.path.endsWith("/source-library-reconciliation-2026-08-26.json"));
   return { path: report.path.replace(/json$/, "sha256"), sha256: digest(Buffer.from(`${report.sha256}\n`)) };
 }
 
 function safePath(root, relative, create) {
-  if (!/^attached_assets\/source-library\/(?:[A-Za-z0-9_' ,.()-]+\/)*[A-Za-z0-9_' ,.()-]+\.(?:xlsx|json|sha256)$/.test(relative) ||
+  if (!/^attached_assets\/(?:source-library\/)?(?:[A-Za-z0-9_' ,.()-]+\/)*[A-Za-z0-9_' ,.()-]+\.(?:xlsx|json|sha256)$/.test(relative) ||
       relative.split("/").some((part) => part === "." || part === "..")) throw new Error("Invalid reviewed input path.");
   let current = realpathSync(root);
   const components = relative.split("/");
@@ -105,7 +105,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
       materialize(process.cwd(), manifest, (entry) => execFileSync("git", ["show", `${entry.revision}:${entry.path}`], { maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 }));
       // Synthesize only the checksum of the exact canonical report, never audit/workbook content.
-      const report = manifest.find((entry) => entry.path.endsWith(".json"));
+      const report = manifest.find((entry) => entry.path.endsWith("/source-library-reconciliation-2026-08-26.json"));
       const checksum = { path: report.path.replace(/json$/, "sha256"), sha256: digest(Buffer.from(`${report.sha256}\n`)) };
       materialize(process.cwd(), [checksum], () => Buffer.from(`${report.sha256}\n`));
     } else throw new Error("Invalid restricted input command.");

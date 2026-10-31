@@ -512,3 +512,35 @@ Push preparation initially failed because the restored sandbox had no Git
 author identity. No new source commit or main change occurred; the premature
 PR checkpoint was corrected immediately. Retry uses an explicit Notion AI
 commit identity and fail-fast shell execution.
+
+### First restricted hosted run — ac14df3e
+
+Private CI restore and cleanup succeeded. Build (web+API), original schema-safe
+rollback, department desktop/phone journey, reduced-motion/HTTPS browser checks,
+workflow syntax and all fresh-runtime foundation checks PASS. API and standard
+release checks were still running during this repair checkpoint.
+
+The broad web suite progressed to 3796 PASS / 4 FAIL / 1 SKIP: all remaining
+failures requested an older exact Aldo workbook outside source-library. Scripts
+routine progressed past workbook parsing and then lacked the retained comparison
+report. Added those two exact historical path/revision/hash entries to the same
+restricted PR-only manifest; do not replace fixtures with synthetic data or
+change assertions to get green. No raw payload was committed or logged.
+
+Original Docker images built, but runtime security comparison rejected Docker's
+CAP_NET_BIND_SERVICE spelling for the exact NET_BIND_SERVICE capability. Added a
+JSON-aware comparator that normalizes only added-capability CAP_ prefixes and
+retains exact UID, drop-ALL and no-extra-capability checks. Regression cases cover
+CHOWN/NET_BIND_SERVICE aliases, empty/null no-add, wrong UID/drop, extra/wrong/
+duplicate/malformed capabilities. No container permission was broadened.
+
+A later status command omitted its repository directory (read-only git status
+error); subsequent commands explicitly use the repo working directory. All
+failures remain owned here; no main merge or production publish occurred.
+
+Second repair pre-push verification: root typecheck PASS (exit 0), 23 input
+contracts PASS, four Docker-security regression groups PASS, maintained Docker
+shell lint PASS, workflow syntax PASS, frozen install and strict dependency
+inventory PASS. The web suite also reported 162.5 seconds against its existing
+150-second budget while failing inputs; leave that timing gate unchanged and
+verify the complete passing suite rather than assuming the budget is met.

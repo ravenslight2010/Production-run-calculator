@@ -258,5 +258,15 @@
     "path": "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
     "sha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
     "revision": "4757ed542872129d6ff2ccad31cd71051ba7f9a5"
+  },
+  {
+    "path": "attached_assets/source-library/audits/source-comparison-2026-08-26.json",
+    "sha256": "0d2b1665c92ef3f2067a1639cc608a97a04eceeee3387d912395f3d92352219d",
+    "revision": "4757ed542872129d6ff2ccad31cd71051ba7f9a5"
+  },
+  {
+    "path": "attached_assets/Aldo's_Pizza_Specs_-_09_1783188271692.xlsx",
+    "sha256": "54c6e9660c5da91e80f41180d5b181d53758d55e688ad5684e5217d130fc100c",
+    "revision": "c32c4370ce5cb36c715574b9acf6befba55d9129"
   }
 ]

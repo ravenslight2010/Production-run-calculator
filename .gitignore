@@ -89,3 +89,4 @@ Thumbs.db
 
 # Exact reviewed legacy CI inputs; never reintroduce private payloads to tracked source.
 /attached_assets/source-library/
+/attached_assets/Aldo's_Pizza_Specs_-_09_1783188271692.xlsx

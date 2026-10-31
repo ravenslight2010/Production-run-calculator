@@ -220,18 +220,9 @@ assert_container_security() {
   local expected_drop="$3"
   local expected_add="$4"
   local actual
-  local actual_base
-  local actual_add
   actual="$(docker inspect --format '{{.Config.User}}|{{json .HostConfig.CapDrop}}|{{json .HostConfig.CapAdd}}' "$id")"
-  actual_base="${actual%|*}"
-  actual_add="${actual##*|}"
-  if [[ "$actual_base" != "${expected_user}|${expected_drop}" ]] ||
-    { [[ "$expected_add" == "[]" ]] && [[ "$actual_add" != "[]" && "$actual_add" != "null" ]]; } ||
-    { [[ "$expected_add" != "[]" ]] && [[ "$actual_add" != "$expected_add" ]]; }; then
-    printf 'Container security mismatch: expected %s|%s|%s, got %s\n' \
-      "$expected_user" "$expected_drop" "$expected_add" "$actual" >&2
-    return 1
-  fi
+  python3 -S "${REPO_ROOT}/scripts/src/check-container-security.py" \
+    "$actual" "$expected_user" "$expected_drop" "$expected_add"
 }
 
 assert_container_security "$migrate_id" "node" '["ALL"]' '[]'

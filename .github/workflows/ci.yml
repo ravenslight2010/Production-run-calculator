@@ -490,6 +490,8 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
           REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs
+      - name: Test exact Docker security comparisons
+        run: python3 -S scripts/src/check-container-security.test.py
       - name: Set up QEMU (multi-arch builds)
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - name: Set up Docker Buildx
