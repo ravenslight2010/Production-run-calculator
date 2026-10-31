@@ -1065,8 +1065,6 @@ test.describe("accessibility smoke", () => {
   test("touch break planning opens above Schedule and retains the saved draft", async ({ page }) => {
     const errors: string[] = [];
     const failedResponses: string[] = [];
-    const knownManagerDiagnostics404: string[] = [];
-    const knownManagerDiagnosticsConsole: string[] = [];
     const unexpectedRequestFailures: string[] = [];
     const expectedNavigationAborts: string[] = [];
     const cancelledReadsToVerify = new Map<string, string>();
@@ -1125,12 +1123,7 @@ test.describe("accessibility smoke", () => {
           text, successfulOrigins, navigationPaths,
           duringReload: requestPhase === "persistence reload",
         });
-        if (
-          pathname === "/api/background-operations/diagnostics"
-          && text.includes("404 (Not Found)")
-        ) {
-          knownManagerDiagnosticsConsole.push(`${text} [${pathname}]`);
-        } else if (cancelledPath) {
+        if (cancelledPath) {
           expectedWebKitNavigationMessages.push(`cancelled document: ${cancelledPath}`);
         } else {
           errors.push(`${text}${pathname ? ` [${pathname}]` : ""}`);
@@ -1140,15 +1133,7 @@ test.describe("accessibility smoke", () => {
     page.on("response", response => {
       const pathname = new URL(response.url()).pathname;
       const record = `${response.status()} ${response.request().method()} ${pathname}`;
-      if (
-        response.status() === 404
-        && response.request().method() === "GET"
-        && pathname === "/api/background-operations/diagnostics"
-      ) {
-        // Confirmed pre-existing manager diagnostics route is not mounted.
-        // Retain it as a separate finding; it is not a Schedule test success.
-        knownManagerDiagnostics404.push(record);
-      } else if (response.status() >= 400) {
+      if (response.status() >= 400) {
         failedResponses.push(record);
       }
     });
@@ -1319,22 +1304,26 @@ test.describe("accessibility smoke", () => {
 
     // Cancellation is not a success receipt. Require fresh authenticated reads
     // of every exact cancelled URL after reload/navigation; actual HTTP errors
-    // still fail, except the separately retained known unmounted diagnostic.
+    // still fail, including the mounted manager diagnostics endpoint.
     for (const [url, pathname] of cancelledReadsToVerify) {
       const recovery = await page.request.get(url);
+      expect(recovery.ok(), `fresh read after navigation: ${pathname}`).toBe(true);
       if (pathname === "/api/background-operations/diagnostics") {
-        expect(recovery.status()).toBe(404);
-        knownManagerDiagnostics404.push("404 GET /api/background-operations/diagnostics");
-      } else expect(recovery.ok(), `fresh read after navigation: ${pathname}`).toBe(true);
+        expect(recovery.status()).toBe(200);
+        expect(recovery.headers()["content-type"]).toContain("application/json");
+        const diagnostics = await recovery.json();
+        expect(Array.isArray(diagnostics.warnings)).toBe(true);
+        expect(Number.isFinite(diagnostics.windowMs)).toBe(true);
+        expect(diagnostics.windowMs).toBeGreaterThan(0);
+        expect(typeof diagnostics.automaticTrackingBackoff?.deferredDateCount).toBe("number");
+        expect(typeof diagnostics.automaticTrackingBackoff?.deferredDateCountCapped).toBe("boolean");
+      }
     }
 
-    console.log("known out-of-scope manager diagnostics 404s:", {
-      responses: knownManagerDiagnostics404,
-      console: knownManagerDiagnosticsConsole,
+    console.log("bounded expected navigation cancellations with verified recovery:", {
       expectedNavigationAborts,
       expectedWebKitNavigationMessages,
     });
-    expect(knownManagerDiagnostics404.every(value => value === "404 GET /api/background-operations/diagnostics")).toBe(true);
     expect({ errors, failedResponses, unexpectedRequestFailures }).toEqual({
       errors: [],
       failedResponses: [],

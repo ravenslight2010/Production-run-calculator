@@ -782,3 +782,38 @@ Corrected pinned-toolpath root typecheck PASS (exit0), workflow policy/actionlin
 PASS, diff whitespace/privacy checks PASS. Confirmed programmatically that every
 one of the29 test diffs is exactly one added Node-environment annotation. No
 assertion or UI/browser project was changed by this timing follow-up.
+
+
+### Uninterrupted release841090be — stale404 test expectation
+
+Required CI41238214719 PASS, including full web timing132.8s <150s,3802 assertions
+PASS/1 existing skip, shared libraries/API/Docker/build/typecheck/security, native
+metadata, self-host and browser/rollback lanes. Standard release41238214690
+closed the real isolated legacy producer and WebKit inventory failures. All12API
+shards, authorized and denied supervisor cases, calendar/smoke and WebKit smoke
+PASS. Accessibility had44 passing cases and4 failures (one per Chromium viewport),
+all at our newly added recovery assertion requiring404 for manager diagnostics.
+
+That expectation was wrong: the current registered manage-staff diagnostics route
+returns200 JSON (confirmed in registration, handler, existing focused API test
+and actual hosted response). Historical unmounted-route comments were stale and
+must not govern current evidence. Remove the stale404 console/response exemption
+entirely. Every fresh cancelled-URL read must now succeed; diagnostics specifically
+requires200, JSON content type and its bounded warnings/window/backoff shape.
+Any404 or other HTTP error now fails, a stricter gate than the old exemption.
+No app route, capability, exception allowlist or production behavior changed.
+The previous release remains FAIL; downstream privacy allowlist failure is not
+waived. Full new-head standard release must pass with no raw error contexts.
+
+Main environment policy/read-review/disabled-bypass/sole independent-secret
+configuration was re-read and verified. The original main report environment,
+policy and secret metadata remain unchanged. PR was marked ready for independent
+review, not merged: live rules require one independent approval; collaborator
+inventory found no other eligible reviewer. User must designate a trusted
+reviewer with appropriate access; no self-approval/admin bypass is permitted.
+Physical/full-production qualification and installed updater exclusions remain.
+
+Pre-push diagnostics correction: focused existing API contract1/1 PASS (disposable
+nonconnecting placeholder URL; handler dependencies mocked, no DB connection),
+5navigation classifier tests PASS, authoritative root typecheck PASS (exit0),
+workflow policy/actionlint PASS. No auth route or production data was modified.

@@ -1568,3 +1568,13 @@ Node annotations (315 focused assertions PASS), preserving explicit jsdom/UI
 suites, isolation/four-worker ceiling/150s budget and real-clock tests. First
 local repeat lacked ShellCheck PATH and exited127; corrected-toolpath full
 verification must pass before push. No timed gate is waived or retried as proof.
+
+
+Latest standard release841090be closed legacy producer/WebKit/supervisor failures;
+44a11y cases passed,4 failed solely at the new stale diagnostics404 recovery
+expectation. Current mounted manage-staff route and focused API contract require
+200JSON. Correct recovery to require actual successful200JSON bounded shape and
+remove historical404 response/console exemption altogether. Every real HTTP
+failure now fails; no product or auth change. Required CI/timing132.8s passed at
+841090be; next-head release must still run uninterrupted. Independent review
+remains required and no other eligible collaborator exists; main unmodified.
