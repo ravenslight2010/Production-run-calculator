@@ -1522,3 +1522,15 @@ suites (284 focused tests PASS), total54 Node suites with unchanged assertions,
 DOM-driven tests, isolation, four workers and150s guard. Authoritative root
 typecheck PASS; latest full hosted timing/suites pending. Main inputs still
 await specific owner approval, so main merge remains blocked.
+
+Final ZIP fixture prerequisite: the full routine reached and failed two existing
+real archive inventory cases after all source/metadata checks passed. Nine
+removed exact archives (6 Git blobs/3 LFS,286430528 bytes) now have a separate
+manifest and opt-in --with-archives transport only for routine/release jobs.
+Source4MiB/12MiB limits unchanged; archive140MiB/file/290MiB aggregate plus exact
+byte counts/OIDs/SHA enforced. LFS pointers must exactly match before read-only
+smudge. No member extraction/execution, raw commits/artifacts/caches. Private
+file modes, exact cleanup and original-main secrecy preserved.26 local
+contracts/workflow syntax/serialized root typecheck PASS; real hosted LFS and
+ZIP inventory verification pending. Overlapping local typechecks caused one
+137/SIGKILL; serialized rerun PASS, killed run not hidden.

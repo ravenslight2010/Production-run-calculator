@@ -116,7 +116,7 @@ jobs:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
           REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --with-archives
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       # pnpm version is read from the "packageManager" field in package.json

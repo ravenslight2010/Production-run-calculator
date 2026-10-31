@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, linkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { authorize, materialize, cleanup, manifest } from "./restore-restricted-ci-inputs.mjs";
+import { authorize, materialize, cleanup, manifest, archiveManifest, verifyArchivePointer } from "./restore-restricted-ci-inputs.mjs";
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const cap = "synthetic-capability-not-a-secret";
 const head = "a".repeat(40);
@@ -82,4 +82,38 @@ test("workflows retain both protected main and narrowly restricted PR lanes with
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   const docker = ci.slice(ci.indexOf("  docker:\n"), ci.indexOf("  build:\n")); assert.doesNotMatch(docker, /cache-to:|cache-from:/); assert.match(docker, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
   const rollback = readFileSync(new URL("./rehearse-schema-safe-rollback.mts", import.meta.url), "utf8"); assert.match(rollback, /for \(const context of \[parentContext, currentContext\]\)/); assert.match(rollback, /--copy-report/);
+});
+
+
+test("opaque archive manifest is exact, bounded, unique and restricted to routine/release", () => {
+  assert.equal(archiveManifest.length, 9);
+  assert.equal(new Set(archiveManifest.map((entry) => entry.path)).size, 9);
+  assert.equal(archiveManifest.reduce((total, entry) => total + entry.bytes, 0), 286430528);
+  assert.equal(archiveManifest.filter((entry) => entry.lfs).length, 3);
+  for (const entry of archiveManifest) {
+    assert.match(entry.path, /^attached_assets\/[^/]+\.zip$/);
+    assert.match(entry.sha256, /^[a-f0-9]{64}$/); assert.match(entry.revision, /^[a-f0-9]{40}$/);
+    assert.ok(Number.isSafeInteger(entry.bytes) && entry.bytes > 0 && entry.bytes <= 140 * 1024 * 1024);
+  }
+  const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.equal(ci.match(/restore-restricted-ci-inputs\.mjs --with-archives/g)?.length, 1);
+  const department = readFileSync(new URL("../../.github/workflows/department-navigation.yml", import.meta.url), "utf8");
+  assert.doesNotMatch(department, /--with-archives/);
+});
+
+test("LFS pointers require exact reviewed oid, length and bounded canonical metadata", () => {
+  const entry = { sha256: sha(bytes), bytes: bytes.length };
+  const pointer = Buffer.from(`version https://git-lfs.github.com/spec/v1\noid sha256:${entry.sha256}\nsize ${entry.bytes}\n`);
+  assert.doesNotThrow(() => verifyArchivePointer(pointer, entry));
+  for (const changed of [{ ...entry, sha256: "f".repeat(64) }, { ...entry, bytes: 0 }, { ...entry, bytes: entry.bytes + 1 }, { ...entry, bytes: 140 * 1024 * 1024 + 1 }]) assert.throws(() => verifyArchivePointer(pointer, changed));
+  assert.throws(() => verifyArchivePointer(Buffer.concat([pointer, Buffer.from("extra metadata")]), entry));
+});
+
+test("separate fixture budgets enforce exact lengths and totals without relaxing source defaults", (t) => {
+  const dir = root(t); const opaque = { path: "attached_assets/opaque.zip", sha256: sha(bytes), bytes: bytes.length };
+  assert.throws(() => materialize(dir, [{ ...opaque, bytes: bytes.length + 1 }], () => bytes));
+  assert.throws(() => materialize(dir, [opaque], () => bytes, { perFile: bytes.length - 1, total: bytes.length }));
+  assert.throws(() => materialize(dir, [opaque, { ...opaque, path: "attached_assets/second.zip" }], () => bytes, { perFile: bytes.length, total: bytes.length }));
+  materialize(dir, [opaque], () => bytes, { perFile: bytes.length, total: bytes.length });
+  assert.deepEqual(readFileSync(path.join(dir, opaque.path)), bytes); cleanup(dir, [opaque]);
 });

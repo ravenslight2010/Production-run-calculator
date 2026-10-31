@@ -627,3 +627,37 @@ backfill/export/dataset regression suite PASS; three further native Linux
 recovery/race reruns PASS, including large busy-gate input refusal without writes.
 Root typecheck PASS, exit0. Latest broad/native-host/timing/release checks must
 run from the pushed head. Main-only data access has not been approved or changed.
+
+### Fifth hosted run — 30669aae
+
+Web+library timing gate PASS after pure-environment correction; Docker/build/
+rollback/browser/fresh checks PASS. Native macOS and Windows metadata checks
+PASS after the fail-closed EPIPE repair. The scripts routine progressed through
+all metadata/distillation checks and reached its final real ZIP inventory suite,
+which exposed nine removed opaque archive fixtures (six normal Git blobs and
+three Git LFS objects, 286,430,528 bytes total). Existing checkout LFS cannot
+restore paths no longer in HEAD. No inventory assertion is skipped or synthesized.
+
+Extended the same reviewed-head PR-only channel with a separate nine-archive
+manifest and --with-archives flag ONLY for routine/release consumers. All source
+input limits remain4MiB/file and12MiB/total. Archive limits are a separate
+140MiB/file,290MiB/total ceiling with exact per-file byte lengths and SHA-256s;
+LFS pointers must exactly match version/OID/length before read-only smudge.
+No archive member is opened/extracted/executed; the existing inventory reads
+central-directory metadata only. ZIPs remain mode600, ignored, contents
+never logged, excluded from build context/artifacts/caches and allowlist-cleaned.
+No main-only permission is inferred; its pending approval remains blocking merge.
+
+Local verification discipline: two root typechecks accidentally overlapped; one
+was terminated with137/SIGKILL during API/calculator checks (no TS diagnostic),
+while the later check completed. This is not counted as a pass for the killed
+run. Stop overlapping workspace-wide checks and repeat root typecheck alone
+before commit; no runner memory limit or gate is changed.
+
+Sixth pre-push: serialized authoritative root typecheck PASS (exit0); all26
+source/archive authorization, pointer, budget and cleanup contracts PASS;
+workflow syntax PASS. Duplicate archive pairs' exact hashes match. The prior
+web full-suite timing PASS was94.4s (unchanged150s limit); all3800 assertions
+and shared libraries PASS. Latest API PASS; native macOS/Windows metadata PASS.
+Real LFS fixture retrieval and final ZIP inventory still require hosted proof.
+No archive member was extracted/executed locally or added to Git.
