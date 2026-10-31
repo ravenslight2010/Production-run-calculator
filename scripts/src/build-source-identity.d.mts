@@ -39,3 +39,4 @@ export function sourceRecordDigest(record: SourceRecord): string;
 export function buildInfoFromRecord(record: SourceRecord, mode: "release" | "development", completedAt?: string): BuildInfo;
 export function completeBuildStage(root: string, record: SourceRecord, stage: "api" | "web"): BuildInfo | false;
 export function sealBuildIdentity(root?: string, required?: boolean): BuildInfo | false;
+export function outputFingerprint(root: string, stage: "api" | "web"): string;
