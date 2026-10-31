@@ -47,7 +47,11 @@ jobs:
         with:
           node-version-file: .nvmrc
       - name: Exercise pure safety contracts (no credentials or production DB)
-        run: node --test scripts/self-host/self-host.test.mjs scripts/self-host/preflight.test.mjs scripts/self-host/build-identity.test.mjs
+        run: >-
+          node --test --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=./scripts/self-host/ci-test-reporter.mjs --test-reporter-destination=stdout
+          scripts/self-host/self-host.test.mjs scripts/self-host/preflight.test.mjs
+          scripts/self-host/build-identity.test.mjs scripts/self-host/ci-test-reporter.test.mjs
       - name: Verify unchanged production identity and promotion contracts
         if: runner.os == 'Linux'
         run: node --test scripts/src/build-source-identity.test.mjs scripts/src/verify-published-build.test.mjs scripts/src/release-source-identity.test.mjs
