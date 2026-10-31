@@ -20,7 +20,7 @@ concurrency:
 jobs:
   release-check-standard:
     name: Release gates and retained standard evidence
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -75,21 +75,16 @@ jobs:
         env:
           SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
         run: node scripts/src/restore-reviewed-build-inputs.mjs
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
-
-      - name: Build production API image and verify its Node.js version
-        run: |
-          set -euo pipefail
-          api_image="release-check-api:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          expected_node_version="v$(tr -d '\r\n' < .nvmrc)"
-          docker build --pull --target api --tag "$api_image" .
-          actual_node_version="$(docker run --rm "$api_image" node --version)"
-          if [[ "$actual_node_version" != "$expected_node_version" ]]; then
-            echo "Production API image Node.js version ${actual_node_version} does not match .nvmrc (${expected_node_version})." >&2
-            exit 1
-          fi
-          printf 'Production API image Node.js version matches .nvmrc: %s\n' "$actual_node_version"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -111,6 +106,19 @@ jobs:
 
       - name: Install dependencies
         run: bash scripts/src/run-release-node.sh pnpm install --frozen-lockfile
+
+      - name: Build production API image and verify its Node.js version
+        run: |
+          set -euo pipefail
+          api_image="release-check-api:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expected_node_version="v$(tr -d '\r\n' < .nvmrc)"
+          docker build --pull --target api --tag "$api_image" .
+          actual_node_version="$(docker run --rm "$api_image" node --version)"
+          if [[ "$actual_node_version" != "$expected_node_version" ]]; then
+            echo "Production API image Node.js version ${actual_node_version} does not match .nvmrc (${expected_node_version})." >&2
+            exit 1
+          fi
+          printf 'Production API image Node.js version matches .nvmrc: %s\n' "$actual_node_version"
 
       - name: Install WebKit and Linux runtime dependencies
         run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps webkit
@@ -259,12 +267,16 @@ jobs:
         run: |
           bash scripts/src/release-stopped-summary.sh
 
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
+
       - name: Clean protected build inputs
         if: always() && steps.reviewed-inputs.outcome != 'skipped'
         run: node scripts/src/restore-reviewed-build-inputs.mjs --cleanup
 
   release-check-full:
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     name: Release gates and retained full evidence
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full }}
     runs-on: ubuntu-latest
@@ -320,6 +332,14 @@ jobs:
         env:
           SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
         run: node scripts/src/restore-reviewed-build-inputs.mjs
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
 
@@ -522,6 +542,10 @@ jobs:
           REGENERATE_COMMAND: pnpm run release:check:full
         run: |
           bash scripts/src/release-stopped-summary.sh
+
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
       - name: Clean protected build inputs
         if: always() && steps.reviewed-inputs.outcome != 'skipped'

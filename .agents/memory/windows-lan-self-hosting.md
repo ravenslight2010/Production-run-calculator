@@ -176,3 +176,19 @@ restore, signed safe updater implementation. Updater policy remains planning
 only. PR #142 stays draft, main/Replit/live deployment NO-GO. Do not ask for a new
 GitHub login: approved transient git publication route works. Full retained
 failure ledger: docs/self-host/fresh-build-profile.md.
+
+## PR #142 restricted CI input channel
+
+Donald approved the narrowly scoped PR-only channel. New environment
+pr-142-reviewed-test-inputs: exact PR merge ref, required owner review, admin
+bypass disabled, new authorization capability, reviewed-head variable. No
+protected-main secret/policy changed. Exact fixed historical Git blob manifest
+(51 workbooks + canonical report), bounded hashes/private files/cleanup, no raw
+payload commits/artifacts/cache exports. Production source policy unchanged.
+Rollback copies the exact report pair into both disposable worktrees.
+Typecheck PASS, 23 input + 7 route contracts PASS, workflow/dependency/frozen
+install/rollback unit PASS; hosted CI pending. Registration CI also found
+cleanup-cases GET missing from the existing manage-staff read inventory; fixed
+the declaration/test only, no permission/Gold enablement change. Main's legacy
+input provisioning remains unresolved by the PR-only grant. Do not merge while
+required gates or this known post-merge issue remain unresolved.

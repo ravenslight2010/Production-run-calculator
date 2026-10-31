@@ -157,7 +157,7 @@ test("offline CLI cannot override the production pin or expose source paths and 
   }
 });
 
-test("all newly wired CI consumers keep private delivery main-only, with no lost checks", () => {
+test("all CI consumers keep the existing protected secret main-only, with no lost checks", () => {
   const consumers = [
     ["ci.yml", ["typecheck", "reduced-motion-browser", "test-db", "build"]],
     ["department-navigation.yml", ["department-navigation"]],
@@ -170,7 +170,9 @@ test("all newly wired CI consumers keep private delivery main-only, with no lost
     for (const job of jobs) {
       const section = workflow.match(new RegExp(`^  ${job}:\\n[\\s\\S]*?(?=^  [a-zA-Z][\\w-]*:|$(?![\\s\\S]))`, "m"))?.[0];
       assert.ok(section, `${file}/${job} must remain present`);
-      assert.ok(section.includes(`environment: \${{ ${guard} && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}`));
+      assert.ok(section.includes(`${guard} && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}`));
+      assert.ok(section.includes("github.event.pull_request.number == 142"));
+      assert.ok(section.includes("pr-142-reviewed-test-inputs"));
       const restore = section.indexOf("      - name: Restore protected main build inputs");
       assert.ok(restore >= 0);
       const nextStep = section.indexOf("\n      - ", restore + 1);

@@ -90,7 +90,7 @@ jobs:
 
   typecheck:
     name: Typecheck
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -109,6 +109,14 @@ jobs:
         env:
           SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
         run: node scripts/src/restore-reviewed-build-inputs.mjs
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       # pnpm version is read from the "packageManager" field in package.json
@@ -138,12 +146,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
+
       - name: Clean protected build inputs
         if: always() && steps.reviewed-inputs.outcome != 'skipped'
         run: node scripts/src/restore-reviewed-build-inputs.mjs --cleanup
 
   test:
     name: Unit tests (web + libs)
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -155,6 +168,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       # pnpm version is read from the "packageManager" field in package.json
@@ -177,10 +198,13 @@ jobs:
           path: test-evidence/test-results.json
           if-no-files-found: error
           retention-days: 14
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
   reduced-motion-browser:
     name: Reduced-motion browser previews
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -198,6 +222,14 @@ jobs:
         env:
           SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
         run: node scripts/src/restore-reviewed-build-inputs.mjs
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -230,6 +262,10 @@ jobs:
           path: test-evidence/test-results.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
       - name: Clean protected build inputs
         if: always() && steps.reviewed-inputs.outcome != 'skipped'
@@ -269,7 +305,7 @@ jobs:
 
   test-db:
     name: API tests (Postgres)
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Match the standard release-check job ceiling for the full API suite.
     timeout-minutes: 45
@@ -306,6 +342,14 @@ jobs:
         env:
           SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
         run: node scripts/src/restore-reviewed-build-inputs.mjs
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       # pnpm version is read from the "packageManager" field in package.json
@@ -336,12 +380,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
+
       - name: Clean protected build inputs
         if: always() && steps.reviewed-inputs.outcome != 'skipped'
         run: node scripts/src/restore-reviewed-build-inputs.mjs --cleanup
 
   schema-safe-rollback:
     name: Schema-safe application rollback rehearsal
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -352,6 +401,14 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -383,7 +440,9 @@ jobs:
           path: test-evidence/test-results.json
           if-no-files-found: error
           retention-days: 14
-
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
   security-audit:
     name: Security audit (prod deps)
@@ -411,15 +470,26 @@ jobs:
 
   docker:
     name: Docker image
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Includes cached multi-stage image builds and a disposable Compose startup.
     timeout-minutes: 40
     permissions:
       contents: read
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Set up QEMU (multi-arch builds)
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - name: Set up Docker Buildx
@@ -432,11 +502,11 @@ jobs:
           target: api
           push: false
           load: true
+          provenance: false
+          sbom: false
           platforms: linux/amd64
           tags: |
             runcalc-api:${{ github.sha }}
-          cache-from: type=gha,scope=docker-build-api-${{ github.run_id }}
-          cache-to: type=gha,mode=max,scope=docker-build-api-${{ github.run_id }}
 
       - name: Build api migration image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -445,11 +515,11 @@ jobs:
           target: api-migrate
           push: false
           load: true
+          provenance: false
+          sbom: false
           platforms: linux/amd64
           tags: |
             runcalc-api-migrate:${{ github.sha }}
-          cache-from: type=gha,scope=docker-build-api-migrate-${{ github.run_id }}
-          cache-to: type=gha,mode=max,scope=docker-build-api-migrate-${{ github.run_id }}
 
       - name: Build web image (caddy static)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -458,20 +528,23 @@ jobs:
           target: web
           push: false
           load: true
+          provenance: false
+          sbom: false
           platforms: linux/amd64
           tags: |
             runcalc-web:${{ github.sha }}
-          cache-from: type=gha,scope=docker-build-web-${{ github.run_id }}
-          cache-to: type=gha,mode=max,scope=docker-build-web-${{ github.run_id }}
 
       - name: Start and verify the Docker stack on disposable data
         env:
           DOCKER_IMAGE_TAG: ${{ github.sha }}
         run: bash scripts/src/check-docker-runtime.sh
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
   build:
     name: Build (web + API)
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Includes dependency installation and both production bundles.
     timeout-minutes: 20
@@ -494,6 +567,14 @@ jobs:
         env:
           SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
         run: node scripts/src/restore-reviewed-build-inputs.mjs
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       # pnpm version is read from the "packageManager" field in package.json
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -504,6 +585,10 @@ jobs:
         run: pnpm --filter @workspace/run-calculator run build
       - name: Build API server bundle
         run: pnpm --filter @workspace/api-server run build
+
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
       - name: Clean protected build inputs
         if: always() && steps.reviewed-inputs.outcome != 'skipped'

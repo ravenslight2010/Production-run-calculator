@@ -138,7 +138,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/profile-data/health-check", "/profile-data/health-workspace",
     "/ai-memory/health-check", "/background-operations/diagnostics",
     "/import-gold/config", "/import-gold/cases", "/import-gold/export.jsonl",
-    "/import-gold/synthetic-review",
+    "/import-gold/synthetic-review", "/import-gold/cleanup-cases",
   ]),
   ...reads(["manage-staff", "manage-qc"], "any", "scoped", [
     "/import-gold/approvals", "/import-gold/retention",

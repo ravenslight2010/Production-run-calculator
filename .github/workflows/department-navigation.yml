@@ -14,7 +14,7 @@ concurrency:
 jobs:
   department-navigation:
     name: Desktop and phone department journey
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -67,6 +67,14 @@ jobs:
         env:
           SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
         run: node scripts/src/restore-reviewed-build-inputs.mjs
+      - name: Restore PR 142 reviewed CI inputs
+        id: restricted-inputs
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
 
@@ -193,6 +201,10 @@ jobs:
           path: test-evidence/test-results.json
           if-no-files-found: error
           retention-days: 14
+      - name: Clean PR 142 reviewed CI inputs
+        if: always() && steps.restricted-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
+
       - name: Clean protected build inputs
         if: always() && steps.reviewed-inputs.outcome != 'skipped'
         run: node scripts/src/restore-reviewed-build-inputs.mjs --cleanup

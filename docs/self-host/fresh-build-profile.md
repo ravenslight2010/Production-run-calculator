@@ -446,3 +446,69 @@ local model evaluation on chosen hardware, restore rehearsal, and signed safe
 GitHub update implementation/rehearsal. The update policy is still a planning
 contract, not an installed automatic updater. No main/Replit/registry publishing
 or production-data changes were made.
+
+### Approved restricted CI input delivery — PR #142
+
+Donald explicitly approved a separate CI-only input channel after the main-only
+secret boundary blocked the required PR gates. This supersedes the earlier
+no-PR-access restriction only for the reviewed same-repository PR #142 head.
+Agent-owned execution remains in this task: recover exact historical Git blobs
+through a guarded, read-only CI transport; pin every path/revision/SHA-256; deny
+forks, other PRs, other branches and unreviewed head revisions. The existing
+protected-main secret and its branch policy must not change. A separate
+environment capability and approved-head variable gate this PR; main retains its
+existing main-only environment and receives no new capability or private inputs.
+This channel is PR-only; post-merge legacy-input provisioning remains unresolved. No raw inputs enter tracked source, uploaded
+artifacts, external build caches or fresh self-host images. Cleanup runs even
+after failures. No live database or Replit publishing is authorized.
+
+Applicable safeguards: source-evidence boundary, build integration isolation,
+verify-before-commit and existing release gates. Verify synthetic authorization
+negatives, hashes, missing/corrupt data, filesystem links/overwrite/cleanup, workflow
+contracts, root typecheck and actual required hosted checks. Rollback worktrees
+must receive the same verified report pair. Desktop/phone/tablet and
+Chromium/WebKit retain existing hosted browser gates; physical devices remain
+unverified. Current status: implementation in progress, CI remains FAIL/NO-GO.
+
+Failure ledger addition: local PyNaCl was unavailable (environment capability);
+installed privately for GitHub secret encryption. An initial rollback-file glob
+was incorrect; resolved to rehearse-schema-safe-rollback.mts, no source effect.
+
+The first restricted-input contract run caught a comma in one retained workbook
+filename; the safe basename grammar now permits that literal character while
+retaining traversal/symlink/hardlink rejection. The existing workflow assertion
+was updated to prove the **original secret** remains main-only alongside the
+new separately authorized PR lane; the protected Docker/Caddy lane is unchanged.
+Focused private-input contracts: 23 PASS. Frozen install, workflow syntax,
+workflow isolation regressions and rollback unit contract PASS locally.
+
+The completed preceding hosted API run (41212300418) also revealed one real
+non-input failure: GET /import-gold/cleanup-cases already requires manage-staff
+but was omitted from the read-authorization inventory. Added the route to that
+existing scoped/all/manage-staff inventory and pinned its policy in the assembly
+regression; no route permission or enablement was changed. Two other API suite
+failures were missing the exact canonical report; hosted revalidation is required.
+
+No protected-main environment/secret mutation was made. A proposed broader
+capability addition was rejected before execution and narrowed to the new
+PR-only environment. Main's legacy workbook CI problem remains outside this
+new PR-only grant and must not be silently represented as repaired.
+
+The new PR-only environment additionally requires explicit deployment review,
+with admin bypass disabled. The agent will approve only runs whose exact PR
+head was reviewed and recorded in REVIEWED_PR_HEAD_SHA; a script-level head
+check alone is not an environment trust boundary. This prevents arbitrary later
+PR code from automatically receiving the environment capability. Forks and other
+refs remain excluded by deployment policy. Protected main remains untouched.
+
+Pre-push checkpoint: authoritative root typecheck PASS (exit 0); focused route
+registration 7 PASS with a nonconnecting placeholder DB URL (the first local
+attempt lacked required DATABASE_URL and collected no tests, then was corrected);
+23 restricted/existing input contracts PASS; dependency inventory, workflow
+syntax/isolation, rollback contract and frozen install PASS. Local checks do not
+claim successful historical CI data retrieval or passing hosted suites.
+
+Push preparation initially failed because the restored sandbox had no Git
+author identity. No new source commit or main change occurred; the premature
+PR checkpoint was corrected immediately. Retry uses an explicit Notion AI
+commit identity and fail-fast shell execution.

@@ -1469,3 +1469,20 @@ typechecks, recovery audit, applicability matrix, and full failure ledger.
 3,518 passed / 1 existing skipped; workspace typecheck passed, including calculator
 checks after rebuilding stale library declarations; recovery audit unchanged at
 9 pass / 1 documented difference / 0 missing.
+
+## PR #142 reviewed-input CI channel and cleanup read inventory
+
+Files: scripts/src/restore-restricted-ci-inputs.*, reviewed-ci-input-manifest.json,
+CI/department/release workflows, rollback rehearsal, scripts package, .gitignore.
+Historical bytes removed from source blocked PR gates. Added a separate PR-142,
+same-repo, reviewed-head, environment-capability gate for exact historical Git
+blob delivery; hashes, bounded regular files, no raw data commits/artifacts, no
+Docker cache/build-record export, allowlisted cleanup and isolated rollback report
+copy. Protected main's existing secret/environment remain unchanged; main input
+provisioning is not solved by this PR-only grant. Synthetic contracts: 23 PASS;
+frozen install/workflow lint+isolation/rollback contract PASS; hosted checks pending.
+
+API routes/index.ts and capabilities/registration.test.ts: protected cleanup-case
+GET was absent from read inventory and failed assembled-router CI. Recorded its
+already-enforced scoped manage-staff policy, without changing permissions or
+real-source Gold enablement. Focused and hosted verification pending.
