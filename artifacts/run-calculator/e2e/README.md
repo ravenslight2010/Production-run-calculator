@@ -224,18 +224,25 @@ through Setup Profiles and live Setup, including selection, add/clear behavior,
 accessible labels, and touch-dialog focus restoration. The four WebKit projects
 are browser emulations; they do not provide physical iOS Safari evidence.
 
-Run the isolated Schedule access and nested-picker journey across desktop,
+Run the isolated Schedule access, nested-picker, and save/reload journeys across desktop,
 phone, and both tablet orientations in Chromium and WebKit:
 
 ```sh
 pnpm --filter @workspace/run-calculator run test:e2e:schedule-dialog-layering
 ```
 
-The test creates and removes manager/restricted accounts and two temporary
+The picker test creates and removes manager/restricted accounts and two temporary
 brand profiles in a disposable database. Touch-emulated layouts select nested
 Schedule options by pointer and keyboard; desktop checks native-select input.
 Physical Android Chrome and iOS Safari/PWA are not run by this matrix and need
 their separately authorized device services.
+
+The separate save/reload journey chooses a future date and brand, enters a case
+count, and saves through Schedule. It confirms the canonical server record, then
+reloads Home and reopens that day's editor to check the date, brand, and cases.
+Its `@focused-only` tag keeps this matrix-owned regression out of the fixed
+full-browser case inventory. Cleanup removes its planned-day row and profile
+and restores the original brand list before removing the temporary account.
 
 WebKit is intentionally not included by `playwright.config.ts` and does not
 inherit `global-setup.ts`. It is a release signal for the highest-risk

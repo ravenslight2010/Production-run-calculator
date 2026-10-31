@@ -3,6 +3,18 @@ name: Browser fixture seeding
 description: Reliable ways to seed master data for authenticated browser journeys that reload and hydrate from the server.
 ---
 
+Use the production surface's rendered accessibility tree when selecting
+portaled controls; do not assume a standalone component demo's named wrapper
+also exists in the operational page.
+
+**Why:** A calendar demo supplied its own named region, while the real Schedule
+calendar lived in a separate popover dialog. Reusing the demo's container
+selector made valid calendar controls appear missing and obscured diagnosis.
+
+**How to apply:** Confirm the actual container before adapting component-demo
+selectors into an operational journey, and bound locator waits so a missing
+wrapper fails before fixture cleanup loses its test-time budget.
+
 Full-suite ordering can expose stale fixture epochs that a fresh-database
 standalone browser run cannot.
 
