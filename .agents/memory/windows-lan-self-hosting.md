@@ -146,3 +146,33 @@ Full failure ledger/current gate matrix: docs/self-host/fresh-build-profile.md.
 No Docker/psql/pwsh locally. Imports/20-client load/real Windows host/device trust,
 model qualification/backup restore/updater remain same-objective open evidence.
 No merge/main/Replit/live deploy authorized by these implementation passes.
+
+## Fresh runtime qualified checkpoint (c0108045)
+
+Hosted foundation run 41211885502 PASS: Windows/Linux safety contracts plus real
+fresh Docker migrate/api/web build and isolated core readiness without WAN/AI,
+manager signup/workspace, explicit unavailable audit/capture, final-package
+privacy, zero legacy markers and cached API restart with unchanged identity.
+Two initial probe defects (stronger cache directives and global OPTIONS CORS 204)
+were corrected without changing production cache/CORS policy; DB-free mounted
+regressions now included. Focused API count is 23 PASS, root typecheck PASS.
+Committed-source local fresh build has matching sealed API/web identities and
+verified source binding; this does not authorize a release or automatic update.
+
+Also repaired inherited synthetic undeclared external-import fixtures and narrow
+trap-only ShellCheck annotations. Hosted routines now pass dependency/shell and
+31 operational-skill checks, then block on the real missing retained Malted Barley
+workbook. Original full web suite still has 23 missing-workbook failures. Default
+production build/Docker/rollback/release/browser preparation remain blocked by
+production source prerequisites. Local chmod(000) files remain readable in this
+sandbox; no unreadable-checker test was skipped/weakened. WebKit installed but
+cannot launch with missing Amazon Linux native dependencies. Chromium panel
+fixtures corrected for UTF-8 and pass five desktop/phone/tablet viewport checks;
+not an authenticated journey or physical-device result.
+
+Same-objective open work: actual Windows host/WSL2/reboot/ACL and LAN CA trust,
+representative imports, chosen-hardware ~20-client/model measurements, verified
+restore, signed safe updater implementation. Updater policy remains planning
+only. PR #142 stays draft, main/Replit/live deployment NO-GO. Do not ask for a new
+GitHub login: approved transient git publication route works. Full retained
+failure ledger: docs/self-host/fresh-build-profile.md.

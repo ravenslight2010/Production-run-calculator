@@ -9,6 +9,11 @@ This branch uses the current `Replit`
 application as its functional baseline. It does not change Replit publishing,
 move production data, merge into main, or install an automatic updater.
 
+Fresh-profile checkpoint: [Windows/Linux + isolated Docker qualification PASS](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/41211885502)
+on implementation `c0108045`. This verifies fresh core startup/manager access and
+cached **API** restart without WAN/AI, not actual Windows Docker, full-stack
+reboot, device HTTPS trust, imports or production release readiness.
+
 ## Target and implemented boundary
 
 One semi-dedicated Windows host, roughly 20 browser clients (floor, office and

@@ -396,3 +396,53 @@ After the protocol correction: focused fresh API + legacy build-info regressions
 **23 PASS** (includes the added CORS-mounted test), authoritative root typecheck
 **PASS, exit 0**. Hosted runtime re-run is required to finish the remaining probes;
 no workspace/signup/restart result is inferred from unit tests.
+
+### Qualified fresh-runtime checkpoint — c0108045
+
+**Self-host foundation PASS** on Windows, Linux and disposable Docker runtime:
+https://github.com/ravenslight2010/Production-run-calculator/actions/runs/41211885502
+
+The fresh-runtime job's real assertions now completed: all three dedicated images
+build; new schema migration succeeds; core /readyz returns 200 on an internal
+network with no model server or WAN; build-info labels the fresh profile; manager
+signup returns 201 and authenticated data-health workspace returns 200 with the
+exact not-applicable historical status; capture/diagnostics operations refuse
+with 409/no-store (protocol-only CORS OPTIONS is empty 204); final API image has
+no uploaded assets, source checkout, report/approval helper or source maps;
+`data_heals` count stays zero before and after cached API restart; build identity
+is unchanged across that restart. All test containers/network/images are cleaned
+up. Native Windows/Linux safety jobs also passed. This is **not** proof of Caddy
+trust, full-stack reboot or actual Windows Docker execution.
+
+Repeated local source build from committed implementation PASS; API/web sealed
+identities match, Git binding is verified to the committed source, and no legacy
+approval/report/map outputs exist in API dist. This provenance is not a signed
+release/update authorization. Local root typecheck and 23 focused API regressions
+passed; 151 combined Node, nine generated-contract, three focused UI and 102 Home
+boundary contracts, strict dependency inventory and maintained shell/workflow
+lint results remain recorded above.
+
+The inherited scripts-routine issues repaired here were confirmed by hosted
+execution: dependency inventory passed, shell checks progressed, and all 31
+operational-skill evidence tests (including the chmod unreadable case blocked in
+this sandbox) passed. The hosted routine then hit the genuine missing retained
+Malted Barley workbook in compare-source-audit. It was not skipped or synthesized.
+Original web unit run retained 3777 PASS / 23 FAIL / 1 SKIP, with all 23 failures
+from the six previously identified real-workbook suites. Original production
+build/Docker/rollback, department browser preparation and standard release build
+still stop on production source prerequisites. Release's post-failure diagnostic
+commands also report missing pnpm because prerequisite failure prevented their
+tooling setup; retained fallback is NO-GO, not successful evidence. Full release
+lane was skipped after standard failed. None of these are green fresh-runtime
+gates, and later unreached tests are not counted as passed. Latest broad CI was
+still running at this checkpoint; it is already not a release GO.
+
+**Overall decision: draft PR / main and live deployment NO-GO.** Fresh runtime
+implementation and its isolated Docker qualification are complete at this
+checkpoint; the broader self-hosting goal is not. Remaining owner-controlled
+qualification: actual Windows/WSL2/unattended startup and ACLs, facility DNS/IANA
+zone and trusted HTTPS on actual clients, representative fresh imports, load and
+local model evaluation on chosen hardware, restore rehearsal, and signed safe
+GitHub update implementation/rehearsal. The update policy is still a planning
+contract, not an installed automatic updater. No main/Replit/registry publishing
+or production-data changes were made.
