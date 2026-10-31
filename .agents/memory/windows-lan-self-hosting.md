@@ -192,3 +192,11 @@ cleanup-cases GET missing from the existing manage-staff read inventory; fixed
 the declaration/test only, no permission/Gold enablement change. Main's legacy
 input provisioning remains unresolved by the PR-only grant. Do not merge while
 required gates or this known post-merge issue remain unresolved.
+
+Hosted 7b7f8375: unit web+libs PASS (3800 web PASS, 1 existing SKIP; 116.8s
+under unchanged150s gate), original Docker runtime/build/rollback/department/
+reduced-motion/freshfoundation PASS. ac14df3e API PASS. Remaining scripts
+defaults need exact retained snapshot+manifest; transport expanded to 56 pinned
+payloads with synthetic contracts/root typecheck PASS. No private payloads in
+source; no main/production mutation. Main-only input provisioning approval and
+latest hosted checks/release evidence are still required before merge.

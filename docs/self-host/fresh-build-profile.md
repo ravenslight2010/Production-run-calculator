@@ -544,3 +544,26 @@ shell lint PASS, workflow syntax PASS, frozen install and strict dependency
 inventory PASS. The web suite also reported 162.5 seconds against its existing
 150-second budget while failing inputs; leave that timing gate unchanged and
 verify the complete passing suite rather than assuming the budget is met.
+
+A proactive audit of the immediately following real-source tests found two
+more required defaults: the retained source-library manifest and its historical
+production recipe snapshot. Added exact historical pins to the same PR-only
+channel (56 payloads total). Metadata review confirms the snapshot is recipe/
+profile/ingredient tables only, not an auth/user export; no live production
+query, new capture, model evaluation, Gold enablement or production heal occurs.
+The canonical manifest's 49 import workbooks all match delivered paths and exact
+hashes; the two additional shipping/schedule workbooks are outside its five
+import kinds. No source-policy/fixture expectation was changed. The channel
+remains fail-closed, review-gated, ephemeral and excluded from Git/artifacts.
+
+Hosted 7b7f8375 checkpoint: Unit tests (web+libs) PASS; calculator 3800 PASS /
+1 pre-existing SKIP, 116.8 seconds within unchanged 150-second budget. Docker
+image/runtime PASS after capability spelling correction; rollback, build,
+department, reduced-motion/HTTPS, workflow lint and fresh foundation PASS.
+Typecheck's routine tests failed on the predicted missing retained snapshot
+(default CLI path), not a TS error. The 56-input manifest includes both remaining
+defaults; focused input contracts and authoritative root typecheck PASS locally
+(exit 0) before this third push. API was still running at this checkpoint; its
+preceding ac14df3e run completed PASS. Full release remains pending behind the
+superseded release job's cancellation/always-evidence cleanup; neither a
+cancelled nor an unexecuted release is a pass. Main remains unchanged.

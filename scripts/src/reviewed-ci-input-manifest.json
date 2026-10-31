@@ -268,5 +268,15 @@
     "path": "attached_assets/Aldo's_Pizza_Specs_-_09_1783188271692.xlsx",
     "sha256": "54c6e9660c5da91e80f41180d5b181d53758d55e688ad5684e5217d130fc100c",
     "revision": "c32c4370ce5cb36c715574b9acf6befba55d9129"
+  },
+  {
+    "path": "attached_assets/source-library/audits/production-snapshot-2026-08-26.json",
+    "sha256": "4bff312e8176dc5333a2a5982798ea9f9bb951bb50409bb9affbd89c3407e9b6",
+    "revision": "4757ed542872129d6ff2ccad31cd71051ba7f9a5"
+  },
+  {
+    "path": "attached_assets/source-library/audits/source-library-manifest-2026-08-26.json",
+    "sha256": "def4f820d563eacd26499cbe043d2251d8c48a31993d36fc57553fa69ac0baf9",
+    "revision": "4757ed542872129d6ff2ccad31cd71051ba7f9a5"
   }
 ]
