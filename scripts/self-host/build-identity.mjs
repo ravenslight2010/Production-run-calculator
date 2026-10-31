@@ -1,4 +1,4 @@
-// Fresh-profile identity primitives only. No production entrypoint selects them.
+// Fresh-profile identity primitives. Only explicit fresh build entrypoints select them.
 // Production validators deliberately do not accept these records.
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -71,6 +71,12 @@ export function prepareFreshSource(root, { reuse = false } = {}) {
   assertFreshSourceUnchanged(root, record);
   writeRecord(candidate, record);
   writeRecord(path.join(root, FRESH_EXPECTED_RECORD_PATH), record);
+  return record;
+}
+
+export function buildFreshSourceRecord(root) {
+  const record = validateFreshSourceRecord(readBoundedJson(path.join(root, FRESH_SOURCE_RECORD_PATH)));
+  assertFreshSourceUnchanged(root, record);
   return record;
 }
 

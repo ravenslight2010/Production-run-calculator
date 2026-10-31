@@ -120,3 +120,29 @@ Runtime/schema/legacy repair/capture/package/installer work is still incomplete,
 not a deferred separate task; request authorization without asking for tokens in
 chat. PR #142 remains draft; full-app/private-input/device qualification and
 main merge/deployment remain NO-GO. No main/Replit writes or deployment occurred.
+
+## Authorized fresh runtime continuation
+
+Git credential access was recovered through the existing approved memory; normal
+feature-only git publication is available. Earlier device-code requirement is
+historical, not a current blocker. Never copy the credential here or into logs.
+
+Fresh runtime is now implemented with compile-time exact aliases, rejecting
+esbuild graph guard, honest audit not-applicable contract/UI, official generated
+OpenAPI/Zod output, strict fresh runtime build-info, dedicated Dockerfile/ignore
+and migrate/api/web targets. Production legacy definitions/fingerprints and
+publication validators retain their authority/behavior. Windows fresh preflight
+explicitly selects the new profile; default production checks remain strict.
+Found/fixed missing generated AUTH_TOKEN_SECRET; four independently generated
+secrets are now tested. Existing initialized candidates are not auto-rewritten.
+
+Local: frozen install/codegen, root and explicit library TypeScript checks,
+151 combined Node contracts, 22 focused API tests, 3 focused UI tests, nine Zod
+contract tests, actual matching fresh API/web build and 15 workflow lint checks
+PASS. Chromium isolated panel layout PASS desktop/phone/tablet portrait/landscape;
+WebKit binary missing. Static panel evidence is not a manager auth journey.
+Hosted Docker qualification is added but result pending at initial publication.
+Full failure ledger/current gate matrix: docs/self-host/fresh-build-profile.md.
+No Docker/psql/pwsh locally. Imports/20-client load/real Windows host/device trust,
+model qualification/backup restore/updater remain same-objective open evidence.
+No merge/main/Replit/live deploy authorized by these implementation passes.

@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusFreshness = typeof SourceLibraryReconciliationStatusFreshness[keyof typeof SourceLibraryReconciliationStatusFreshness];
+export type LegacySourceLibraryReconciliationStatusStatus = typeof LegacySourceLibraryReconciliationStatusStatus[keyof typeof LegacySourceLibraryReconciliationStatusStatus];
 
 
-export const SourceLibraryReconciliationStatusFreshness = {
-  current: 'current',
-  stale: 'stale',
+export const LegacySourceLibraryReconciliationStatusStatus = {
+  clean: 'clean',
+  warning: 'warning',
+  error: 'error',
+  'not-verified': 'not-verified',
 } as const;

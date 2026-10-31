@@ -12,4 +12,5 @@ export type BuildInfoBuildMode = typeof BuildInfoBuildMode[keyof typeof BuildInf
 export const BuildInfoBuildMode = {
   release: 'release',
   development: 'development',
+  'self-host-fresh': 'self-host-fresh',
 } as const;

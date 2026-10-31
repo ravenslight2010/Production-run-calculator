@@ -21,7 +21,7 @@ export function createEnvironment(options, secret = () => randomBytes(32).toStri
     "# Private bootstrap credentials. Keep this file out of Git and backups shared with staff.",
     "POSTGRES_DB=runcalc", "POSTGRES_USER=runcalc_user", `POSTGRES_PASSWORD=${password}`,
     `DATABASE_URL=postgresql://runcalc_user:${password}@db:5432/runcalc`,
-    "NODE_ENV=production", "PORT=5000", `TZ=${options.timeZone}`,
+    `AUTH_TOKEN_SECRET=${secret()}`, "NODE_ENV=production", "PORT=5000", `TZ=${options.timeZone}`,
     `SITE_ADDRESS=${options.site}`, `STAFF_SIGNUP_CODE=${secret()}`,
     `INITIAL_MANAGER_USERNAME=${options.manager}`, `INITIAL_MANAGER_ACCESS_CODE=${secret()}`,
     "REPLIT_DOMAINS=", "LOCAL_AI_BASE_URL=http://ollama:11434/v1",

@@ -5,13 +5,10 @@
  * API specification. Canonical shared-record GET responses expose X-Master-Data-Epoch. Shared-record mutations retain their original read epoch and return 409 after a guarded change if it is missing or stale. A fresh GET does not rebase an older queued intent.
  * OpenAPI spec version: 0.1.0
  */
-import type { SourceLibraryReconciliationStatusHealResult } from './sourceLibraryReconciliationStatusHealResult';
 
-export type SourceLibraryReconciliationStatusHeal = {
-  id: string;
-  fromDate: Date;
-  /** @nullable */
-  appliedAt: Date | null;
-  markerValid: boolean;
-  result: SourceLibraryReconciliationStatusHealResult;
-};
+export type FreshSourceLibraryReconciliationStatusReason = typeof FreshSourceLibraryReconciliationStatusReason[keyof typeof FreshSourceLibraryReconciliationStatusReason];
+
+
+export const FreshSourceLibraryReconciliationStatusReason = {
+  'legacy-production-audit-not-packaged': 'legacy-production-audit-not-packaged',
+} as const;

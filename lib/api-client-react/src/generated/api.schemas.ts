@@ -2867,6 +2867,7 @@ export const BuildInfoSourcePolicy = {
   'production-source-v2': 'production-source-v2',
   'production-source-v3': 'production-source-v3',
   'production-source-v4': 'production-source-v4',
+  'self-host-fresh-source-v1': 'self-host-fresh-source-v1',
 } as const;
 
 export type BuildInfoGitBinding = typeof BuildInfoGitBinding[keyof typeof BuildInfoGitBinding];
@@ -2883,6 +2884,7 @@ export type BuildInfoBuildMode = typeof BuildInfoBuildMode[keyof typeof BuildInf
 export const BuildInfoBuildMode = {
   release: 'release',
   development: 'development',
+  'self-host-fresh': 'self-host-fresh',
 } as const;
 
 export type BuildInfoPlatformIdentitySource = typeof BuildInfoPlatformIdentitySource[keyof typeof BuildInfoPlatformIdentitySource];
@@ -7665,28 +7667,28 @@ export interface AiRetentionReport {
   cutoffs: AiRetentionReportCutoffs;
 }
 
-export type SourceLibraryReconciliationStatusStatus = typeof SourceLibraryReconciliationStatusStatus[keyof typeof SourceLibraryReconciliationStatusStatus];
+export type LegacySourceLibraryReconciliationStatusStatus = typeof LegacySourceLibraryReconciliationStatusStatus[keyof typeof LegacySourceLibraryReconciliationStatusStatus];
 
 
-export const SourceLibraryReconciliationStatusStatus = {
+export const LegacySourceLibraryReconciliationStatusStatus = {
   clean: 'clean',
   warning: 'warning',
   error: 'error',
   'not-verified': 'not-verified',
 } as const;
 
-export type SourceLibraryReconciliationStatusFreshness = typeof SourceLibraryReconciliationStatusFreshness[keyof typeof SourceLibraryReconciliationStatusFreshness];
+export type LegacySourceLibraryReconciliationStatusFreshness = typeof LegacySourceLibraryReconciliationStatusFreshness[keyof typeof LegacySourceLibraryReconciliationStatusFreshness];
 
 
-export const SourceLibraryReconciliationStatusFreshness = {
+export const LegacySourceLibraryReconciliationStatusFreshness = {
   current: 'current',
   stale: 'stale',
 } as const;
 
-export type SourceLibraryReconciliationStatusFindingsItemCategory = typeof SourceLibraryReconciliationStatusFindingsItemCategory[keyof typeof SourceLibraryReconciliationStatusFindingsItemCategory];
+export type SourceLibraryReconciliationFindingCategory = typeof SourceLibraryReconciliationFindingCategory[keyof typeof SourceLibraryReconciliationFindingCategory];
 
 
-export const SourceLibraryReconciliationStatusFindingsItemCategory = {
+export const SourceLibraryReconciliationFindingCategory = {
   'pool-mismatch': 'pool-mismatch',
   'alias-gap': 'alias-gap',
   'stale-profile-link': 'stale-profile-link',
@@ -7695,19 +7697,19 @@ export const SourceLibraryReconciliationStatusFindingsItemCategory = {
   'unexpected-stub': 'unexpected-stub',
 } as const;
 
-export type SourceLibraryReconciliationStatusFindingsItemSeverity = typeof SourceLibraryReconciliationStatusFindingsItemSeverity[keyof typeof SourceLibraryReconciliationStatusFindingsItemSeverity];
+export type SourceLibraryReconciliationFindingSeverity = typeof SourceLibraryReconciliationFindingSeverity[keyof typeof SourceLibraryReconciliationFindingSeverity];
 
 
-export const SourceLibraryReconciliationStatusFindingsItemSeverity = {
+export const SourceLibraryReconciliationFindingSeverity = {
   info: 'info',
   warning: 'warning',
   error: 'error',
 } as const;
 
-export type SourceLibraryReconciliationStatusFindingsItemSourceRoute = typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute[keyof typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute];
+export type SourceLibraryReconciliationFindingSourceRoute = typeof SourceLibraryReconciliationFindingSourceRoute[keyof typeof SourceLibraryReconciliationFindingSourceRoute];
 
 
-export const SourceLibraryReconciliationStatusFindingsItemSourceRoute = {
+export const SourceLibraryReconciliationFindingSourceRoute = {
   dough: 'dough',
   sauce: 'sauce',
   cheeseRecipes: 'cheeseRecipes',
@@ -7717,14 +7719,25 @@ export const SourceLibraryReconciliationStatusFindingsItemSourceRoute = {
   audit: 'audit',
 } as const;
 
-export type SourceLibraryReconciliationStatusReportSnapshot = {
+export interface SourceLibraryReconciliationFinding {
+  id: string;
+  category: SourceLibraryReconciliationFindingCategory;
+  severity: SourceLibraryReconciliationFindingSeverity;
+  affectedRecord: string;
+  currentValue: string;
+  proposedOutcome: string;
+  protectedValue: boolean;
+  sourceRoute: SourceLibraryReconciliationFindingSourceRoute;
+}
+
+export type LegacySourceLibraryReconciliationStatusReportSnapshot = {
   path: string;
   /** @pattern ^[a-f0-9]{64}$ */
   sha256: string;
   capturedAt: string;
 };
 
-export type SourceLibraryReconciliationStatusReportManifest = {
+export type LegacySourceLibraryReconciliationStatusReportManifest = {
   path: string;
   /** @pattern ^[a-f0-9]{64}$ */
   sha256: string;
@@ -7734,7 +7747,7 @@ export type SourceLibraryReconciliationStatusReportManifest = {
   excludedOlderDuplicates: number;
 };
 
-export type SourceLibraryReconciliationStatusReport = {
+export type LegacySourceLibraryReconciliationStatusReport = {
   path: string;
   /** @pattern ^[a-f0-9]{64}$ */
   sha256: string;
@@ -7745,11 +7758,11 @@ export type SourceLibraryReconciliationStatusReport = {
   stubs: number;
   /** @pattern ^[a-f0-9]{64}$ */
   planSha256: string;
-  snapshot: SourceLibraryReconciliationStatusReportSnapshot;
-  manifest: SourceLibraryReconciliationStatusReportManifest;
+  snapshot: LegacySourceLibraryReconciliationStatusReportSnapshot;
+  manifest: LegacySourceLibraryReconciliationStatusReportManifest;
 };
 
-export type SourceLibraryReconciliationStatusHealResult = {
+export type LegacySourceLibraryReconciliationStatusHealResult = {
   /** @minimum 0 */
   replacements: number;
   /** @minimum 0 */
@@ -7762,16 +7775,16 @@ export type SourceLibraryReconciliationStatusHealResult = {
   deletedStubs: number;
 };
 
-export type SourceLibraryReconciliationStatusHeal = {
+export type LegacySourceLibraryReconciliationStatusHeal = {
   id: string;
   fromDate: string;
   /** @nullable */
   appliedAt: string | null;
   markerValid: boolean;
-  result: SourceLibraryReconciliationStatusHealResult;
+  result: LegacySourceLibraryReconciliationStatusHealResult;
 };
 
-export type SourceLibraryReconciliationStatusSummary = {
+export type LegacySourceLibraryReconciliationStatusSummary = {
   /** @minimum 0 */
   poolMismatches: number;
   /** @minimum 0 */
@@ -7792,26 +7805,46 @@ export type SourceLibraryReconciliationStatusSummary = {
   findingLimitPerCategory: number;
 };
 
-export type SourceLibraryReconciliationStatusFindingsItem = {
-  id: string;
-  category: SourceLibraryReconciliationStatusFindingsItemCategory;
-  severity: SourceLibraryReconciliationStatusFindingsItemSeverity;
-  affectedRecord: string;
-  currentValue: string;
-  proposedOutcome: string;
-  protectedValue: boolean;
-  sourceRoute: SourceLibraryReconciliationStatusFindingsItemSourceRoute;
-};
-
-export interface SourceLibraryReconciliationStatus {
-  report: SourceLibraryReconciliationStatusReport;
-  heal: SourceLibraryReconciliationStatusHeal;
+export interface LegacySourceLibraryReconciliationStatus {
+  report: LegacySourceLibraryReconciliationStatusReport;
+  heal: LegacySourceLibraryReconciliationStatusHeal;
   checkedAt: string;
-  status: SourceLibraryReconciliationStatusStatus;
-  freshness: SourceLibraryReconciliationStatusFreshness;
-  summary: SourceLibraryReconciliationStatusSummary;
-  findings: SourceLibraryReconciliationStatusFindingsItem[];
+  status: LegacySourceLibraryReconciliationStatusStatus;
+  freshness: LegacySourceLibraryReconciliationStatusFreshness;
+  summary: LegacySourceLibraryReconciliationStatusSummary;
+  findings: SourceLibraryReconciliationFinding[];
 }
+
+export type FreshSourceLibraryReconciliationStatusStatus = typeof FreshSourceLibraryReconciliationStatusStatus[keyof typeof FreshSourceLibraryReconciliationStatusStatus];
+
+
+export const FreshSourceLibraryReconciliationStatusStatus = {
+  'not-applicable': 'not-applicable',
+} as const;
+
+export type FreshSourceLibraryReconciliationStatusBuildProfile = typeof FreshSourceLibraryReconciliationStatusBuildProfile[keyof typeof FreshSourceLibraryReconciliationStatusBuildProfile];
+
+
+export const FreshSourceLibraryReconciliationStatusBuildProfile = {
+  'self-host-fresh': 'self-host-fresh',
+} as const;
+
+export type FreshSourceLibraryReconciliationStatusReason = typeof FreshSourceLibraryReconciliationStatusReason[keyof typeof FreshSourceLibraryReconciliationStatusReason];
+
+
+export const FreshSourceLibraryReconciliationStatusReason = {
+  'legacy-production-audit-not-packaged': 'legacy-production-audit-not-packaged',
+} as const;
+
+export interface FreshSourceLibraryReconciliationStatus {
+  status: FreshSourceLibraryReconciliationStatusStatus;
+  buildProfile: FreshSourceLibraryReconciliationStatusBuildProfile;
+  reason: FreshSourceLibraryReconciliationStatusReason;
+  /** @maxItems 0 */
+  findings: SourceLibraryReconciliationFinding[];
+}
+
+export type SourceLibraryReconciliationStatus = LegacySourceLibraryReconciliationStatus | FreshSourceLibraryReconciliationStatus;
 
 export interface ProfileDataHealthWorkspace {
   importCoverage?: ProfileDataHealthWorkspaceImportCoverage;

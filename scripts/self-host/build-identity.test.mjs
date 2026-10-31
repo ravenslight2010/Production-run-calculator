@@ -23,7 +23,7 @@ import {
 } from './build-identity.mjs';
 
 function addFreshInputs(root) {
-  for (const file of ['Dockerfile', '.dockerignore', 'docker-compose.self-host.yml',
+  for (const file of ['Dockerfile', '.dockerignore', 'Dockerfile.self-host', 'Dockerfile.self-host.dockerignore', 'docker-compose.self-host.yml',
     'docker/Caddyfile.self-host', 'scripts/self-host/config.mjs']) put(root, file);
   return root;
 }
@@ -73,7 +73,7 @@ test('fresh source does not depend on separately retained historical audit/appro
 
 test('fresh fingerprints bind deployment/installer inputs and every normal source category', t => {
   const root = freshFixture(t);
-  for (const file of ['Dockerfile', '.dockerignore', 'docker-compose.self-host.yml',
+  for (const file of ['Dockerfile', '.dockerignore', 'Dockerfile.self-host', 'Dockerfile.self-host.dockerignore', 'docker-compose.self-host.yml',
     'docker/Caddyfile.self-host', 'scripts/self-host/config.mjs', 'package.json', 'pnpm-lock.yaml',
     'pnpm-workspace.yaml', 'scripts/src/build.mjs', 'lib/math/src/index.ts',
     'artifacts/api-server/src/index.ts', 'artifacts/run-calculator/src/main.ts',
@@ -109,7 +109,7 @@ test('fresh fingerprint is location/order independent and ignores secrets, tests
   assert.equal(hash(root), before);
 });
 
-for (const entry of ['Dockerfile', '.dockerignore', 'docker-compose.self-host.yml', 'docker',
+for (const entry of ['Dockerfile', '.dockerignore', 'Dockerfile.self-host', 'Dockerfile.self-host.dockerignore', 'docker-compose.self-host.yml', 'docker',
   'scripts/self-host', 'lib', 'artifacts/api-server/src', 'artifacts/run-calculator/src']) {
   test(`missing fresh input refuses preparation: ${entry}`, t => {
     const root = freshFixture(t);

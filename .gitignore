@@ -84,3 +84,5 @@ Thumbs.db
 # source-bound handoffs under docs/evidence rather than blocking task rebases.
 /.local/evidence/workbook-import-audit/
 /.local/evidence/break-planning/
+# Locally prepared fresh-profile identity; never a source-controlled release.
+/artifacts/api-server/self-host-source-record.json

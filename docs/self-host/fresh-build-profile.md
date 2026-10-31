@@ -206,3 +206,113 @@ Do not fabricate/omit generated output, publish private historical evidence or
 add a write-enabled codegen workflow merely to work around the connector.
 Until the route is approved, schema publication and the rest of the runtime/
 packaging activation stay incomplete under the same owning objective.
+
+## Authorized runtime implementation (continuation)
+
+Donald pointed to the existing GitHub credential, and approved continuing the
+implementation through completion. Authentication and a no-change feature push
+check succeeded without printing or persisting the credential in git settings.
+The earlier request-size limitation is no longer a publication blocker: normal
+feature-branch git pushes can publish official generated files. No new device-
+code login is needed. The source copy was clean and fast-forwarded to the exact
+committed 51ee82eb checkpoint before continuing; no unreviewed checkout was pushed.
+
+### Agent-owned execution
+
+Same owning objective, owner Notion AI, draft PR #142. Implement a **compile-time**
+fresh runtime: exclude historical repair/capture modules from the module graph,
+keep only live input normalization, report the historical audit as explicitly
+not applicable without invented report/marker/counters, use strict fresh identity
+at runtime, regenerate API schemas, and select dedicated fresh Docker/migration
+images and read-only preflight explicitly. Production entrypoints/validators,
+legacy definitions/fingerprints and Replit publication remain unchanged. Normal
+restart must still require cached images only, with no build/migration/model pull.
+
+### Applicable safeguards and verification
+
+Apply the existing safety matrix plus: inspect esbuild input graphs and final
+package contents; reject any historical repair or capture module in a fresh graph;
+reject unsealed authored build inputs; test all fresh capture methods without DB
+or report reads; compare live normalization behavior with the existing production
+helpers; validate actual generated response schemas; test matching/mismatched
+fresh runtime identity and ignored ambient Replit/build-mode variables. Default
+production schema/promotion/identity tests must continue to pass.
+
+Use official codegen, full root and leaf typechecks, focused server/client tests,
+Node preflight/identity tests, and native Windows/Linux CI. Test the new status
+panel at desktop/phone/tablet portrait/landscape with Chromium and WebKit where
+available; record physical Android/iOS as blocked, never implied by emulation.
+Synthetic local/CI DB/image tests may create only isolated test data; no production
+DB or private historical source inputs are authorized. Actual Windows Docker/WSL2,
+trusted LAN CA/device, hardware capacity, restore and unattended-update release
+qualification remain separate evidence requirements within this same objective.
+
+### Runtime implementation results and retained failure ledger
+
+Implemented explicit fresh API/web builds and `Dockerfile.self-host` targets.
+The fresh build uses exact module aliases and a rejecting esbuild graph guard;
+historical repair/capture implementations cannot enter the graph. Live Natural
+pepperoni normalization has parity tests without granting legacy repair authority.
+The historical audit returns `not-applicable` with a closed profile/reason shape;
+all capture/diagnostics methods refuse with 409/no-store. Official OpenAPI codegen
+produced the client/Zod union; production status fields remain unchanged. The UI
+renders the distinction without an invented SHA/report/marker/count. Runtime
+build identity ignores ambient Replit labels and loads only a valid sealed fresh
+record. Independent session-signing credentials are generated for fresh installs.
+
+Verification at this continuation's local implementation checkpoint:
+
+- Frozen install and official API generation: PASS.
+- Authoritative `CI=true pnpm run typecheck`: PASS, exit 0 (rerun after changes).
+  This includes official regeneration drift and nine generated-contract tests.
+- Explicit leaf `tsc --build --force lib/api-client-react/tsconfig.json
+  lib/api-zod/tsconfig.json`: PASS, exit 0.
+- Combined fresh/default-production identity, promotion, preflight, reporter and
+  update-policy Node contracts: **151 PASS**, zero failures/skips on Linux.
+- Focused fresh API/legacy build-info tests: **22 PASS**; focused status-panel and
+  existing workspace self-check UI regressions: **3 PASS**.
+- Explicit actual fresh API/web source build: PASS, matched/sealed outputs,
+  graph guard passed, no source maps or capture/approval helper packaged in dist.
+  A dirty checkout correctly reports Git binding unavailable, not a release SHA.
+- Workflow policy/actionlint: PASS, all 15 workflows.
+- Isolated real-component browser layout (built application CSS), Chromium:
+  PASS at desktop 1440x900, phone 390x844/844x390, tablet 768x1024/1024x768.
+  Each had visible honest status, no horizontal overflow and zero page errors.
+  This static component fixture is **not** a login/navigation/persistence journey.
+- Added hosted Linux Docker qualification: dedicated images, isolated internal
+  network, disposable fresh schema, core readiness without WAN/AI, initial manager
+  signup/workspace, capture refusal, package privacy, empty historical markers and
+  cached API restart. Hosted result must be recorded after execution; local
+  Docker/psql/PowerShell are unavailable. No claim that this lane has passed yet.
+
+Concrete failures found and resolved in this continuation:
+
+1. The new BuildInfo test expected a date string after Zod parsing; official
+   schemas coerce dates. Fixed the test to assert Date and wire round-trip equality,
+   without hand-editing generated schemas. Nine contract tests then passed.
+2. The new synthetic fresh preflight fixture initially omitted `.dockerignore`;
+   the real prerequisite correctly blocked it. Completed the fixture; did not
+   relax the required input set. Combined 151 contracts then passed.
+3. Fresh API graph qualification initially resolved esbuild's artifact-relative
+   input `src/lib/appShellCache.ts` against repository root and rejected it as
+   unsealed. Added an explicit fresh-only esbuild working-directory anchor; the
+   real build then passed with the guard intact. Bounded input diagnostics retained.
+4. Inspection found host configuration lacked AUTH_TOKEN_SECRET, required to
+   sign login sessions. Added an independent 256-bit secret and expanded the
+   uniqueness assertion to all four secrets. Existing credentials are never
+   silently rewritten; prior initialized candidates need explicit recovery review.
+5. An initial browser probe assumed `/usr/bin/chromium`; actual bundled executable
+   is discovered at `/usr/local/bin/chromium`. Repeated real layout checks passed.
+6. Attempting package `run typecheck` for the two generated libraries failed
+   because those packages expose no such script. Ran their actual TypeScript
+   project configurations explicitly and passed; root typecheck also passed.
+
+Still blocked/not reached, retained under this same objective (owner Notion AI):
+WebKit browser binary unavailable locally; physical Android/iOS unavailable;
+actual Windows Docker/WSL2/ACL/unattended reboot, trusted LAN DNS/CA/device matrix,
+fresh representative imports, 20-client load, local-model quality/capacity,
+backup/restore and safe signed automatic updater remain unqualified. The new
+Docker lane does not test imports, Caddy trust or full-stack restart and must not
+be described as doing so. Existing full production/private-workbook failures
+are unchanged and are not skipped/replaced by fresh-profile passes. PR #142
+remains draft; main merge, Replit publication and live deployment remain NO-GO.

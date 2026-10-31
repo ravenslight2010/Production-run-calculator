@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusFindingsItemCategory = typeof SourceLibraryReconciliationStatusFindingsItemCategory[keyof typeof SourceLibraryReconciliationStatusFindingsItemCategory];
+export type SourceLibraryReconciliationFindingCategory = typeof SourceLibraryReconciliationFindingCategory[keyof typeof SourceLibraryReconciliationFindingCategory];
 
 
-export const SourceLibraryReconciliationStatusFindingsItemCategory = {
+export const SourceLibraryReconciliationFindingCategory = {
   'pool-mismatch': 'pool-mismatch',
   'alias-gap': 'alias-gap',
   'stale-profile-link': 'stale-profile-link',

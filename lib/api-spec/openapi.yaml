@@ -8835,7 +8835,7 @@ components:
           type: string
           pattern: '^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
           description: Application-owned artifact-set ID, not a Replit Build UUID.
-        sourcePolicy: { type: string, enum: [production-source-v2, production-source-v3, production-source-v4] }
+        sourcePolicy: { type: string, enum: [production-source-v2, production-source-v3, production-source-v4, self-host-fresh-source-v1] }
         sourceFingerprintSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         gitRevision:
           type: string
@@ -8843,7 +8843,7 @@ components:
           pattern: '^[a-f0-9]{40}$'
         gitBinding: { type: string, enum: [verified, unavailable] }
         completedAt: { type: string, format: date-time }
-        buildMode: { type: string, enum: [release, development] }
+        buildMode: { type: string, enum: [release, development, self-host-fresh] }
         platformDeploymentId:
           type: string
           nullable: true
@@ -13399,6 +13399,24 @@ components:
           additionalProperties: true
 
     SourceLibraryReconciliationStatus:
+      oneOf:
+        - $ref: "#/components/schemas/LegacySourceLibraryReconciliationStatus"
+        - $ref: "#/components/schemas/FreshSourceLibraryReconciliationStatus"
+
+    FreshSourceLibraryReconciliationStatus:
+      type: object
+      additionalProperties: false
+      required: [status, buildProfile, reason, findings]
+      properties:
+        status: { type: string, enum: [not-applicable] }
+        buildProfile: { type: string, enum: [self-host-fresh] }
+        reason: { type: string, enum: [legacy-production-audit-not-packaged] }
+        findings:
+          type: array
+          maxItems: 0
+          items: { $ref: "#/components/schemas/SourceLibraryReconciliationFinding" }
+
+    LegacySourceLibraryReconciliationStatus:
       type: object
       additionalProperties: false
       required: [report, heal, checkedAt, status, freshness, summary, findings]
@@ -13469,23 +13487,25 @@ components:
             findingLimitPerCategory: { type: integer, minimum: 1 }
         findings:
           type: array
-          items:
-            type: object
-            additionalProperties: false
-            required: [id, category, severity, affectedRecord, currentValue, proposedOutcome, protectedValue, sourceRoute]
-            properties:
-              id: { type: string }
-              category:
-                type: string
-                enum: [pool-mismatch, alias-gap, stale-profile-link, stale-pending-run-link, protected-stub, unexpected-stub]
-              severity: { type: string, enum: [info, warning, error] }
-              affectedRecord: { type: string }
-              currentValue: { type: string }
-              proposedOutcome: { type: string }
-              protectedValue: { type: boolean }
-              sourceRoute:
-                type: string
-                enum: [dough, sauce, cheeseRecipes, mixes, import, setupProfiles, audit]
+          items: { $ref: "#/components/schemas/SourceLibraryReconciliationFinding" }
+
+    SourceLibraryReconciliationFinding:
+      type: object
+      additionalProperties: false
+      required: [id, category, severity, affectedRecord, currentValue, proposedOutcome, protectedValue, sourceRoute]
+      properties:
+        id: { type: string }
+        category:
+          type: string
+          enum: [pool-mismatch, alias-gap, stale-profile-link, stale-pending-run-link, protected-stub, unexpected-stub]
+        severity: { type: string, enum: [info, warning, error] }
+        affectedRecord: { type: string }
+        currentValue: { type: string }
+        proposedOutcome: { type: string }
+        protectedValue: { type: boolean }
+        sourceRoute:
+          type: string
+          enum: [dough, sauce, cheeseRecipes, mixes, import, setupProfiles, audit]
 
     AuditLog:
       type: object

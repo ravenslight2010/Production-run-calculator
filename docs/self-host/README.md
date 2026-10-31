@@ -2,8 +2,10 @@
 
 **Status: DRAFT / NO-GO for production.** Replit/main source integration is complete
 for the captured refreshed tips; see the [current integration report](integration-2026-10-31.md).
-Private build/workbook inputs and full CI still block production readiness.
- This branch uses the current `Replit`
+Full production CI/private-workbook failures and host qualification remain open.
+The explicit fresh profile builds without those historical production inputs;
+see [fresh-profile implementation and evidence](fresh-build-profile.md).
+This branch uses the current `Replit`
 application as its functional baseline. It does not change Replit publishing,
 move production data, merge into main, or install an automatic updater.
 
@@ -24,7 +26,7 @@ Implemented in this first integration candidate:
   Existing force-push schema tooling remains confined to a refused-if-data-exists
   first-install path. **Do not use it for application updates.**
 - Windows PowerShell launcher, exact Node requirement, independent private state
-  directory, generated high-entropy database/staff/first-manager credentials,
+  directory, generated high-entropy database/staff/first-manager credentials and independent session-signing secret,
   exclusive credential creation, Windows ACLs, no credential printing.
 - Normal restart uses cached images (`--pull never`, `--no-build`) and never
   downloads models or runs migrations. Core starts independently of AI readiness.
@@ -59,14 +61,24 @@ See [branch comparison](branch-audit.md) and
 
 ## Read-only check before initialization
 
-Run `node scripts/self-host/preflight.mjs --root .` with the pinned Node version,
+Run `node scripts/self-host/preflight.mjs --root . --profile self-host-fresh` with the pinned Node version,
 or use the Windows launcher with `-CheckOnly` and an external StateDirectory.
 Blocked prerequisites return exit 2 **before** creating credentials/changing ACLs,
 downloading images or touching data. Normal cached restart does not run this
 build-input check. A ready preflight is not deployment approval.
 
 See [preflight and build-input boundary](preflight-and-build-boundary.md) for
-current missing inputs and the proposed separate fresh-install build contract.
+historical production checks and the now-implemented separate fresh-install build contract.
+The CLI still defaults to strict production checks when `--profile` is omitted.
+
+The explicit local source-build command is `node scripts/self-host/build.mjs`
+after a frozen dependency install with the pinned toolchain. It selects compile-time
+fresh API aliases, rejects historical repair/capture modules and unsealed authored
+inputs, and seals matching API/web identities. It is not a production release
+approval. `Dockerfile.self-host` packages only fresh runtime outputs, not the
+source checkout or uploaded audit assets. `node scripts/self-host/qualify-runtime.mjs`
+is an isolated, destructive-to-its-own-fixtures **Linux Docker test**, not an
+installer; it creates and cleans only randomly named test containers/network.
 
 ## Disposable fresh-install rehearsal
 
@@ -103,7 +115,7 @@ After successful setup, normal restart is:
 ```
 
 A successful `up` means only that Docker accepted the startup request. Verify
-HTTPS `/api/ready`, login and workflows; it is **not** a deployment acceptance.
+HTTPS `/api/readyz`, login and workflows; it is **not** a deployment acceptance.
 
 ## Prepare AI once, while online
 

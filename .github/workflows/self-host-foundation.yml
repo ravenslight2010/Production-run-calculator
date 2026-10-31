@@ -3,6 +3,13 @@ on:
   pull_request:
     paths:
       - 'scripts/self-host/**'
+      - 'artifacts/api-server/**'
+      - 'artifacts/run-calculator/**'
+      - 'lib/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'scripts/src/build-web-source.mjs'
       - 'scripts/src/build-source-files.*'
       - 'scripts/src/build-source-identity.*'
       - 'scripts/src/verify-published-build.*'
@@ -10,6 +17,7 @@ on:
       - 'scripts/src/fixtures/build-identity-fixture.mjs'
       - 'scripts/src/restore-reviewed-build-inputs.mjs'
       - 'scripts/src/source-library-pool-approval-assets.mjs'
+      - 'Dockerfile.self-host*'
       - 'docker-compose.self-host.yml'
       - 'docker/Caddyfile.self-host'
       - '.github/workflows/self-host-foundation.yml'
@@ -17,6 +25,13 @@ on:
     branches: [main, feat/windows-lan-self-hosting]
     paths:
       - 'scripts/self-host/**'
+      - 'artifacts/api-server/**'
+      - 'artifacts/run-calculator/**'
+      - 'lib/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'scripts/src/build-web-source.mjs'
       - 'scripts/src/build-source-files.*'
       - 'scripts/src/build-source-identity.*'
       - 'scripts/src/verify-published-build.*'
@@ -24,6 +39,7 @@ on:
       - 'scripts/src/fixtures/build-identity-fixture.mjs'
       - 'scripts/src/restore-reviewed-build-inputs.mjs'
       - 'scripts/src/source-library-pool-approval-assets.mjs'
+      - 'Dockerfile.self-host*'
       - 'docker-compose.self-host.yml'
       - 'docker/Caddyfile.self-host'
       - '.github/workflows/self-host-foundation.yml'
@@ -52,6 +68,7 @@ jobs:
           --test-reporter=./scripts/self-host/ci-test-reporter.mjs --test-reporter-destination=stdout
           scripts/self-host/self-host.test.mjs scripts/self-host/preflight.test.mjs
           scripts/self-host/build-identity.test.mjs scripts/self-host/ci-test-reporter.test.mjs
+          scripts/self-host/runtime-build-policy.test.mjs
       - name: Verify unchanged production identity and promotion contracts
         if: runner.os == 'Linux'
         run: node --test scripts/src/build-source-identity.test.mjs scripts/src/verify-published-build.test.mjs scripts/src/release-source-identity.test.mjs
@@ -69,11 +86,11 @@ jobs:
         shell: pwsh
         run: |
           $state = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString())
-          function docker { throw 'Docker must not run before the missing-input preflight fails' }
+          function docker { throw 'Docker must not run before the invalid-setup preflight fails' }
           $blocked = $false
           try {
             & ./scripts/self-host/Start-SelfHost.ps1 -StateDirectory $state -InitializeFresh `
-              -Site runcalc.test.lan -TimeZone America/Chicago -Manager testmanager
+              -Site "invalid site" -TimeZone America/Chicago -Manager testmanager
           } catch {
             if ($_.Exception.Message -ne 'node failed with exit 2') {
               $category = ($_.FullyQualifiedErrorId -replace '[^A-Za-z0-9_. :,()-]', '_')
@@ -82,10 +99,20 @@ jobs:
             }
             $blocked = $true
           }
-          if (-not $blocked) { throw 'Expected missing reviewed inputs to block fresh setup' }
+          if (-not $blocked) { throw 'Expected invalid setup to block fresh setup' }
           if (Test-Path $state) { throw 'Blocked preflight created a state directory' }
           # The expected/handled native exit 2 must not leak to the runner trailer.
           $global:LASTEXITCODE = 0
+      - name: Verify fresh Windows check-only needs no legacy audit or setup writes
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $state = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString())
+          function docker { throw 'Docker must not run in check-only mode' }
+          & ./scripts/self-host/Start-SelfHost.ps1 -StateDirectory $state -CheckOnly `
+            -Site runcalc.test.lan -TimeZone America/Chicago -Manager testmanager
+          if ($LASTEXITCODE -ne 0) { throw 'Fresh check-only failed' }
+          if (Test-Path $state) { throw 'Check-only created a state directory' }
       - name: Validate isolated Compose configuration (does not start services)
         if: runner.os == 'Linux'
         shell: bash
@@ -95,3 +122,15 @@ jobs:
           node scripts/self-host/config.mjs "$state" runcalc.test.lan America/Chicago testmanager
           export SELF_HOST_ENV_FILE="$state/self-host.env"
           docker compose --env-file "$SELF_HOST_ENV_FILE" -f docker-compose.self-host.yml config --quiet
+  fresh-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Qualify disposable fresh images without runtime WAN or AI
+        run: node scripts/self-host/qualify-runtime.mjs

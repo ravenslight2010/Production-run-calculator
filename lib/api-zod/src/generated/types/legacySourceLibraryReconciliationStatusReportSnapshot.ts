@@ -6,12 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusReportManifest = {
+export type LegacySourceLibraryReconciliationStatusReportSnapshot = {
   path: string;
   /** @pattern ^[a-f0-9]{64}$ */
   sha256: string;
-  /** @minimum 0 */
-  retained: number;
-  /** @minimum 0 */
-  excludedOlderDuplicates: number;
+  capturedAt: Date;
 };

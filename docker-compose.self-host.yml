@@ -19,7 +19,7 @@ services:
   # Existing push-force is unsuitable for automatic customer upgrades.
   migrate:
     profiles: [initialize]
-    build: {context: ., target: api-migrate}
+    build: {context: ., dockerfile: Dockerfile.self-host, target: self-host-migrate}
     env_file: ${SELF_HOST_ENV_FILE:?Use the self-host launcher}
     user: node
     cap_drop: [ALL]
@@ -28,7 +28,7 @@ services:
       db: {condition: service_healthy}
     restart: "no"
   api:
-    build: {context: ., target: api}
+    build: {context: ., dockerfile: Dockerfile.self-host, target: self-host-api}
     env_file: ${SELF_HOST_ENV_FILE:?Use the self-host launcher}
     restart: unless-stopped
     user: node
@@ -39,7 +39,7 @@ services:
     expose: ["5000"]
     # AI is advisory: neither a cold model nor a failed download blocks core.
   web:
-    build: {context: ., target: web}
+    build: {context: ., dockerfile: Dockerfile.self-host, target: self-host-web}
     restart: unless-stopped
     user: "1001:1001"
     cap_drop: [ALL]

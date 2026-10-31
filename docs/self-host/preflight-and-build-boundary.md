@@ -1,4 +1,10 @@
-# First-install preflight and remaining build-input boundary
+# First-install preflight and build-input boundary
+
+> Historical production-default evidence below is retained. The current Windows
+> launcher explicitly selects `self-host-fresh`; its audit check is not applicable,
+> not a production pin override. See [current implementation](fresh-build-profile.md)
+> for runtime/package qualification. The default CLI still enforces the original
+> production contract.
 
 ## Agent-owned execution
 

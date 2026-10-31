@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusFindingsItemSourceRoute = typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute[keyof typeof SourceLibraryReconciliationStatusFindingsItemSourceRoute];
+export type SourceLibraryReconciliationFindingSourceRoute = typeof SourceLibraryReconciliationFindingSourceRoute[keyof typeof SourceLibraryReconciliationFindingSourceRoute];
 
 
-export const SourceLibraryReconciliationStatusFindingsItemSourceRoute = {
+export const SourceLibraryReconciliationFindingSourceRoute = {
   dough: 'dough',
   sauce: 'sauce',
   cheeseRecipes: 'cheeseRecipes',

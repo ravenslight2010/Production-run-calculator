@@ -1,3 +1,4 @@
+import type { SourceLibraryReconciliationStatus } from "@workspace/api-client-react";
 import { inventoryClientId } from "./inventoryShared";
 
 export type ProfileDataHealthFinding = {
@@ -117,43 +118,7 @@ export type DataHealthWorkspace = {
     };
     cutoffs: { conversationBefore: string; thumbnailBefore: string; observationBefore: string };
   };
-  sourceReconciliation: {
-    report: {
-      path: string;
-      sha256: string;
-      formatVersion: number;
-      automaticProposals: number;
-      stubs: number;
-      planSha256: string;
-      snapshot: { path: string; sha256: string; capturedAt: string };
-      manifest: { path: string; sha256: string; retained: number; excludedOlderDuplicates: number };
-    };
-    heal: { id: string; fromDate: string; appliedAt: string | null; markerValid: boolean; result: Record<string, number> };
-    checkedAt: string;
-    status: "clean" | "warning" | "error" | "not-verified";
-    freshness: "current" | "stale";
-    summary: {
-      poolMismatches: number;
-      aliasGaps: number;
-      staleProfileLinks: number;
-      stalePendingRunLinks: number;
-      protectedStubs: number;
-      unexpectedStubs: number;
-      protectedHistoryReferences: number;
-      omittedFindings: number;
-      findingLimitPerCategory: number;
-    };
-    findings: Array<{
-      id: string;
-      category: "pool-mismatch" | "alias-gap" | "stale-profile-link" | "stale-pending-run-link" | "protected-stub" | "unexpected-stub";
-      severity: "info" | "warning" | "error";
-      affectedRecord: string;
-      currentValue: string;
-      proposedOutcome: string;
-      protectedValue: boolean;
-      sourceRoute: DataHealthFinding["sourceRoute"];
-    }>;
-  };
+  sourceReconciliation: SourceLibraryReconciliationStatus;
 };
 
 export async function applyAiRetentionCleanup(): Promise<DataHealthWorkspace["aiRetention"]> {

@@ -26,9 +26,9 @@ test('generated secrets are independent and environment is local-only', () => {
     const i = line.indexOf('='); return [line.slice(0,i), line.slice(i+1)];
   }));
   assert.equal(pairs.DATABASE_URL, `postgresql://runcalc_user:${pairs.POSTGRES_PASSWORD}@db:5432/runcalc`);
-  const secrets = [pairs.POSTGRES_PASSWORD, pairs.STAFF_SIGNUP_CODE, pairs.INITIAL_MANAGER_ACCESS_CODE];
+  const secrets = [pairs.POSTGRES_PASSWORD, pairs.STAFF_SIGNUP_CODE, pairs.INITIAL_MANAGER_ACCESS_CODE, pairs.AUTH_TOKEN_SECRET];
   assert.ok(secrets.every(value => /^[a-f0-9]{64}$/.test(value)));
-  assert.equal(new Set(secrets).size, 3);
+  assert.equal(new Set(secrets).size, 4);
   assert.equal(pairs.LOCAL_AI_FALLBACK_TO_GEMINI, 'false');
   assert.equal(pairs.LOCAL_AI_STRICT_READINESS, 'false');
   assert.equal(pairs.TZ, setup.timeZone);

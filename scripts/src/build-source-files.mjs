@@ -10,7 +10,7 @@ function assertPolicy(policy) {
   if (![SOURCE_POLICY, SELF_HOST_FRESH_SOURCE_POLICY].includes(policy))
     throw new Error("Unsupported build-source policy.");
 }
-const FRESH_TOP_FILES = new Set(["Dockerfile", ".dockerignore", "docker-compose.self-host.yml"]);
+const FRESH_TOP_FILES = new Set(["Dockerfile", ".dockerignore", "Dockerfile.self-host", "Dockerfile.self-host.dockerignore", "docker-compose.self-host.yml"]);
 const FRESH_REQUIRED = [...FRESH_TOP_FILES, "docker", "scripts/self-host"];
 const NON_PRODUCTION_SOURCE_FILES = new Set([
   "scripts/src/run-docker-caddy-browser-smoke.mjs",

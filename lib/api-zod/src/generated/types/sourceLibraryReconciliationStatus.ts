@@ -5,19 +5,7 @@
  * API specification. Canonical shared-record GET responses expose X-Master-Data-Epoch. Shared-record mutations retain their original read epoch and return 409 after a guarded change if it is missing or stale. A fresh GET does not rebase an older queued intent.
  * OpenAPI spec version: 0.1.0
  */
-import type { SourceLibraryReconciliationStatusFindingsItem } from './sourceLibraryReconciliationStatusFindingsItem';
-import type { SourceLibraryReconciliationStatusFreshness } from './sourceLibraryReconciliationStatusFreshness';
-import type { SourceLibraryReconciliationStatusHeal } from './sourceLibraryReconciliationStatusHeal';
-import type { SourceLibraryReconciliationStatusReport } from './sourceLibraryReconciliationStatusReport';
-import type { SourceLibraryReconciliationStatusStatus } from './sourceLibraryReconciliationStatusStatus';
-import type { SourceLibraryReconciliationStatusSummary } from './sourceLibraryReconciliationStatusSummary';
+import type { FreshSourceLibraryReconciliationStatus } from './freshSourceLibraryReconciliationStatus';
+import type { LegacySourceLibraryReconciliationStatus } from './legacySourceLibraryReconciliationStatus';
 
-export interface SourceLibraryReconciliationStatus {
-  report: SourceLibraryReconciliationStatusReport;
-  heal: SourceLibraryReconciliationStatusHeal;
-  checkedAt: Date;
-  status: SourceLibraryReconciliationStatusStatus;
-  freshness: SourceLibraryReconciliationStatusFreshness;
-  summary: SourceLibraryReconciliationStatusSummary;
-  findings: SourceLibraryReconciliationStatusFindingsItem[];
-}
+export type SourceLibraryReconciliationStatus = LegacySourceLibraryReconciliationStatus | FreshSourceLibraryReconciliationStatus;

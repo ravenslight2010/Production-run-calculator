@@ -6,6 +6,8 @@ import esbuildPluginPino from "esbuild-plugin-pino";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { buildSourceRecord, completeBuildStage } from "../../scripts/src/build-source-identity.mjs";
+import { buildFreshSourceRecord, completeFreshBuildStage } from "../../scripts/self-host/build-identity.mjs";
+import { freshRuntimePlugin, assertFreshRuntimeGraph, FRESH_RUNTIME_BUILD_CONTRACT } from "../../scripts/self-host/runtime-build-policy.mjs";
 import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "../../scripts/src/source-library-pool-approval-assets.mjs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
@@ -16,20 +18,20 @@ const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 async function buildAll() {
   const root = path.resolve(artifactDir, "../..");
   const identityMode = process.env.BUILD_IDENTITY_MODE;
-  if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish") {
+  if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish" && identityMode !== "self-host-fresh") {
     throw new Error("Invalid build identity mode.");
   }
-  const sourceRecord = buildSourceRecord(
-    root,
-    identityMode ?? (process.env.NODE_ENV === "development" ? "development" : "publish"),
-  );
+  const mode = identityMode ?? (process.env.NODE_ENV === "development" ? "development" : "publish");
+  const fresh = mode === "self-host-fresh";
+  const sourceRecord = fresh ? buildFreshSourceRecord(root) : buildSourceRecord(root, mode);
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
-  await esbuild({
+  const result = await esbuild({
+    ...(fresh ? { absWorkingDir: root } : {}),
     entryPoints: {
       index: path.resolve(artifactDir, "src/index.ts"),
-      "source-library-approval": path.resolve(root, "scripts/src/source-library-approval-bundle.mts"),
+      ...(!fresh ? { "source-library-approval": path.resolve(root, "scripts/src/source-library-approval-bundle.mts") } : {}),
     },
     platform: "node",
     bundle: true,
@@ -116,8 +118,10 @@ async function buildAll() {
       "puppeteer-core",
       "electron",
     ],
-    sourcemap: "linked",
+    sourcemap: fresh ? false : "linked",
+    metafile: fresh,
     plugins: [
+      ...(fresh ? [freshRuntimePlugin(root)] : []),
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
       esbuildPluginPino({ transports: ["pino-pretty"] })
     ],
@@ -133,6 +137,12 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  if (fresh) {
+    assertFreshRuntimeGraph(root, result.metafile);
+    await writeFile(path.resolve(distDir, "self-host-build-contract.json"), JSON.stringify(FRESH_RUNTIME_BUILD_CONTRACT));
+    completeFreshBuildStage(root, sourceRecord, "api");
+    return;
+  }
   const reportRelativePath =
     "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
   const reportShaRelativePath =

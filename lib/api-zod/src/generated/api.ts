@@ -698,27 +698,28 @@ export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidates
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportAutomaticProposalsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportPlanSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportSnapshotSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportManifestSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportManifestRetainedMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportManifestExcludedOlderDuplicatesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultReplacementsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultAliasesInsertedMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultRepointedProfilesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultRepointedRunsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultDeletedStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryPoolMismatchesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryAliasGapsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryStaleProfileLinksMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryStalePendingRunLinksMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryProtectedStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryUnexpectedStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryProtectedHistoryReferencesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryOmittedFindingsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationTwoFindingsMax = 0;
 export const listAuditLogsResponseLogsItemChangesReasonCodeMax = 200;
 export const listAuditLogsResponseLogsItemChangesTargetIdOneMax = 200;
 export const listAuditLogsResponseLogsItemChangesTargetTypeMax = 200;
@@ -1565,12 +1566,12 @@ export const GetBuildInfoResponse = zod.object({
   "schemaVersion": zod.literal(1),
   "kind": zod.enum(['app-build-info']),
   "appBuildId": zod.string().regex(getBuildInfoResponseAppBuildIdRegExp).describe('Application-owned artifact-set ID, not a Replit Build UUID.'),
-  "sourcePolicy": zod.enum(['production-source-v2', 'production-source-v3', 'production-source-v4']),
+  "sourcePolicy": zod.enum(['production-source-v2', 'production-source-v3', 'production-source-v4', 'self-host-fresh-source-v1']),
   "sourceFingerprintSha256": zod.string().regex(getBuildInfoResponseSourceFingerprintSha256RegExp),
   "gitRevision": zod.string().regex(getBuildInfoResponseGitRevisionRegExp).nullable(),
   "gitBinding": zod.enum(['verified', 'unavailable']),
   "completedAt": zod.coerce.date(),
-  "buildMode": zod.enum(['release', 'development']),
+  "buildMode": zod.enum(['release', 'development', 'self-host-fresh']),
   "platformDeploymentId": zod.string().regex(getBuildInfoResponsePlatformDeploymentIdRegExp).nullable(),
   "platformBuildId": zod.string().regex(getBuildInfoResponsePlatformBuildIdRegExp).nullable(),
   "platformIdentitySource": zod.enum(['runtime-reported', 'unavailable'])
@@ -7398,24 +7399,24 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "observationBefore": zod.coerce.date()
 })
 }),
-  "sourceReconciliation": zod.object({
+  "sourceReconciliation": zod.union([zod.object({
   "report": zod.object({
   "path": zod.string(),
-  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportSha256RegExp),
   "formatVersion": zod.int(),
-  "automaticProposals": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin),
-  "stubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin),
-  "planSha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp),
+  "automaticProposals": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportAutomaticProposalsMin),
+  "stubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportStubsMin),
+  "planSha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportPlanSha256RegExp),
   "snapshot": zod.object({
   "path": zod.string(),
-  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp),
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportSnapshotSha256RegExp),
   "capturedAt": zod.coerce.date()
 }),
   "manifest": zod.object({
   "path": zod.string(),
-  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp),
-  "retained": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin),
-  "excludedOlderDuplicates": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin)
+  "sha256": zod.string().regex(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportManifestSha256RegExp),
+  "retained": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportManifestRetainedMin),
+  "excludedOlderDuplicates": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneReportManifestExcludedOlderDuplicatesMin)
 })
 }),
   "heal": zod.object({
@@ -7424,25 +7425,25 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "appliedAt": zod.coerce.date().nullable(),
   "markerValid": zod.boolean(),
   "result": zod.object({
-  "replacements": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin),
-  "aliasesInserted": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin),
-  "repointedProfiles": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin),
-  "repointedRuns": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin),
-  "deletedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin)
+  "replacements": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultReplacementsMin),
+  "aliasesInserted": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultAliasesInsertedMin),
+  "repointedProfiles": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultRepointedProfilesMin),
+  "repointedRuns": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultRepointedRunsMin),
+  "deletedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneHealResultDeletedStubsMin)
 })
 }),
   "checkedAt": zod.coerce.date(),
   "status": zod.enum(['clean', 'warning', 'error', 'not-verified']),
   "freshness": zod.enum(['current', 'stale']),
   "summary": zod.object({
-  "poolMismatches": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin),
-  "aliasGaps": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin),
-  "staleProfileLinks": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin),
-  "stalePendingRunLinks": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin),
-  "protectedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin),
-  "unexpectedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin),
-  "protectedHistoryReferences": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin),
-  "omittedFindings": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin),
+  "poolMismatches": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryPoolMismatchesMin),
+  "aliasGaps": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryAliasGapsMin),
+  "staleProfileLinks": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryStaleProfileLinksMin),
+  "stalePendingRunLinks": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryStalePendingRunLinksMin),
+  "protectedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryProtectedStubsMin),
+  "unexpectedStubs": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryUnexpectedStubsMin),
+  "protectedHistoryReferences": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryProtectedHistoryReferencesMin),
+  "omittedFindings": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationOneSummaryOmittedFindingsMin),
   "findingLimitPerCategory": zod.int().min(1)
 }),
   "findings": zod.array(zod.object({
@@ -7455,7 +7456,21 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "protectedValue": zod.boolean(),
   "sourceRoute": zod.enum(['dough', 'sauce', 'cheeseRecipes', 'mixes', 'import', 'setupProfiles', 'audit'])
 }))
-})
+}),zod.object({
+  "status": zod.enum(['not-applicable']),
+  "buildProfile": zod.enum(['self-host-fresh']),
+  "reason": zod.enum(['legacy-production-audit-not-packaged']),
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "category": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']),
+  "severity": zod.enum(['info', 'warning', 'error']),
+  "affectedRecord": zod.string(),
+  "currentValue": zod.string(),
+  "proposedOutcome": zod.string(),
+  "protectedValue": zod.boolean(),
+  "sourceRoute": zod.enum(['dough', 'sauce', 'cheeseRecipes', 'mixes', 'import', 'setupProfiles', 'audit'])
+})).max(getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationTwoFindingsMax)
+})])
 })
 })
 

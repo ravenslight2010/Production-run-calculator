@@ -6,23 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusSummary = {
+export type LegacySourceLibraryReconciliationStatusHealResult = {
   /** @minimum 0 */
-  poolMismatches: number;
+  replacements: number;
   /** @minimum 0 */
-  aliasGaps: number;
+  aliasesInserted: number;
   /** @minimum 0 */
-  staleProfileLinks: number;
+  repointedProfiles: number;
   /** @minimum 0 */
-  stalePendingRunLinks: number;
+  repointedRuns: number;
   /** @minimum 0 */
-  protectedStubs: number;
-  /** @minimum 0 */
-  unexpectedStubs: number;
-  /** @minimum 0 */
-  protectedHistoryReferences: number;
-  /** @minimum 0 */
-  omittedFindings: number;
-  /** @minimum 1 */
-  findingLimitPerCategory: number;
+  deletedStubs: number;
 };

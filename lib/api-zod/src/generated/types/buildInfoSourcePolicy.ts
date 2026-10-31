@@ -13,4 +13,5 @@ export const BuildInfoSourcePolicy = {
   'production-source-v2': 'production-source-v2',
   'production-source-v3': 'production-source-v3',
   'production-source-v4': 'production-source-v4',
+  'self-host-fresh-source-v1': 'self-host-fresh-source-v1',
 } as const;

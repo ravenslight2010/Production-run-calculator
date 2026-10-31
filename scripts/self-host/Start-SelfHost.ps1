@@ -34,7 +34,7 @@ if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne ('v' + (Get-Content (Join-Path $
 # DB creation. Restart intentionally does not need private build-time inputs.
 if ($InitializeFresh -or $CheckOnly) {
   if ($InitializeFresh -and $CheckOnly) { throw 'Choose InitializeFresh or CheckOnly, not both' }
-  $preflight = @((Join-Path $PSScriptRoot 'preflight.mjs'), '--root', $root)
+  $preflight = @((Join-Path $PSScriptRoot 'preflight.mjs'), '--root', $root, '--profile', 'self-host-fresh')
   if ($InitializeFresh) { $preflight += @('--site', $Site, '--time-zone', $TimeZone, '--manager', $Manager) }
   Invoke-Checked 'node' $preflight
   if ($CheckOnly) {
@@ -107,7 +107,7 @@ try {
   }
   # --pull never and --no-build: a normal offline restart performs no downloads.
   Invoke-Checked 'docker' ($compose + @('up', '-d', '--no-build', '--pull', 'never', 'db', 'ollama', 'api', 'web', 'caddy-storage-init'))
-  Write-Output 'Stack started, not yet qualified. Verify HTTPS /api/ready, trust the LAN CA, and prepare local models separately.'
+  Write-Output 'Stack started, not yet qualified. Verify HTTPS /api/readyz, trust the LAN CA, and prepare local models separately.'
 } finally {
   foreach ($key in $previous.Keys) { [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process') }
 }

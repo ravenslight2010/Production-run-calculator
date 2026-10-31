@@ -6,15 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusHealResult = {
-  /** @minimum 0 */
-  replacements: number;
-  /** @minimum 0 */
-  aliasesInserted: number;
-  /** @minimum 0 */
-  repointedProfiles: number;
-  /** @minimum 0 */
-  repointedRuns: number;
-  /** @minimum 0 */
-  deletedStubs: number;
-};
+export type FreshSourceLibraryReconciliationStatusStatus = typeof FreshSourceLibraryReconciliationStatusStatus[keyof typeof FreshSourceLibraryReconciliationStatusStatus];
+
+
+export const FreshSourceLibraryReconciliationStatusStatus = {
+  'not-applicable': 'not-applicable',
+} as const;

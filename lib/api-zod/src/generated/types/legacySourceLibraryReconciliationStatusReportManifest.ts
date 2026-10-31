@@ -6,12 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusStatus = typeof SourceLibraryReconciliationStatusStatus[keyof typeof SourceLibraryReconciliationStatusStatus];
-
-
-export const SourceLibraryReconciliationStatusStatus = {
-  clean: 'clean',
-  warning: 'warning',
-  error: 'error',
-  'not-verified': 'not-verified',
-} as const;
+export type LegacySourceLibraryReconciliationStatusReportManifest = {
+  path: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  /** @minimum 0 */
+  retained: number;
+  /** @minimum 0 */
+  excludedOlderDuplicates: number;
+};

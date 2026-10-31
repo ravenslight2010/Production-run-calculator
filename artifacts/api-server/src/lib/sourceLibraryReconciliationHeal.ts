@@ -145,7 +145,7 @@ export type SourceLibraryReconciliationFinding = {
   sourceRoute: "dough" | "sauce" | "cheeseRecipes" | "mixes" | "import" | "setupProfiles" | "audit";
 };
 
-export type SourceLibraryReconciliationStatus = {
+export type LegacySourceLibraryReconciliationStatus = {
   report: {
     path: string;
     sha256: string;
@@ -179,6 +179,9 @@ export type SourceLibraryReconciliationStatus = {
   };
   findings: SourceLibraryReconciliationFinding[];
 };
+
+export type SourceLibraryReconciliationStatus = LegacySourceLibraryReconciliationStatus |
+  import("../selfHostFresh/contract").FreshSourceReconciliationStatus;
 
 type ReconciliationExecutor = Pick<typeof db, "select">;
 
@@ -449,7 +452,7 @@ export async function sourceLibraryReconciliationStatus(
   executor: ReconciliationExecutor,
   scope: string,
   sequentialQueries = false,
-): Promise<SourceLibraryReconciliationStatus> {
+): Promise<LegacySourceLibraryReconciliationStatus> {
   const [
     dough,
     sauce,

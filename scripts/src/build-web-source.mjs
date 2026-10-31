@@ -3,17 +3,20 @@ import {
   buildSourceRecord, completeBuildStage, PROJECT_ROOT, readBoundedJson, validateSourceRecord, writeRecord,
 } from "./build-source-identity.mjs";
 
-const startFile = path.join(PROJECT_ROOT, ".local/build-identity/web-stage-start.json");
+import { buildFreshSourceRecord, completeFreshBuildStage, validateFreshSourceRecord } from "../self-host/build-identity.mjs";
+const fresh = process.env.BUILD_IDENTITY_MODE === "self-host-fresh";
+const startFile = path.join(PROJECT_ROOT, fresh ? ".local/build-identity/self-host-web-stage-start.json" : ".local/build-identity/web-stage-start.json");
 try {
   if (process.argv.length !== 3) throw new Error("Invalid web build identity arguments.");
   const identityMode = process.env.BUILD_IDENTITY_MODE;
-  if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish") {
+  if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish" && identityMode !== "self-host-fresh") {
     throw new Error("Invalid web build identity mode.");
   }
   if (process.argv[2] === "--start") {
-    writeRecord(startFile, buildSourceRecord(PROJECT_ROOT, identityMode ?? "publish"));
+    writeRecord(startFile, fresh ? buildFreshSourceRecord(PROJECT_ROOT) : buildSourceRecord(PROJECT_ROOT, identityMode ?? "publish"));
   } else if (process.argv[2] === "--complete") {
-    completeBuildStage(PROJECT_ROOT, validateSourceRecord(readBoundedJson(startFile)), "web");
+    if (fresh) completeFreshBuildStage(PROJECT_ROOT, validateFreshSourceRecord(readBoundedJson(startFile)), "web");
+    else completeBuildStage(PROJECT_ROOT, validateSourceRecord(readBoundedJson(startFile)), "web");
   } else {
     throw new Error("Invalid web build identity stage.");
   }

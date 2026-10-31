@@ -6,9 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SourceLibraryReconciliationStatusReportSnapshot = {
-  path: string;
-  /** @pattern ^[a-f0-9]{64}$ */
-  sha256: string;
-  capturedAt: Date;
-};
+export type SourceLibraryReconciliationFindingSeverity = typeof SourceLibraryReconciliationFindingSeverity[keyof typeof SourceLibraryReconciliationFindingSeverity];
+
+
+export const SourceLibraryReconciliationFindingSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+} as const;
