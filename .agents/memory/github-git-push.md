@@ -33,7 +33,7 @@ not waive existing source-version or deployment-binding release checks.
 
 ## Git push authentication
 
-The installed GitHub API connection can read and modify GitHub REST resources, but it does not make the local shell's HTTPS `git push` authenticated and cannot update a ref to a commit whose Git objects have not been uploaded. Workspace Git pushes need a secure push credential, supplied as an authenticated repository URL or assembled from a token only within the pushing process.
+The installed GitHub API connection can read and modify GitHub REST resources, but it does not make the local shell's HTTPS `git push` authenticated and cannot update a ref to a commit whose Git objects have not been uploaded. Workspace Git pushes need a secure push credential, supplied through an authenticated repository URL, assembled only within the pushing process, or provided by an already authenticated `gh` credential helper for the exact Git host.
 
 **Why:** A REST ref update alone cannot transfer a local commit graph, and the shell's unauthenticated remote rejects password/token-less pushes.
 
@@ -44,6 +44,12 @@ An existing configured push URL can take precedence over a process-local push UR
 **Why:** A stale push URL masked a newly supplied valid token; once Git used that token, the server denied the push with 403 even though authenticated REST reads succeeded and the account reported push permission.
 
 **How to apply:** Distinguish credential selection errors from token-scope failures before asking for another secret. Check the effective remote and verify the exact remote tip after any successful push; do not infer success from an API permission field.
+
+Git transport and Git LFS transport are separate capabilities on an authenticated proxy. Source-only validation must not silently depend on an unsupported historical-asset upload endpoint.
+
+**Why:** Authenticated Git pushes through the Replit GitHub proxy succeeded only after omitting unrelated historical LFS uploads; neither validation source tree contained LFS files.
+
+**How to apply:** Verify the tested tree has no LFS requirements before a validation-only upload omission. Never apply that omission to needed assets, a merge, or deployment. Keep credentials command-local, match the authenticated host, and never replace a secret with one for an unrelated repository.
 
 For review-only CodeRabbit scans of a long-lived branch, split an oversized diff into stacked PRs at existing ancestor commits rather than merging into the default branch. The default CodeRabbit auto-review setting may skip PRs whose base is not the default branch; a manual `@coderabbitai full review` comment can request those reviews without changing repository-wide settings.
 
@@ -102,6 +108,18 @@ A workspace Git credential may be a token-only value rather than an authenticate
 **How to apply:** Detect the format only inside the credential-consuming process, never print it, and select an authentication path that explicitly supports that format for the independently verified destination repository. Do not assume a guarded helper accepts both token-only and authenticated-URL inputs merely because it reads the same secret name. Never pass a raw token as a Git remote or shell argument: Git error output may echo it. Keep credentials in process-local authentication rather than persistent remotes.
 
 ## Linked worktrees with optional LFS assets
+
+When reconciling the GitHub backup, inspect the proposed merged tree even when
+Git reports only one textual conflict. Preserve the current Publish-compatible
+database policy until an explicitly approved replacement has been verified.
+
+**Why:** A backup branch reintroduced identity generators and their automatic
+conversion while deleting the serial repair fixture; most of those reversions
+merged without textual conflicts.
+
+**How to apply:** Review schema declarations, package hooks, repair fixtures, and
+their CI tests together. A clean merge is not proof that the current publishing
+fix survives.
 
 For bounded CI comparisons, set `GIT_LFS_SKIP_SMUDGE=1` on linked-worktree creation only after confirming that every selected test/build input is available as a normal Git blob and LFS payloads are outside the measured check closure.
 

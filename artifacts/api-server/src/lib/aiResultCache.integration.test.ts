@@ -1004,13 +1004,9 @@ describe("AI result cache persistence and scope isolation", () => {
 
       const response = await fetch(`${healthBaseUrl}/healthz`);
       const body = await response.json() as {
+        status: string;
         checks: { database: string };
-        diagnostics: {
-          cacheMaintenance: {
-            live: { status: string; recentErrorCount: number };
-            sandbox: { status: string; recentErrorCount: number };
-          };
-        };
+        diagnostics?: unknown;
       };
 
       // The pool's acquisition timeout must win before the route can wait
@@ -1019,15 +1015,11 @@ describe("AI result cache persistence and scope isolation", () => {
       expect(Date.now() - startedAt).toBeLessThan(3_000);
       expect(pool.waitingCount).toBe(0);
       expect(response.status).toBe(503);
+      expect(body.status).toBe("degraded");
       expect(body.checks.database).toBe("error");
-      expect(body.diagnostics.cacheMaintenance.live).toMatchObject({
-        status: "ok",
-        recentErrorCount: 0,
-      });
-      expect(body.diagnostics.cacheMaintenance.sandbox).toMatchObject({
-        status: "ok",
-        recentErrorCount: 0,
-      });
+      // /healthz is a public compatibility probe. Detailed cache-maintenance
+      // diagnostics belong only to the authorized manager diagnostics route.
+      expect(body).not.toHaveProperty("diagnostics");
     } finally {
       for (const client of heldClients) client.release();
     }

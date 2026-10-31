@@ -45,7 +45,6 @@ import {
   DIE_TYPES_KEY,
   DEFAULT_DIE_TYPES,
   MAX_HISTORY_DAYS,
-  CHANGE_HISTORY_KEY,
   MAX_CHANGE_HISTORY,
   type MasterDataChange,
   type MasterDataChangeType,
@@ -58,8 +57,9 @@ import {
   type RecipeRow,
   type CrustField,
 } from "./types";
+import { isDayStatePersistenceBlocked } from "./adapters/dayStatePersistenceFence";
 import { normalizeDayBreaks } from "./dayTimeline";
-import { COMPLETED_HISTORY_CACHE_KEY, COMPLETED_HISTORY_OUTBOX_KEY, queueCompletedRun } from "./completedHistorySync";
+import { queueCompletedRun, loadCompletedHistoryForActiveScope } from "./completedHistorySync";
 import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
 import { MIX_SEED } from "./mixSeed";
 import {
@@ -164,6 +164,9 @@ import {
   withProfileCacheProjection,
   writeCachedProfileBlobs,
 } from "./profileCache";
+import { MEMORY_DIRECTORY_KEYS } from "./factoryDirectory";
+import { getProfileCacheGeneration } from "./profileCache";
+import { readLegacyMasterDataHistory } from "./legacyMasterDataHistory";
 
 type ProfileBlobEntry = {
   key: string;
@@ -250,7 +253,7 @@ export function loadList(key: string, fallback: string[]): string[] {
       }
     }
   } catch {}
-  return fallback;
+  return MEMORY_DIRECTORY_KEYS.has(key) ? [] : fallback;
 }
 
 /** Current local formula pool with explicit units for import safety checks. */
@@ -302,6 +305,7 @@ function notifyKv(key: string, value: unknown): void {
 }
 
 export function saveList(key: string, list: string[]): void {
+  if (localStorage.getItem(key) === JSON.stringify(list)) return;
   try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
   notifyKv(key, list);
 }
@@ -486,7 +490,7 @@ export function loadBrandFlavors(): Record<string, string[]> {
   try {
     const raw = localStorage.getItem(BRAND_FLAVORS_KEY);
     if (raw) return JSON.parse(raw) as Record<string, string[]>;
-    const oldFlavors = loadList(FLAVORS_KEY, []);
+    const oldFlavors = MEMORY_DIRECTORY_KEYS.has(BRAND_FLAVORS_KEY) ? [] : loadList(FLAVORS_KEY, []);
     if (oldFlavors.length > 0) {
       const brands = loadList(BRANDS_KEY, []);
       const seeded: Record<string, string[]> = {};
@@ -498,6 +502,7 @@ export function loadBrandFlavors(): Record<string, string[]> {
 }
 
 export function saveBrandFlavors(bf: Record<string, string[]>): void {
+  if (localStorage.getItem(BRAND_FLAVORS_KEY) === JSON.stringify(bf)) return;
   try { localStorage.setItem(BRAND_FLAVORS_KEY, JSON.stringify(bf)); } catch {}
   notifyKv(BRAND_FLAVORS_KEY, bf);
 }
@@ -516,10 +521,10 @@ export const PROFILE_EXCLUDED_FIELDS = [
   "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
   "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
   "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
-  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
-  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
-  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
-  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration", "app1StockConsumedLbs",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration", "app2StockConsumedLbs",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration", "app3StockConsumedLbs",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration", "app4StockConsumedLbs",
   "applicatorStockInitialized",
   "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
   "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
@@ -936,6 +941,7 @@ export function profileWritesEnabled(): boolean {
 
 export type SaveProfileOptions = {
   authoritative?: boolean;
+  subTab?: "dough" | "crusts";
 };
 
 export function saveProfile(
@@ -973,6 +979,10 @@ export function saveProfile(
       }
     }
   } catch {}
+
+  if (options.subTab) {
+    dough = JSON.stringify({ ...JSON.parse(dough), _subTab: options.subTab });
+  }
 
   // Change detection — profiles are now a factory-wide server pool with
   // per-profile last-write-wins stamps, so an unchanged nav-save must not mint
@@ -1019,8 +1029,8 @@ export function saveProfile(
   if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
   if (!profileSyncSuppressed) {
-    if (options.authoritative) markProfileForceEdited(key);
-    else markProfileEdited(key);
+    if (options.authoritative) markProfileForceEdited(key, { brand, flavor });
+    else markProfileEdited(key, { brand, flavor });
   }
   return true;
 }
@@ -1034,13 +1044,14 @@ export async function saveProfileAndWaitForServer(
   brand: string,
   flavor: string,
   values: FormValues,
+  options: Pick<SaveProfileOptions, "subTab"> = {},
 ): Promise<"saved" | "unchanged"> {
   const key = canonicalProfileKey(brand, flavor);
-  const changed = saveProfile(brand, flavor, values, { authoritative: true });
+  const changed = saveProfile(brand, flavor, values, { ...options, authoritative: true });
   // If a previous attempt failed after writing the same local values, promote
   // its pending plain operation to an authoritative manager write so Retry
   // does not get mistaken for an unchanged form.
-  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key);
+  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key, { brand, flavor });
   if (!changed && !hasPendingProfileWrite(key)) return "unchanged";
   await flushProfileQueueStrict();
   return "saved";
@@ -1062,61 +1073,45 @@ export function saveProfileSubTab(
   flavor: string,
   subTab: "dough" | "crusts",
 ): void {
-  if (!profileWritesAllowed) return;
-  if (!brand && !flavor) return;
+  if (!profileWritesAllowed || (!brand && !flavor)) return;
   const profileKey = canonicalProfileKey(brand, flavor);
-  // Embed in the dough profile blob so the server-pool sync distributes it.
-  // The old unscoped :subtab key is migration-only once the cache is active.
+  const raw = readProfileBlob(profileKey, "dough");
+  // A mode toggle must not resurrect a deleted profile or invent a setup stub.
+  if (!raw) return;
+  const profile = JSON.parse(raw) as Record<string, unknown>;
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return;
   if (!profileCacheIsActive()) {
     try { localStorage.setItem(profileKey + ":subtab", subTab); } catch {}
   }
-  try {
-    const raw = readProfileBlob(profileKey, "dough");
-    const blob: Record<string, unknown> = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    if (blob._subTab !== subTab) {
-      blob._subTab = subTab;
-      writeProfileBlob(profileKey, "dough", JSON.stringify(blob));
-      // Trigger a server-pool push so other tablets receive the update.
-      markProfileEdited(profileKey);
-    }
-  } catch {}
+  if (profile._subTab === subTab) return;
+  writeProfileBlob(profileKey, "dough", JSON.stringify({ ...profile, _subTab: subTab }));
+  markProfileEdited(profileKey, { brand, flavor });
 }
 
 /**
  * Return the saved Line Type preference for a brand+flavor pair, or null when
  * none has been explicitly recorded (caller defaults to "dough").
  *
- * Checks the fast-access `:subtab` key first; falls back to `_subTab` inside
- * the dough profile blob (populated on devices that reconciled a server update
- * but have not yet toggled the line type locally).
+ * This is shared product setup. Prefer the authenticated profile cache; a
+ * previous identity's legacy fast-access key must never override server data.
  */
 export function loadProfileSubTab(
   brand: string,
   flavor: string,
 ): "dough" | "crusts" | null {
   const profileKey = canonicalProfileKey(brand, flavor);
-  if (!profileCacheIsActive()) {
+  const raw = readProfileBlob(profileKey, "dough");
+  if (raw) {
     try {
-      const v = localStorage.getItem(profileKey + ":subtab");
-      if (v === "dough" || v === "crusts") return v;
-    } catch { return null; }
+      const value = JSON.parse(raw)._subTab;
+      if (value === "dough" || value === "crusts") return value;
+    } catch { /* Invalid legacy metadata is not a saved default. */ }
   }
-  // Fallback: read _subTab from the dough profile blob (set by server reconcile
-  // on tablets that haven't toggled locally yet).
+  if (profileCacheIsActive()) return null;
   try {
-    const raw = readProfileBlob(profileKey, "dough");
-    if (raw) {
-      const blob = JSON.parse(raw) as Record<string, unknown>;
-      const embedded = blob._subTab;
-      if (embedded === "dough" || embedded === "crusts") {
-        // Seed the fast-access key so subsequent calls don't need to parse.
-        if (!profileCacheIsActive()) {
-          try { localStorage.setItem(profileKey + ":subtab", embedded); } catch {}
-        }
-        return embedded;
-      }
-    }
-  } catch {}
+    const v = localStorage.getItem(profileKey + ":subtab");
+    if (v === "dough" || v === "crusts") return v;
+  } catch { return null; }
   return null;
 }
 
@@ -1144,8 +1139,9 @@ export function applyPackagingPatchToProfile(
       if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
     } catch {}
     for (const k of keys) existing[k] = patch[k];
-    writeProfileBlob(canonicalProfileKey(brand, flavor), "dough", JSON.stringify(existing));
-    markProfileEdited(canonicalProfileKey(brand, flavor));
+    const key = canonicalProfileKey(brand, flavor);
+    writeProfileBlob(key, "dough", JSON.stringify(existing));
+    markProfileEdited(key, { brand, flavor });
   } catch {}
 }
 
@@ -1322,9 +1318,11 @@ export function refreshProfilesFromNamedRecipes(
       const curRows = Array.isArray(obj[rowsField])
         ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
         : [];
-      // emptyRowsOnly: skip profiles that already have rows stored — the full
-      // diff path handles them when the pool actually changes.
-      if (opts?.emptyRowsOnly && curRows.length > 0) continue;
+      // Passive pool snapshots may fill missing/zero-only rows, but must not
+      // overwrite populated profile data. Explicit manager saves use the full
+      // replacement path without this option.
+      const curRowsAllZero = curRows.every((row) => !(Number(row.lbs) > 0));
+      if (opts?.emptyRowsOnly && curRows.length > 0 && !curRowsAllZero) continue;
       const rowsDiffer = !recipeRowsEqual(curRows, patch.rows);
 
       // Doughball weight is PER-FLAVOR (one family serves many flavors). Two
@@ -1362,7 +1360,7 @@ export function refreshProfilesFromNamedRecipes(
       if (weightDiffers) obj.targetDoughballWeight = effectiveWeight;
       if (trayDiffers) obj.doughballsPerTray = wantTray;
       writeProfileBlobEntry(entry, JSON.stringify(obj));
-      markProfileEdited(entry.key);
+      markProfileEdited(entry.key, { brand: profileBrand, flavor: profileFlavor });
       touched.push({ brand: profileBrand, flavor: profileFlavor });
     } catch {
       // Skip an unreadable profile — never let one bad row block the fan-out.
@@ -1381,8 +1379,8 @@ export function refreshProfilesFromNamedRecipes(
  * fields but not the row arrays) and on the one-time boot heal to correct
  * profiles that accumulated stale rows from earlier merges.
  *
- * @param opts.emptyRowsOnly  When true, skip slots that already have rows —
- *   safe for ongoing empty-row healing without overwriting valid data.
+ * @param opts.emptyRowsOnly  When true, update only empty or all-zero slots —
+ *   safe for passive pool refreshes without overwriting populated profile data.
  */
 export function refreshCheeseOrMixProfileRows(
   targetName: string,
@@ -1460,6 +1458,7 @@ export function loadDayState(): DayState {
 // adopted FROM a peer keep the peer's stamp instead of being re-claimed as a
 // local edit (which would defeat the newer-stamp-wins merge and start echo wars).
 export function saveDayState(ds: DayState, opts?: { stampMeta?: boolean }): void {
+  if (isDayStatePersistenceBlocked()) return;
   let toSave = ds;
   if (opts?.stampMeta !== false) {
     try { toSave = stampDayStateMeta(ds, loadDayState(), Date.now()); } catch {}
@@ -1486,21 +1485,7 @@ export function overlayRunMetaStamps(runs: RunMeta[]): RunMeta[] {
 }
 
 export function loadHistory(): HistoryDay[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (raw) {
-      const history = JSON.parse(raw) as HistoryDay[];
-      for (const day of history) {
-        for (const vals of Object.values(day.runValues ?? {})) {
-          const o = vals as unknown as Record<string, unknown>;
-          resolvePep1Combined(o, typeof o.pep1Combined === "boolean");
-          normalizePepFields(o);
-        }
-      }
-      return history;
-    }
-  } catch {}
-  return [];
+  return loadCompletedHistoryForActiveScope();
 }
 
 // A history run worth keeping/showing: it has a name (brand or flavor), was
@@ -1522,12 +1507,10 @@ export function filterMeaningfulHistory(days: HistoryDay[]): HistoryDay[] {
 
 export function archiveDayToHistory(ds: DayState, date: string): void {
   try {
-    const history = loadHistory().filter(h => h.date !== date);
     // Never archive blank/unnamed placeholder runs; if nothing meaningful ran
     // that day (e.g. an off-day sign-in), don't create a history entry at all.
     const keptRuns = ds.runs.filter(isDisplayableHistoryRun);
     if (keptRuns.length === 0) {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
       return;
     }
     const runValues: Record<string, FormValues> = {};
@@ -1540,9 +1523,8 @@ export function archiveDayToHistory(ds: DayState, date: string): void {
         queueCompletedRun(date, run, runValues[run.id]);
       }
     }
-    const entry: HistoryDay = { date, runs: keptRuns, runValues };
-    const trimmed = [entry, ...history].slice(0, MAX_HISTORY_DAYS);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+    // Completed payloads are retained only by the durable finalization outbox.
+    // Mutable active-run settings remain in their existing recovery store.
   } catch {}
 }
 
@@ -1666,6 +1648,7 @@ export function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
   try { return JSON.parse(localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, DoughRecipePreset>; } catch { return {}; }
 }
 export function saveDoughRecipePresets(p: Record<string, DoughRecipePreset>): void {
+  if (localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) === JSON.stringify(p)) return;
   try { localStorage.setItem(DOUGH_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
   notifyKv(DOUGH_RECIPE_PRESETS_KEY, p);
 }
@@ -1674,6 +1657,7 @@ export function loadFrontlineRecipePresets(): Record<string, RecipeRow[]> {
   try { return JSON.parse(localStorage.getItem(FRONTLINE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
 }
 export function saveFrontlineRecipePresets(p: Record<string, RecipeRow[]>): void {
+  if (localStorage.getItem(FRONTLINE_RECIPE_PRESETS_KEY) === JSON.stringify(p)) return;
   try { localStorage.setItem(FRONTLINE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
   notifyKv(FRONTLINE_RECIPE_PRESETS_KEY, p);
 }
@@ -1682,6 +1666,7 @@ export function loadCheeseRecipePresets(): Record<string, RecipeRow[]> {
   try { return JSON.parse(localStorage.getItem(CHEESE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
 }
 export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
+  if (localStorage.getItem(CHEESE_RECIPE_PRESETS_KEY) === JSON.stringify(p)) return;
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
   notifyKv(CHEESE_RECIPE_PRESETS_KEY, p);
 }
@@ -1890,19 +1875,7 @@ export function applyIngredientMerge(map: MergeMap): void {
     );
     saveTemplates(templates);
   } catch {}
-  // ── History ──
-  try {
-    const history = loadHistory().map((day) => ({
-      ...day,
-      runValues: Object.fromEntries(
-        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
-          id,
-          mergeSettingsObject(vals as unknown as Record<string, unknown>, map) as unknown as FormValues,
-        ]),
-      ),
-    }));
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  } catch {}
+  // Immutable completed history is not rewritten by master-data maintenance.
   // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
   const runPrefix = RUN_KEY("");
   const keysToRewrite: string[] = [];
@@ -2177,123 +2150,63 @@ export function removeStaleRecipeReference(
   return clearRecipeNameSelections(category, trimmed);
 }
 
-// ── Master-data change history (local-only undo trail) ──────────────────────
-// A snapshot is every "run-calc-*" localStorage key EXCEPT the change-history
-// key itself (which would nest snapshots and blow up exponentially). This is the
-// maximal blast radius of any master-data edit — a merge rewrites lists, recipe
-// presets, profiles, runs, templates and history; a brand/flavor rename rewrites
-// profiles + day-state; an ingredient rename rewrites per-run values. Snapshot-
-// everything is the only universally-correct undo, so we accept the size cost
-// (bounded by MAX_CHANGE_HISTORY + quota-safe trimming on write).
-const APP_KEY_PREFIX = "run-calc-";
-
+// ── Retired browser rollback compatibility ─────────────────────────────────
+// The maintained callsites are being moved to typed canonical commands. These
+// compatibility entry points must not capture or restore a browser database,
+// even if called directly by an old consumer. Import/profile-repair compensation
+// remains owned by its existing server protocol.
+/** @deprecated Browser snapshots are not valid shared Undo evidence. */
 export function captureMasterDataSnapshot(): Record<string, string> {
-  const snap: Record<string, string> = {};
-  if (typeof localStorage === "undefined") return snap;
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (
-      !k || k === CHANGE_HISTORY_KEY || k === HISTORY_KEY
-      || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
-      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
-    ) continue;
-    if (!k.startsWith(APP_KEY_PREFIX)) continue;
-    const v = localStorage.getItem(k);
-    if (v !== null) snap[k] = v;
-  }
-  return snap;
+  return {};
 }
 
-// Restore a snapshot: rewrite every captured key, and delete any current
-// "run-calc-*" key (except the change-history key) that wasn't in the snapshot —
-// so additions made after the snapshot are truly reverted, not just overwritten.
-export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
-  if (typeof localStorage === "undefined") return;
-  const present = new Set<string>();
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    // Master-data undo/reset must never discard append-only completed history or
-    // its upload queue. Explicit purge-all is server-administered, not an
-    // incidental local rollback side effect.
-    if (
-      k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY && k !== HISTORY_KEY
-      && !k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
-      && !k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
-    ) present.add(k);
+/** @deprecated Use the owning server compensation protocol, never this API. */
+export function restoreMasterDataSnapshot(_snap: Record<string, string>): never {
+  throw new Error("Browser rollback is disabled. Shared changes require guarded server Undo; legacy evidence is retained on this device.");
+}
+
+let sessionChangeGeneration = -1;
+let sessionChanges: MasterDataChange[] = [];
+
+function currentSessionChanges(): MasterDataChange[] {
+  const generation = getProfileCacheGeneration();
+  if (generation !== sessionChangeGeneration) {
+    sessionChangeGeneration = generation;
+    sessionChanges = [];
   }
-  for (const k of present) {
-    if (!(k in snap)) {
-      try { localStorage.removeItem(k); } catch {}
-    }
-  }
-  for (const [k, v] of Object.entries(snap)) {
-    if (
-      k === HISTORY_KEY || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
-      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
-    ) continue;
-    try { localStorage.setItem(k, v); } catch {}
-  }
+  return sessionChanges;
 }
 
 export function loadChangeHistory(): MasterDataChange[] {
-  try {
-    const raw = localStorage.getItem(CHANGE_HISTORY_KEY);
-    if (raw) return JSON.parse(raw) as MasterDataChange[];
-  } catch {}
-  return [];
+  return [...currentSessionChanges(), ...readLegacyMasterDataHistory().items].slice(0, MAX_CHANGE_HISTORY);
 }
 
-// Persist the change-history list, trimming oldest entries until it fits the
-// localStorage quota. A snapshot can be large, so a write may overflow; rather
-// than throw (and break the edit that triggered it) we drop the oldest entries
-// and retry, keeping whatever recent history fits.
-export function saveChangeHistory(list: MasterDataChange[]): void {
-  if (typeof localStorage === "undefined") return;
-  let trimmed = list.slice(0, MAX_CHANGE_HISTORY);
-  while (trimmed.length > 0) {
-    try {
-      localStorage.setItem(CHANGE_HISTORY_KEY, JSON.stringify(trimmed));
-      return;
-    } catch {
-      trimmed = trimmed.slice(0, -1); // drop the oldest and retry
-    }
-  }
-  try { localStorage.removeItem(CHANGE_HISTORY_KEY); } catch {}
+/** @deprecated Legacy evidence is read-only; do not replace or trim its bytes. */
+export function saveChangeHistory(_list: MasterDataChange[]): never {
+  throw new Error("Legacy change history is read-only. Its original evidence is retained on this device.");
 }
 
-// Record a change. `before` must be a snapshot captured BEFORE the edit. If the
-// edit turned out to be a no-op (the post-edit state equals `before`), nothing
-// is recorded — list mutations bail silently on duplicates/invalid input, and a
-// useless undo entry would just clutter the history.
+// Transitional notices are metadata-only and session-only, not Undo receipts.
+// Do not compare snapshots or persist client-provided before facts.
 export function recordMasterDataChange(
   type: MasterDataChangeType,
   description: string,
-  before: Record<string, string>,
+  _before: Record<string, string>,
 ): void {
-  const after = captureMasterDataSnapshot();
-  if (JSON.stringify(before) === JSON.stringify(after)) return;
   const entry: MasterDataChange = {
     id: genId(),
     ts: Date.now(),
     type,
-    description,
-    before,
+    description: description.slice(0, 500),
+    before: {},
+    evidence: "session-only",
   };
-  saveChangeHistory([entry, ...loadChangeHistory()]);
+  sessionChanges = [entry, ...currentSessionChanges()].slice(0, MAX_CHANGE_HISTORY);
 }
 
-// Roll back to the point just before the given entry: restore that entry's
-// before-snapshot and discard it plus every newer entry (the list is newest-
-// first, so we keep only entries older than the undone one). Returns false when
-// the entry no longer exists. Callers reload/refresh React state and re-push to
-// the server after a successful undo.
-export function undoChange(id: string): boolean {
-  const list = loadChangeHistory();
-  const idx = list.findIndex((e) => e.id === id);
-  if (idx === -1) return false;
-  restoreMasterDataSnapshot(list[idx].before);
-  saveChangeHistory(list.slice(idx + 1));
-  return true;
+/** @deprecated A local entry can never authorize a shared compensation. */
+export function undoChange(_id: string): false {
+  return false;
 }
 
 /** Case-insensitive merge that keeps the existing label when a duplicate appears. */
@@ -2949,7 +2862,9 @@ export function purgeOrphanedProfilesIfNeeded(
       const sep = entry.key.indexOf("__");
       if (sep < 0) continue;
       const brandLc = entry.key.slice(0, sep);
-      if (!known.has(brandLc)) orphans.add(entry.key);
+      // A legacy cleanup is not an explicit deletion of a newer owned edit.
+      // Its brand directory may still be awaiting delivery on another queue.
+      if (!known.has(brandLc) && !hasPendingProfileWrite(entry.key)) orphans.add(entry.key);
     }
     for (const key of orphans) {
       deleteCachedProfile(key);

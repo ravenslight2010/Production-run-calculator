@@ -19,6 +19,7 @@ import { startWebPushAlertScheduler } from "./lib/webPush";
 import { serverJobBackgroundFailureFields, startServerJobWorkerLoop } from "./lib/serverJobs";
 import { startAuthRetentionScheduler } from "./lib/authRetention";
 import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention";
+import { startIdentitySequenceHealthScheduler } from "./lib/identitySequenceHealth";
 import { db, pool } from "@workspace/db";
 import { startDatabaseCapacityCollection } from "./lib/databaseCapacity";
 import {
@@ -26,6 +27,7 @@ import {
   reportCapacityTelemetry,
 } from "./lib/capacityTelemetry";
 import { getBuildInfo } from "./lib/buildInfo";
+import { stopDatabasePhaseObservations } from "./lib/databasePhaseTelemetry";
 import { setGeminiMetricsObserver } from "@workspace/integrations-openai-ai-server";
 import { sql } from "drizzle-orm";
 import {
@@ -75,6 +77,7 @@ let stopWebPushAlertScheduler: (() => void) | undefined;
 let stopDailyRolloverScheduler: (() => void) | undefined;
 let stopAuthRetentionScheduler: (() => void) | undefined;
 let stopImportSourceRetentionScheduler: (() => void) | undefined;
+let stopIdentitySequenceHealthScheduler: (() => void) | undefined;
 let stopDatabaseCapacityCollection: (() => void) | undefined;
 let stopCapacityTelemetryHeartbeat: (() => void) | undefined;
 
@@ -123,11 +126,16 @@ async function startServer(): Promise<void> {
     stopAuthRetentionScheduler = undefined;
     stopImportSourceRetentionScheduler?.();
     stopImportSourceRetentionScheduler = undefined;
+    stopIdentitySequenceHealthScheduler?.();
+    stopIdentitySequenceHealthScheduler = undefined;
     stopDatabaseCapacityCollection?.();
     stopDatabaseCapacityCollection = undefined;
     stopCapacityTelemetryHeartbeat?.();
     stopCapacityTelemetryHeartbeat = undefined;
     stopSyncOutboxFanout();
+    // Ends diagnostics only; never aborts work, releases clients, or changes leases.
+    stopDatabasePhaseObservations();
+    reportCapacityTelemetry(logger);
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
@@ -275,6 +283,7 @@ async function initializeStartup(startedAt: number): Promise<void> {
         );
       },
     }).stop;
+    stopIdentitySequenceHealthScheduler = startIdentitySequenceHealthScheduler().stop;
   } else {
     logger.info(
       { event: "background_auxiliary_schedulers", outcome: "disabled", reason: "managed_browser_fixture" },

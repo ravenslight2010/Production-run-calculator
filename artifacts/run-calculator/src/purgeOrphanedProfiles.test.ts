@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { setProfileCacheIdentity, writeCachedProfileBlobs, readCachedProfileBlobs, scopeProfileCacheStorageKey } from "./profileCache";
+import { markProfileEdited, flushProfileQueue } from "./profileServerSync";
 import {
   deleteProfilesForBrand,
   deleteProfileEntry,
@@ -61,6 +63,28 @@ describe("deleteProfileEntry", () => {
 
 describe("purgeOrphanedProfilesIfNeeded", () => {
   beforeEach(() => localStorage.clear());
+
+  it("preserves the exact owned pending edit while its brand is absent from the canonical directory", async () => {
+    setProfileCacheIdentity({ userId: "offline-owner", scope: "live" });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    try {
+      const key = "new brand__cheese";
+      const blobs = { dough: '{"targetCases":17}', crust: "{}" };
+      writeCachedProfileBlobs(key, blobs);
+      markProfileEdited(key);
+      await flushProfileQueue();
+      const queueKey = scopeProfileCacheStorageKey("run-calc-profilesync-queue-v1");
+      const before = localStorage.getItem(queueKey);
+      expect(before).toBeTruthy();
+      purgeOrphanedProfilesIfNeeded(["Existing brand"]);
+      expect(localStorage.getItem(queueKey)).toBe(before);
+      expect(readCachedProfileBlobs(key)).toEqual(blobs);
+    } finally {
+      await flushProfileQueue();
+      setProfileCacheIdentity(null);
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("removes profiles whose brand is not in the Brands list, keeps known ones", () => {
     localStorage.setItem(BRANDS_KEY, JSON.stringify(["Basha's Ultra Thin"]));

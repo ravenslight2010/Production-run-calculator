@@ -18,6 +18,9 @@
 // policy, rather than elapsed wall time alone, also decides whether a resumed
 // tunnel needs a restart propagation countdown.
 
+import { resolveLineTiming } from "./lineTiming";
+import { computeLineSections, type LineSections } from "./lineSections";
+
 export type PhaseState =
   | "filling"   // product entering this stage at run start
   | "active"    // stage in steady-state (all product flowing normally)
@@ -37,18 +40,24 @@ export interface LinePhases {
   stage1: PhaseInfo;
   stage2: PhaseInfo;
   stage3: PhaseInfo;
+  /** Additive v2 view. Never repurpose numbered stages for deployed readers. */
+  sections?: LineSections;
+}
+
+export function linePhaseRows(phases: LinePhases): PhaseInfo[] {
+  return phases.sections ? Object.values(phases.sections) : [phases.stage1, phases.stage2, phases.stage3];
 }
 
 /** True while any modeled line segment still contains product. */
 export function lineHasProduct(phases: LinePhases): boolean {
-  return [phases.stage1, phases.stage2, phases.stage3].some(
+  return linePhaseRows(phases).some(
     (phase) => phase.state !== "empty",
   );
 }
 
 /** True only while product is actively leaving one of the modeled stages. */
 export function lineHasPackagingDrain(phases: LinePhases): boolean {
-  return [phases.stage1, phases.stage2, phases.stage3].some(
+  return linePhaseRows(phases).some(
     (phase) => phase.state === "draining",
   );
 }
@@ -81,7 +90,14 @@ function isEndedRunWithProduct({
  * occurred, even though the phase model represents those runs as empty.
  */
 export function isFrontlineDrainComplete(args: StationDrainCompletionArgs): boolean {
-  return isEndedRunWithProduct(args) && args.phases.stage1.state === "empty";
+  return isEndedRunWithProduct(args) && (args.phases.sections
+    ? args.phases.sections.pressOven.state === "empty" && args.phases.sections.frontline.state === "empty"
+    : args.phases.stage1.state === "empty");
+}
+
+export function isPressOvenDrainComplete(args: StationDrainCompletionArgs): boolean {
+  return isEndedRunWithProduct(args) &&
+    (args.phases.sections?.pressOven ?? args.phases.stage1).state === "empty";
 }
 
 /**
@@ -92,13 +108,13 @@ export function isFrontlineDrainComplete(args: StationDrainCompletionArgs): bool
 export function isPackagingDrainComplete(args: StationDrainCompletionArgs): boolean {
   return (
     isEndedRunWithProduct(args) &&
-    args.phases.stage1.state === "empty" &&
-    args.phases.stage2.state === "empty" &&
-    args.phases.stage3.state === "empty"
+    linePhaseRows(args.phases).every((phase) => phase.state === "empty")
   );
 }
 
 export interface ComputeLinePhasesArgs {
+  pressOvenMin?: number;
+  frontlineMin?: number;
   /** Virtual elapsed time (pause-excluded), in seconds. */
   elapsedBatchSec: number;
   /** Wall-clock ms when the run was paused; null/undefined if not paused. */
@@ -127,6 +143,15 @@ export interface ComputeLinePhasesArgs {
 }
 
 export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
+  const timing = resolveLineTiming(args);
+  return {
+    ...computeLegacyLinePhases({ ...args, preTunnelMin: timing.preTunnelMin,
+      postTunnelMin: timing.postTunnelMin, freezerTime: timing.totalMin }),
+    sections: computeLineSections(args),
+  };
+}
+
+function computeLegacyLinePhases(args: ComputeLinePhasesArgs): LinePhases {
   const {
     elapsedBatchSec,
     pausedAt,
@@ -381,9 +406,7 @@ export function computePackagingDrainElapsedSec(args: ComputeLinePhasesArgs): nu
     return 0;
   }
 
-  let preTunnelMin = Number(args.preTunnelMin);
-  let postTunnelMin = Number(args.postTunnelMin);
-  const freezerTime = Number(args.freezerTime);
+  let { preTunnelMin, postTunnelMin, totalMin: freezerTime } = resolveLineTiming(args);
   if (!Number.isFinite(preTunnelMin) || !Number.isFinite(postTunnelMin) || !Number.isFinite(freezerTime)) {
     return 0;
   }
@@ -452,7 +475,7 @@ export function computeEndedRunElapsedSec(run: EndedRunRecord): number {
 export function pickMostActivePhase(
   phases: LinePhases,
 ): PhaseInfo | undefined {
-  const rows = [phases.stage1, phases.stage2, phases.stage3];
+  const rows = linePhaseRows(phases);
 
   // Active transitions with a live countdown first.
   const withCountdown = rows.filter(

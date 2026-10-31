@@ -1,77 +1,66 @@
 import type { DayBreak, DayBreaks, FormValues, RunMeta } from "./types";
 import { DAY_BREAK_DURATION_MIN } from "./types";
+import { estimateRun, type RunEstimate } from "@workspace/live-calc";
 
-export type TimelineRun = {
-  run: RunMeta;
-  durationSec: number;
-};
-
+export { estimateRun };
+export type TimelineRun = { run: RunMeta; durationSec?: number; remainingSec?: number; estimate?: RunEstimate };
 export type TimelineRunProjection = {
   runId: string;
   startMs?: number;
   finishMs?: number;
-  durationSec: number;
+  durationSec?: number;
+  estimate?: RunEstimate;
   status: "completed" | "current" | "paused" | "upcoming";
 };
-
 export type TimelineBreakProjection = {
   slot: 1 | 2 | 3;
   break: DayBreak;
   startMs?: number;
   finishMs?: number;
   status: "scheduled" | "pending" | "unassigned";
-  reason?: "during-run" | "missing-run" | "invalid-time";
+  reason?: "during-run" | "missing-run" | "invalid-time" | "unknown-duration";
 };
-
 export type DayTimeline = {
   runs: TimelineRunProjection[];
   breaks: TimelineBreakProjection[];
   projectedFinishMs?: number;
+  partialFinishMs?: number;
+  incomplete: boolean;
   productionStartMs: number;
 };
-
 const CLOCK_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const finiteDuration = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const timestamp = (value: unknown): value is number => typeof value === "number"
+  && Number.isFinite(value) && value > 0 && Number.isFinite(new Date(value).getTime());
 
 export function defaultDayBreak(slot: 1 | 2 | 3): DayBreak {
   return { slot, enabled: false, mode: "after-run", durationMin: DAY_BREAK_DURATION_MIN };
 }
-
 export function defaultDayBreaks(): DayBreaks {
   return [defaultDayBreak(1), defaultDayBreak(2), defaultDayBreak(3)];
 }
-
 export function isValidLocalTime(value: unknown): value is string {
   return typeof value === "string" && CLOCK_RE.test(value);
 }
-
 export function normalizeDayBreaks(value: unknown): DayBreaks {
   const source = Array.isArray(value) ? value : [];
   return [1, 2, 3].map((slot) => {
     const raw = source[slot - 1];
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return defaultDayBreak(slot as 1 | 2 | 3);
     const candidate = raw as Record<string, unknown>;
-    const mode = candidate.mode === "at-time" || candidate.mode === "after-run"
-      ? candidate.mode
-      : "after-run";
-    const enabled = candidate.enabled === true;
-    const runId = typeof candidate.runId === "string" && candidate.runId.trim() ? candidate.runId : undefined;
-    const atTime = isValidLocalTime(candidate.atTime) ? candidate.atTime : undefined;
     return {
       slot: slot as 1 | 2 | 3,
-      enabled,
-      mode,
-      ...(runId ? { runId } : {}),
-      ...(atTime ? { atTime } : {}),
+      enabled: candidate.enabled === true,
+      mode: candidate.mode === "at-time" ? "at-time" : "after-run",
+      ...(typeof candidate.runId === "string" && candidate.runId.trim() ? { runId: candidate.runId } : {}),
+      ...(isValidLocalTime(candidate.atTime) ? { atTime: candidate.atTime } : {}),
       durationMin: DAY_BREAK_DURATION_MIN,
     };
   }) as DayBreaks;
 }
-
 function dateAtLocalTime(date: string | undefined, time: string, fallbackMs: number): number | undefined {
   if (!isValidLocalTime(time)) return undefined;
-  const base = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? new Date(`${date}T${time}:00`)
-    : new Date(fallbackMs);
+  const base = date ? new Date(`${date}T${time}:00`) : new Date(fallbackMs);
   if (!date) {
     const [hour, minute] = time.split(":").map(Number);
     base.setHours(hour, minute, 0, 0);
@@ -79,19 +68,21 @@ function dateAtLocalTime(date: string | undefined, time: string, fallbackMs: num
   return Number.isFinite(base.getTime()) ? base.getTime() : undefined;
 }
 
-function productionStartMs(date: string | undefined, time: string, fallbackMs: number): number {
-  return dateAtLocalTime(date, isValidLocalTime(time) ? time : "06:00", fallbackMs) ?? fallbackMs;
+/** Unknown is deliberately not zero (in particular, not freezer-only). */
+export function estimatedRunDurationSec(values: Partial<FormValues> | undefined): number | undefined {
+  return estimateRun(values).durationSec;
 }
 
-export function estimatedRunDurationSec(values: Partial<FormValues> | undefined): number {
-  const cases = Number(values?.casesNeeded ?? 0);
-  const pizzasPerCase = Number(values?.pizzasPerCase ?? 0);
-  const ppm = Number(values?.approxLineSpeed ?? 0);
-  const freezerMin = Number(values?.freezerTime ?? 0);
-  const lineSec = cases > 0 && pizzasPerCase > 0 && ppm > 0
-    ? (cases * pizzasPerCase / ppm) * 60
-    : 0;
-  return Math.max(0, lineSec + Math.max(0, freezerMin) * 60);
+/** Both editor and summary call this with the same identity-bound snapshots. */
+export function buildTimelineRuns(
+  runs: RunMeta[],
+  values: (run: RunMeta) => Partial<FormValues> | undefined,
+  nowMs: number,
+): TimelineRun[] {
+  return runs.map((run) => {
+    const estimate = estimateRun(values(run), run, nowMs);
+    return { run, durationSec: estimate.durationSec, remainingSec: estimate.remainingSec, estimate };
+  });
 }
 
 export function calculateDayTimeline(input: {
@@ -102,141 +93,114 @@ export function calculateDayTimeline(input: {
   currentRunId?: string;
   currentRemainingSec?: number;
   nowMs: number;
+  /** Explicitly false for future-day planning. */
+  isToday?: boolean;
 }): DayTimeline {
-  const breaks = normalizeDayBreaks(input.breaks);
-  const start = productionStartMs(input.date, input.productionStartTime ?? "06:00", input.nowMs);
+  const start = dateAtLocalTime(input.date, input.productionStartTime ?? "06:00", input.nowMs) ?? input.nowMs;
+  const today = new Date(input.nowMs);
+  const localDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const isToday = input.isToday ?? input.date === localDay;
   const projections: TimelineRunProjection[] = [];
-  const breakProjections: TimelineBreakProjection[] = breaks.map((breakSlot) => ({
-    slot: breakSlot.slot,
-    break: breakSlot,
-    status: "unassigned",
+  const breaks: TimelineBreakProjection[] = normalizeDayBreaks(input.breaks).map((item) => ({
+    slot: item.slot, break: item, status: "unassigned",
   }));
-  let cursor = start;
-
-  for (const item of input.runs) {
-    const run = item.run;
-    if (run.endedAt) {
-      projections.push({
-        runId: run.id,
-        startMs: run.startedAt,
-        finishMs: run.endedAt,
-        durationSec: item.durationSec,
-        status: "completed",
-      });
-      cursor = Math.max(cursor, run.endedAt);
-      continue;
-    }
-
-    let finishMs: number;
-    let status: TimelineRunProjection["status"];
-    if (run.id === input.currentRunId && run.startedAt) {
-      const remaining = Math.max(0, Number(input.currentRemainingSec ?? item.durationSec));
-      // A pause can outlive the original projected finish.  Never place the
-      // resumed finish in the past or downstream runs will be scheduled there.
-      finishMs = run.pausedAt
-        ? Math.max(input.nowMs, run.pausedAt) + remaining * 1000
-        : input.nowMs + remaining * 1000;
-      status = run.pausedAt ? "paused" : "current";
-      cursor = Math.max(cursor, run.startedAt);
-    } else if (run.startedAt) {
-      finishMs = Math.max(cursor, run.startedAt) + item.durationSec * 1000;
-      status = run.pausedAt ? "paused" : "current";
-      cursor = Math.max(cursor, run.startedAt);
+  const clockTargets = new Map<number, number>();
+  let incomplete = false;
+  for (const item of breaks) {
+    if (!item.break.enabled) continue;
+    if (item.break.mode === "after-run") {
+      if (!input.runs.some(({ run }) => run.id === item.break.runId)) item.reason = "missing-run";
     } else {
-      const startMs = cursor;
-      finishMs = startMs + item.durationSec * 1000;
-      projections.push({ runId: run.id, startMs, finishMs, durationSec: item.durationSec, status: "upcoming" });
-      cursor = finishMs;
-      continue;
+      const time = dateAtLocalTime(input.date, item.break.atTime ?? "", input.nowMs);
+      if (time === undefined) item.reason = "invalid-time";
+      else clockTargets.set(item.slot, time);
     }
-    projections.push({ runId: run.id, startMs: run.startedAt, finishMs, durationSec: item.durationSec, status });
-    cursor = Math.max(cursor, finishMs);
+    if (item.reason) incomplete = true;
   }
-
-  const breakTargets = new Map<number, number>();
-  for (const projection of breakProjections) {
-    const breakSlot = projection.break;
-    if (!breakSlot.enabled) continue;
-    let target: number | undefined;
-    if (breakSlot.mode === "after-run") {
-      const referenced = breakSlot.runId ? projections.find((run) => run.runId === breakSlot.runId) : undefined;
-      if (!referenced) {
-        projection.reason = "missing-run";
-        continue;
-      }
-      target = referenced.finishMs;
-    } else {
-      target = dateAtLocalTime(input.date, breakSlot.atTime ?? "", input.nowMs);
-      if (target === undefined) {
-        projection.reason = "invalid-time";
-        continue;
-      }
+  let cursor: number | undefined = start;
+  let partialFinish: number | undefined;
+  const placed = new Set<number>();
+  const place = (item: TimelineBreakProjection, target?: number) => {
+    placed.add(item.slot);
+    if (cursor === undefined || target === undefined) {
+      item.status = "pending";
+      item.reason = "unknown-duration";
+      incomplete = true;
+      return;
     }
-    const targetMs = target;
-    if (targetMs === undefined) {
-      projection.reason = "invalid-time";
-      continue;
+    const breakStart = Math.max(cursor, target);
+    const breakFinish = breakStart + DAY_BREAK_DURATION_MIN * 60_000;
+    if (!timestamp(breakStart) || !timestamp(breakFinish)) {
+      item.status = "pending";
+      item.reason = "unknown-duration";
+      cursor = undefined;
+      incomplete = true;
+      return;
     }
-    const active = projections.find((run) =>
-      run.status !== "completed" && run.startMs !== undefined && run.finishMs !== undefined
-      && targetMs > run.startMs && targetMs < run.finishMs,
-    );
-    if (active && breakSlot.mode === "at-time") {
-      projection.status = "pending";
-      projection.reason = "during-run";
-      continue;
-    }
-    breakTargets.set(projection.slot, targetMs);
-    projection.status = "scheduled";
-  }
-
-  // Rebuild the schedule in run order. Completed/current timestamps are
-  // authoritative. A scheduled break is inserted before the first upcoming
-  // run whose baseline window reaches its target; an after-run break therefore
-  // lands immediately after its referenced run. A clock break that was inside
-  // a projected (not-yet-active) run is placed after that run.
-  const scheduledBreaks = breakProjections
-    .filter((item) => item.status === "scheduled" && breakTargets.has(item.slot))
-    .sort((a, b) => (breakTargets.get(a.slot)! - breakTargets.get(b.slot)!) || (a.slot - b.slot));
-  let downstream = start;
-  let breakIndex = 0;
-  const placeBreak = (item: TimelineBreakProjection) => {
-    const targetMs = breakTargets.get(item.slot) ?? downstream;
-    const startMs = Math.max(downstream, targetMs);
-    item.startMs = startMs;
-    item.finishMs = startMs + DAY_BREAK_DURATION_MIN * 60_000;
-    downstream = item.finishMs;
-    breakIndex += 1;
+    item.startMs = breakStart;
+    item.finishMs = breakFinish;
+    item.status = "scheduled";
+    cursor = item.finishMs;
+    partialFinish = Math.max(partialFinish ?? 0, cursor);
   };
-  for (const run of projections) {
-    if (run.status === "completed" || (run.status === "current" || run.status === "paused") && run.startMs !== undefined) {
-      downstream = Math.max(downstream, run.finishMs ?? downstream);
-      while (breakIndex < scheduledBreaks.length
-        && (breakTargets.get(scheduledBreaks[breakIndex].slot) ?? Number.POSITIVE_INFINITY) <= downstream) {
-        placeBreak(scheduledBreaks[breakIndex]);
-      }
-      continue;
+  const clocksThrough = (boundary: number | undefined, activeStart?: number) => {
+    if (boundary === undefined) return;
+    for (const item of [...breaks].sort((a, b) =>
+      (clockTargets.get(a.slot) ?? Infinity) - (clockTargets.get(b.slot) ?? Infinity) || a.slot - b.slot)) {
+      const target = clockTargets.get(item.slot);
+      if (placed.has(item.slot) || target === undefined || target > boundary) continue;
+      if (activeStart !== undefined && target > activeStart && target < boundary) {
+        placed.add(item.slot);
+        item.status = "pending";
+        item.reason = "during-run";
+        incomplete = true;
+      } else place(item, target);
     }
-    const baselineFinish = run.finishMs ?? downstream;
-    while (breakIndex < scheduledBreaks.length) {
-      const targetMs = breakTargets.get(scheduledBreaks[breakIndex].slot) ?? Number.POSITIVE_INFINITY;
-      const breakIsAfterThisRun = scheduledBreaks[breakIndex].break.mode === "after-run"
-        && targetMs === baselineFinish;
-      if (!(targetMs <= (run.startMs ?? downstream) || (targetMs < baselineFinish && !breakIsAfterThisRun))) break;
-      placeBreak(scheduledBreaks[breakIndex]);
+  };
+  for (const item of input.runs) {
+    const { run } = item;
+    const completed = timestamp(run.endedAt);
+    const active = timestamp(run.startedAt) && !completed;
+    const status = completed ? "completed" : active ? run.pausedAt ? "paused" : "current" : "upcoming";
+    let startMs: number | undefined;
+    let finishMs: number | undefined;
+    if (completed) {
+      startMs = timestamp(run.startedAt) ? run.startedAt : undefined;
+      finishMs = run.endedAt;
+      cursor = cursor === undefined ? finishMs : Math.max(cursor, finishMs!);
+    } else if (active) {
+      startMs = run.startedAt;
+      const remaining = run.id === input.currentRunId && input.currentRemainingSec !== undefined
+        ? input.currentRemainingSec : item.remainingSec;
+      finishMs = finiteDuration(remaining) ? Math.max(input.nowMs, run.pausedAt ?? input.nowMs) + remaining * 1000 : undefined;
+      cursor = finishMs === undefined ? undefined : Math.max(cursor ?? finishMs, finishMs);
+    } else {
+      if (cursor !== undefined && isToday) cursor = Math.max(cursor, input.nowMs);
+      clocksThrough(cursor);
+      startMs = cursor;
+      finishMs = startMs !== undefined && finiteDuration(item.durationSec) ? startMs + item.durationSec * 1000 : undefined;
+      cursor = finishMs;
     }
-    run.startMs = downstream;
-    run.finishMs = downstream + run.durationSec * 1000;
-    downstream = run.finishMs;
-    while (breakIndex < scheduledBreaks.length
-      && (breakTargets.get(scheduledBreaks[breakIndex].slot) ?? Number.POSITIVE_INFINITY) <= baselineFinish) {
-      placeBreak(scheduledBreaks[breakIndex]);
+    if (!timestamp(finishMs)) {
+      finishMs = undefined;
+      cursor = undefined;
+      incomplete = true;
+    } else partialFinish = Math.max(partialFinish ?? 0, finishMs);
+    projections.push({ runId: run.id, startMs, finishMs, durationSec: item.durationSec, estimate: item.estimate, status });
+    // A clock choice inside any unfinished run needs an explicit planning
+    // decision; do not silently move the requested time to an after-run break.
+    clocksThrough(finishMs, completed ? undefined : startMs);
+    for (const br of breaks) {
+      if (br.break.enabled && br.break.mode === "after-run" && br.break.runId === run.id && !br.reason) place(br, finishMs);
     }
   }
-  while (breakIndex < scheduledBreaks.length) {
-    placeBreak(scheduledBreaks[breakIndex]);
+  for (const item of breaks) {
+    if (!item.break.enabled || placed.has(item.slot) || item.reason) continue;
+    place(item, clockTargets.get(item.slot));
   }
-  const lastRunFinish = projections.reduce((max, run) => Math.max(max, run.finishMs ?? 0), start);
-  const lastBreakFinish = breakProjections.reduce((max, item) => Math.max(max, item.finishMs ?? 0), start);
-  return { runs: projections, breaks: breakProjections, projectedFinishMs: Math.max(lastRunFinish, lastBreakFinish), productionStartMs: start };
+  return {
+    runs: projections, breaks, productionStartMs: start, incomplete,
+    projectedFinishMs: incomplete ? undefined : cursor,
+    partialFinishMs: partialFinish,
+  };
 }

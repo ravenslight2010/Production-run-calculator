@@ -83,6 +83,8 @@ export function unionIngredientCategories(
 
 export interface Ingredient {
   id: string;
+  /** Server-observed canonical version; never assign a browser edit time here. */
+  updatedAt?: number;
   scope?: string;
   name: string;
   categories: IngredientCategory[];
@@ -138,8 +140,11 @@ export function normalizeIngredient(input: unknown): Ingredient | null {
       ? raw.id.trim()
       : `ing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const mapping = normalizeIngredientAllergens(raw.allergens);
+  const version = typeof raw.updatedAt === "number" ? raw.updatedAt
+    : typeof raw.updatedAt === "string" ? Date.parse(raw.updatedAt) : NaN;
   return {
     id,
+    ...(Number.isSafeInteger(version) && version >= 0 ? { updatedAt: version } : {}),
     name,
     categories: normalizeCategories(raw.categories),
     mergedInto:

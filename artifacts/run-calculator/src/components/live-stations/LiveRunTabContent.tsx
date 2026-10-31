@@ -1,4 +1,6 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
+import { linePhaseRows } from "@workspace/live-calc";
+import { LineTransitSettings } from "../LineTransitSettings";
 import { createFrameRepeater } from "../../frameRepeater";
 import {
   applyTemporaryOverrides,
@@ -40,7 +42,6 @@ import {
   STOP_REASONS_KEY,
   SUPERVISOR_PIN_KEY,
   DEFAULT_STOP_REASONS,
-  DEFAULT_SUPERVISOR_PIN,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
@@ -597,7 +598,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                   receipt={operationalSnapshotReceipt}
                 />
                 {/* ─── Line Map toggle ─── */}
-                <div className="flex justify-end mb-1">
+                <div className="flex justify-end mb-1" data-testid="run-identity" data-run-id={currentRun?.id}>
                   <button
                     type="button"
                     onClick={() => setShowLineMap(prev => !prev)}
@@ -1041,6 +1042,8 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                       lastPauseStopsTunnel: true,
                       runStatus: "ended",
                       preTunnelMin: preTun2,
+                      pressOvenMin: ve.pressOvenMin,
+                      frontlineMin: ve.frontlineMin,
                       postTunnelMin: postTun2,
                       freezerTime: freezerMin2,
                       nowMs: nowMs2,
@@ -1093,9 +1096,9 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                 onDismiss={() => setShowPaceAlert(false)}
               />
             )}
-                  {/* 3-phase line status — filling at run start, draining only after
+                  {/* Four-section line status — filling at run start, draining only after
                       a persisted pause or stop.
-                      Auto-hidden when all stages are in steady-state active. */}
+                      Hidden when no section contains product. */}
                   {!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => {
                     const freezerMin = Number(ve.freezerTime) || 0;
                     if (freezerMin <= 0) return null;
@@ -1103,9 +1106,9 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                     // Thin display of the server-adopted context model (the
                     // context falls back locally when offline/lagging).
                     const phases = linePhases;
-                    const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[];
-                    // Hide the strip entirely when everything is in steady-state or empty.
-                    const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
+                    const rows = linePhaseRows(phases);
+                    // Keep occupied sections visible, including their steady states.
+                    const anyVisible = rows.some(r => r.state !== "empty");
                     if (!anyVisible) return null;
                     function phaseRowStyle(state: PhaseInfo["state"]) {
                       if (state === "filling" || state === "resuming") return { text: "text-sky-400", dot: "bg-sky-400", badge: "bg-sky-950/40 border-sky-700/30" };
@@ -1124,8 +1127,8 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                       return phase.label;
                     }
                     return (
-                      <div className="mb-4 rounded-lg border border-border/40 bg-card/60 overflow-hidden divide-y divide-border/20">
-                        {rows.filter(r => r.state !== "empty").map((phase, i) => {
+                      <div data-testid="line-phase-strip" className="mb-4 rounded-lg border border-border/40 bg-card/60 overflow-hidden divide-y divide-border/20">
+                        {rows.map((phase, i) => {
                           const s = phaseRowStyle(phase.state);
                           return (
                             <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 ${s.badge}`}>
@@ -1224,7 +1227,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                               </div>
                               <div className="flex items-baseline gap-2">
                                 <span className="text-4xl font-black text-foreground tabular-nums tracking-tight">{calc.ppm}</span>
-                                <span className="text-sm text-muted-foreground font-bold uppercase">PPM</span>
+                                <span className="text-sm text-muted-foreground font-bold">pizzas/min · {fmtNum(calc.ppm / 2, 1)} pairs/min at Press / Oven</span>
                               </div>
                               {calc.catchUpPpm !== null && (
                                 <div className="text-xs font-medium text-muted-foreground mt-2">
@@ -1381,7 +1384,6 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                     </div>
                   );
                 })()}
-
 
 
                 {/* Die change warning — before run ends */}
@@ -1870,7 +1872,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <NumField
                           control={form.control}
                           name="approxLineSpeed"
-                          label="Approximate Line Speed (ppm)"
+                          label="Approximate Line Speed (pizzas/min)"
                           step="0.1"
                         />
                       ) : (
@@ -1900,34 +1902,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           label="Freeze tunnel time (min)"
                         />
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="preTunnelMin"
-                          label="Pre-tunnel (min)"
-                          step="0.5"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="postTunnelMin"
-                          label="Post-tunnel (min)"
-                          step="0.5"
-                        />
-                      </div>
-                      {(() => {
-                        const total  = Number(v.freezerTime) || 0;
-                        const pre    = Number(v.preTunnelMin)  > 0 ? Number(v.preTunnelMin)  : PRE_POST_TUNNEL_DEFAULT_MIN;
-                        const post   = Number(v.postTunnelMin) > 0 ? Number(v.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                        const tunnel = Math.max(0, total - pre - post);
-                        if (total <= 0) return null;
-                        return (
-                          <p className="text-[11px] text-muted-foreground">
-                            Freeze tunnel set point:{" "}
-                            <span className="font-semibold text-foreground">{fmtNum(tunnel, 1)} min</span>
-                            {" "}({fmtNum(pre, 1)} pre + {fmtNum(tunnel, 1)} tunnel + {fmtNum(post, 1)} post = {fmtNum(total, 1)} total)
-                          </p>
-                        );
-                      })()}
+                      <LineTransitSettings form={form} values={v} />
                       <Separator className="opacity-30" />
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <NumField

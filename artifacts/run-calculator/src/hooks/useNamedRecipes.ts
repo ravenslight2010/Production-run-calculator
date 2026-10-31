@@ -1,5 +1,12 @@
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { type NamedRecipeKind } from "../namedRecipes";
-import { useMasterDataSlice } from "../masterData";
+import {
+  fetchMasterDataBootstrap,
+  MASTER_DATA_QUERY_KEY,
+  MASTER_DATA_STALE_TIME_MS,
+  useMasterDataSlice,
+} from "../masterData";
 import type { NamedRecipe } from "@workspace/named-recipes";
 
 // Factory-wide dough / sauce recipes, shared by the manager management UI and
@@ -11,9 +18,28 @@ import type { NamedRecipe } from "@workspace/named-recipes";
 export function useNamedRecipes(kind: NamedRecipeKind): {
   items: NamedRecipe[];
   isLoading: boolean;
+  hasData: boolean;
+  isStale: boolean;
+  ensureLoaded: () => Promise<NamedRecipe[]>;
 } {
-  const { data, isLoading } = useMasterDataSlice(
+  const queryClient = useQueryClient();
+  const { data, isPending, isStale } = useMasterDataSlice(
     kind === "dough" ? "doughRecipes" : "sauceRecipes",
   );
-  return { items: data ?? [], isLoading };
+  const ensureLoaded = useCallback(async () => {
+    const bootstrap = await queryClient.fetchQuery({
+      queryKey: MASTER_DATA_QUERY_KEY,
+      queryFn: fetchMasterDataBootstrap,
+      staleTime: MASTER_DATA_STALE_TIME_MS,
+      retry: false,
+    });
+    return kind === "dough" ? bootstrap.doughRecipes : bootstrap.sauceRecipes;
+  }, [kind, queryClient]);
+  return {
+    items: data ?? [],
+    isLoading: isPending,
+    hasData: data !== undefined,
+    isStale,
+    ensureLoaded,
+  };
 }

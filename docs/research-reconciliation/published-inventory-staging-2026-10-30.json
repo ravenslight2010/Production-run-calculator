@@ -1,0 +1,31 @@
+{
+  "kind": "minimized-staging-verification-evidence",
+  "environment": "isolated-local-staging",
+  "status": "PASS",
+  "startedAt": "2026-10-30T23:22:32.630Z",
+  "completedAt": "2026-10-30T23:23:13.711Z",
+  "command": "node scripts/src/isolated-staging.mjs check",
+  "nodeVersion": "v24.22.1",
+  "sourceHeadContextOnly": "9587ccfb945499871822be9c2b08de143963a2f7",
+  "gitBinding": "unavailable",
+  "sourceFingerprintSha256": "a58d74c8ec3a095a10f21dda50af142fc7f631aa4687b0851798aa36e6f80f7c",
+  "apiBuild": "app-build:0593197b-64df-42dd-925c-685b468eb86c",
+  "webBuild": "app-build:4bacff19-e44b-48d7-b052-2234960cd4bf",
+  "fixture": "Generated stage-only manager/operator accounts and synthetic inventory in an independently verified fresh cluster; removed on cleanup.",
+  "results": [
+    { "check": "independent-app-and-cluster-preflight", "role": "stage-runner", "status": "PASS" },
+    { "check": "five-manager-only-denials-with-unchanged-inventory", "role": "operator", "status": "PASS" },
+    { "check": "invalid-session-and-input-no-write", "role": "manager/operator", "status": "PASS" },
+    { "check": "authorized-adjustment-persisted", "role": "manager", "status": "PASS" },
+    { "check": "restart-signin-persistence-and-denial-recovery", "role": "manager/operator", "status": "PASS" },
+    { "check": "empty-reset-reseed-and-owned-resource-cleanup", "role": "stage-runner", "status": "PASS" }
+  ],
+  "sourceReportSha256": "ace78fd809f1561499b0ecc9bff757b8a271ba1b7529e8e16cb9dcc05c096c87",
+  "productionSignedInVerification": "BLOCKED: local results are not published runtime proof",
+  "completionBoundary": "Owner accepted staging-only verification; published-site behavior remains unverified.",
+  "productionReadinessEstablished": false,
+  "satisfiesProductionEvidenceReleaseGates": false,
+  "browserOfflineRecovery": "NOT RUN",
+  "physicalDeviceVerification": "NOT RUN",
+  "sanitization": "No account identifiers, credentials, tokens, operational payloads or private runtime logs retained."
+}

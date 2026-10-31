@@ -4,6 +4,7 @@ import { ChevronDown, Plus, X } from "lucide-react";
 import { TouchOptionPicker } from "./TouchOptionPicker";
 import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
 import { useIsTouchDevice } from "../hooks/use-mobile";
+import { useFactoryDirectoryReady } from "./FactoryDirectoryBoundary";
 
 export function IngredientSelect({
   value,
@@ -28,6 +29,7 @@ export function IngredientSelect({
   ariaLabel?: string;
   testId?: string;
 }) {
+  const directoryReady = useFactoryDirectoryReady();
   const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
   const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
@@ -43,6 +45,7 @@ export function IngredientSelect({
   );
 
   function openDropdown() {
+    if (!directoryReady) return;
     setInputVal("");
     setConfirmDelete(null);
     confirmDeleteRef.current = null;
@@ -69,6 +72,7 @@ export function IngredientSelect({
     : {};
 
   if (isTouchDevice) {
+    if (!directoryReady) return <span role="status">Lists unavailable. Retry online.</span>;
     const accessibleLabel = (placeholder ?? "Select option").replace(/[.…]+$/, "").trim();
     return (
       <TouchOptionPicker
@@ -93,6 +97,8 @@ export function IngredientSelect({
       <button
         ref={triggerRef}
         type="button"
+        disabled={!directoryReady}
+        title={!directoryReady ? "Operational lists unavailable. Retry online." : undefined}
         onClick={openDropdown}
         aria-label={ariaLabel}
         data-testid={testId}
@@ -201,6 +207,7 @@ export function TypeDropdown({
   testId,
   showLabelOnTouch = true,
 }: TypeDropdownProps) {
+  const directoryReady = useFactoryDirectoryReady();
   const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
@@ -216,6 +223,7 @@ export function TypeDropdown({
 
   const MENU_W = 176;
   function openDropdown() {
+    if (!directoryReady) return;
     setInputVal("");
     setConfirmDelete(null);
     confirmDeleteRef.current = null;
@@ -242,6 +250,7 @@ export function TypeDropdown({
     : {};
 
   if (isTouchDevice) {
+    if (!directoryReady) return <span role="status">Lists unavailable. Retry online.</span>;
     const touchOptions = [
       ...(allowClear && value ? [{ value: "", label: "— None" }] : []),
       ...options.map((option) => ({ value: option, label: option })),
@@ -281,6 +290,8 @@ export function TypeDropdown({
           ref={triggerRef}
           type="button"
           onClick={openDropdown}
+          disabled={!directoryReady}
+          title={!directoryReady ? "Operational lists unavailable. Retry online." : undefined}
           aria-label={ariaLabel ?? label}
           data-testid={testId}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"

@@ -71,6 +71,9 @@
       "path": "../../lib/production-rules"
     },
     {
+      "path": "../../lib/schedule-move"
+    },
+    {
       "path": "../../lib/schedule-optimize"
     },
     {

@@ -12,6 +12,7 @@ import {
 import { currentScope } from "../lib/requestScope";
 import { getStaffMember } from "../lib/roles";
 import { requireCapability } from "../middlewares/requireCapability";
+import { executeReadQueries } from "../lib/queryReads";
 import { dataHealthWorkspace } from "./profileDataHealth";
 
 const router = Router();
@@ -78,25 +79,25 @@ function clean(value: unknown, max: number): string {
 
 async function candidates(executor: QueueExecutor): Promise<Candidate[]> {
   const scope = currentScope();
-  const [incidents, imports, conflicts, rules, health] = await Promise.all([
-    executor.select().from(incidentsTable).where(and(
+  const [incidents, imports, conflicts, rules, health] = await executeReadQueries([
+    () => executor.select().from(incidentsTable).where(and(
       eq(incidentsTable.scope, scope),
       inArray(incidentsTable.workflowState, ["new", "assigned", "waiting"]),
     )),
-    executor.select().from(importHistoryTable).where(and(
+    () => executor.select().from(importHistoryTable).where(and(
       eq(importHistoryTable.scope, scope),
       inArray(importHistoryTable.status, ["partial", "failed"]),
     )),
-    executor.select().from(syncConflictLogsTable).where(and(
+    () => executor.select().from(syncConflictLogsTable).where(and(
       eq(syncConflictLogsTable.scope, scope),
       sql`${syncConflictLogsTable.conflictCount} > 0`,
     )),
-    executor.select().from(productionRulesTable).where(and(
+    () => executor.select().from(productionRulesTable).where(and(
       eq(productionRulesTable.scope, scope),
       eq(productionRulesTable.enabled, true),
     )),
-    dataHealthWorkspace(executor),
-  ]);
+    () => dataHealthWorkspace(executor, true),
+  ] as const, "sequential");
   const out: Candidate[] = [];
   for (const item of incidents) out.push({
     dedupKey: `incident:${item.id}`,

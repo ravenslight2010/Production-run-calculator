@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sync-receive rounding guard for casesOnCurrentSkid.
  *

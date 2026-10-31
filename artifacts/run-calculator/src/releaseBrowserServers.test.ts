@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RELEASE_BROWSER_BASE_URL,

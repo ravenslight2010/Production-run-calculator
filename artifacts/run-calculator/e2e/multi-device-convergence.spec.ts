@@ -9,6 +9,7 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   AuthorizedBrowserFixtures,
   cleanupTestUsers,
@@ -104,14 +105,37 @@ test.describe("multi-device convergence", () => {
   }, testInfo) => {
     const username = `e2e_multi_${Math.random().toString(36).slice(2, 10)}`;
     users.add(username);
-    const session = await MultiDeviceSession.create(browser, (page) => signUp(page, username));
     const runId = uniqueRunId("simultaneous");
+    const session = await MultiDeviceSession.create(
+      browser,
+      (page) => signUp(page, username),
+      undefined,
+      {
+        beforeNavigate: async (page, device) => {
+          if (device !== "device-a") return;
+          const epochResponse = await page.request.get("/api/sync/reset-epoch");
+          expect(epochResponse.ok(), "fixture reset epoch must be readable").toBe(true);
+          const epochBody = await epochResponse.json() as { epoch?: number };
+          const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
+          const response = await page.request.put(
+            `/api/sync/today?today=${today()}&epoch=${epoch}`,
+            {
+              data: {
+                senderId: "multi-device-device-a",
+                payload: seededPayload(runId),
+              },
+            },
+          );
+          expect(
+            response.ok(),
+            `canonical fixture PUT failed before device startup: ${response.status()}`,
+          ).toBe(true);
+        },
+      },
+    );
     try {
-      await session.putToday("device-a", today(), seededPayload(runId));
-      await session.page("device-a").reload({ waitUntil: "domcontentloaded" });
-      await session.page("device-b").reload({ waitUntil: "domcontentloaded" });
-      await session.page("device-a").getByTestId("tab-run").click();
-      await session.page("device-b").getByTestId("tab-run").click();
+      await selectCanonicalFixtureRun(session.page("device-a"), runId);
+      await selectCanonicalFixtureRun(session.page("device-b"), runId);
       await expect(session.page("device-a").getByTestId("input-casesNeeded")).toHaveValue("40");
       await expect(session.page("device-b").getByTestId("input-casesNeeded")).toHaveValue("40");
 
@@ -174,8 +198,8 @@ test.describe("multi-device convergence", () => {
       await session.putToday("device-a", today(), seededPayload(runId));
       await session.page("device-a").reload({ waitUntil: "domcontentloaded" });
       await session.page("device-b").reload({ waitUntil: "domcontentloaded" });
-      await session.page("device-a").getByTestId("tab-run").click();
-      await session.page("device-b").getByTestId("tab-run").click();
+      await selectCanonicalFixtureRun(session.page("device-a"), runId);
+      await selectCanonicalFixtureRun(session.page("device-b"), runId);
       await expect(session.page("device-b").getByTestId("input-casesNeeded")).toHaveValue("40");
 
       await session.withDiagnostics(testInfo, async () => {
@@ -461,15 +485,24 @@ test.describe("multi-device convergence", () => {
     users.add(username);
     const session = await MultiDeviceSession.create(browser, (page) => signUp(page, username));
     const runId = uniqueRunId("delete");
+    let blockedSyncTraffic: Awaited<
+      ReturnType<MultiDeviceSession["blockSyncTraffic"]>
+    > | undefined;
     try {
       const seeded = seededPayload(runId);
       await session.putToday("device-a", today(), seeded);
       await session.page("device-a").reload({ waitUntil: "domcontentloaded" });
       await session.page("device-b").reload({ waitUntil: "domcontentloaded" });
       await expect.poll(() => session.localRunExists("device-b", runId)).toBe(true);
+      await expect(
+        session.page("device-b").getByTestId("operational-state-badge"),
+      ).toHaveText("Confirmed server baseline", { timeout: 20_000 });
 
       await session.withDiagnostics(testInfo, async () => {
-        await session.page("device-b").goto("/sign-in", { waitUntil: "domcontentloaded" });
+        // Keep the app mounted while the peer sleeps so the online/focus
+        // recovery path is exercised on wake. A navigation to /sign-in
+        // unmounted sync, then a return to / tested only initial boot.
+        blockedSyncTraffic = await session.blockSyncTraffic("device-b");
         await session.setOffline("device-b", true);
         const deleted: SyncPayload = {
           ...seeded,
@@ -489,7 +522,11 @@ test.describe("multi-device convergence", () => {
 
         await session.setOffline("device-b", false);
         session.mark("device-b", "wake/reconnect requested after deletion");
-        await session.page("device-b").goto("/", { waitUntil: "domcontentloaded" });
+        await blockedSyncTraffic.release();
+        blockedSyncTraffic = undefined;
+        await session.page("device-b").evaluate(() =>
+          window.dispatchEvent(new Event("focus")),
+        );
         await expect.poll(
           () => session.localRunExists("device-b", runId),
           { timeout: 15_000, message: "device-b resurrected a deleted run after wake" },
@@ -509,6 +546,7 @@ test.describe("multi-device convergence", () => {
         expect(finalValues?.[runId], "server resurrected deleted run values").toBeUndefined();
       });
     } finally {
+      await blockedSyncTraffic?.release();
       await session.close();
     }
   });

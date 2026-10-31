@@ -27,6 +27,7 @@ import {
 } from "../lib/ingredientMerge";
 import { planIngredientBatchWeightRepoint } from "../lib/ingredientBatchWeights";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
+import { MasterDataWriteConflict, respondMasterDataWriteConflict } from "../lib/masterDataWriteFence";
 import { broadcastMasterDataChanged } from "./sync";
 
 // Factory-wide ingredient catalog. Reading is open to any signed-in
@@ -91,6 +92,7 @@ function toApiItem(row: IngredientRow): Ingredient {
   const mapping = normalizeIngredientAllergens(row.allergens);
   return {
     id: row.id,
+    updatedAt: row.updatedAt.getTime(),
     name: row.name,
     categories: row.categories ?? [],
     mergedInto: row.mergedInto ?? null,
@@ -222,6 +224,13 @@ router.post(
           // active name owner instead of creating another selectable identity.
           const target = sameName ?? sameId;
           if (target) {
+            if (Number(req.header("x-master-data-epoch")) > 0 && ingredient.updatedAt !== target.updatedAt.getTime()) {
+              // An import with a fresh ID may reuse an existing identity only
+              // when it makes no mutation. A stale full-pool body cannot use a
+              // later GET's epoch to re-enable or rename an undone record.
+              if (!sameId && sameName && ingredient.categories.every((category) => target.categories.includes(category))) continue;
+              throw new MasterDataWriteConflict();
+            }
             const renamed =
               !sameName &&
               sameId?.id === target.id &&
@@ -279,6 +288,7 @@ router.post(
       const items = await listAll();
       res.json({ items });
     } catch (err) {
+      if (respondMasterDataWriteConflict(err, res)) return;
       req.log.error({ err }, "failed to save ingredients");
       res.status(500).json({ error: "Failed to save ingredients" });
     }

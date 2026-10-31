@@ -135,7 +135,8 @@ import {
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
-import { applyImportOperation } from "./importOperations";
+import { applyImportOperation, type ImportGoldCapture } from "./importOperations";
+import { assertImportFileBytes, assertImportPreflight, IMPORT_GRID_MAX_ROWS, IMPORT_GRID_MAX_COLUMNS, IMPORT_GRID_MAX_CELLS } from "@workspace/spec-import/import-preflight";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { parseDoughCustomerSection, parseDoughVariantTable, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
@@ -422,8 +423,11 @@ type WorkbookSourceData = {
 
 /** Read workbook values and transient formula metadata without evaluating formulas. */
 function readWorkbookSourceData(data: ArrayBuffer, sourceFile?: string): WorkbookSourceData {
+  assertImportFileBytes(data.byteLength, sourceFile);
   const wb = XLSX.read(data, { type: "array" });
+  if (wb.SheetNames.length > 100) throw new Error(`${sourceFile || "Workbook"}: more than 100 worksheets. Split the workbook.`);
   const grids: SheetGrid[] = [];
+  let totalCells = 0;
   const formulasBySheet = new Map<string, Map<string, WorkbookFormulaCell>>();
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name];
@@ -441,6 +445,10 @@ function readWorkbookSourceData(data: ArrayBuffer, sourceFile?: string): Workboo
     formulasBySheet.set(name, formulaCells);
     const usedRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
     if (!usedRange) continue;
+    totalCells += (usedRange.e.r + 1) * (usedRange.e.c + 1);
+    if (usedRange.e.r >= IMPORT_GRID_MAX_ROWS || usedRange.e.c >= IMPORT_GRID_MAX_COLUMNS || totalCells > IMPORT_GRID_MAX_CELLS) {
+      throw new Error(`${sourceFile || "Workbook"} · ${name}: worksheet range exceeds import limits. Remove unused formatted rows/columns or split the workbook.`);
+    }
     const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
       header: 1,
       defval: "",
@@ -455,6 +463,7 @@ function readWorkbookSourceData(data: ArrayBuffer, sourceFile?: string): Workboo
       ...(sourceFile?.trim() ? { sourceFile: sourceFile.trim() } : {}),
     });
   }
+  assertImportPreflight(grids);
   return { grids, formulasBySheet };
 }
 
@@ -2583,6 +2592,7 @@ export async function prepareSpecImport(
   options: { allowAi?: boolean; includeSourcePreview?: boolean } = {},
 ): Promise<SpecImportPrepared> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
+  assertImportFileBytes(data.byteLength, name);
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
 
@@ -2816,6 +2826,10 @@ export async function prepareSpecImportMulti(
   signal?: AbortSignal,
   options: { allowAi?: boolean; includeSourcePreview?: boolean } = {},
 ): Promise<SpecImportPrepared> {
+  if (!buffers.length || buffers.length > 100 || buffers.reduce((total, buffer) => total + buffer.byteLength, 0) > 50 * 1024 * 1024) {
+    throw new Error("Select 1–100 populated workbook files totaling no more than 50 MB. Split larger imports.");
+  }
+  buffers.forEach((buffer, index) => assertImportFileBytes(buffer.byteLength, names?.[index]));
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
 
@@ -3193,6 +3207,7 @@ export async function commitSpecImport(
    */
   acceptedNewMixIngredientNames?: ReadonlySet<string>,
   operationId?: string,
+  goldCapture?: ImportGoldCapture,
 ): Promise<{
   mixesAdded: number;
   cheeseRecipesAdded: number;
@@ -3495,7 +3510,7 @@ export async function commitSpecImport(
   // ordinary autosaves; only this deliberate Apply action overrides it.
   if (!operationId) {
     for (const { brand, flavor } of touchedProfiles) {
-      markProfileForceEdited(canonicalProfileKey(brand, flavor));
+      markProfileForceEdited(canonicalProfileKey(brand, flavor), { brand, flavor });
     }
   }
   // A spec import is an explicit manager repair, not an eventually-consistent
@@ -3844,6 +3859,7 @@ export async function commitSpecImport(
       sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Spec sheet",
       changes,
       ...(prepared.sourceEvidence ? { sourceEvidence: prepared.sourceEvidence } : {}),
+      ...(goldCapture ? { goldCapture } : {}),
     });
     resultHash = committed.resultHash;
     // The first pass was a side-effect-free projection. Adopt the exact same

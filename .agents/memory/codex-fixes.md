@@ -1421,3 +1421,191 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed**: A rendered hit-area check catches undersized actions that visibility and clickability checks miss, reducing missed production actions on compact screens.
 
 **Verification**: Focused isolated Chromium browser run passed all five viewports; Run Calculator typecheck passed.
+
+## Calculator routine test-limit contract
+
+**Date**: 2026-10-23
+**Files changed**:
+- `artifacts/run-calculator/package.json`
+- `artifacts/run-calculator/src/autoTrackTraysBatches.test.tsx`
+
+**What was wrong**: The standard calculator test command did not run the focused duration/worker documentation contract. The full suite also exposed a stale auto-track test setup that armed packaging suppression while asserting dough tray suppression.
+
+**What the fix was**: Added the contract test to the package's standard test chain while retaining its standalone command. Corrected the tray test to arm the dough-specific suppression ref.
+
+**Why it was needed**: CI invokes the package's standard test command, so placing the contract there ensures guide/runner drift fails routine validation. The test setup must use the suppression channel the tray countdown actually observes.
+
+**Verification**: Focused contract passed; full calculator suite passed (3,507 passed, 1 skipped); workspace typecheck passed.
+
+## Run-template timeout test isolation
+
+**Date**: 2026-10-23
+
+**Files changed**:
+- `artifacts/run-calculator/src/runTemplatesRepository.ts`
+- `artifacts/run-calculator/src/runTemplatesRepository.test.ts`
+
+**What was wrong**: Optimistic writes could outlive a test and remain in the
+module-level flush registry. Timeout cases depended on advancing fake time and
+teardown did not settle work or restore stubbed globals.
+
+**What the fix was**: Recovered the restorable write-timeout override while
+retaining the 30-second production default. Added an observation-only test drain
+for existing flushes in both scopes, including successful follow-up rounds.
+Teardown waits before resetting fixture state and restores overrides, mocks,
+globals, and timers in `finally`. Timeout cases use real aborts, with explicit
+successive-case and failed-body cleanup coverage.
+
+**Why it was needed**: Cleanup must not deliver queued timeout writes merely to
+wait for previous work. Both scopes must settle so the next case cannot coalesce
+against a previous case's promise. This is a local regression repair, not evidence
+for the uploaded document's claimed historical CI cause or permanent CI stability.
+
+**Evidence**: `.local/task-evidence/run-template-recovery/` retains the protected
+baseline, revision/source hashes, bounded repeated runs, full client context,
+typechecks, recovery audit, applicability matrix, and full failure ledger.
+
+**Verification**: 20/20 focused runs (32 tests each); full calculator suite
+3,518 passed / 1 existing skipped; workspace typecheck passed, including calculator
+checks after rebuilding stale library declarations; recovery audit unchanged at
+9 pass / 1 documented difference / 0 missing.
+
+## PR #142 reviewed-input CI channel and cleanup read inventory
+
+Files: scripts/src/restore-restricted-ci-inputs.*, reviewed-ci-input-manifest.json,
+CI/department/release workflows, rollback rehearsal, scripts package, .gitignore.
+Historical bytes removed from source blocked PR gates. Added a separate PR-142,
+same-repo, reviewed-head, environment-capability gate for exact historical Git
+blob delivery; hashes, bounded regular files, no raw data commits/artifacts, no
+Docker cache/build-record export, allowlisted cleanup and isolated rollback report
+copy. Protected main's existing secret/environment remain unchanged; main input
+provisioning is not solved by this PR-only grant. Synthetic contracts: 23 PASS;
+frozen install/workflow lint+isolation/rollback contract PASS; hosted checks pending.
+
+API routes/index.ts and capabilities/registration.test.ts: protected cleanup-case
+GET was absent from read inventory and failed assembled-router CI. Recorded its
+already-enforced scoped manage-staff policy, without changing permissions or
+real-source Gold enablement. Focused and hosted verification pending.
+
+Restricted hosted follow-up: 3796 web tests passed; 4 still requested the old
+root-level Aldo workbook, and source comparison requested its retained audit.
+Both added as exact historical path/revision/hash metadata to the same PR-only
+manifest (54 payloads total), not copied into Git. Docker runtime failed an
+equivalent kernel CAP_NET_BIND_SERVICE spelling; check-docker-runtime now uses
+a JSON comparator plus synthetic tests to normalize only added CAP_ prefixes
+while rejecting extra/missing/wrong/duplicate capabilities, wrong UID and drop
+sets. Runtime permissions unchanged. Hosted rollback/build/browser/fresh lanes
+passed; broad revalidation remains pending.
+
+21e7395f follow-up: strict comparison snapshot includes two Markdown audit
+members in addition to its 51 workbooks. Later versions' bytes do not match;
+located/pinned exact older SHA-verified blobs, bringing PR-only delivery to 58
+payloads. No guard/fixture data was weakened. Web assertions all passed but one
+run exceeded unchanged150s budget (157.4s versus prior116.8s); moved thirteen
+DOM-independent library/static-source suites to Node environment only (105
+focused tests PASS), preserving every assertion, UI DOM environment, isolation,
+worker ceiling and timing limit. Root typecheck +23 input contracts PASS locally;
+full hosted rerun required. API passed at21e7395f. Main-only inputs still await
+separate user approval; no merge or main environment mutation.
+
+Native metadata EPIPE contention: distill-backfill.mts now treats a closed gate
+stdin pipe as a refused/busy-or-unavailable recovery, never success or automatic
+retry. A held-native-gate large synthetic request proves decision/recovery-lock
+bytes and update-lock absence are preserved. Complete distill-backfill/export/
+dataset suite PASS plus three extra native Linux recovery/race runs PASS;
+macOS/Windows hosted checks remain required. No identity/inode/lock recovery
+condition weakened. Source audit inputs all58 passed hosted comparison/manifest/
+reconciliation/heal gates.
+
+Timing repair expanded to41 additional syntax/import-graph-confirmed pure/static
+suites (284 focused tests PASS), total54 Node suites with unchanged assertions,
+DOM-driven tests, isolation, four workers and150s guard. Authoritative root
+typecheck PASS; latest full hosted timing/suites pending. Main inputs still
+await specific owner approval, so main merge remains blocked.
+
+Final ZIP fixture prerequisite: the full routine reached and failed two existing
+real archive inventory cases after all source/metadata checks passed. Nine
+removed exact archives (6 Git blobs/3 LFS,286430528 bytes) now have a separate
+manifest and opt-in --with-archives transport only for routine/release jobs.
+Source4MiB/12MiB limits unchanged; archive140MiB/file/290MiB aggregate plus exact
+byte counts/OIDs/SHA enforced. LFS pointers must exactly match before read-only
+smudge. No member extraction/execution, raw commits/artifacts/caches. Private
+file modes, exact cleanup and original-main secrecy preserved.26 local
+contracts/workflow syntax/serialized root typecheck PASS; real hosted LFS and
+ZIP inventory verification pending. Overlapping local typechecks caused one
+137/SIGKILL; serialized rerun PASS, killed run not hidden.
+
+
+### Separate main CI input approval and remaining standard release defects
+
+Owner approved a separate main-only path. New owner-reviewed main-only
+environment/capability is independent of PR142; original protected report secret,
+environment/policy and Docker/Caddy workflow unchanged. Exact main push/manual
+context, repository/ref/runSHA/push-after/checkout and capability checks precede
+fixed historical transport; PRs/forks/other refs refuse. Three CI workflows use
+this separate main transport; no secret copied, raw artifacts or broader data
+permissions.27 input/isolation contracts PASS. Hosted main path awaits merge.
+
+Standard release41221117195 exposed unconditional fresh-only imports in legacy
+isolated producers, an8-vs16 WebKit compatibility inventory, an authorized
+supervisor fixture missing scheduling capability, and exact read cancellations
+at reload/navigation. Lazy-load fresh helpers only in explicit fresh mode;
+assert legacy isolated copy excludes fresh tree; inventory all16 reviewed cases;
+grant only the explicit disposable supervisor fixture and add denied-supervisor
+browser case; classify only observed exact GET cancels at known-origin deliberate
+navigation, requiring fresh authenticated reads afterward. All writes/HTTP and
+unrelated-path/origin failures remain failures. Existing unmounted diagnostic404
+stays separately retained. No artifact allowlist expansion to hide failed
+Playwright contexts.79 identity/graph tests and5 cancellation tests PASS; hosted
+release closure pending. Main requires a genuine independent approving review,
+not author self-review/admin bypass. See owning task ledger for full evidence.
+
+
+Same-head hosted timing `a459d7c8`:3802 assertions PASS/1 existing skip but153.5s
+FAIL vs150s. Further scoped AST/runtime-import graph review found29 pure/static
+suites with no DOM/JSX dependency, including checking transitive cycles. Add only
+Node annotations (315 focused assertions PASS), preserving explicit jsdom/UI
+suites, isolation/four-worker ceiling/150s budget and real-clock tests. First
+local repeat lacked ShellCheck PATH and exited127; corrected-toolpath full
+verification must pass before push. No timed gate is waived or retried as proof.
+
+
+Latest standard release841090be closed legacy producer/WebKit/supervisor failures;
+44a11y cases passed,4 failed solely at the new stale diagnostics404 recovery
+expectation. Current mounted manage-staff route and focused API contract require
+200JSON. Correct recovery to require actual successful200JSON bounded shape and
+remove historical404 response/console exemption altogether. Every real HTTP
+failure now fails; no product or auth change. Required CI/timing132.8s passed at
+841090be; next-head release must still run uninterrupted. Independent review
+remains required and no other eligible collaborator exists; main unmodified.
+
+Break-planning release fixture clock: cb271880 required CI passed, but standard
+release41241133881 had44a11y PASS/4FAIL because actual late CI time put23:00 inside
+an unfinished run and correctly withheld day finish. In accessibility-smoke.spec.ts
+freeze only this journey to06:00 on its same local date. dayTimeline.test.ts now
+covers both morning completion and21:15 pending/during-run refusal. No production
+planner or HTTP exception changes; save/reload assertions and all viewports retained.
+Full replacement-head gates still required; prior release remains FAIL until closed.
+
+Navigation request identity repair in accessibility-smoke.spec.ts: standard
+release41244096942 at b363400e closed all clock/preview failures (46PASS/2FAIL),
+but StrictMode destination reads could start after the pre-navigation snapshot
+and report abort after the timeline rendered. Record newly started requests during
+explicit navigation and wait for both actual200Summary reads plus ready canonical
+snapshot UI. Keep exact cancellation predicates, mandatory recovery, HTTP/console
+checks unchanged. No production/auth changes or blanket normal-operation exemption.
+
+Release raw-output isolation: c528a2eb passed all46standard test gates,48a11y and
+3WebKit smoke cases, but privacy verification correctly rejected four .last-run.json
+files. release-check.mts now routes all6standard/full Playwright raw output paths
+to a unique700OS-temp parent outside retained evidence. Canonical explicit summaries
+unchanged; no allowlist widening or deletion of prior user evidence. Full-plan
+release-evidence.test.mts checks all6distinct absolute temporary output directories
+and unchanged disposable DB/concurrency guards. Local validation first exposed
+missing canonical report/checksum; exact manifest-pinned local Git report and exact
+checksum restored privately, never printed or committed. New full release required.
+
+Complete release-evidence contract exposed API package.json's existing schedule-move
+dependency missing from artifacts/api-server/tsconfig.json references. Add that one
+buildable reference; preserve exact graph-completeness assertion and routes-only
+diagnostic config. Full root types/contract rerun required; no dependency changes.

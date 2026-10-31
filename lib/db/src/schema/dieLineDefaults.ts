@@ -25,6 +25,9 @@ export const dieLineDefaultsTable = pgTable(
     casesPerLayer: doublePrecision("cases_per_layer").notNull().default(0),
     preTunnelMin: doublePrecision("pre_tunnel_min"),
     postTunnelMin: doublePrecision("post_tunnel_min"),
+    // Nullable: existing rows retain the half/half compatibility allocation.
+    pressOvenMin: doublePrecision("press_oven_min"),
+    frontlineMin: doublePrecision("frontline_min"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

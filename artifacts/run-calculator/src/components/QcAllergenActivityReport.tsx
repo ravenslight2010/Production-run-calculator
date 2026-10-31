@@ -96,18 +96,18 @@ export default function QcAllergenActivityReport({
   const report = query.data;
 
   return (
-    <section className={`${panelClass} space-y-4 p-4 sm:p-5`} aria-labelledby="qc-allergen-activity-title" data-testid="qc-allergen-activity-report">
+    <section className={`${panelClass} min-w-0 space-y-4 p-[min(1rem,4vw)] [overflow-wrap:anywhere] sm:p-5`} aria-labelledby="qc-allergen-activity-title" data-testid="qc-allergen-activity-report">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="max-w-2xl">
+        <div className="min-w-0 max-w-2xl">
           <h2 id="qc-allergen-activity-title" className="text-base font-bold">Daily allergen activity</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Read-only summary of recorded run values and QC events. Missing information stays unavailable or unknown.
           </p>
         </div>
-        <label className="block w-full sm:w-48">
+        <label className="block w-full min-w-0 max-w-full sm:w-48">
           <span className="mb-1 block text-xs font-semibold text-muted-foreground">Production date</span>
           <input
-            className="min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+            className="min-h-10 w-full min-w-0 max-w-full rounded-lg border border-input bg-background px-[min(.5rem,2vw)] text-sm"
             type="date"
             value={selectedDate || report?.date || ""}
             onChange={(event) => setSelectedDate(event.target.value)}
@@ -130,7 +130,7 @@ export default function QcAllergenActivityReport({
         </div>
       ) : report ? (
         <>
-          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label="Report source availability">
+          <ul className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label="Report source availability">
             <SourceLine title="Ended runs" source={report.sources.endedRuns} />
             <SourceLine title="Active runs" source={report.sources.activeRuns} />
             <SourceLine title="QC events" source={report.sources.qcEvents} />
@@ -142,12 +142,12 @@ export default function QcAllergenActivityReport({
               Run details are not available for this date. Check the source status above; the report does not infer that no runs or checks occurred.
             </p>
           ) : (
-            <div className="grid gap-3 lg:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
               {report.runs.map((run) => (
-                <article key={run.runId} className="min-w-0 rounded-xl border border-border/80 bg-background/60 p-4" data-testid={`card-allergen-activity-${run.runId}`}>
+                <article key={run.runId} className="min-w-0 rounded-xl border border-border/80 bg-background/60 p-[min(1rem,4vw)]" data-testid={`card-allergen-activity-${run.runId}`}>
                   <header className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h3 className="truncate text-sm font-bold">{run.label}</h3>
+                      <h3 className="break-words text-sm font-bold [overflow-wrap:anywhere]">{run.label}</h3>
                       <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{run.runId}</p>
                     </div>
                     <span className="rounded-full border border-border px-2.5 py-1 text-[10px] font-semibold text-muted-foreground">
@@ -155,7 +155,7 @@ export default function QcAllergenActivityReport({
                     </span>
                   </header>
 
-                  <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <dl className="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="min-w-0 rounded-lg bg-muted/35 p-3">
                       <dt className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Manual run-allergen value</dt>
                       <dd className="mt-1 break-words text-sm font-semibold" data-testid={`text-manual-allergen-${run.runId}`}>

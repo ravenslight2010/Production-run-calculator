@@ -19,7 +19,10 @@ vi.mock("@workspace/db", () => ({
   dailySyncTable: { scope: { name: "scope" }, date: { name: "date" } },
   usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
 }));
-vi.mock("@workspace/live-calc", () => ({ computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed }));
+vi.mock("@workspace/live-calc", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@workspace/live-calc")>(),
+  computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed,
+}));
 vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() } }));
 vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() } }));
 vi.mock("./serverJobs", async (importOriginal) => {
@@ -251,11 +254,18 @@ describe("server web-push alert candidates", () => {
     clearScheduledEvaluationQueueMonitorForTests();
     const { logger } = await import("../lib/logger");
     vi.mocked(logger.warn).mockClear();
+    const databasePhase = {
+      version: 1 as const, stage: "duplicate_group_scan" as const, coverage: "complete" as const,
+      phase: "post_checkout" as const, outcome: "query_timeout" as const,
+      observedFrom: "2026-10-25T00:00:00.000Z", observedUntil: "2026-10-25T00:00:00.125Z",
+      elapsedMs: 80, acquisitionMs: 20, postCheckoutMs: 60, timeoutOverrunMs: null,
+    };
     const sampleQueue = vi.fn().mockRejectedValue(new ScheduledEvaluationQueueReadError(
       "duplicate_group_scan",
       80,
       125,
       Object.assign(new Error("private query details"), { code: "57014" }),
+      databasePhase,
     ));
     const scheduler = startWebPushAlertScheduler({
       enqueue: async () => ({ examined: 0, enqueued: 0 }),
@@ -273,6 +283,8 @@ describe("server web-push alert candidates", () => {
           failureReason: "database-timeout",
           durationMs: 125,
           queryDurationMs: 80,
+          databasePhaseVersion: 1,
+          databasePhase,
         }),
         expect.any(String),
       );

@@ -38,6 +38,13 @@ function positive(value: number | undefined): number {
   return Number.isFinite(value) && Number(value) > 0 ? Number(value) : 0;
 }
 
+function remainder(total: number, accounted: number): number {
+  const difference = total - accounted;
+  // Suppress arithmetic dust, not physically meaningful fractional batches.
+  const tolerance = Number.EPSILON * 16 * Math.max(1, total, accounted);
+  return difference > tolerance ? difference : 0;
+}
+
 /** Compute the state of a staged supply pipeline without rounding partial units. */
 export function computeStagedSupply(input: StagedSupplyInput): StagedSupply {
   const total = positive(input.total);
@@ -46,7 +53,7 @@ export function computeStagedSupply(input: StagedSupplyInput): StagedSupply {
   const ready = positive(input.ready);
   const inProduction = positive(input.inProduction);
   const cap = positive(input.cap);
-  const remaining = Math.max(0, total - consumed);
+  const remaining = remainder(total, consumed);
   const staged = onLine + ready + inProduction;
   return {
     total,
@@ -55,7 +62,7 @@ export function computeStagedSupply(input: StagedSupplyInput): StagedSupply {
     ready,
     inProduction,
     remaining,
-    stillToMake: Math.max(0, remaining - staged),
+    stillToMake: remainder(remaining, staged),
     stagingRoom: Math.max(0, cap - staged),
   };
 }
@@ -127,6 +134,37 @@ export function computeFrontlineEffectiveBatchWeight(configuredEffectiveWeight: 
     : FRONTLINE_DEFAULT_OPERATIONAL_BATCH_WEIGHT;
 }
 
+/** Return a configured Frontline weight only when the source provides a valid value. */
+export function knownFrontlineBatchWeight(configuredEffectiveWeight: number | null | undefined): number | null {
+  return Number.isFinite(configuredEffectiveWeight) &&
+    Number(configuredEffectiveWeight) > 0 &&
+    Number(configuredEffectiveWeight) <= FRONTLINE_DEFAULT_OPERATIONAL_BATCH_WEIGHT
+    ? Number(configuredEffectiveWeight)
+    : null;
+}
+
+/**
+ * Compatibility baseline only: before the on-line supply model, BatchesMade
+ * recorded cumulative consumption. Preserve that as consumption, never stock.
+ * Once a pounds ledger exists it is authoritative; later production observations
+ * in BatchesMade must not re-initialize it.
+ */
+export function legacyFrontlineConsumption(values: Record<string, unknown>): Record<string, number> {
+  const baseline: Record<string, number> = {};
+  for (const slot of ["app1", "app2", "app3", "app4"]) {
+    const field = `${slot}StockConsumedLbs`;
+    if (values[field] !== undefined) continue;
+    const recipe = values[`${slot}CheeseRecipe`];
+    const recipeLbs = Array.isArray(recipe)
+      ? recipe.reduce((sum, row) => sum + positive(Number(row?.lbs)), 0)
+      : 0;
+    const weight = knownFrontlineBatchWeight(recipeLbs || Number(values[`${slot}BatchLbs`]));
+    const count = Number(values[`${slot}BatchesMade`]);
+    if (weight !== null && Number.isFinite(count) && count >= 0) baseline[field] = count * weight;
+  }
+  return baseline;
+}
+
 /** Convert pounds of Frontline demand into (possibly partial) batch units. */
 export function computeFrontlineSupplyFromLbs(input: Omit<FrontlineSupplyInput, "total"> & {
   demandLbs: number;
@@ -137,6 +175,25 @@ export function computeFrontlineSupplyFromLbs(input: Omit<FrontlineSupplyInput, 
     ...computeFrontlineSupply({
       ...input,
       total: positive(input.demandLbs) / effectiveBatchWeight,
+    }),
+    effectiveBatchWeight,
+  };
+}
+
+/** Convert known physical Frontline stock and consumption to the shared batch-unit pipeline. */
+export function computeFrontlineSupplyFromStockLbs(input: {
+  demandLbs: number;
+  consumedLbs?: number;
+  onLineLbs?: number;
+  configuredEffectiveWeight: number | null | undefined;
+}): (StagedSupply & { effectiveBatchWeight: number }) | null {
+  const effectiveBatchWeight = knownFrontlineBatchWeight(input.configuredEffectiveWeight);
+  if (effectiveBatchWeight === null) return null;
+  return {
+    ...computeFrontlineSupply({
+      total: positive(input.demandLbs) / effectiveBatchWeight,
+      consumed: positive(input.consumedLbs) / effectiveBatchWeight,
+      onLine: positive(input.onLineLbs) / effectiveBatchWeight,
     }),
     effectiveBatchWeight,
   };

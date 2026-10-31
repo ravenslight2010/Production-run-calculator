@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Tests for the shared corrections-memory logic in @workspace/ai-memory.
 // Web and mobile both consume this lib, so testing it once here covers both.
 import { describe, it, expect } from "vitest";

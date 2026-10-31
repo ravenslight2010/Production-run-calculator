@@ -10,3 +10,7 @@
 
 # Isolated browser evidence is not application source or publish input.
 artifacts/run-calculator/generated-artifacts
+docs/evidence/qc-slice-7-intelligence
+artifacts/run-calculator/test-results
+artifacts/run-calculator/playwright-report
+release-evidence-full/runtime-certification

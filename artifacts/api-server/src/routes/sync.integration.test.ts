@@ -14,7 +14,7 @@ import {
   clearCapacityTelemetryForTests,
   legacySyncReadinessSnapshot,
 } from "../lib/capacityTelemetry";
-import { applySyncDeltaData } from "@workspace/sync-contract";
+import { applySyncDeltaData, MANUAL_SECTION_FIELDS } from "@workspace/sync-contract";
 import type { AutoTrackClaim } from "../lib/autoTrackCoordination";
 import type { AutoTrackClaimServiceDependencies } from "../lib/autoTrackClaimService";
 
@@ -45,6 +45,7 @@ let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let mixesTable: DbModule["mixesTable"];
 let qualityChecksTable: DbModule["qualityChecksTable"];
 let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
@@ -129,6 +130,7 @@ beforeAll(async () => {
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  mixesTable = dbMod.mixesTable;
   qualityChecksTable = dbMod.qualityChecksTable;
   qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
@@ -226,10 +228,18 @@ function dayRow(date: string) {
   };
 }
 
+// Fixtures represent already-acknowledged canonical operations. Generic sync
+// is no longer a way to create lifecycle/counter facts for transaction tests.
+async function seedCanonicalSync(date: string, data: unknown, canonicalRevision = 1) {
+  await db.insert(dailySyncTable).values({ date, scope: "live", data, canonicalRevision })
+    .onConflictDoUpdate({ target: [dailySyncTable.date, dailySyncTable.scope],
+      set: { data, canonicalRevision } });
+}
+
 beforeEach(async () => {
   injectedSseWriteFailures = 0;
   clearServerTickDateBackoffsForTests();
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${mixesTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -397,6 +407,43 @@ describe("completed-run inventory corrections from sync writes", () => {
         },
       }));
 
+    if (actualCases === 15) {
+      // Fail after the correction updates stock, at its audit insert boundary.
+      // The entire saved snapshot and stock/ledger delta must roll back together.
+      const originalLedger = await db.select().from(inventoryLedgerTable);
+      await db.execute(sql`
+        CREATE FUNCTION fail_inventory_correction_audit() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.note LIKE 'Run consumption correction:%' THEN
+            RAISE EXCEPTION 'synthetic correction audit failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+      `);
+      await db.execute(sql`
+        CREATE TRIGGER fail_inventory_correction_audit
+        BEFORE INSERT ON ${inventoryLedgerTable}
+        FOR EACH ROW EXECUTE FUNCTION fail_inventory_correction_audit()
+      `);
+      try {
+        const failed = await saveActualCases(actualCases, "inventory-correction-failpoint");
+        expect(failed.status).toBe(500);
+        expect(await onHandForItem(dough.id)).toBe(98);
+        expect(await onHandForItem(circles.id)).toBe(880);
+        expect(await db.select().from(inventoryLedgerTable)).toEqual(originalLedger);
+        const [persisted] = await db.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+        expect(persisted.data).toMatchObject({
+          dayState: { runs: [{ id: runId, actualCases: 10 }] },
+        });
+      } finally {
+        await db.execute(sql`DROP TRIGGER fail_inventory_correction_audit ON ${inventoryLedgerTable}`);
+        await db.execute(sql`DROP FUNCTION fail_inventory_correction_audit()`);
+      }
+    }
+
     const saved = await saveActualCases(actualCases, "inventory-correction-test");
     expect(saved.status).toBe(200);
     expect(await saved.json()).toMatchObject({
@@ -459,6 +506,159 @@ describe("completed-run inventory corrections from sync writes", () => {
       120,
       -120,
     ]);
+  });
+
+  it("reconciles a prepared-mix run decrease, increase, and zero without recharging raw components", async () => {
+    const runId = "inventory-correction-prepared-mix";
+    const rawKey = "ingredient:Audit Onion:lbs";
+    const [rawIngredient] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: rawKey,
+      category: "ingredient",
+      name: "Audit Onion",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      scope: "live",
+      itemId: rawIngredient.id,
+      qtyReceived: 100,
+      qtyRemaining: 100,
+      lotNumber: "",
+      receivedDate: DATE,
+    });
+    const runValues = {
+      ...RUN_VALUES,
+      app1Type: "Audit Onion",
+      app1OzPerPizza: 2,
+    };
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{ id: runId, brand: "Acme", flavor: "Cheese", actualCases: 10 }],
+          substitutions: [],
+        },
+        runValues: { [runId]: runValues },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+    await db.insert(mixesTable).values({
+      id: "audit-prep-mix",
+      scope: "live",
+      name: "Audit Prep Mix",
+      brand: "Acme",
+      flavor: "Cheese",
+      batchSize: 40,
+      daysEarly: 0,
+      notes: "",
+      amountAlreadyMade: 0,
+      amountActualMade: 0,
+      components: [{ ingredient: "Audit Onion", perPizza: 2 }],
+      isPrep: true,
+      enabled: true,
+    });
+
+    const dayStart = await fetch(`${baseUrl}/api/inventory/consume-day-start`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ date: DATE }),
+    });
+    expect(dayStart.status).toBe(200);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+    const preparedItem = (await db.select().from(inventoryItemsTable))
+      .find((item) => item.key === "ingredient:Prepared mix [audit-prep-mix]:lbs");
+    expect(preparedItem).toBeDefined();
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(37.25, 3);
+
+    // The run becomes completed after prep and then its original claim draws
+    // only the prepared stock; the raw ingredient is already charged by prep.
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            actualCases: 10,
+            startedAt: 1_000,
+            endedAt: 2_000,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: runValues },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+    const consumed = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ runId, lines: [] }),
+    });
+    expect(await consumed.json()).toMatchObject({ applied: true, consumed: 1 });
+    expect(await onHandForItem(preparedItem!.id)).toBe(0);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+
+    const saveActualCases = async (nextActualCases: number, senderId: string) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: managerAuthHeaders(),
+      });
+      expect(read.status).toBe(200);
+      const current = await read.json() as Record<string, any>;
+      const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+      const payload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId,
+        dayState: {
+          ...current.dayState,
+          runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+            run.id === runId ? { ...run, actualCases: nextActualCases } : run,
+          ),
+        },
+        runValues: current.runValues,
+        runValuesUpdatedAt: current.runValuesUpdatedAt,
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+    };
+    const afterDecrease = await saveActualCases(5, "prepared-mix-decrease");
+    expect(afterDecrease.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(18.625, 3);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+
+    const decreaseRetry = await saveActualCases(5, "prepared-mix-decrease-retry");
+    expect(decreaseRetry.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(18.625, 3);
+
+    const afterIncrease = await saveActualCases(10, "prepared-mix-increase");
+    expect(afterIncrease.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBe(0);
+
+    const afterZero = await saveActualCases(0, "prepared-mix-zero");
+    expect(afterZero.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(37.25, 3);
+    const afterZeroRetry = await saveActualCases(0, "prepared-mix-zero-retry");
+    expect(afterZeroRetry.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(37.25, 3);
+
+    const afterZeroIncrease = await saveActualCases(10, "prepared-mix-zero-increase");
+    expect(afterZeroIncrease.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBe(0);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+    const corrections = (await db.select().from(inventoryLedgerTable)).filter((entry) =>
+      entry.itemId === preparedItem!.id &&
+      entry.runId === runId &&
+      entry.note.startsWith("Run consumption correction:"),
+    );
+    expect(corrections).toHaveLength(4);
+    expect(corrections.reduce((sum, entry) => sum + entry.qtyDelta, 0)).toBeCloseTo(0, 3);
+    expect((await db.select().from(inventoryLedgerTable)).filter((entry) =>
+      entry.itemId === rawIngredient.id && entry.type === "consume",
+    )).toHaveLength(1);
   });
 
   it("keeps multiple merged source and target baselines combined for later run corrections", async () => {
@@ -886,6 +1086,145 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
   });
 
+  it("resumes only the acknowledged Packaging correction, retaining counts and generation", async () => {
+    const correction = await request(edit("resume-baseline"));
+    expect(correction.status).toBe(200);
+    const corrected = await correction.json() as any;
+    const progress = corrected.data.packagingProgress["manual-run"];
+    const body = edit("resume-operation", "packaging", "manual-run", {
+      operation: "resume-packaging", correctionGeneration: progress.correctionGeneration,
+      values: { skidsCompleted: 2, casesOnCurrentSkid: 2 },
+      baseValues: { skidsCompleted: 2, casesOnCurrentSkid: 2 },
+    });
+    const response = await request(body);
+    expect(response.status).toBe(200);
+    const resumed = await response.json() as any;
+    expect(resumed.data.packagingProgress["manual-run"]).toMatchObject({
+      skidsCompleted: 2, casesOnCurrentSkid: 2,
+      correctionGeneration: progress.correctionGeneration,
+    });
+    expect(resumed.data.packagingProgress["manual-run"].manualOverrideUntil)
+      .toBeLessThanOrEqual(resumed.serverTime);
+    expect(resumed.data.runValues["manual-run"]).toEqual(corrected.data.runValues["manual-run"]);
+    expect(resumed.data.dayState).toEqual(corrected.data.dayState);
+    const duplicate = await (await request(body)).json() as any;
+    expect(duplicate.duplicate).toBe(true);
+    expect(duplicate.canonicalRevision).toBe(resumed.canonicalRevision);
+    expect(duplicate.data.packagingProgress).toEqual(resumed.data.packagingProgress);
+    // The next correction supersedes both delayed and already-accepted retries.
+    const newer = await (await request(edit("resume-new-correction", "packaging", "manual-run", {
+      values: { casesOnCurrentSkid: 1 },
+      baseValues: { skidsCompleted: 2, casesOnCurrentSkid: 2 },
+    }))).json() as any;
+    expect((await request({ ...body, id: "resume-stale-generation" })).status).toBe(409);
+    const oldRetry = await (await request(body)).json() as any;
+    expect(oldRetry.duplicate).toBe(true);
+    expect(oldRetry.data.packagingProgress).toEqual(newer.data.packagingProgress);
+    const reboundIdentity = await request({ ...body, observedGeneration: "other-lifecycle:2" });
+    expect(reboundIdentity.status).toBe(409);
+    expect((await reboundIdentity.json() as { code: string }).code).toBe("section_changed");
+  });
+
+  it.each(["expiry", "resume"] as const)("keeps four-station canonical progress live after a correction and %s", async (recovery) => {
+    const now = Date.now();
+    const date = new Date(now).toISOString().slice(0, 10);
+    const runId = "integrated-packaging";
+    const [sauceItem] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:BBQ Sauce:lbs", category: "ingredient", name: "BBQ Sauce", unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({ itemId: sauceItem.id, qtyReceived: 1000, qtyRemaining: 1000 });
+    const stored = {
+      dayState: { date, currentIndex: 0, runs: [
+        { id: runId, brand: "", flavor: "", subTab: "dough", startedAt: now - 500_000, metaUpdatedAt: now - 500_000 },
+        { id: "unrelated-pending", brand: "", flavor: "", metaUpdatedAt: 1 },
+      ] },
+      runValuesUpdatedAt: { [runId]: 1 },
+      runValues: {
+        [runId]: {
+          casesNeeded: 1000, approxLineSpeed: 60, speedAdjustment: 1, crustsPerCycle: 12, cycleSpeed: 5,
+          freezerTime: 0, preTunnelMin: 0.5, postTunnelMin: 0.5,
+          pizzasPerCase: 12, casesPerSkid: 48, casesPerLayer: 12,
+          doughballsPerTray: 36, doughBatchYield: 100, targetDoughballWeight: 8,
+          doughRecipe: [], skidsCompleted: 0, casesOnCurrentSkid: 10,
+          traysOnLine: 2, batchesReady: 1, mixerLowSec: 10, mixerHighSec: 10, hopperSec: 10,
+          sauceBarrelLbs: 50, sauceOzPerPizza: 2, frontlineRecipeName: "BBQ Sauce", frontlineRecipe: [],
+          sauceStockBarrels: 2, sauceStockAnchorNetSec: 0, sauceStockCorrectionGeneration: 0, sauceStockInitialized: true,
+          sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+          app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50, app1CheeseRecipe: [],
+          app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
+          app1StockLbs: 0, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
+          app1StockConsumedLbs: 0, applicatorStockInitialized: true,
+          app2Type: "", app3Type: "", app4Type: "", pep1Type: "", pep2Type: "",
+        },
+        "unrelated-pending": { skidsCompleted: 9, casesOnCurrentSkid: 7 },
+      },
+    };
+    await db.insert(dailySyncTable).values({ date, scope: "live", data: stored });
+    const read = async () => (await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, date))))[0]!.data as any;
+    const post = (body: Record<string, unknown>) => fetch(`${baseUrl}/api/sync/manual-section?today=${date}`, {
+      method: "POST", headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const correction = {
+      id: `integrated-correction-${recovery}`, date, runId, section: "packaging",
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 3 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 10 },
+      observedGeneration: `${runId}:${now - 500_000}`, baseRevision: 0, resetEpoch: 0, deviceId: "fixture-device",
+    };
+    expect((await post(correction)).status).toBe(200);
+    const corrected = await read();
+    const hold = corrected.packagingProgress[runId].manualOverrideUntil;
+    const heldTick = await runAutoTrackServerTicks({ nowMs: now + 1_000, scope: "live", date });
+    expect(heldTick.accepted, JSON.stringify(heldTick)).toBeGreaterThan(0);
+    const held = await read();
+    expect(held.runValues[runId].casesOnCurrentSkid).toBe(3);
+    expect(held.autoTrackServerState.wallClockBookkeeping[runId].packagingHeld).toBe(true);
+    expect(held.runValues[runId].traysOnLine).not.toBe(2);
+    expect(held.runValues[runId].sauceStockBarrels).toBeLessThan(2);
+    expect(held.runValues[runId].sauceBarrelsMade).toBeGreaterThan(0);
+    expect(held.runValues[runId].app1BatchesMade).toBeGreaterThan(0);
+    expect(held.runValues["unrelated-pending"]).toEqual(stored.runValues["unrelated-pending"]);
+    let recoveryAt = hold;
+    if (recovery === "resume") {
+      const resumedResponse = await post({
+        ...correction, id: "integrated-resume", operation: "resume-packaging", correctionGeneration: 1,
+        baseValues: correction.values,
+      });
+      expect(resumedResponse.status).toBe(200);
+      const resumed = await resumedResponse.json() as any;
+      recoveryAt = Math.max(now + 2_000, resumed.serverTime);
+      expect(resumed.data.packagingProgress[runId].manualOverrideUntil).toBeLessThan(hold);
+    }
+    await runAutoTrackServerTicks({ nowMs: recoveryAt, scope: "live", date });
+    const rearmed = await read();
+    expect(rearmed.runValues[runId].casesOnCurrentSkid).toBe(3);
+    const dueAt = rearmed.autoTrackServerState.wallClockBookkeeping[runId].caseNextDueMs;
+    expect(dueAt).toBe(recoveryAt + 12_000);
+    await runAutoTrackServerTicks({ nowMs: dueAt, scope: "live", date });
+    const advanced = await read();
+    expect(advanced.runValues[runId].casesOnCurrentSkid).toBe(4);
+    expect(advanced.packagingProgress[runId].correctionGeneration).toBe(1);
+    await runAutoTrackServerTicks({ nowMs: dueAt, scope: "live", date });
+    expect((await read()).runValues[runId].casesOnCurrentSkid).toBe(4);
+    // A second client/reload reads the same durable correction and progress.
+    const peer = await fetch(`${baseUrl}/api/sync/today?today=${date}`, { headers: authHeaders() });
+    expect(peer.status).toBe(200);
+    expect((await peer.json() as any).runValues[runId].casesOnCurrentSkid).toBe(4);
+  });
+
+  it.each([
+    { operation: "resume-packaging" },
+    { operation: "resume-packaging", correctionGeneration: 0 },
+    { operation: "resume-packaging", correctionGeneration: 1, section: "dough" },
+    { operation: "other" },
+  ])("rejects an invalid Resume operation without a correction write: %j", async (extra) => {
+    const response = await request(edit(`invalid-resume-${crypto.randomUUID()}`, "packaging", "manual-run", extra));
+    expect(response.status).toBe(400);
+    const [row] = await db.select().from(dailySyncTable).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect(row!.data).toEqual(values());
+  });
+
   it.each([
     ["invalid section", { ...edit("error-invalid-section"), section: "unknown" }, 400, "invalid_edit", undefined],
     ["invalid submitted values", { ...edit("error-invalid-values"), values: { skidsCompleted: 7654321 } }, 400, "invalid_values", "7654321"],
@@ -902,8 +1241,9 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     const responseText = await response.text();
     const payload = JSON.parse(responseText) as Record<string, unknown>;
     expect(response.status).toBe(status);
-    expect(payload).toEqual({ error: "Manual section edit was rejected", code });
-    expect(payload).not.toHaveProperty("data");
+    expect(payload).toMatchObject({ error: "Manual section edit was rejected", code });
+    if (status === 409) expect(payload).toHaveProperty("data");
+    else expect(payload).not.toHaveProperty("data");
     expect(payload).not.toHaveProperty("values");
     if (marker) expect(responseText).not.toContain(marker);
   });
@@ -974,6 +1314,46 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       app1BatchesMade: 9,
       applicatorStockInitialized: true,
     });
+  });
+
+  it.each(["pep1", "pep1b", "pep2", "pep2b"])("accepts a complete-section %s refill without treating its inactive companion as a correction", async (register) => {
+    const section = register.startsWith("pep1") ? "pep1" : "pep2";
+    const baseline = Object.fromEntries([section, `${section}b`].flatMap((slot) =>
+      ["StockLbs", "StockAnchorNetSec", "StockCorrectionGeneration"].map((suffix) => [`${slot}${suffix}`, 0]),
+    ));
+    const typeField = register.endsWith("b") ? `${section}TypeB` : `${section}Type`;
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: { date: DATE, runs: [{ id: "pep-stock-run", startedAt: 1_000, pausedAt: 2_000, metaUpdatedAt: 3 }] },
+        runValues: {
+          "pep-stock-run": {
+            ...baseline, [typeField]: "Pepperoni", pep1Combined: false,
+            app1StockLbs: 18.75, app1StockConsumedLbs: 6.25, app1BatchesMade: 4,
+          },
+        },
+      },
+      canonicalRevision: 0,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    const edit = {
+      id: `pep-refill-${register}`, date: DATE, runId: "pep-stock-run", section,
+      values: { ...baseline, [`${register}StockLbs`]: 12.5, [`${register}StockCorrectionGeneration`]: 1 },
+      baseValues: baseline, observedGeneration: "pep-stock-run:3",
+      baseRevision: 0, resetEpoch: 0, deviceId: "pep-device",
+    };
+    const response = await request(edit);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { runValues: Record<string, Record<string, unknown>> } };
+    expect(body.data.runValues["pep-stock-run"]).toMatchObject({
+      [`${register}StockLbs`]: 12.5, [`${register}StockCorrectionGeneration`]: 1,
+      app1StockLbs: 18.75, app1StockConsumedLbs: 6.25, app1BatchesMade: 4,
+    });
+    expect(await (await request(edit)).json()).toMatchObject({ duplicate: true });
+    const stale = await request({
+      ...edit, id: `pep-stale-${register}`,
+      values: { ...edit.values, [`${register}StockLbs`]: 20, [`${register}StockCorrectionGeneration`]: 2 },
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: "section_changed" });
   });
 
   it("rejects an operator stock adjustment above that slot's capacity", async () => {
@@ -1113,7 +1493,7 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     await db.update(dataResetTable).set({ epoch: 9 }).where(eq(dataResetTable.scope, "live"));
     const retry = await request(body);
     expect(retry.status).toBe(409);
-    expect(await retry.json()).toEqual({
+    expect(await retry.json()).toMatchObject({
       error: "Manual section edit was rejected",
       code: "reset_changed",
     });
@@ -1287,7 +1667,200 @@ function sandboxAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signLegacyTokenForTests(SANDBOX)}` };
 }
 
+describe("POST /sync/station-activity — server-confirmed station evidence", () => {
+  const DATE = "2030-03-10";
+  const RUN = "station-activity-run";
+
+  beforeEach(async () => {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          currentIndex: 0,
+          runs: [{ id: RUN, startedAt: 1_000, metaUpdatedAt: 1 }],
+        },
+        runValues: { [RUN]: {} },
+      },
+      canonicalRevision: 7,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  });
+
+  const confirm = (body: Record<string, unknown>) => fetch(
+    `${baseUrl}/api/sync/station-activity?today=${DATE}&epoch=0`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+
+  it("records an idempotent run-bound event without changing snapshot data or counters", async () => {
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    const payload = {
+      id: "station-confirm-1",
+      runId: RUN,
+      station: "freezeTunnel",
+      senderId: "device-station-1",
+    };
+
+    const firstResponse = await confirm(payload);
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as {
+      ok: boolean;
+      duplicate: boolean;
+      eventAtServerMs: number;
+      canonicalRevision: number;
+    };
+    expect(first).toMatchObject({ ok: true, duplicate: false, canonicalRevision: 7 });
+
+    const secondResponse = await confirm(payload);
+    expect(secondResponse.status).toBe(200);
+    const second = await secondResponse.json() as typeof first;
+    expect(second).toMatchObject({
+      ok: true,
+      duplicate: true,
+      eventAtServerMs: first.eventAtServerMs,
+      canonicalRevision: 7,
+    });
+
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect(after.data).toEqual(before.data);
+    expect(after.canonicalRevision).toBe(before.canonicalRevision);
+    const events = await db.select().from(operationalIntentLedgerTable)
+      .where(and(
+        eq(operationalIntentLedgerTable.scope, "live"),
+        eq(operationalIntentLedgerTable.date, DATE),
+        eq(operationalIntentLedgerTable.intentId, payload.id),
+      ));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      outcome: "accepted",
+      commandType: "station-activity-confirmation",
+      actionData: { runId: RUN, station: "freezeTunnel" },
+    });
+  });
+
+  it("rejects confirmations for a non-selected run", async () => {
+    const response = await confirm({
+      id: "station-confirm-wrong-run",
+      runId: "another-run",
+      station: "warehouse",
+      senderId: "device-station-1",
+    });
+    expect(response.status).toBe(409);
+    const receipts = await db.select().from(operationalIntentLedgerTable)
+      .where(and(
+        eq(operationalIntentLedgerTable.scope, "live"),
+        eq(operationalIntentLedgerTable.date, DATE),
+        eq(operationalIntentLedgerTable.intentId, "station-confirm-wrong-run"),
+      ));
+    expect(receipts).toHaveLength(0);
+  });
+
+  it("keeps canonical state readable with unknown activity when evidence reads fail, then recovers", async () => {
+    const runId = "station-read-failure-run";
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: { date: DATE, currentIndex: 0, runs: [{ id: runId, startedAt: Date.now() - 10_000 }] },
+        runValues: { [runId]: { casesNeeded: 240 } },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    // This suite owns a disposable database. Hide only the evidence table,
+    // not canonical sync state; always restore it before teardown.
+    await db.execute(sql`ALTER TABLE operational_intent_ledger RENAME TO unavailable_station_evidence`);
+    let failedRead: { data: unknown; snapshotId: string; operationalProjection: { stationActivity: unknown } };
+    try {
+      const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, { headers: authHeaders() });
+      expect(response.status).toBe(200);
+      failedRead = await response.json() as typeof failedRead;
+      expect(failedRead.operationalProjection).not.toBeNull();
+      expect(failedRead.operationalProjection.stationActivity).toBeNull();
+    } finally {
+      await db.execute(sql`ALTER TABLE unavailable_station_evidence RENAME TO operational_intent_ledger`);
+    }
+    const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, { headers: authHeaders() });
+    expect(response.status).toBe(200);
+    const recovered = await response.json() as typeof failedRead;
+    expect(recovered.snapshotId).toBe(failedRead!.snapshotId);
+    expect(recovered.data).toEqual(failedRead!.data);
+    expect(recovered.operationalProjection.stationActivity).not.toBeNull();
+    expect(recovered.operationalProjection.stationActivity).toEqual({});
+  });
+});
+
 describe("factory purge retains QC history", () => {
+  it.each(["live", "sandbox"] as const)("retains immutable label and import QC evidence through %s reset and purge", async (scope) => {
+    const originalOperationalEvents = await db.insert(qcWorkflowEventsTable).values(
+      (["live", "sandbox"] as const).flatMap((fixtureScope) =>
+        (["label-reference", "label-reference-review", "label-check", "import-committed", "import-review"] as const).map((eventType) => ({
+          scope: fixtureScope,
+          operationId: `retained-${fixtureScope}-${eventType}`,
+          recordId: `retained-label-${fixtureScope}`,
+          eventType,
+          runId: eventType === "label-check" ? "retained-label-run" : null,
+          actorId: fixtureScope === "live" ? MANAGER : SANDBOX,
+          payload: {
+            version: 1,
+            sourceIdentity: "SYNTHETIC-RETENTION-REF",
+            observed: { productName: "Synthetic Product", lotText: "LOT-TEST", dateText: "printed text" },
+            outcome: "not-evaluated",
+            ...(eventType.startsWith("import-") ? {
+              operationId: `synthetic-import-${fixtureScope}`, resultHash: "a".repeat(64),
+              status: "rejected", reason: "Synthetic retained review",
+              summary: { entities: [{ entity: "mixes", before: 0, after: 1, created: 1, updated: 0, deleted: 0 }], changes: [], omittedChanges: 0 },
+            } : {}),
+          },
+        })),
+      ),
+    ).returning();
+    const recipeCaptures = await db.insert(qcWorkflowEventsTable).values(
+      (["live", "sandbox"] as const).map((fixtureScope) => ({
+        scope: fixtureScope,
+        operationId: `retained-recipe-${fixtureScope}`,
+        recordId: `mix:retained-recipe-${fixtureScope}`,
+        eventType: "recipe-committed" as const,
+        runId: null,
+        actorId: fixtureScope === "live" ? MANAGER : SANDBOX,
+        payload: {
+          recipeType: "mix",
+          recipeId: `retained-recipe-${fixtureScope}`,
+          displayName: `Synthetic retained recipe ${fixtureScope}`,
+          resultHash: "b".repeat(64),
+          changedFields: ["batchSize"],
+        },
+      })),
+    ).returning();
+    const recipeDecisions = await db.insert(qcWorkflowEventsTable).values(
+      recipeCaptures.map((capture) => ({
+        scope: capture.scope,
+        operationId: `retained-recipe-review-${capture.scope}`,
+        recordId: capture.recordId,
+        eventType: "recipe-review" as const,
+        relatedEventId: String(capture.id),
+        runId: null,
+        actorId: capture.actorId,
+        payload: { status: "rejected", resultHash: "b".repeat(64), reason: "Synthetic retained decision" },
+      })),
+    ).returning();
+    const original = [...originalOperationalEvents, ...recipeCaptures, ...recipeDecisions];
+    for (const action of ["reset", "purge-all"]) {
+      const response = await fetch(`${baseUrl}/api/sync/${action}`, {
+        method: "POST",
+        headers: {
+          ...(scope === "live" ? managerAuthHeaders() : sandboxAuthHeaders()),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const retained = await db.select().from(qcWorkflowEventsTable).orderBy(qcWorkflowEventsTable.id);
+      expect(retained).toEqual([...original].sort((a, b) => a.id - b.id));
+    }
+  });
+
   it.each(["live", "sandbox"] as const)("preserves both QC scopes while purging only %s master data", async (scope) => {
     await db.delete(qualityChecksTable);
     await db.insert(qualityChecksTable).values([
@@ -1321,6 +1894,22 @@ describe("factory purge retains QC history", () => {
         scope: "sandbox", operationId: "purge-sandbox-component-qc", recordId: "purge-sandbox-component-qc-record",
         eventType: "component-check", runId: "purge-run", actorId: SANDBOX, payload: { outcome: "not-evaluated" },
       },
+      {
+        scope: "live", operationId: "purge-live-brix-qc", recordId: "purge-live-brix-qc-record",
+        eventType: "brix-check", runId: "purge-run", actorId: MANAGER,
+        payload: { measurementKind: "brix", actualBrix: 12.5, outcome: "not-evaluated" },
+      },
+      {
+        scope: "sandbox", operationId: "purge-sandbox-brix-qc", recordId: "purge-sandbox-brix-qc-record",
+        eventType: "brix-check", runId: "purge-run", actorId: SANDBOX,
+        payload: { measurementKind: "brix", actualBrix: 8, outcome: "not-evaluated" },
+      },
+      ...(["live", "sandbox"] as const).flatMap((scope) =>
+        (["date-code-check", "date-code-reference", "date-code-reference-review"] as const).map((eventType) => ({
+          scope, eventType, operationId: `purge-${scope}-${eventType}`, recordId: `${scope}-${eventType}`,
+          runId: eventType === "date-code-check" ? "purge-run" : null, actorId: MANAGER,
+          payload: { outcome: "not-evaluated", fixture: true },
+        }))),
     ]);
     await db.insert(inventoryItemsTable).values([
       { scope: "live", key: "purge-live-item", category: "ingredient", name: "Live fixture", unit: "lbs" },
@@ -1339,11 +1928,17 @@ describe("factory purge retains QC history", () => {
     expect(checks.map((row) => row.summary).sort()).toEqual(["Live retained check", "Sandbox retained check"]);
     expect(checks.map((row) => row.reviewerId).sort()).toEqual([MANAGER, SANDBOX].sort());
     const workflowEvents = await db.select().from(qcWorkflowEventsTable);
+    for (const type of ["date-code-check", "date-code-reference", "date-code-reference-review"]) {
+      expect(workflowEvents.filter((event) => event.eventType === type).map((event) => event.scope).sort())
+        .toEqual(["live", "sandbox"]);
+    }
     expect(workflowEvents.filter((row) => row.eventType === "lot").map((row) => row.payload.lotNumber).sort())
       .toEqual(["Live QC retained", "Sandbox QC retained"]);
     expect(workflowEvents.filter((row) => row.eventType === "allergen-review").map((row) => row.scope).sort())
       .toEqual(["live", "sandbox"]);
     expect(workflowEvents.filter((row) => row.eventType === "component-check").map((row) => row.scope).sort())
+      .toEqual(["live", "sandbox"]);
+    expect(workflowEvents.filter((row) => row.eventType === "brix-check").map((row) => row.scope).sort())
       .toEqual(["live", "sandbox"]);
     const items = await db.select().from(inventoryItemsTable);
     expect(items.map((row) => row.scope)).toEqual([scope === "live" ? "sandbox" : "live"]);
@@ -1357,6 +1952,39 @@ describe("factory purge retains QC history", () => {
     const res = await fetch(`${baseUrl}/api/sync/purge-all`, { method: "POST", headers: authHeaders() });
     expect(res.status).toBe(403);
     expect(await db.select().from(qualityChecksTable)).toEqual(before);
+  });
+});
+
+describe("GET /completed-history — bounded stable archive", () => {
+  it("pages equal completion timestamps without skipping records, and preserves scope and date fences", async () => {
+    for (const scope of ["live", "sandbox"] as const) {
+      for (const runId of ["page-a", "page-b", "page-c"]) {
+        await db.insert(completedRunHistoryTable).values({
+          id: `${scope}-${runId}`, scope, operationId: `${scope}-${runId}`, runId,
+          date: "2030-03-10", completedAt: new Date("2030-03-10T12:00:00Z"),
+          snapshot: { dayState: { runs: [{ id: runId, endedAt: 1 }] }, runValues: {} },
+          snapshotHash: `${scope}-${runId}`, actorId: USER,
+        });
+      }
+    }
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await fetch(`${baseUrl}/api/completed-history?from=2030-03-10&to=2030-03-10&limit=1${cursor ? `&cursor=${cursor}` : ""}`, { headers: managerAuthHeaders() });
+      expect(result.status).toBe(200);
+      const body = await result.json() as {
+        history: Array<{ operationId: string; runId: string }>; nextCursor?: string;
+      };
+      expect(body.history).toHaveLength(1);
+      expect(body.history[0].operationId.startsWith("live-")).toBe(true);
+      seen.push(body.history[0].runId);
+      cursor = body.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual(["page-a", "page-b", "page-c"]);
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(6);
+    for (const query of ["limit=0", "limit=201", "cursor=bad"]) {
+      expect((await fetch(`${baseUrl}/api/completed-history?${query}`, { headers: managerAuthHeaders() })).status).toBe(400);
+    }
   });
 });
 
@@ -1497,6 +2125,8 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
             app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
             app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
             app1BatchCorrectionGeneration: 0,
+            app1StockLbs: 0, app1StockConsumedLbs: 0, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
             app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
             app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
             app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
@@ -1522,7 +2152,7 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
     // Hold the accepted claim's next due time in the future to replay the same
     // server tick boundary without manufacturing a new physical batch event.
     const heldData = afterFirst.data as any;
-    heldData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].nextDueAt = TICK_NOW + 60_000;
+    heldData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].nextDueAt = 180;
     await db.update(dailySyncTable).set({ data: heldData })
       .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
 
@@ -1628,6 +2258,8 @@ describe("server auto-track tick recovery under database pressure", () => {
             app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
             app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
             app1BatchCorrectionGeneration: 0,
+            app1StockLbs: 0, app1StockConsumedLbs: 0, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
             app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
             app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
             app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
@@ -1777,6 +2409,7 @@ describe("server auto-track tick recovery under database pressure", () => {
     let lostReplyInjected = false;
     let applyingManagerEdit = false;
     let managerEditStamp: number | undefined;
+    let managerEditRevision: number | undefined;
     let managerEditStatus: number | undefined;
     transactionDb.transaction = async (...args: any[]) => {
       if (!applyingManagerEdit) transactionAttempts += 1;
@@ -1793,24 +2426,23 @@ describe("server auto-track tick recovery under database pressure", () => {
           const current = await read.json() as Record<string, any>;
           const serverClock = vi.spyOn(Date, "now").mockReturnValue(TICK_NOW + 1);
           try {
+            const active = current.dayState.runs.find((run: any) => run.id === TICK_RUN);
+            const baseline = Object.fromEntries(MANUAL_SECTION_FIELDS.app1.map((field) =>
+              [field, Number(current.runValues[TICK_RUN][field]) || 0]));
             const correction = await fetch(
-              `${baseUrl}/api/sync/today?today=${TICK_DATE}&epoch=0`,
+              `${baseUrl}/api/sync/manual-section?today=${TICK_DATE}`,
               {
-                method: "PUT",
+                method: "POST",
                 headers: { ...authHeaders(), "content-type": "application/json" },
                 body: JSON.stringify({
-                  senderId: "manager-recovery-correction",
-                  payload: {
-                    syncVersion: 1,
-                    completeness: "partial",
-                    baseSnapshotId: read.headers.get("X-Sync-Snapshot"),
-                    runValues: {
-                      [TICK_RUN]: { ...current.runValues[TICK_RUN], app1BatchesMade: 7 },
-                    },
-                    runValuesUpdatedAt: {
-                      [TICK_RUN]: Number(current.runValuesUpdatedAt[TICK_RUN]) + 1,
-                    },
-                  },
+                  id: "manager-recovery-correction", date: TICK_DATE,
+                  runId: TICK_RUN, section: "app1", deviceId: "manager-recovery",
+                  observedGeneration: `${TICK_RUN}:${active.metaUpdatedAt ?? active.startedAt ?? 0}`,
+                  baseRevision: current.canonicalRevision ?? 0, resetEpoch: 0,
+                  baseValues: baseline,
+                  values: { ...baseline, app1BatchesMade: 7,
+                    app1BatchAnchorNetSec: (TICK_NOW + 1 - active.startedAt) / 1000,
+                    app1BatchCorrectionGeneration: baseline.app1BatchCorrectionGeneration + 1 },
                 }),
               },
             );
@@ -1818,8 +2450,10 @@ describe("server auto-track tick recovery under database pressure", () => {
             expect(correction.status).toBe(200);
             const corrected = await correction.json() as {
               data?: { runValuesUpdatedAt?: Record<string, number> };
+              canonicalRevision: number;
             };
             managerEditStamp = corrected.data?.runValuesUpdatedAt?.[TICK_RUN];
+            managerEditRevision = corrected.canonicalRevision;
           } finally {
             serverClock.mockRestore();
           }
@@ -1859,7 +2493,7 @@ describe("server auto-track tick recovery under database pressure", () => {
     });
     expect(finalData.runValuesUpdatedAt[TICK_RUN]).toBe(managerEditStamp);
     expect(finalData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"]).toMatchObject({
-      generation: `manual:${managerEditStamp}`,
+      generation: `manual:${managerEditRevision}`,
       sequence: 0,
       nextDueAt: 0,
     });
@@ -1904,17 +2538,19 @@ describe("server auto-track tick recovery under database pressure", () => {
     // manager correction gets its own revision, then the retry accepts the
     // distinct wall-clock claims that did not fit the first pass's claim
     // budget. Each write must retain its own ordered wakeup.
-    expect(tickWakeups).toHaveLength(3);
+    expect(tickWakeups).toHaveLength(5);
     expect(tickWakeups).toMatchObject([
       { scope: "live", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+      { scope: "live", cursor: 2, kind: "manual-section", date: TICK_DATE, payload: { event: "acquired" } },
       {
-        scope: "live", cursor: 2, kind: "day-state", date: TICK_DATE,
-        senderId: "manager-recovery-correction",
+        scope: "live", cursor: 3, kind: "day-state", date: TICK_DATE,
+        senderId: "manager-recovery",
       },
-      { scope: "live", cursor: 3, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+      { scope: "live", cursor: 4, kind: "manual-section", date: TICK_DATE, payload: { event: "released" } },
+      { scope: "live", cursor: 5, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
     ]);
     expect(await db.select().from(syncOutboxCursorsTable))
-      .toMatchObject([{ scope: "live", cursor: 3 }]);
+      .toMatchObject([{ scope: "live", cursor: 5 }]);
     expect(await db.select().from(dataResetTable))
       .toMatchObject([{ scope: "live", epoch: 0 }]);
   });
@@ -2386,7 +3022,8 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     });
     expect(fencedRun.endedAt).toBeUndefined();
 
-    const first = await postFinalization(finalization("offline:final-one"));
+    const exactEnd = finalization("offline:final-one");
+    const first = await postFinalization(exactEnd);
     const firstBody = await first.json() as any;
     expect(firstBody.outcome).toBe("accepted");
     expect(firstBody.duplicate).toBe(false);
@@ -2427,18 +3064,17 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     await db.update(dailySyncTable).set({
       data: { dayState: { date: DATE, runs: [{ id: "later-run", startedAt: 999 }] }, runValues: {} },
     }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
-    const replay = await postFinalization(finalization("offline:final-one"));
+    const replay = await postFinalization(exactEnd);
     const replayBody = await replay.json() as any;
     expect(replayBody).toMatchObject({
       outcome: "accepted",
       duplicate: true,
       cursor: firstBody.cursor,
       canonicalRevision: firstBody.canonicalRevision,
-      serverTime: firstBody.serverTime,
+      serverTime: expect.any(Number),
     });
-    expect(replayBody.data.dayState.runs.find((run: any) => run.id === RUN)?.endedAt)
-      .toBe(firstBody.data.dayState.runs.find((run: any) => run.id === RUN).endedAt);
-    expect(replayBody.data.dayState.runs.some((run: any) => run.id === "later-run")).toBe(false);
+    expect(replayBody.data.dayState.runs.some((run: any) => run.id === "later-run")).toBe(true);
+    expect((await db.select().from(completedRunHistoryTable))).toHaveLength(1);
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(16);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
@@ -2843,7 +3479,7 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
   function intent(
     id: string,
     observedGeneration: string,
-    action: "pause" | "resume" | "lifecycle" | "correction",
+    action: "pause" | "resume" | "lifecycle" | "correction" | "control",
     extra: Record<string, unknown> = {},
   ) {
     return {
@@ -2879,9 +3515,16 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
     expect(startedRun.startedAt).not.toBe(started.data.operationalIntentHistory.outcomes.at(-1).effectiveAt);
 
     const startGeneration = `${RUN}:${startedRun.metaUpdatedAt}`;
-    const corrected = await post(intent("ordered:correct", startGeneration, "correction", {
-      values: { traysOnLine: 7 },
-    }));
+    const corrected = await fetch(`${baseUrl}/api/sync/manual-section?today=${DATE}`, {
+      method: "POST", headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "ordered:correct", date: DATE, runId: RUN, section: "dough",
+        observedGeneration: startGeneration, baseRevision: started.canonicalRevision,
+        resetEpoch: 0, deviceId: "transition-client",
+        values: { traysOnLine: 7, batchesReady: 0 },
+        baseValues: { traysOnLine: 2, batchesReady: 0 },
+      }),
+    }).then((response) => response.json()) as any;
     expect(corrected).toMatchObject({ outcome: "accepted" });
     expect(corrected.data.runValues[RUN].traysOnLine).toBe(7);
 
@@ -2907,6 +3550,48 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
     expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
   });
 
+  it("fences stale snapshots and colliding command IDs after a canonical control", async () => {
+    const now = Date.now();
+    const initial = {
+      dayState: { date: DATE, runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: now - 60_000, metaUpdatedAt: 100 }] },
+      runValues: { [RUN]: { traysOnLine: 4, batchesReady: 2, casesNeeded: 100 } },
+      runValuesUpdatedAt: { [RUN]: now },
+    };
+    await db.update(dailySyncTable).set({ data: initial, canonicalRevision: 10 })
+      .where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+    const control = intent("authority:mode", `${RUN}:100`, "control", {
+      baseRevision: 10, control: { kind: "auto-track", enabled: false },
+    });
+    const accepted = await post(control);
+    expect(accepted).toMatchObject({ outcome: "accepted", duplicate: false, canonicalRevision: 11 });
+    const collision = await post({ ...control, control: { kind: "auto-track", enabled: true } });
+    expect(collision).toMatchObject({ outcome: "conflicted", duplicate: true, canonicalRevision: 11 });
+    expect(collision.data.dayState.runs[0].autoTrackDisabled).toBe(true);
+    const stale = {
+      ...initial,
+      dayState: { ...initial.dayState, runs: [{ ...initial.dayState.runs[0],
+        startedAt: 1, endedAt: now, autoTrackDisabled: false, metaUpdatedAt: now + 1_000_000,
+        notes: "legitimate setup note" }] },
+      runValues: { [RUN]: { ...initial.runValues[RUN], traysOnLine: 99 } },
+      runValuesUpdatedAt: { [RUN]: now + 1_000_000 },
+    };
+    const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+      method: "PUT", headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "sleeping-client", payload: stale }),
+    });
+    expect(response.status).toBe(409);
+    expect(response.headers.get("X-Operational-Update-Required")).toBe("commands-required");
+    const merged = await response.json() as any;
+    expect(merged.data.dayState.runs[0]).toMatchObject({
+      startedAt: now - 60_000, autoTrackDisabled: true, notes: "legitimate setup note",
+    });
+    expect(merged.data.dayState.runs[0].endedAt).toBeUndefined();
+    expect(merged.data.runValues[RUN]).toMatchObject({ traysOnLine: 4, batchesReady: 2 });
+    const retry = await post(control);
+    expect(retry).toMatchObject({ duplicate: true, outcome: "accepted", canonicalRevision: merged.canonicalRevision });
+    expect(retry.data.dayState.runs[0].notes).toBe("legitimate setup note");
+  });
+
   it("serializes concurrent retries of one stable intent ID to one committed receipt", async () => {
     const initialData = {
       dayState: { date: DATE, runs: [{ id: RUN, startedAt: 1, metaUpdatedAt: 10 }] },
@@ -2921,8 +3606,8 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
       target: [dailySyncTable.date, dailySyncTable.scope],
       set: { canonicalRevision: 4, data: initialData },
     });
-    const body = intent("same-intent", `${RUN}:10`, "correction", {
-      values: { traysOnLine: 7 },
+    const body = intent("same-intent", `${RUN}:10`, "control", {
+      baseRevision: 4, control: { kind: "auto-track", enabled: false },
     });
     const [first, second] = await Promise.all([post(body), post(body)]);
     expect([first.duplicate, second.duplicate].sort()).toEqual([false, true]);
@@ -2934,7 +3619,7 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
       eq(dailySyncTable.scope, "live"),
     ));
     expect(stored.canonicalRevision).toBe(5);
-    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(7);
+    expect((stored.data as any).dayState.runs[0].autoTrackDisabled).toBe(true);
   });
 });
 
@@ -2964,7 +3649,7 @@ describe("operational intent service boundary", () => {
         actorId: USER,
         deviceId: "service-test",
         baseRevision: 4,
-        actionData: { action: "correction", runId, values: { traysOnLine: 7 } },
+        actionData: { action: "control", runId, control: { kind: "auto-track", enabled: false } },
       },
       intent: {
         version: 1,
@@ -2974,8 +3659,9 @@ describe("operational intent service boundary", () => {
         observedGeneration: `${runId}:10`,
         resetEpoch: 0,
         effectiveAt: Date.now(),
-        action: "correction",
-        values: { traysOnLine: 7 },
+        action: "control",
+        baseRevision: 4,
+        control: { kind: "auto-track", enabled: false },
       },
       consumeRun: async () => ({ applied: false, consumed: 0 }),
     }));
@@ -2986,12 +3672,13 @@ describe("operational intent service boundary", () => {
       canonicalRevision: 5,
     });
     expect(result.cursor).toBeTypeOf("number");
-    expect(result.data.runValues[runId].traysOnLine).toBe(7);
+    expect(result.data.dayState.runs[0].autoTrackDisabled).toBe(true);
+    expect(result.data.runValues[runId].traysOnLine).toBe(2);
     const [stored] = await db.select().from(dailySyncTable).where(and(
       eq(dailySyncTable.date, date),
       eq(dailySyncTable.scope, "live"),
     ));
-    expect((stored.data as any).runValues[runId].traysOnLine).toBe(7);
+    expect((stored.data as any).dayState.runs[0].autoTrackDisabled).toBe(true);
   });
 
   it("leaves state and receipts unchanged when an in-transaction side effect fails", async () => {
@@ -3101,11 +3788,41 @@ describe("POST /sync/auto-track/claim", () => {
         senderId: "seed",
         payload: {
           dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2 }] },
-          runValues: { [RUN]: { traysOnLine: 10 } },
+          runValues: { [RUN]: {
+            traysOnLine: 10,
+            casesNeeded: 200, pizzasPerCase: 12, crustsPerCycle: 1, cycleSpeed: 400,
+            app1Type: "Cheese", app1BatchLbs: 50, app1OzPerPizza: 2, app1CheeseRecipe: [],
+            app1StockLbs: 0, app1StockConsumedLbs: 0, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
+          } },
           runValuesUpdatedAt: { [RUN]: 1 },
         },
       }),
     });
+    // A client sync write cannot initialize server-owned stock for a running run.
+    // Seed only this disposable test database with the acknowledged canonical
+    // starting supply so the claim transaction reaches its intended guard.
+    const [row] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE),
+    ));
+    const data = structuredClone(row.data) as any;
+    data.dayState = { ...data.dayState, date: DATE, runs: [
+      { id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2 },
+    ] };
+    Object.assign(data.runValues[RUN], {
+      traysOnLine: 10,
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      app1StockLbs: 0,
+      app1StockConsumedLbs: 0,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    });
+    await db.update(dailySyncTable).set({ data }).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE),
+    ));
   });
 
   it("commits one of two competing tabs and converges both on one decrement", async () => {
@@ -3194,6 +3911,7 @@ describe("POST /sync/auto-track/claim", () => {
           { field: "app1BatchesMade", from: 0, to: 1 },
           { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
           { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+          { field: "app1StockLbs", from: 0, to: 50 },
         ],
       },
     };
@@ -3222,18 +3940,20 @@ describe("POST /sync/auto-track/claim", () => {
     expect(retry.outcome).toBe("duplicate");
     expect(retry.values.traysOnLine).toBe(9);
 
-    await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
-      method: "PUT",
+    const correction = await fetch(`${baseUrl}/api/sync/manual-section?today=${DATE}`, {
+      method: "POST",
       headers: { ...authHeaders(), "content-type": "application/json" },
       body: JSON.stringify({
-        senderId: "manual",
-        payload: {
-          dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep" }] },
-          runValues: { [RUN]: { traysOnLine: 14 } },
-          runValuesUpdatedAt: { [RUN]: Date.now() + 1_000 },
-        },
+        id: "manual-tray-correction", date: DATE, runId: RUN,
+        section: "dough", deviceId: "manual", resetEpoch: 0, baseRevision: 0,
+        observedGeneration: `${RUN}:2`,
+        values: { traysOnLine: 14, batchesReady: 0 },
+        baseValues: { traysOnLine: 9, batchesReady: 0 },
       }),
     });
+    expect(correction.status).toBe(200);
+    const oldAcceptedReplay = await (await post(body)).json() as { values: { traysOnLine: number } };
+    expect(oldAcceptedReplay.values.traysOnLine).toBe(14);
     const staleBase = await (await post(event("tab-b", "tab-b:tray:2", 2, 9, 8))).json() as {
       outcome: string;
       values: { traysOnLine: number };
@@ -3294,6 +4014,7 @@ describe("POST /sync/auto-track/claim", () => {
           { field: "app1BatchesMade", from: 0, to: 1 },
           { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
           { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+          { field: "app1StockLbs", from: 0, to: 50 },
         ],
       },
     });
@@ -3387,6 +4108,7 @@ describe("POST /sync/auto-track/claim", () => {
     const bodies = await Promise.all([a.json(), b.json()]) as Array<{
       outcome: string;
       values: Record<string, number>;
+      data: Record<string, any>;
     }>;
     expect(bodies.map(({ outcome }) => outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every(({ values }) =>
@@ -3394,6 +4116,13 @@ describe("POST /sync/auto-track/claim", () => {
       && values.app1StockAnchorNetSec === 15
       && values.app1BatchesMade === 9
     )).toBe(true);
+    const accepted = bodies.find(({ outcome }) => outcome === "accepted")!;
+    expect(accepted.data.autoTrackServerState.netOwnership[RUN]["app1-stock"]).toMatchObject({
+      generation: `${RUN}:2`,
+      sequence: 1,
+    });
+    expect(accepted.data.autoTrackServerState.netOwnership[RUN]["app1-stock"].updatedAt)
+      .toEqual(expect.any(Number));
     expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
   });
 
@@ -3427,7 +4156,7 @@ describe("POST /sync/auto-track/claim", () => {
               sauceBarrelLbs: 10,
             },
           },
-          runValuesUpdatedAt: { [RUN]: 3 },
+          runValuesUpdatedAt: { [RUN]: Date.now() + 100 },
         },
       }),
     }).then((response) => response.json()) as {
@@ -3518,7 +4247,7 @@ describe("POST /sync/auto-track/claim", () => {
               sauceBarrelLbs: 10,
             },
           },
-          runValuesUpdatedAt: { [RUN]: 3 },
+          runValuesUpdatedAt: { [RUN]: Date.now() + 100 },
         },
       }),
     }).then((response) => response.json()) as {
@@ -3603,6 +4332,319 @@ describe("GET /sync/scheduled — client-local-date filtering", () => {
     expect(days[0].date).toBe("2030-03-12");
     expect(days[0].runCount).toBe(1);
     expect(days[0].runs).toHaveLength(1);
+  });
+});
+
+describe("POST /sync/schedule-swap — atomic date-scoped schedule exchange", () => {
+  const sourceDate = "2030-03-10";
+  const destinationDate = "2030-03-11";
+  const originalSource = {
+    dayState: { date: sourceDate, runs: [{ id: "source-run", brand: "Source" }], breaks: { break1: 20 } },
+    runValues: { "source-run": { casesNeeded: 12 } },
+    runValuesUpdatedAt: { "source-run": 101 },
+    packagingProgress: { "source-run": { casesOnCurrentSkid: 3 } },
+    doughTimerControls: { "source-run": { generation: "source-generation" } },
+    brands: ["Source-only factory list"],
+    templates: [{ id: "source-template" }],
+  };
+  const originalDestination = {
+    dayState: { date: destinationDate, runs: [{ id: "destination-run", brand: "Destination" }], breaks: { break1: 40 } },
+    runValues: { "destination-run": { casesNeeded: 24 } },
+    runValuesUpdatedAt: { "destination-run": 202 },
+    packagingProgress: { "destination-run": { casesOnCurrentSkid: 6 } },
+    autoTrackCoordination: { version: 1, runs: { "destination-run": { case: { sequence: 2 } } } },
+    brands: ["Destination-only factory list"],
+    templates: [{ id: "destination-template" }],
+  };
+
+  async function seedPair() {
+    await seedCanonicalSync(sourceDate, originalSource, 4);
+    await seedCanonicalSync(destinationDate, originalDestination, 8);
+  }
+
+  function swapRequest(revisions = { sourceRevision: 4, destinationRevision: 8 }) {
+    return fetch(`${baseUrl}/api/sync/schedule-swap`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate,
+        destinationDate,
+        ...revisions,
+        resetEpoch: 0,
+        senderId: "schedule-swap-test",
+      }),
+    });
+  }
+
+  it("atomically swaps runs, values, stamps, packaging, breaks and run state, preserving factory data", async () => {
+    await seedPair();
+    const response = await swapRequest();
+    expect(response.status).toBe(200);
+    const result = await response.json() as { swapped: boolean; sourceRevision: number; destinationRevision: number };
+    expect(result).toMatchObject({ swapped: true, sourceRevision: 5, destinationRevision: 9 });
+
+    const rows = await db.select().from(dailySyncTable)
+      .where(inArray(dailySyncTable.date, [sourceDate, destinationDate]));
+    const source = rows.find((row) => row.date === sourceDate)!;
+    const destination = rows.find((row) => row.date === destinationDate)!;
+    expect(source.canonicalRevision).toBe(5);
+    expect(destination.canonicalRevision).toBe(9);
+    expect(source.data).toMatchObject({
+      dayState: { date: sourceDate, runs: [{ id: "destination-run" }], breaks: { break1: 40 } },
+      runValues: originalDestination.runValues,
+      runValuesUpdatedAt: originalDestination.runValuesUpdatedAt,
+      packagingProgress: originalDestination.packagingProgress,
+      autoTrackCoordination: originalDestination.autoTrackCoordination,
+      brands: originalSource.brands,
+      templates: originalSource.templates,
+    });
+    expect(destination.data).toMatchObject({
+      dayState: { date: destinationDate, runs: [{ id: "source-run" }], breaks: { break1: 20 } },
+      runValues: originalSource.runValues,
+      runValuesUpdatedAt: originalSource.runValuesUpdatedAt,
+      packagingProgress: originalSource.packagingProgress,
+      doughTimerControls: originalSource.doughTimerControls,
+      brands: originalDestination.brands,
+      templates: originalDestination.templates,
+    });
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"));
+    expect(events.filter((event) => event.kind === "day-state").map((event) => event.date).sort())
+      .toEqual([sourceDate, destinationDate]);
+  });
+
+  it("rejects stale revisions without changing either date", async () => {
+    await seedPair();
+    const response = await swapRequest({ sourceRevision: 3, destinationRevision: 8 });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "SCHEDULE_REVISION_CONFLICT" });
+    const rows = await db.select().from(dailySyncTable)
+      .where(inArray(dailySyncTable.date, [sourceDate, destinationDate]));
+    expect(rows.find((row) => row.date === sourceDate)).toMatchObject({
+      canonicalRevision: 4,
+      data: originalSource,
+    });
+    expect(rows.find((row) => row.date === destinationDate)).toMatchObject({
+      canonicalRevision: 8,
+      data: originalDestination,
+    });
+    expect(await db.select().from(syncOutboxEventsTable)).toEqual([]);
+  });
+
+  it("serializes concurrent swaps so only one request can apply a given revision pair", async () => {
+    await seedPair();
+    const responses = await Promise.all([swapRequest(), swapRequest()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    const rows = await db.select().from(dailySyncTable)
+      .where(inArray(dailySyncTable.date, [sourceDate, destinationDate]));
+    expect(rows.find((row) => row.date === sourceDate)?.canonicalRevision).toBe(5);
+    expect(rows.find((row) => row.date === destinationDate)?.canonicalRevision).toBe(9);
+  });
+
+  it("requires schedule authority and applies the server facility-local 7 a.m. boundary", async () => {
+    await seedPair();
+    const denied = await fetch(`${baseUrl}/api/sync/schedule-swap`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate, destinationDate, sourceRevision: 4, destinationRevision: 8, resetEpoch: 0,
+      }),
+    });
+    expect(denied.status).toBe(403);
+    const deniedSwap = await fetch(`${baseUrl}/api/sync/schedule-swap`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate, destinationDate, sourceRevision: 4, destinationRevision: 8, resetEpoch: 0,
+      }),
+    });
+    expect(deniedSwap.status).toBe(403);
+    const deniedEligibility = await fetch(
+      `${baseUrl}/api/sync/schedule-swap-eligibility?sourceDate=${sourceDate}&destinationDate=${destinationDate}`,
+      { headers: authHeaders() },
+    );
+    expect(deniedEligibility.status).toBe(403);
+
+    const originalTimeZone = process.env.FACILITY_TIME_ZONE;
+    const now = vi.spyOn(Date, "now");
+    process.env.FACILITY_TIME_ZONE = "UTC";
+    try {
+      await seedCanonicalSync(sourceDate, {
+        ...originalSource,
+        dayState: { ...originalSource.dayState, runs: [{ id: "started-run", startedAt: 100 }] },
+      }, 4);
+      now.mockReturnValue(Date.parse("2030-03-10T07:00:00Z"));
+      const afterBoundary = await fetch(
+        `${baseUrl}/api/sync/schedule-swap-eligibility?sourceDate=${sourceDate}&destinationDate=${destinationDate}`,
+        { headers: managerAuthHeaders() },
+      );
+      expect(await afterBoundary.json()).toMatchObject({
+        sourceScheduled: true,
+        destinationScheduled: true,
+        canSwap: false,
+        reason: "today-started-after-6am",
+      });
+      const tooLate = await swapRequest();
+      expect(tooLate.status).toBe(409);
+      expect(await tooLate.json()).toMatchObject({ code: "TODAY_SWAP_NOT_ELIGIBLE" });
+
+      now.mockReturnValue(Date.parse("2030-03-10T06:59:00Z"));
+      const beforeBoundaryEligibility = await fetch(
+        `${baseUrl}/api/sync/schedule-swap-eligibility?sourceDate=${sourceDate}&destinationDate=${destinationDate}`,
+        { headers: managerAuthHeaders() },
+      );
+      expect(await beforeBoundaryEligibility.json()).toMatchObject({ canSwap: true });
+      const beforeBoundary = await swapRequest();
+      expect(beforeBoundary.status).toBe(200);
+    } finally {
+      now.mockRestore();
+      if (originalTimeZone === undefined) delete process.env.FACILITY_TIME_ZONE;
+      else process.env.FACILITY_TIME_ZONE = originalTimeZone;
+    }
+  });
+});
+
+describe("POST /sync/schedule-move — atomic run relocation", () => {
+  const sourceDate = "2030-03-10";
+  const destinationDate = "2030-03-11";
+  const sourceData = {
+    dayState: {
+      date: sourceDate,
+      runs: [
+        { id: "move-run", brand: "Move", metaUpdatedAt: 10 },
+        { id: "stay-run", brand: "Stay", metaUpdatedAt: 11 },
+      ],
+      breaks: { break1: 20 },
+      stagedItems: { "move-run::Flour__lbs": true, "stay-run::Cheese__lbs": true },
+    },
+    runValues: {
+      "move-run": { casesNeeded: 18 },
+      "stay-run": { casesNeeded: 7 },
+    },
+    runValuesUpdatedAt: { "move-run": 101, "stay-run": 102 },
+    packagingProgress: {
+      "move-run": { casesOnCurrentSkid: 3 },
+      "stay-run": { casesOnCurrentSkid: 1 },
+    },
+    doughTimerControls: { "move-run": { generation: "move-generation" } },
+    autoTrackCoordination: { version: 1, runs: { "move-run": { case: { sequence: 1 } } } },
+    autoTrackServerState: {
+      version: 1,
+      wallClockBookkeeping: {
+        "move-run": { lifecycleGeneration: "move-run:1", caseNextDueMs: 1_900_000_000_000 },
+        "stay-run": { lifecycleGeneration: "stay-run:1", caseNextDueMs: 1_900_000_000_100 },
+      },
+    },
+    brands: ["Source factory list"],
+  };
+  const destinationData = {
+    dayState: { date: destinationDate, runs: [{ id: "destination-run", brand: "Destination" }], breaks: { break1: 40 } },
+    runValues: { "destination-run": { casesNeeded: 6 } },
+    runValuesUpdatedAt: { "destination-run": 202 },
+    packagingProgress: { "destination-run": { casesOnCurrentSkid: 2 } },
+    brands: ["Destination factory list"],
+  };
+
+  function moveRequest(
+    runIds: string[] | "all" = ["move-run"],
+    revisions = { sourceRevision: 4, destinationRevision: 8 },
+    headers: Record<string, string> = managerAuthHeaders(),
+  ) {
+    return fetch(`${baseUrl}/api/sync/schedule-move`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceDate,
+        destinationDate,
+        ...revisions,
+        resetEpoch: 0,
+        runIds,
+        senderId: "schedule-move-test",
+      }),
+    });
+  }
+
+  async function seedPair() {
+    await seedCanonicalSync(sourceDate, sourceData, 4);
+    await seedCanonicalSync(destinationDate, destinationData, 8);
+  }
+
+  it("moves one run once, retains source runs, and carries run-bound values and progress", async () => {
+    await seedPair();
+    const responses = await Promise.all([moveRequest(), moveRequest()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+
+    const source = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, sourceDate))).then((rows) => rows[0]);
+    const destination = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate))).then((rows) => rows[0]);
+    expect((source.data as any).dayState.runs.map((run: any) => run.id)).toEqual(["stay-run"]);
+    expect((source.data as any).runValues).toEqual({ "stay-run": { casesNeeded: 7 } });
+    expect((source.data as any).dayState.stagedItems).toEqual({ "stay-run::Cheese__lbs": true });
+    expect((source.data as any).autoTrackServerState.wallClockBookkeeping).toEqual({
+      "stay-run": { lifecycleGeneration: "stay-run:1", caseNextDueMs: 1_900_000_000_100 },
+    });
+    expect((destination.data as any).dayState.runs.map((run: any) => run.id)).toEqual(["destination-run", "move-run"]);
+    expect((destination.data as any).runValues["move-run"]).toEqual({ casesNeeded: 18 });
+    expect((destination.data as any).runValuesUpdatedAt["move-run"]).toBe(101);
+    expect((destination.data as any).packagingProgress["move-run"]).toEqual({ casesOnCurrentSkid: 3 });
+    expect((destination.data as any).doughTimerControls["move-run"]).toEqual({ generation: "move-generation" });
+    expect((destination.data as any).autoTrackCoordination.runs["move-run"]).toEqual({ case: { sequence: 1 } });
+    expect((destination.data as any).autoTrackServerState.wallClockBookkeeping["move-run"]).toEqual({
+      lifecycleGeneration: "move-run:1",
+      caseNextDueMs: 1_900_000_000_000,
+    });
+    expect((destination.data as any).dayState.stagedItems).toEqual({ "move-run::Flour__lbs": true });
+    expect((source.data as any).brands).toEqual(sourceData.brands);
+    expect((destination.data as any).brands).toEqual(destinationData.brands);
+    expect(source.canonicalRevision).toBe(5);
+    expect(destination.canonicalRevision).toBe(9);
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"));
+    expect(events.filter((event) => event.kind === "day-state").map((event) => event.date).sort())
+      .toEqual([sourceDate, destinationDate]);
+  });
+
+  it("rolls back stale requests and does not leave an empty destination row", async () => {
+    await seedCanonicalSync(sourceDate, sourceData, 4);
+    await db.delete(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ));
+    const stale = await moveRequest(["move-run"], { sourceRevision: 3, destinationRevision: 0 });
+    expect(stale.status).toBe(409);
+    expect(await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ))).toEqual([]);
+    expect((await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, sourceDate),
+    )))[0].canonicalRevision).toBe(4);
+  });
+
+  it("moves a whole day onto a new date and removes the empty source", async () => {
+    await seedCanonicalSync(sourceDate, sourceData, 4);
+    await db.delete(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ));
+    const response = await moveRequest("all", { sourceRevision: 4, destinationRevision: 0 });
+    expect(response.status).toBe(200);
+    expect((await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, sourceDate),
+    )))).toEqual([]);
+    const [destination] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ));
+    expect((destination.data as any).dayState).toMatchObject({
+      date: destinationDate,
+      runs: [{ id: "move-run" }, { id: "stay-run" }],
+      breaks: { break1: 20 },
+    });
+    expect((destination.data as any).runValues).toEqual(sourceData.runValues);
+  });
+
+  it("denies operators without schedule-management capability", async () => {
+    await seedPair();
+    const response = await moveRequest(["move-run"], undefined, authHeaders());
+    expect(response.status).toBe(403);
   });
 });
 
@@ -3846,6 +4888,7 @@ describe("/sync snapshot conditionals", () => {
       runValues: { "wake-projection-run": { casesNeeded: 240 } },
       runValuesUpdatedAt: { "wake-projection-run": 1 },
     };
+    await seedCanonicalSync(DATE, activePayload);
     const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
@@ -3884,6 +4927,66 @@ describe("/sync snapshot conditionals", () => {
     expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
   });
 
+  it("projects the later canonical active run without a device selection across full and unchanged reads", async () => {
+    const now = Date.now();
+    const payload = {
+      dayState: {
+        date: DATE,
+        runs: [
+          { id: "display-old", subTab: "crusts", startedAt: now - 900_000, endedAt: now - 90_000 },
+          { id: "display-live", subTab: "crusts", startedAt: now - 30_000 },
+          { id: "display-next" },
+        ],
+      },
+      runValues: {
+        "display-old": { casesNeeded: 100, approxLineSpeed: 30, pizzasPerCase: 6, freezerTime: 12 },
+        "display-live": {
+          casesNeeded: 200, approxLineSpeed: 90, pizzasPerCase: 12, freezerTime: 7,
+          casesPerSkid: 40, sauceOzPerPizza: 2, sauceBarrelLbs: 50,
+          tempFreezerTime: 9, app1Type: "Cheese", app1OzPerPizza: 3, app1BatchLbs: 25,
+        },
+      },
+      packagingProgress: { "display-live": { skidsCompleted: 1, casesOnCurrentSkid: 3 } },
+      runValuesUpdatedAt: { "display-old": 1, "display-live": 1 },
+    };
+    const { computeServerCalc } = await import("@workspace/live-calc");
+    const { buildAutoTrackSchedule } = await import("./sync");
+    // An old result must not be paired with the new active run's settings.
+    expect(buildAutoTrackSchedule(payload, computeServerCalc(payload, [], now), now)).toBeNull();
+    await seedCanonicalSync(DATE, payload);
+    const read = async (snapshotId?: string) => {
+      const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}${snapshotId ? `&snapshot=${snapshotId}` : ""}`,
+        { headers: authHeaders() });
+      expect(response.ok).toBe(true);
+      const body = await response.json() as {
+        dayState: { currentIndex?: number };
+        operationalProjection: import("@workspace/live-calc").OperationalProjection;
+        unchanged?: boolean;
+        snapshotId?: string;
+      };
+      return { ...body, responseSnapshotId: response.headers.get("X-Sync-Snapshot") };
+    };
+    const full = await read();
+    expect(full.dayState.currentIndex).toBeUndefined();
+    expect(full.operationalProjection.calc).toMatchObject({ ppm: 90, casesCompleted: 43 });
+    expect(full.operationalProjection.due).toMatchObject({ runId: "display-live" });
+    expect(full.operationalProjection).toMatchObject({
+      runId: "display-live", facts: { runStatus: "running" },
+      lifecycleGeneration: full.operationalProjection.due.generation,
+    });
+    expect(full.operationalProjection.effectiveElapsedSec).toBeGreaterThanOrEqual(30);
+    expect(full.operationalProjection.effectiveElapsedSec).toBeLessThan(60);
+    expect(full.responseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+    const unchanged = await read(full.responseSnapshotId!);
+    expect(unchanged.unchanged).toBe(true);
+    expect(unchanged.snapshotId).toBe(full.responseSnapshotId);
+    expect(unchanged.operationalProjection.runId).toBe("display-live");
+    expect(unchanged.operationalProjection.due.runId).toBe("display-live");
+    // Both read forms are transport-only: no selection or projection is saved.
+    const [stored] = await db.select().from(dailySyncTable).where(eq(dailySyncTable.date, DATE));
+    expect(stored.data).toEqual(payload);
+  });
+
   it("returns nonzero draining occupancy from an unchanged read of an ended run", async () => {
     const now = Date.now();
     const startedAt = now - 10 * 60_000;
@@ -3912,6 +5015,7 @@ describe("/sync snapshot conditionals", () => {
       },
       runValuesUpdatedAt: { "wake-draining-run": 1 },
     };
+    await seedCanonicalSync(DATE, endedPayload);
     const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
@@ -4303,8 +5407,14 @@ describe("/sync/today — complete-write causal fence", () => {
   it("accepts a current-base fast-clock write, then a normally stamped edit without losing terminal lifecycle", async () => {
     const serverNow = Date.now();
     const fastStamp = serverNow + 86_400_000;
+    await seedCanonicalSync(DATE, {
+      dayState: { date: DATE, runs: [{ id: "complete-fence-run",
+        startedAt: serverNow - 10_000, endedAt: serverNow - 1_000,
+        metaUpdatedAt: serverNow - 1_000 }] }, runValues: {},
+    });
+    const confirmedBaseline = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, { headers: authHeaders() });
     const first = await put(
-      complete(emptyCompleteSnapshotId(DATE), 12, fastStamp, {
+      complete(confirmedBaseline.headers.get("X-Sync-Snapshot")!, 12, fastStamp, {
         startedAt: serverNow - 10_000,
         endedAt: serverNow - 1_000,
         metaUpdatedAt: serverNow - 1_000,
@@ -4541,6 +5651,7 @@ describe("/sync large-day complete versus partial measurements", () => {
       dayState: {
         date: DATE,
         resetAt: 1_000,
+        resetBoundaryAt: 1_000,
         runs,
         shiftNotes: "Large-day benchmark fixture",
         runToTime: Object.fromEntries(runs.map((run) => [run.id, 18])),
@@ -4598,6 +5709,7 @@ describe("/sync large-day complete versus partial measurements", () => {
 
   it("compares complete and one-run partial writes on a representative large day", async () => {
     const completeFixture = largeDayFixture();
+    await seedCanonicalSync(DATE, completeFixture);
     const baseline = await measuredPut(completeFixture, "large-day-complete");
     expect(baseline.response.status).toBe(200);
     expect(baseline.parsed.snapshotId).toMatch(/^[a-f0-9]{64}$/);
@@ -4613,22 +5725,20 @@ describe("/sync large-day complete versus partial measurements", () => {
       runValues: {
         [changedRunId]: {
           ...(completeFixture.runValues as Record<string, JsonRecord>)[changedRunId],
-          casesOnCurrentSkid: 99,
+          notes: "Updated ordinary setup note",
         },
       },
       runValuesUpdatedAt: { [changedRunId]: changedRunStamp },
       packagingProgress: {
         [changedRunId]: {
           ...(completeFixture.packagingProgress as Record<string, JsonRecord>)[changedRunId],
-          casesOnCurrentSkid: 99,
-          updatedAt: changedRunStamp,
         },
       },
     };
     const optimized = await measuredPut(partialFixture, "large-day-partial");
     expect(optimized.response.status).toBe(200);
     expect(optimized.canonical?.runValues).toMatchObject({
-      [changedRunId]: { casesOnCurrentSkid: 99 },
+      [changedRunId]: { notes: "Updated ordinary setup note", casesOnCurrentSkid: 28 },
     });
 
     const completeCanonical = baseline.canonical;
@@ -4790,8 +5900,8 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
 
     // Device A is awake and advances setup, skid progress, a manual correction,
     // and the remote stop while Device B remains asleep on the initial snapshot.
-    await put(initial);
-    await put(awakeEdit);
+    await seedCanonicalSync(DATE, initial);
+    await seedCanonicalSync(DATE, awakeEdit, 2);
 
     // B wakes with its pre-sleep snapshot and performs the push it would have
     // queued before the foreground adoption barrier. The server must return
@@ -4801,7 +5911,8 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
       ok: boolean;
       data?: typeof awakeEdit;
     };
-    expect(canonical.ok).toBe(true);
+    expect(staleWake.status).toBe(409);
+    expect(canonical.ok).toBe(false);
     expect(canonical.data?.dayState.runs[0]).toMatchObject({
       endedAt: 9_000,
       metaUpdatedAt: 2_000,
@@ -4945,8 +6056,8 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
       manualOverrideUntil,
     });
 
-    // Both devices begin from the same automatic generation and 36/48.
-    await put({
+    // Both devices begin from the same acknowledged automatic generation.
+    await seedCanonicalSync(DATE, {
       ...meta,
       runValues: {
         r1: { casesNeeded: 500, casesPerSkid: 48, skidsCompleted: 0, casesOnCurrentSkid: 36 },
@@ -4957,14 +6068,15 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
 
     // Device A explicitly corrects downward. Its new generation is the causal
     // boundary, independent of the whole-run timestamp.
-    await put({
-      ...meta,
-      runValues: {
-        r1: { casesNeeded: 500, casesPerSkid: 48, skidsCompleted: 0, casesOnCurrentSkid: 24 },
-      },
-      runValuesUpdatedAt: { r1: 2_000 },
-      packagingProgress: { r1: progress(0, 24, 1, 2_000, 62_000) },
+    const correction = await fetch(`${baseUrl}/api/sync/manual-section?today=${DATE}`, {
+      method: "POST", headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ id: "downward-skid", date: DATE, runId: "r1",
+        section: "packaging", deviceId: "awake-manager", resetEpoch: 0, baseRevision: 1,
+        observedGeneration: "r1:0",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 24 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 36 } }),
     });
+    expect(correction.status).toBe(200);
 
     // Device B has not seen that correction. Its later automatic tick and
     // later whole-run stamp must be patched back to Device A's generation.
@@ -4992,7 +6104,7 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
     });
     expect(staleBody.data?.packagingProgress?.r1).toMatchObject({
       correctionGeneration: 1,
-      manualOverrideUntil: 62_000,
+      manualOverrideUntil: expect.any(Number),
     });
 
     const stored = await fetch(`${baseUrl}/api/sync/${DATE}`, {
@@ -5316,6 +6428,10 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
       },
       deletedItems: { runs: [addedRun.id] },
     };
+    await seedCanonicalSync(conflictDate, {
+      ...sharedBaseline,
+      dayState: { ...sharedBaseline.dayState, runs: peerBEndAndRemove.dayState.runs },
+    }, 2);
 
     const responses = await Promise.all([
       peerPut("lifecycle-peer-a", peerAStartAndAdd),
@@ -5451,6 +6567,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
         return response!;
       };
 
+      await seedCanonicalSync(date, baseline);
       const seeded = await peerPut(`pause-resume-seed-${date}`, baseline);
       expect(seeded.status).toBe(200);
       const sharedBaseline = ((await seeded.json()) as { data: typeof baseline }).data;
@@ -5487,10 +6604,11 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
         },
       };
       const payloads = { pause: paused, resume: resumed };
+      await seedCanonicalSync(date, resumed, 2);
 
       for (const action of order) {
         const response = await peerPut(`pause-resume-${action}-${date}`, payloads[action]);
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(action === "pause" ? 409 : 200);
       }
 
       const canonicalResponse = await fetch(`${baseUrl}/api/sync/${date}`, {
@@ -5871,20 +6989,22 @@ describe("/sync/events — active-run calc tick", () => {
   // The server re-emits the server-computed calc on a low cadence while a run
   // is active. Uses LIVE_CALC_TICK_MS so the test does not wait on the 15s
   // default heartbeat.
-  it("pushes a calcTick frame with serverCalc for the active run", async () => {
+  it("pushes a calcTick frame for the later active lifecycle without currentIndex", async () => {
     const date = "2030-03-13";
     process.env.LIVE_CALC_TICK_MS = "2000";
-    await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-      method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({
-        senderId: "calc-tick-writer",
-        payload: {
-          dayState: { runs: [{ id: "active-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }] },
-          runValues: { "active-run": { casesNeeded: 240 } },
-          runValuesUpdatedAt: { "active-run": 1 },
-        },
-      }),
+    // Already-accepted canonical lifecycle: generic sync cannot create Start/End
+    // facts, so seed through the disposable fixture rather than a legacy PUT.
+    await seedCanonicalSync(date, {
+      dayState: { runs: [
+        { id: "ended-run", brand: "Acme", flavor: "Cheese", startedAt: 500, endedAt: 900 },
+        { id: "active-run", brand: "Acme", flavor: "Pep", subTab: "crusts", startedAt: 1000 },
+        { id: "pending-run", brand: "Acme", flavor: "Next" },
+      ] },
+      runValues: {
+        "ended-run": { casesNeeded: 100, approxLineSpeed: 30, pizzasPerCase: 6 },
+        "active-run": { casesNeeded: 240, approxLineSpeed: 90, pizzasPerCase: 12 },
+      },
+      runValuesUpdatedAt: { "ended-run": 1, "active-run": 1 },
     });
 
     const ctrl = new AbortController();
@@ -5920,6 +7040,11 @@ describe("/sync/events — active-run calc tick", () => {
     expect(tickFrame).toBeDefined();
     const serverCalc = tickFrame!.serverCalc as { runId?: string } | null | undefined;
     expect(serverCalc?.runId).toBe("active-run");
+    expect(tickFrame!.serverCalc).toMatchObject({ calc: { ppm: 90 } });
+    expect(tickFrame!.autoTrackSchedule).toMatchObject({ runId: "active-run" });
+    expect(tickFrame!.operationalProjection).toMatchObject({
+      runId: "active-run", facts: { runStatus: "running" },
+    });
     expect(typeof (tickFrame!.serverTime as number | undefined)).toBe("number");
   });
 });
@@ -5968,6 +7093,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
 
   it("sends the current-day snapshot as the first frame for a newly connected device", async () => {
     const date = "2030-03-12";
+    await seedCanonicalSync(date, {
+      dayState: { date, runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }], resetAt: 1000 },
+      runValues: { "scheduled-run": { casesNeeded: 240 } },
+      runValuesUpdatedAt: { "scheduled-run": 1 },
+    });
     await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
@@ -5996,6 +7126,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(line).toBeDefined();
     const initial = JSON.parse(line!.slice("data: ".length)) as {
       initial?: boolean;
+      canonicalRevision?: number;
       senderId?: string | null;
       data?: { dayState?: { runs?: Array<{ id: string }> } };
       serverCalc?: { runId: string } | null;
@@ -6018,7 +7149,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(initial.operationalProjection).toMatchObject({
       version: 1,
       runId: "scheduled-run",
-      calculationRevision: 1,
+      calculationRevision: initial.canonicalRevision,
       facts: { runStatus: "running", pressDone: false },
     });
     expect(initial.operationalProjection?.serverTimeMs).toBe(initial.serverTime);
@@ -6663,6 +7794,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
       runValues,
       runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 10_000 + index])),
     };
+    await seedCanonicalSync(date, canonical);
     const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
@@ -6802,9 +7934,9 @@ describe("/sync/events — date-scoped broadcasts", () => {
         }
 
         const senderId = `shift-peer-${["a", "b", "c"][step % 3]}`;
-        const changedRun = runs[(step * 7) % runs.length].id;
-        const stamp = 2_000_000_000_000 + step;
         const lifecycleKind = lifecycleSteps.get(step);
+        const changedRun = runs[((lifecycleKind === "end" ? 8 : step) * 7) % runs.length].id;
+        const stamp = 2_000_000_000_000 + step;
         let nextPayload: Record<string, any> = {
           ...canonical,
           baseSnapshotId: syncSnapshotId(canonical),
@@ -6812,7 +7944,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
             ...canonical.runValues,
             [changedRun]: {
               ...canonical.runValues[changedRun],
-              casesOnCurrentSkid: (step * 5) % 48,
+              casesNeeded: step === 0 ? canonical.runValues[changedRun].casesNeeded : 240 + (step * 5) % 48,
             },
           },
           runValuesUpdatedAt: { ...canonical.runValuesUpdatedAt, [changedRun]: stamp },
@@ -6871,10 +8003,17 @@ describe("/sync/events — date-scoped broadcasts", () => {
           };
         }
         const priorSnapshotId = syncSnapshotId(canonical);
-        const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-          method: "PUT",
+        const isLifecycleCommand = lifecycleKind === "start" || lifecycleKind === "end";
+        const targetRun = canonical.dayState.runs.find((run: any) => run.id === changedRun);
+        const write = await fetch(`${baseUrl}/api/sync/${isLifecycleCommand ? "operational-intents" : "today"}?today=${date}`, {
+          method: isLifecycleCommand ? "POST" : "PUT",
           headers: { ...authHeaders(), "content-type": "application/json" },
-          body: JSON.stringify({ senderId, payload: nextPayload }),
+          body: JSON.stringify(isLifecycleCommand ? { senderId, intent: {
+            version: 1, id: `shift:${step}`, date, runId: changedRun,
+            observedGeneration: `${changedRun}:${targetRun.metaUpdatedAt ?? targetRun.startedAt ?? 0}`,
+            resetEpoch: 0, effectiveAt: Date.now(), action: "lifecycle",
+            lifecycle: lifecycleKind, ...(lifecycleKind === "end" ? { inventoryLines: [] } : {}),
+          } } : { senderId, payload: nextPayload }),
         });
         expect(write.status).toBe(200);
         const writeBody = await write.json() as { data: Record<string, any>; snapshotId: string };

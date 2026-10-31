@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { createPackagingManager, createPackagingControlAdapter, runUnlockedManualSectionAction } from "./packagingManager";
 import { DEFAULT_VALUES, type DayState, type FormValues, type RunMeta } from "./types";

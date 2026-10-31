@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VALUES, type DayState, type RunMeta } from "../types";
 import {
@@ -8,6 +9,7 @@ import {
   reconcileOperationalIntentCanonical,
   serverOwnedApplicatorStockProgress,
   shouldAtomicallyAdoptFirstSnapshot,
+  shouldKeepLocalSeedPlaceholder,
   stampDayStateMeta,
 } from "./runSyncPolicy";
 
@@ -54,6 +56,29 @@ describe("run sync policy", () => {
   it("only atomically adopts the initial untouched seeded placeholder", () => {
     expect(shouldAtomicallyAdoptFirstSnapshot({ initialSnapshot: true, localRuns: [{ id: "a", brand: "", flavor: "", seeded: true }] })).toBe(true);
     expect(shouldAtomicallyAdoptFirstSnapshot({ initialSnapshot: true, hasLocalUserEdit: true, localRuns: [{ id: "a", brand: "", flavor: "", seeded: true }] })).toBe(false);
+  });
+  it("drops only an untouched current seeded placeholder when remote runs exist", () => {
+    const placeholder = { id: "seed", brand: "", flavor: "", seeded: true };
+    const context = {
+      run: placeholder,
+      remoteRunCount: 1,
+      isCurrentRun: true,
+      hasRecentLocalEdit: false,
+      hasDirtyForm: false,
+    };
+    expect(shouldKeepLocalSeedPlaceholder(context)).toBe(false);
+    expect(shouldKeepLocalSeedPlaceholder({ ...context, hasDirtyForm: true })).toBe(true);
+    expect(shouldKeepLocalSeedPlaceholder({ ...context, hasRecentLocalEdit: true })).toBe(true);
+    expect(shouldKeepLocalSeedPlaceholder({ ...context, remoteRunCount: 0 })).toBe(true);
+    expect(shouldKeepLocalSeedPlaceholder({
+      ...context,
+      run: { ...placeholder, seeded: false },
+    })).toBe(true);
+    expect(shouldKeepLocalSeedPlaceholder({
+      ...context,
+      isCurrentRun: false,
+      hasRecentLocalEdit: true,
+    })).toBe(false);
   });
   it("adopts server-proven pound depletion without allowing an older same-generation refill", () => {
     const remote = {

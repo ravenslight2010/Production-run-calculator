@@ -16,20 +16,24 @@ const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 async function buildAll() {
   const root = path.resolve(artifactDir, "../..");
   const identityMode = process.env.BUILD_IDENTITY_MODE;
-  if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish") {
+  if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish" && identityMode !== "self-host-fresh") {
     throw new Error("Invalid build identity mode.");
   }
-  const sourceRecord = buildSourceRecord(
-    root,
-    identityMode ?? (process.env.NODE_ENV === "development" ? "development" : "publish"),
-  );
+  const mode = identityMode ?? (process.env.NODE_ENV === "development" ? "development" : "publish");
+  const fresh = mode === "self-host-fresh";
+  const { buildFreshSourceRecord, completeFreshBuildStage } = fresh
+    ? await import("../../scripts/self-host/build-identity.mjs") : {};
+  const { freshRuntimePlugin, assertFreshRuntimeGraph, FRESH_RUNTIME_BUILD_CONTRACT } = fresh
+    ? await import("../../scripts/self-host/runtime-build-policy.mjs") : {};
+  const sourceRecord = fresh ? buildFreshSourceRecord(root) : buildSourceRecord(root, mode);
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
-  await esbuild({
+  const result = await esbuild({
+    ...(fresh ? { absWorkingDir: root } : {}),
     entryPoints: {
       index: path.resolve(artifactDir, "src/index.ts"),
-      "source-library-approval": path.resolve(root, "scripts/src/source-library-approval-bundle.mts"),
+      ...(!fresh ? { "source-library-approval": path.resolve(root, "scripts/src/source-library-approval-bundle.mts") } : {}),
     },
     platform: "node",
     bundle: true,
@@ -116,8 +120,10 @@ async function buildAll() {
       "puppeteer-core",
       "electron",
     ],
-    sourcemap: "linked",
+    sourcemap: fresh ? false : "linked",
+    metafile: fresh,
     plugins: [
+      ...(fresh ? [freshRuntimePlugin(root)] : []),
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
       esbuildPluginPino({ transports: ["pino-pretty"] })
     ],
@@ -133,6 +139,12 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  if (fresh) {
+    assertFreshRuntimeGraph(root, result.metafile);
+    await writeFile(path.resolve(distDir, "self-host-build-contract.json"), JSON.stringify(FRESH_RUNTIME_BUILD_CONTRACT));
+    completeFreshBuildStage(root, sourceRecord, "api");
+    return;
+  }
   const reportRelativePath =
     "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
   const reportShaRelativePath =

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { createSyncRetryController, syncRetryDelay, SYNC_RETRY_MAX_MS } from "./syncRetry";
 

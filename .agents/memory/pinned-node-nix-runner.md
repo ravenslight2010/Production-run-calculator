@@ -26,3 +26,15 @@ Concurrent task merges can launch multiple pinned-Node `npx` acquisitions agains
 **Why:** Parallel post-merge hooks share the user npm cache even when each task has an isolated workspace, so one wait can exceed npm's lock deadline.
 
 **How to apply:** Give each short-lived Node bootstrap a private temporary npm cache and remove it with the bootstrap's temporary marker directory. Do not clear or mutate the shared cache to recover from a lock timeout.
+
+If a pinned Node command reports mutually exclusive CA modes, keep the mode selected by the Node build and inherited `NODE_OPTIONS` consistent through the launcher and its child processes. When the build uses OpenSSL CA mode, keep system-CA mode disabled and provide readable host CA file/directory paths.
+
+**Why:** npm-provisioned Node builds can default to OpenSSL CA mode, while `NODE_USE_SYSTEM_CA=1` or a conflicting `NODE_OPTIONS` flag can request the opposite mode and fail even for `node --version`.
+
+**How to apply:** Inspect the selected Node build, `NODE_USE_SYSTEM_CA`, and inherited `NODE_OPTIONS`; align their CA modes across acquisition and child processes. For OpenSSL mode, set readable `SSL_CERT_FILE` and `SSL_CERT_DIR`. Keep HTTPS certificate verification enabled and verify both bootstrap and the selected runtime.
+
+Successful validation with an independently provisioned pinned package manager does not prove the ordinary workflow launcher can select it. A dangling user-level Corepack launcher can silently fall through to an older Nix pnpm.
+
+**Why:** An obsolete Corepack symlink selected older Nix pnpm, which recursively attempted manager installation and exhausted threads while the independently provisioned exact manager ran the same checks successfully. Provisioning the repository-pinned manager in the existing user-tools PATH resolved selection without changing project dependencies. These are different launcher paths, not evidence that the application or checks fail.
+
+**How to apply:** Verify pinned-manager selection and ordinary workflow resolution separately, preserving repository engine requirements and HTTPS verification. Inspect launcher targets and preserve dangling launchers before reprovisioning. pnpm's current self-update installs its launcher under `PNPM_HOME/bin`; verify the resulting executable's actual PATH precedence instead of assuming the requested prefix is already the binary directory. Do not change project dependencies to work around a local launcher failure.

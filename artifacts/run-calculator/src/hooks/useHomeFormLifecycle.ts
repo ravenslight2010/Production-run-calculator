@@ -38,7 +38,14 @@ export function shouldAutosaveHomeForm(
   return !readOnly
     && formRunId === currentRunId
     && !handoffInProgress
-    && !deepEqual(stored, incoming)
+    // Registered optional controls can add own properties with value undefined.
+    // Browser persistence omits those properties. Comparing the raw watch
+    // object with its JSON round-trip would otherwise invent another edit on
+    // every render, restamp the run and keep lifecycle commands waiting on sync.
+    && !deepEqual(
+      JSON.parse(JSON.stringify(stored)),
+      JSON.parse(JSON.stringify(incoming)),
+    )
     && !isEmptyOverPopulated(incoming, stored);
 }
 

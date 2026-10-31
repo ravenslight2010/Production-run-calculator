@@ -3,6 +3,33 @@ import type {
   APIRequestContext,
   APIResponse,
 } from "@playwright/test";
+import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
+
+/** Fresh test-owned seeds only; never use this to replay a rejected edit. */
+export async function freshMasterDataSeedHeaders(
+  request: APIRequestContext,
+  collectionUrl: string,
+  headers: Record<string, string> = {},
+): Promise<Record<string, string>> {
+  requireIsolatedTestDatabase("Fresh master-data seed");
+  const target = new URL(
+    collectionUrl,
+    collectionUrl.startsWith("/") ? requireLocalFixtureApiOrigin("Fresh master-data seed") : undefined,
+  );
+  requireLocalFixtureApiOrigin("Fresh master-data seed", target.origin);
+  if (target.username || target.password || target.hash || !target.pathname.startsWith("/api/")) {
+    throw new Error("Fresh master-data seeds require a credential-free local API collection URL.");
+  }
+  const response = await request.get(target.href, { headers });
+  if (!response.ok()) {
+    throw new Error(`Fixture canonical master-data read failed: ${await responseFailure(response)}`);
+  }
+  const epoch = response.headers()["x-master-data-epoch"];
+  if (epoch === undefined || !/^\d+$/.test(epoch)) {
+    throw new Error("Fixture canonical master-data read did not return a valid epoch; seed was not submitted.");
+  }
+  return { ...headers, "X-Master-Data-Epoch": epoch };
+}
 
 export const DEFAULT_MANAGER_CAPABILITIES = [
   "manage-staff",
@@ -446,6 +473,99 @@ export class AuthorizedBrowserFixtures {
     };
   }
 
+  async assignManagerRole(
+    account: Pick<AuthorizedTestAccount, "userId" | "token">,
+  ): Promise<void> {
+    requireIsolatedTestDatabase("assign manager role to browser fixture account");
+    await this.withDatabase("assign manager role to browser fixture account", async (db) => {
+      const managerRole = await db.query(
+        "SELECT 1 FROM roles WHERE name = 'manager' LIMIT 1",
+      );
+      if (managerRole.rowCount !== 1) {
+        throw new Error("The isolated database does not contain the built-in manager role.");
+      }
+      await db.query(
+        "UPDATE roles SET capabilities = $1::jsonb, updated_at = NOW() WHERE name = 'manager'",
+        [JSON.stringify(DEFAULT_MANAGER_CAPABILITIES)],
+      );
+      const updated = await db.query(
+        "UPDATE user_roles SET role = 'manager', updated_at = NOW() WHERE user_id = $1 RETURNING user_id",
+        [account.userId],
+      );
+      if (updated.rowCount !== 1) {
+        throw new Error("The fixture account has no assigned role to promote.");
+      }
+      const persistedRole = await db.query<{ role: string }>(
+        "SELECT role FROM user_roles WHERE user_id = $1",
+        [account.userId],
+      );
+      if (persistedRole.rows[0]?.role !== "manager") {
+        throw new Error("The isolated database did not retain the manager role assignment.");
+      }
+    });
+    const identityResponse = await this.request.get(`${this.apiBase}/api/me`, {
+      headers: { Cookie: `rc_auth=${account.token}` },
+      failOnStatusCode: true,
+    });
+    const identity = await identityResponse.json() as {
+      userId?: string;
+      role?: string;
+    };
+    if (identity.userId !== account.userId || identity.role !== "manager") {
+      throw new Error(
+        "The API did not observe the fixture account's manager role after assignment.",
+      );
+    }
+  }
+
+  async assignQcManagerRole(
+    account: Pick<AuthorizedTestAccount, "userId" | "token">,
+  ): Promise<void> {
+    requireIsolatedTestDatabase("assign QC Manager role to browser fixture account");
+    await this.withDatabase("assign QC Manager role to browser fixture account", async (db) => {
+      const qcManagerRole = await db.query(
+        "SELECT 1 FROM roles WHERE name = 'qc-manager' LIMIT 1",
+      );
+      if (qcManagerRole.rowCount !== 1) {
+        throw new Error("The isolated database does not contain the built-in QC Manager role.");
+      }
+      const updated = await db.query(
+        "UPDATE user_roles SET role = 'qc-manager', updated_at = NOW() WHERE user_id = $1 RETURNING user_id",
+        [account.userId],
+      );
+      if (updated.rowCount !== 1) {
+        throw new Error("The fixture account has no assigned role to promote.");
+      }
+    });
+    const identityResponse = await this.request.get(`${this.apiBase}/api/me`, {
+      headers: { Cookie: `rc_auth=${account.token}` },
+      failOnStatusCode: true,
+    });
+    const identity = await identityResponse.json() as {
+      userId?: string;
+      role?: string;
+    };
+    if (identity.userId !== account.userId || identity.role !== "qc-manager") {
+      throw new Error(
+        "The API did not observe the fixture account's QC Manager role after assignment.",
+      );
+    }
+  }
+
+  /**
+   * Fresh, test-owned seeds read the canonical collection first. If the server
+   * rejects this unique seed only because the shared epoch changed between the
+   * read and write, refresh once and retry explicitly; other rejections fail.
+   */
+  private async masterDataSeedHeaders(
+    token: string,
+    collection: string,
+  ): Promise<Record<string, string>> {
+    return freshMasterDataSeedHeaders(this.request, `${this.apiBase}/api/${collection}`, {
+      Cookie: `rc_auth=${token}`,
+    });
+  }
+
   async seedBrandProfile(
     account: Pick<AuthorizedTestAccount, "token">,
     profile: BrandProfileFixture,
@@ -453,17 +573,45 @@ export class AuthorizedBrowserFixtures {
     await this.start();
     const key = profile.key
       ?? `${profile.brand.toLowerCase()}__${profile.flavor.toLowerCase()}`;
-    const response = await this.request.post(`${this.apiBase}/api/brand-profiles`, {
-      headers: { Cookie: `rc_auth=${account.token}` },
-      data: {
-        items: [{
-          ...profile,
-          key,
-          crustValues: profile.crustValues ?? {},
-          updatedAt: profile.updatedAt ?? Date.now(),
-        }],
-      },
-    });
+    const seedProfile = (headers: Record<string, string>) =>
+      this.request.post(`${this.apiBase}/api/brand-profiles`, {
+        headers,
+        data: {
+          items: [{
+            ...profile,
+            key,
+            crustValues: profile.crustValues ?? {},
+            updatedAt: profile.updatedAt ?? Date.now(),
+          }],
+        },
+      });
+    let response = await seedProfile(
+      await this.masterDataSeedHeaders(account.token, "brand-profiles"),
+    );
+    if (response.status() === 409) {
+      const responseBody = await response.text();
+      let responseError: unknown;
+      try {
+        responseError = (JSON.parse(responseBody) as { error?: unknown }).error;
+      } catch {
+        responseError = undefined;
+      }
+      if (
+        responseError
+        === "Shared data changed after this edit was prepared. Refresh canonical records and review the pending edit before retrying; it has not been applied."
+      ) {
+        console.warn(
+          "Fresh profile fixture seed conflicted on the shared-data epoch; refreshing and retrying once.",
+        );
+        response = await seedProfile(
+          await this.masterDataSeedHeaders(account.token, "brand-profiles"),
+        );
+      } else {
+        throw new Error(
+          `Fixture profile seed failed: HTTP 409 ${responseBody.slice(0, 1_000)}`,
+        );
+      }
+    }
     if (!response.ok()) {
       throw new Error(`Fixture profile seed failed: ${await responseFailure(response)}`);
     }
@@ -483,15 +631,81 @@ export class AuthorizedBrowserFixtures {
       throw new Error(`Fixture reset epoch failed: ${await responseFailure(epochResponse)}`);
     }
     const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
+    const snapshotResponse = await this.request.get(
+      `${this.apiBase}/api/sync/today?today=${date}`,
+      { headers },
+    );
+    if (!snapshotResponse.ok()) {
+      throw new Error(`Fixture base snapshot fetch failed: ${await responseFailure(snapshotResponse)}`);
+    }
+    const baseSnapshotId = snapshotResponse.headers()["x-sync-snapshot"];
+    if (!baseSnapshotId && fixture.payload.completeness === "complete") {
+      throw new Error("Fixture base snapshot fetch omitted X-Sync-Snapshot.");
+    }
+    const payload = fixture.payload.completeness === "complete"
+      ? { ...fixture.payload, baseSnapshotId }
+      : fixture.payload;
     const response = await this.request.put(
       `${this.apiBase}/api/sync/today?today=${date}&epoch=${epoch}`,
       {
         headers,
-        data: { senderId: fixture.senderId, payload: fixture.payload },
+        data: { senderId: fixture.senderId, payload },
       },
     );
     if (!response.ok()) {
       throw new Error(`Fixture today sync seed failed: ${await responseFailure(response)}`);
+    }
+    const syncHeaders = response.headers();
+    const convergence = syncHeaders["x-sync-convergence"];
+    if (convergence !== "written") {
+      throw new Error(
+        "Fixture today sync seed was not persisted " +
+        `(response=${syncHeaders["x-sync-response"] ?? "missing"}, convergence=${convergence ?? "missing"}).`,
+      );
+    }
+    this.syncDates.add(date);
+    return date;
+  }
+
+  /**
+   * Initial canonical state for journeys that need an already-started run or
+   * existing counters. Setup-only sync intentionally rejects these fields.
+   * Call before mounting the calculator. This is not a command implementation
+   * or a fallback after a rejected application write.
+   */
+  async seedCanonicalTodaySnapshot(fixture: TodaySyncFixture): Promise<string> {
+    const connectionString = requireIsolatedTestDatabase("seed canonical browser snapshot");
+    await this.start();
+    const date = fixture.date ?? new Date().toISOString().slice(0, 10);
+    const dayState = fixture.payload.dayState as JsonRecord | undefined;
+    if (!dayState || !Array.isArray(dayState.runs) || "operationalProjection" in fixture.payload) {
+      throw new Error("Canonical browser fixture requires a daily run snapshot, without a persisted projection.");
+    }
+    const response = await this.request.get(`${this.apiBase}/api/sync/today?today=${date}`, {
+      headers: { Cookie: `rc_auth=${fixture.token}` },
+    });
+    if (!response.ok()) {
+      throw new Error(`Canonical browser fixture authorization failed: ${await responseFailure(response)}`);
+    }
+    const db = new Client({ connectionString });
+    try {
+      await db.connect();
+      await db.query(
+        `INSERT INTO daily_sync (date, scope, data, canonical_revision, updated_at)
+         VALUES ($1, 'live', $2::jsonb, 1, NOW())
+         ON CONFLICT (date, scope) DO UPDATE
+           SET data = $2::jsonb,
+               canonical_revision = daily_sync.canonical_revision + 1,
+               updated_at = NOW()`,
+        [date, JSON.stringify({
+          ...fixture.payload,
+          syncVersion: 1,
+          completeness: "complete",
+          dayState: { ...dayState, date },
+        })],
+      );
+    } finally {
+      await db.end().catch(() => {});
     }
     this.syncDates.add(date);
     return date;
@@ -530,7 +744,7 @@ export class AuthorizedBrowserFixtures {
   ): Promise<string> {
     await this.start();
     const response = await this.request.post(`${this.apiBase}/api/cheese-recipes`, {
-      headers: { Cookie: `rc_auth=${account.token}` },
+      headers: await this.masterDataSeedHeaders(account.token, "cheese-recipes"),
       data: {
         items: [{
           brand: "",
@@ -560,7 +774,7 @@ export class AuthorizedBrowserFixtures {
     const response = await this.request.post(
       `${this.apiBase}/api/${kind}-recipes`,
       {
-        headers: { Cookie: `rc_auth=${account.token}` },
+        headers: await this.masterDataSeedHeaders(account.token, `${kind}-recipes`),
         data: {
           items: [{
             notes: "",
@@ -588,7 +802,7 @@ export class AuthorizedBrowserFixtures {
   ): Promise<string> {
     await this.start();
     const response = await this.request.post(`${this.apiBase}/api/mixes`, {
-      headers: { Cookie: `rc_auth=${account.token}` },
+      headers: await this.masterDataSeedHeaders(account.token, "mixes"),
       data: {
         items: [{
           brand: "",

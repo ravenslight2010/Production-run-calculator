@@ -36,46 +36,49 @@ export const API_OPERATION_CODES = {
 export function fieldCheckDiagnosticLabel(checkName: string, metrics: Record<string, number>): string {
   if (checkName === "sync-acknowledgment") {
     return ({
-      1: "Login or permission rejected",
-      2: "Server rejected a stale/reset write",
-      3: "Sync retries exhausted",
-      4: "Server rejected the sync request",
+      1: "The account or permission was rejected",
+      2: "The saved update was out of date or came after a reset",
+      3: "The app tried to sync again but did not receive confirmation",
+      4: "The server rejected the sync request",
     } as Record<number, string>)[metrics.failureCode!] ?? "Failure category unavailable (older evidence)";
   }
   if (checkName === "performance") {
     const source = ({
-      1: "Home bundle load", 2: "Page navigation load",
-      3: "API timeout", 4: "API transport failure",
-      5: "API HTTP failure", 6: "API request cancelled",
+      1: "Home screen did not load",
+      2: "Page did not open",
+      3: "App request timed out",
+      4: "App could not reach the server",
+      5: "Server returned an error",
+      6: "Request ended before a reply",
     } as Record<number, string>)[metrics.sourceCode!] ?? "Source unavailable (older evidence)";
     const outcome = ({
-      1: "HTTP 5xx",
-      2: "authentication rejected",
-      3: "HTTP 4xx",
-      4: "transport failure",
-      5: "browser reported offline",
-      6: "client timeout",
-      7: "cancelled",
+      1: "server error",
+      2: "account or permission rejected",
+      3: "request rejected",
+      4: "network connection failed",
+      5: "browser reported no connection",
+      6: "no reply before the app wait limit",
+      7: "cancelled before a reply",
     } as Record<number, string>)[metrics.outcomeCode!];
     const operation = ({
-      1: "authentication",
-      2: "diagnostics",
-      3: "import",
-      4: "inventory",
-      5: "master data",
-      6: "sync",
-      7: "other API operation",
+      1: "signing in",
+      2: "loading diagnostics",
+      3: "importing",
+      4: "loading inventory",
+      5: "loading shared lists",
+      6: "syncing",
+      7: "another app request",
     } as Record<number, string>)[metrics.operationCode!];
     const background = metrics.backgroundCode === 1
-      ? "background involvement observed"
+      ? "app went into the background while waiting"
       : Number.isInteger(metrics.backgroundCode)
-        ? "no browser-hidden transition observed; OS suspension unknown"
+        ? "no background change observed; operating-system pause is unknown"
         : null;
     const status = Number.isInteger(metrics.httpStatusCode) ? ` · HTTP ${metrics.httpStatusCode}` : "";
     const requestDetail = outcome
       ? ` · ${operation ?? "operation unavailable"} · ${outcome}${status}`
       : "";
-    return `${source}${requestDetail}${Number.isFinite(metrics.durationMs) ? ` · client elapsed request wait ${metrics.durationMs === 10_000_000 ? "≥" : ""}${Math.round(metrics.durationMs!)} ms` : " · elapsed duration unavailable"}${background ? ` · ${background}` : ""}`;
+    return `${source}${requestDetail}${Number.isFinite(metrics.durationMs) ? ` · browser wait ${metrics.durationMs === 10_000_000 ? "at least " : ""}${Math.round(metrics.durationMs!)} ms` : " · wait duration unavailable"}${background ? ` · ${background}` : ""}. Browser wait is not server processing time.`;
   }
   return "";
 }

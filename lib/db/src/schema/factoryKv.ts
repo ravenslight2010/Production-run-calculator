@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, uniqueIndex, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, uniqueIndex, serial } from "drizzle-orm/pg-core";
 
 // Factory-wide key-value store for master data (name lists, presets, settings,
 // tombstones, history) that needs a proper server home instead of living only in
@@ -12,7 +12,7 @@ import { pgTable, text, jsonb, timestamp, uniqueIndex, integer } from "drizzle-o
 export const factoryKvTable = pgTable(
   "factory_kv",
   {
-    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    id: serial("id").primaryKey(),
     scope: text("scope").notNull().default("live"),
     key: text("key").notNull(),
     value: jsonb("value").notNull(),

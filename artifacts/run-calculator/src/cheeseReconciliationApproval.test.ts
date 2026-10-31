@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   CHEESE_RECONCILIATION_2026_08_26,

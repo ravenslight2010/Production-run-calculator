@@ -10,17 +10,48 @@ import {
   undoImportOperation,
 } from "./importOperations";
 import { buildSpecImportChanges } from "./specImport";
+import { subscribeImportSafetyReview, finishImportSafetyReview, ImportReviewCancelledError } from "./importSafetyReview";
+
+const reviewHash = "a".repeat(64);
+let unsubscribeReview: (() => void) | undefined;
+function stubOperationFetch(mock: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input) === "/api/import-operations/preview"
+      ? Promise.resolve(new Response(JSON.stringify({
+        expectedStateHash: reviewHash, before: {}, after: {},
+        baseline: { status: "unavailable", limitation: "Synthetic legacy baseline" },
+      }), { status: 200 }))
+      : mock(input, init));
+}
 
 beforeEach(() => {
   sessionStorage.clear();
+  unsubscribeReview = subscribeImportSafetyReview((review) => { if (review) finishImportSafetyReview(true); });
 });
 
 afterEach(() => {
+  unsubscribeReview?.();
   vi.unstubAllGlobals();
   sessionStorage.clear();
 });
 
 describe("import operation client boundary", () => {
+  it("keeps cancellation distinct from an ambiguous Apply and immediately permits a fresh review", async () => {
+    unsubscribeReview?.();
+    let approvals = 0;
+    unsubscribeReview = subscribeImportSafetyReview((review) => { if (review) finishImportSafetyReview(++approvals > 1); });
+    const id = "import-cancel-then-review";
+    const applyFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      operation: { operationId: id, status: "applied", result: {} },
+    }), { status: 200 }));
+    stubOperationFetch(applyFetch);
+    const payload = { importType: "premix" as const, sourceLabel: "Synthetic.xlsx", changes: { mixes: { upsert: [] } } };
+    await expect(applyImportOperation(id, payload)).rejects.toBeInstanceOf(ImportReviewCancelledError);
+    expect(applyFetch).not.toHaveBeenCalled();
+    expect(listPendingImportOperations()).toEqual([]);
+    await expect(applyImportOperation(id, payload)).resolves.toMatchObject({ status: "applied" });
+    expect(applyFetch).toHaveBeenCalledTimes(1);
+  });
   it("builds a bounded spec changes envelope without mutating rows", () => {
     const rows = [{ key: "a__b" }];
     expect(buildSpecImportChanges({
@@ -37,7 +68,7 @@ describe("import operation client boundary", () => {
   });
 
   it("requires the canonical applied result before resolving", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    stubOperationFetch(vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         operation: {
           operationId: "import-operation-001",
@@ -60,7 +91,7 @@ describe("import operation client boundary", () => {
   });
 
   it("keeps ambiguous transport failures retryable without reparsing", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    stubOperationFetch(vi.fn().mockRejectedValue(new Error("offline")));
     await expect(applyImportOperation("import-operation-002", {
       importType: "cheese",
       sourceLabel: "reviewed.xlsx",
@@ -78,7 +109,7 @@ describe("import operation client boundary", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({
         operation: { operationId: id, status: "applied", result: { ok: true }, resultHash: "hash-4" },
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", fetchMock);
+    stubOperationFetch(fetchMock);
     const payload = {
       importType: "spec" as const,
       sourceLabel: "reviewed.xlsx",
@@ -90,7 +121,7 @@ describe("import operation client boundary", () => {
       changes: { brandProfiles: { upsert: [{ key: "changed", brand: "Changed", flavor: "Review" }] } },
     })).rejects.toThrow(/reviewed changes differ/u);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(listPendingImportOperations()).toContainEqual({ operationId: id, payload });
+    expect(listPendingImportOperations()).toContainEqual({ operationId: id, payload: { ...payload, expectedStateHash: reviewHash } });
     await expect(retryPendingImportOperation(id))
       .resolves.toMatchObject({ operationId: id, resultHash: "hash-4" });
     const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
@@ -105,7 +136,7 @@ describe("import operation client boundary", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({
         operation: { operationId: id, status: "applied", result: { ok: true } },
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", fetchMock);
+    stubOperationFetch(fetchMock);
     const payload = {
       importType: "premix" as const,
       sourceLabel: "reviewed-premix.xlsx",
@@ -135,7 +166,7 @@ describe("import operation client boundary", () => {
   it("does not send a new operation when the pending record is corrupted", async () => {
     sessionStorage.setItem("run-calculator.pending-import-operations.v1", "{not-json");
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    stubOperationFetch(fetchMock);
     await expect(applyImportOperation("import-operation-corrupt-007", {
       importType: "premix",
       sourceLabel: "new.xlsx",
@@ -149,7 +180,7 @@ describe("import operation client boundary", () => {
   });
 
   it("does not accept an undo response without the canonical result", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    stubOperationFetch(vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ operationId: "import-operation-003", status: "undone" }), { status: 200 }),
     ));
     await expect(undoImportOperation("import-operation-003", "hash-1"))
@@ -158,7 +189,7 @@ describe("import operation client boundary", () => {
 
   it("does not send an import when the exact request cannot be stored for recovery", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    stubOperationFetch(fetchMock);
     vi.stubGlobal("window", {
       get sessionStorage() {
         throw new Error("session storage unavailable");

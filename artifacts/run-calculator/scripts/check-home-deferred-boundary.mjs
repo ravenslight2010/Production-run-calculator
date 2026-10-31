@@ -1,9 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import ts from "@workspace/typescript-api-v6";
 import { fileURLToPath } from "node:url";
+import { VITE_CLIENT_RESOLVE_CONDITIONS } from "./vite-client-resolve-conditions.mjs";
 
 export const DEFERRED_HOME_MODULE_SUFFIXES = [
+  "/src/components/ExcelImportDialog.tsx",
+  "/src/components/SpecImportDialog.tsx",
+  "/src/components/PremixImportDialog.tsx",
+  "/src/components/ShippingImportDialog.tsx",
+  "/src/components/RecipeGuideImportDialog.tsx",
+  "/src/components/CheeseImportDialog.tsx",
+  "/src/components/MixedImportReviewQueue.tsx",
+  "/src/components/ImportGoldLabCard.tsx",
+  "/src/components/ImportGoldRetentionCard.tsx",
+  "/src/components/ImportGoldApprovalsCard.tsx",
   "/src/components/SetupContent.tsx",
   "/src/components/WarehouseTabContent.tsx",
   "/src/components/MixesTabContent.tsx",
@@ -21,7 +33,11 @@ export const DEFERRED_HOME_MODULE_SUFFIXES = [
   "/src/components/DataHealthWorkspace.tsx",
   "/src/components/DeferredManagementSurface.tsx",
   "/src/components/ImportHistoryPanel.tsx",
+  "/src/components/MixedImportReviewQueue.tsx",
+  "/src/components/ImportGoldLabCard.tsx",
+  "/src/components/ImportGoldRetentionCard.tsx",
   "/src/components/MixReconcilePanel.tsx",
+  "/src/components/MixedImportReviewQueue.tsx",
   "/src/components/GlanceOverlay.tsx",
 ];
 
@@ -31,6 +47,7 @@ const DEFERRED_HOME_PANEL_NAMES = DEFERRED_HOME_MODULE_SUFFIXES.map((suffix) =>
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_ROOT = path.resolve(SCRIPT_DIR, "../src");
 const HOME_FILE = path.resolve(SOURCE_ROOT, "pages/home.tsx");
+const WORKSPACE_ROOT = path.resolve(SOURCE_ROOT, "../../..");
 const LIVE_RUN_FILE = path.resolve(
   SOURCE_ROOT,
   "components/live-stations/LiveRunTabContent.tsx",
@@ -94,17 +111,42 @@ function staticImportSpecifiers(source, filePath) {
   return specifiers;
 }
 
-function resolveLocalSource(specifier, importerPath, sourceRoot, readSource) {
-  const cleanSpecifier = specifier.split(/[?#]/, 1)[0];
-  let basePath;
-  if (cleanSpecifier.startsWith("@/")) {
-    basePath = path.resolve(sourceRoot, cleanSpecifier.slice(2));
-  } else if (cleanSpecifier.startsWith(".")) {
-    basePath = path.resolve(path.dirname(importerPath), cleanSpecifier);
-  } else {
-    return null;
-  }
+function analyzeDynamicImports(source, filePath) {
+  const specifiers = [];
+  const nonLiteralLocations = [];
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
+    ) {
+      const [argument] = node.arguments;
+      if (
+        argument &&
+        (ts.isStringLiteral(argument) ||
+          ts.isNoSubstitutionTemplateLiteral(argument))
+      ) {
+        specifiers.push(argument.text);
+      } else {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+          node.getStart(sourceFile),
+        );
+        nonLiteralLocations.push(`line ${line + 1}, column ${character + 1}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { specifiers, nonLiteralLocations };
+}
 
+function resolveSourceFile(basePath, specifier, readSource) {
   const supportedExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
   const extension = path.extname(basePath);
   if (extension && !supportedExtensions.includes(extension)) return null;
@@ -133,8 +175,310 @@ function resolveLocalSource(specifier, importerPath, sourceRoot, readSource) {
     }
   }
   throw new Error(
-    `Unable to resolve local static import "${specifier}" from "${importerPath}".`,
+    `Unable to resolve local static import "${specifier}" from "${basePath}".`,
   );
+}
+
+const MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH = 400;
+// Workspace package enumeration is normally quick; cap a stalled pnpm process at 30 seconds.
+const WORKSPACE_DISCOVERY_TIMEOUT_MS = 30_000;
+
+function workspaceDiscoveryContext(workspaceRoot) {
+  const root = path.resolve(workspaceRoot);
+  return {
+    root,
+    command: `pnpm --dir ${JSON.stringify(root)} --recursive list --json --depth -1`,
+  };
+}
+
+function safeWorkspaceDiscoveryDetail(value) {
+  const detail = String(value ?? "No additional details were provided.")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1[redacted]@")
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+/gi, "$1[redacted]")
+    .replace(/(token|password|secret|_auth)\s*([=:]\s*)[^\s,;]+/gi, "$1$2[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (detail.length <= MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH) return detail;
+  return `${detail.slice(0, MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH - 1)}…`;
+}
+
+function workspaceDiscoveryError(workspaceRoot, detail, { timedOut = false } = {}) {
+  const { root, command } = workspaceDiscoveryContext(workspaceRoot);
+  return new Error(
+    `Workspace package discovery failed.\n` +
+      `Command: ${command}\n` +
+      `Workspace root: ${root}\n` +
+      (timedOut
+        ? `Failure: pnpm workspace listing timed out after ${WORKSPACE_DISCOVERY_TIMEOUT_MS}ms.\n`
+        : "") +
+      `Action: Run the command above from the workspace root and check pnpm-workspace.yaml.\n` +
+      `Details: ${safeWorkspaceDiscoveryDetail(detail)}`,
+  );
+}
+
+function workspaceManifestJsonError(workspaceRoot, detail) {
+  const match = detail.match(
+    /Failed to parse\s+(.+?)(?:\s+package\.json|([/\\]package\.json)):/i,
+  );
+  if (!match) return null;
+
+  const reportedPath = match[2]
+    ? `${match[1]}${match[2]}`
+    : path.join(match[1], "package.json");
+  const root = path.resolve(workspaceRoot);
+  const manifestPath = path.resolve(root, reportedPath);
+  const relativePath = path.relative(root, manifestPath);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    return null;
+  }
+  return new Error(
+    `Invalid workspace package manifest at "${normalize(manifestPath)}": invalid JSON.`,
+  );
+}
+
+export function runPnpmWorkspaceList(root, spawn = spawnSync) {
+  return spawn(
+    "pnpm",
+    ["--dir", root, "--recursive", "list", "--json", "--depth", "-1"],
+    { encoding: "utf8", timeout: WORKSPACE_DISCOVERY_TIMEOUT_MS },
+  );
+}
+
+function readWorkspacePackageManifest(manifestPath, readSource) {
+  const source = readSource(manifestPath);
+  let manifest;
+  try {
+    manifest = JSON.parse(source);
+  } catch {
+    throw new Error(
+      `Invalid workspace package manifest at "${normalize(manifestPath)}": invalid JSON.`,
+    );
+  }
+  if (
+    !manifest ||
+    typeof manifest !== "object" ||
+    Array.isArray(manifest) ||
+    typeof manifest.name !== "string"
+  ) {
+    throw new Error(
+      `Invalid workspace package manifest at "${normalize(manifestPath)}": expected "name" to be a string.`,
+    );
+  }
+  return manifest;
+}
+
+function discoverWorkspacePackageDirectories(
+  workspaceRoot,
+  runWorkspaceList = runPnpmWorkspaceList,
+) {
+  const result = runWorkspaceList(workspaceRoot);
+  if (result.error || result.status !== 0) {
+    const detail = [
+      result.error?.message,
+      result.stderr?.trim(),
+    ]
+      .filter(Boolean)
+      .join("; ") || `exit status ${result.status}`;
+    const manifestError = workspaceManifestJsonError(workspaceRoot, detail);
+    if (manifestError) throw manifestError;
+    throw workspaceDiscoveryError(workspaceRoot, detail, {
+      timedOut: result.error?.code === "ETIMEDOUT",
+    });
+  }
+
+  let packages;
+  try {
+    packages = JSON.parse(result.stdout);
+    if (!Array.isArray(packages)) {
+      throw new Error("pnpm workspace package listing must be a JSON array.");
+    }
+    if (packages.some((workspacePackage) => typeof workspacePackage?.path !== "string")) {
+      throw new Error("pnpm workspace package listing contains an entry without a path.");
+    }
+  } catch (error) {
+    throw workspaceDiscoveryError(
+      workspaceRoot,
+      `Invalid pnpm workspace package listing: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  const root = path.resolve(workspaceRoot);
+  return packages.map((workspacePackage) => {
+    const packageDirectory = path.resolve(workspacePackage.path);
+    const relativePath = path.relative(root, packageDirectory);
+    if (
+      relativePath === ".." ||
+      relativePath.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativePath)
+    ) {
+      throw workspaceDiscoveryError(
+        workspaceRoot,
+        `pnpm reported a workspace package outside the root: "${packageDirectory}".`,
+      );
+    }
+    return packageDirectory;
+  });
+}
+
+function workspacePackageRoot(
+  packageName,
+  workspaceRoot,
+  readSource,
+  workspacePackageDirectories,
+) {
+  const matches = [];
+  for (const candidateDirectory of workspacePackageDirectories) {
+    const manifestPath = path.join(candidateDirectory, "package.json");
+    const manifest = readWorkspacePackageManifest(manifestPath, readSource);
+    if (manifest.name === packageName) matches.push(candidateDirectory);
+  }
+  if (matches.length > 1) {
+    const conflictingDirectories = matches
+      .map((directory) => normalize(path.relative(workspaceRoot, directory)))
+      .sort();
+    throw new Error(
+      `Workspace package "${packageName}" has multiple local manifests: ${conflictingDirectories.join(", ")}.`,
+    );
+  }
+  return matches[0] ?? null;
+}
+
+function exportTarget(exportsField, exportKey) {
+  const selectedExport =
+    typeof exportsField === "string" || Array.isArray(exportsField)
+      ? exportKey === "."
+        ? exportsField
+        : undefined
+      : exportsField &&
+          Object.keys(exportsField).some((key) => key.startsWith("."))
+        ? exportsField[exportKey]
+        : exportKey === "."
+          ? exportsField
+          : undefined;
+
+  const selectRuntimeTarget = (value, conditions) => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const target = selectRuntimeTarget(entry, conditions);
+        if (target) return target;
+      }
+      return null;
+    }
+    if (!value || typeof value !== "object") return null;
+    for (const [condition, branch] of Object.entries(value)) {
+      if (condition !== "default" && !conditions.has(condition)) continue;
+      const target = selectRuntimeTarget(branch, conditions);
+      if (target) return target;
+    }
+    return null;
+  };
+
+  const selectForMode = (mode) => {
+    const conditions = new Set([
+      ...VITE_CLIENT_RESOLVE_CONDITIONS.filter(
+        (condition) => condition !== "development|production",
+      ),
+      mode,
+      "import",
+      "default",
+    ]);
+    return selectRuntimeTarget(selectedExport, conditions);
+  };
+
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv === "development" || nodeEnv === "production") {
+    return selectForMode(nodeEnv);
+  }
+
+  const developmentTarget = selectForMode("development");
+  const productionTarget = selectForMode("production");
+  if (developmentTarget !== productionTarget) {
+    throw new Error(
+      `Workspace package export "${exportKey}" resolves to different entries for Vite development and production conditions; set NODE_ENV to the build mode or use a mode-independent export.`,
+    );
+  }
+  return productionTarget;
+}
+
+function resolveWorkspaceSource(
+  specifier,
+  workspaceRoot,
+  readSource,
+  getWorkspacePackageDirectories,
+) {
+  const match = specifier.match(/^(@workspace\/[^/]+)(\/.*)?$/);
+  if (!match) return null;
+  const [, packageName, packageSubpath = ""] = match;
+  const packageRoot = workspacePackageRoot(
+    packageName,
+    workspaceRoot,
+    readSource,
+    getWorkspacePackageDirectories(),
+  );
+  if (!packageRoot) {
+    throw new Error(`Unable to find local workspace package "${packageName}".`);
+  }
+
+  const manifestPath = path.join(packageRoot, "package.json");
+  const manifest = readWorkspacePackageManifest(manifestPath, readSource);
+  const exportKey = packageSubpath ? `.${packageSubpath}` : ".";
+  const target = exportTarget(manifest.exports, exportKey);
+  if (!target || !target.startsWith("./")) {
+    throw new Error(
+      `Workspace package "${packageName}" does not export a local source entry for "${exportKey}".`,
+    );
+  }
+
+  const targetPath = path.resolve(packageRoot, target);
+  const relativeTarget = path.relative(packageRoot, targetPath);
+  if (
+    relativeTarget === ".." ||
+    relativeTarget.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeTarget)
+  ) {
+    throw new Error(
+      `Workspace package "${packageName}" export "${exportKey}" escapes its package directory.`,
+    );
+  }
+  return resolveSourceFile(targetPath, specifier, readSource);
+}
+
+function resolveLocalSource(
+  specifier,
+  importerPath,
+  sourceRoot,
+  workspaceRoot,
+  readSource,
+  includeWorkspacePackages = true,
+  getWorkspacePackageDirectories,
+) {
+  const cleanSpecifier = specifier.split(/[?#]/, 1)[0];
+  let basePath;
+  if (cleanSpecifier.startsWith("@/")) {
+    basePath = path.resolve(sourceRoot, cleanSpecifier.slice(2));
+  } else if (cleanSpecifier.startsWith(".")) {
+    basePath = path.resolve(path.dirname(importerPath), cleanSpecifier);
+  } else {
+    return includeWorkspacePackages
+      ? resolveWorkspaceSource(
+          cleanSpecifier,
+          workspaceRoot,
+          readSource,
+          getWorkspacePackageDirectories,
+        )
+      : null;
+  }
+
+  return resolveSourceFile(basePath, specifier, readSource);
 }
 
 export function checkHomeDeferredSourceBoundary({
@@ -143,8 +487,18 @@ export function checkHomeDeferredSourceBoundary({
   homeFilePath = HOME_FILE,
   liveRunFilePath = LIVE_RUN_FILE,
   sourceRoot = SOURCE_ROOT,
+  workspaceRoot = WORKSPACE_ROOT,
   readSource = (filePath) => fs.readFileSync(filePath, "utf8"),
+  runWorkspaceList,
 }) {
+  let workspacePackageDirectories;
+  const getWorkspacePackageDirectories = () => {
+    workspacePackageDirectories ??= discoverWorkspacePackageDirectories(
+      workspaceRoot,
+      runWorkspaceList,
+    );
+    return workspacePackageDirectories;
+  };
   const roots = [
     ["Home", homeFilePath, homeSource],
     ["LiveRunTabContent", liveRunFilePath, liveRunSource],
@@ -156,18 +510,100 @@ export function checkHomeDeferredSourceBoundary({
       DEFERRED_HOME_PANEL_NAMES[index],
     ]),
   );
+  const dynamicImportPaths = new Set();
+  const rootPaths = new Set(
+    roots.map(([, filePath]) => normalize(path.resolve(filePath))),
+  );
+  const sourceRootPath = path.resolve(sourceRoot);
+  const isLocalSourcePath = (filePath) => {
+    const relativePath = path.relative(sourceRootPath, filePath);
+    return (
+      relativePath !== ".." &&
+      !relativePath.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relativePath)
+    );
+  };
+  const collectDynamicImports = (
+    sourceName,
+    filePath,
+    source,
+    importChain,
+    isHelper,
+  ) => {
+    const { specifiers, nonLiteralLocations } = analyzeDynamicImports(
+      source,
+      filePath,
+    );
+    if (nonLiteralLocations.length > 0) {
+      const sourceLabel = isHelper
+        ? `${sourceName} helper ${normalize(path.relative(sourceRootPath, filePath))}`
+        : sourceName;
+      const chain =
+        importChain.length > 0
+          ? `\nImport chain: ${[sourceName, ...importChain].join(" -> ")}`
+          : "";
+      throw new Error(
+        `${sourceLabel} has runtime dynamic import(s) with a non-literal specifier that the Home startup guard cannot inspect:\n` +
+          `${nonLiteralLocations.map((location) => `- ${location}`).join("\n")}\n` +
+          `Use a string literal or no-substitution template literal for each dynamic import specifier.${chain}`,
+      );
+    }
+    for (const specifier of specifiers) {
+      const importedPath = resolveLocalSource(
+        specifier,
+        filePath,
+        sourceRoot,
+        workspaceRoot,
+        readSource,
+        false,
+        getWorkspacePackageDirectories,
+      );
+      if (importedPath) {
+        dynamicImportPaths.add(normalize(path.resolve(importedPath)));
+      }
+    }
+  };
+
+  for (const [sourceName, filePath, source] of roots) {
+    collectDynamicImports(sourceName, filePath, source, [], false);
+  }
+
+  const unregisteredDynamicImports = [...dynamicImportPaths].filter(
+    (importedPath) => !deferredPaths.has(importedPath),
+  );
+  if (unregisteredDynamicImports.length > 0) {
+    throw new Error(
+      `Home has local dynamic import(s) missing from the deferred panel inventory:\n${unregisteredDynamicImports
+        .map((importedPath) => `- ${path.relative(sourceRoot, importedPath)}`)
+        .join("\n")}`,
+    );
+  }
+
   const visited = new Set();
   const visit = (sourceName, filePath, source, importChain) => {
     const normalizedPath = normalize(path.resolve(filePath));
     if (visited.has(normalizedPath)) return;
     visited.add(normalizedPath);
 
+    if (isLocalSourcePath(normalizedPath) && !rootPaths.has(normalizedPath)) {
+      collectDynamicImports(
+        sourceName,
+        normalizedPath,
+        source,
+        importChain,
+        true,
+      );
+    }
+
     for (const specifier of staticImportSpecifiers(source, normalizedPath)) {
       const importedPath = resolveLocalSource(
         specifier,
         normalizedPath,
         sourceRoot,
+        workspaceRoot,
         readSource,
+        true,
+        getWorkspacePackageDirectories,
       );
       if (!importedPath) continue;
 
@@ -193,17 +629,9 @@ export function checkHomeDeferredSourceBoundary({
     visit(sourceName, filePath, source, []);
   }
 
-  const dynamicImportNames = new Set(
-    roots.flatMap(([, , source]) =>
-      [...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)].map(
-        ([, specifier]) =>
-          path.basename(specifier).replace(/\.tsx?$/, ""),
-      ),
-    ),
-  );
-  const missingLoaders = DEFERRED_HOME_PANEL_NAMES.filter(
-    (name) => !dynamicImportNames.has(name),
-  );
+  const missingLoaders = [...deferredPaths.entries()]
+    .filter(([modulePath]) => !dynamicImportPaths.has(modulePath))
+    .map(([, name]) => name);
   if (missingLoaders.length > 0) {
     throw new Error(
       `Home is missing dynamic imports for deferred panel(s):\n${missingLoaders
@@ -305,6 +733,10 @@ export function checkHomeDeferredBoundary(manifest) {
 }
 
 function runCli() {
+  const sourceResult = checkHomeDeferredSourceBoundary({
+    homeSource: fs.readFileSync(HOME_FILE, "utf8"),
+    liveRunSource: fs.readFileSync(LIVE_RUN_FILE, "utf8"),
+  });
   const manifestPath = path.resolve(
     SCRIPT_DIR,
     "../dist/public/.vite/workbook-boundary-manifest.json",
@@ -314,6 +746,9 @@ function runCli() {
   }
   const result = checkHomeDeferredBoundary(
     JSON.parse(fs.readFileSync(manifestPath, "utf8")),
+  );
+  console.log(
+    `Home source boundary OK: ${sourceResult.deferredHomePanels} optional surfaces are statically inventoried.`,
   );
   console.log(
     `Home boundary OK: ${result.eagerModuleCount} opening modules; ${result.deferredHomePanels} optional surfaces are deferred.`,

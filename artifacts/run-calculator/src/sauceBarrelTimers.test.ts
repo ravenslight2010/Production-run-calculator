@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sauce barrel timer — pure-calculation tests.
  *

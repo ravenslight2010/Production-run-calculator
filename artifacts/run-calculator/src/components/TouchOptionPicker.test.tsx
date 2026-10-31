@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TouchSelect } from "./TouchOptionPicker";
+import { DialogLayerProvider } from "./ui/dialog";
 
 afterEach(() => {
   cleanup();
@@ -65,6 +66,26 @@ function renderSelect(
 }
 
 describe("TouchSelect", () => {
+  it("scopes both portal layers and closes without applying when disabled while open", async () => {
+    installPointerCapabilities({ coarse: true, fine: false, touchPoints: 1 });
+    const change = vi.fn();
+    const content = (disabled: boolean) => (
+      <DialogLayerProvider value={80}>
+        <TouchSelect aria-label="Schedule break" title="Schedule break" value="off" disabled={disabled} onChange={change}>
+          <option value="off">Not scheduled</option>
+          <option value="after-run">After a run</option>
+        </TouchSelect>
+      </DialogLayerProvider>
+    );
+    const view = render(content(false));
+    await userEvent.click(await screen.findByRole("button", { name: "Schedule break" }));
+    const dialog = await screen.findByRole("dialog", { name: "Schedule break" });
+    expect(dialog.style.zIndex).toBe("80");
+    expect((dialog.previousElementSibling as HTMLElement).style.zIndex).toBe("80");
+    view.rerender(content(true));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Schedule break" })).toBeNull());
+    expect(change).not.toHaveBeenCalled();
+  });
   it("keeps the native select on a pointer device", () => {
     installPointerCapabilities();
 

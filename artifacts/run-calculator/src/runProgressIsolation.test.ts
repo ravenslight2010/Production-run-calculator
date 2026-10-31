@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VALUES, type FormValues, type RunMeta } from "./types";
 import { isolatePendingRunPackagingProgress } from "./runProgressIsolation";

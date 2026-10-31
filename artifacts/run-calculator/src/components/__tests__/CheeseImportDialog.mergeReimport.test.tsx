@@ -43,7 +43,10 @@ function makePrepared(): CheeseImportPrepared {
   };
 }
 
-function renderDialog(prepared: CheeseImportPrepared) {
+function renderDialog(
+  prepared: CheeseImportPrepared,
+  options: { goldCaptureEnabled?: boolean; onConfirm?: ReturnType<typeof vi.fn> } = {},
+) {
   return render(
     <CheeseImportDialog
       open={true}
@@ -52,7 +55,8 @@ function renderDialog(prepared: CheeseImportPrepared) {
       error={null}
       prepared={prepared}
       applying={false}
-      onConfirm={vi.fn()}
+      goldCaptureEnabled={options.goldCaptureEnabled}
+      onConfirm={options.onConfirm ?? vi.fn()}
     />,
   );
 }
@@ -94,5 +98,14 @@ describe("CheeseImportDialog merge re-import guidance", () => {
     const oldRow = screen.getByLabelText("Include Old Blend") as HTMLInputElement;
     expect(oldRow.checked).toBe(true);
     expect(screen.queryByTestId("cheese-merged-away-cheese:old-blend")).toBeNull();
+  });
+
+  it("keeps unbound capture unavailable without blocking ordinary Apply", () => {
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(), { goldCaptureEnabled: true, onConfirm });
+    (screen.getByTestId("cheese-import-destructive-confirmation").querySelector("input") as HTMLInputElement).click();
+    expect(screen.queryByTestId("cheese-import-gold-opt-in")).toBeNull();
+    screen.getByRole("button", { name: /Apply/ }).click();
+    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(false);
   });
 });

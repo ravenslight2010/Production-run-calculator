@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { exportApplyLog } from "./distill-applylog-export.mts";
+import { assertApplyLogExportPlatformSupported, exportApplyLog } from "./distill-applylog-export.mts";
 import { cleanupExpiredApplyLogExports } from "./distill-applylog-retention.mts";
 import { IMPORT_SOURCE_RETENTION_MS } from "@workspace/db/schema";
 import { sha256 } from "@workspace/distill-dataset";
+
+assert.doesNotThrow(() => assertApplyLogExportPlatformSupported("linux"));
+assert.throws(
+  () => assertApplyLogExportPlatformSupported("win32"),
+  /Private Apply-log export is not supported on Windows.*metadata-only appends/u,
+);
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "distill-applylog-export-"));
 const repoRoot = path.join(root, "repo");

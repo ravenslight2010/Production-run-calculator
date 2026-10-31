@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Tests for the shared mix-list browsing helpers (@workspace/mixes) used by
 // the redesigned Mixes settings list on BOTH web and mobile: search matching
 // and brand grouping. Pure logic — no UI.

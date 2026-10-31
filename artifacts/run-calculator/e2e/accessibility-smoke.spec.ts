@@ -1,10 +1,12 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page, type Request } from "@playwright/test";
 import { Client } from "pg";
+import { cancelledDocumentMessage, cancelledJourneyRead } from "./breakPlanningEvidence";
 import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
+  AuthorizedBrowserFixtures,
 } from "./isolation";
 import {
   dismissOnboardingIfPresent,
@@ -12,6 +14,8 @@ import {
 } from "./onboarding";
 
 const testUsernames = new Set<string>();
+const canonicalSeedDates = new Set<string>();
+let authorizedFixtures: AuthorizedBrowserFixtures;
 const DOCUMENT_SHELL_RULES = ["landmark-one-main", "region"] as const;
 const SCREEN_RULES: Record<string, readonly string[]> = {
   "sign-in": [],
@@ -334,6 +338,7 @@ async function signUp(
   page: Page,
   role: "manager" | "supervisor" | "operator" = "manager",
   username = uniqueTestId("a11y"),
+  scheduleAccess = false,
 ): Promise<void> {
   testUsernames.add(username);
   await signUpAndHandleOnboarding(page, username, "AccessibilitySmoke123!", {
@@ -385,7 +390,7 @@ async function signUp(
         } else if (role === "supervisor") {
           await db.query(
             "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'supervisor'",
-            [JSON.stringify(["review-incidents", "edit-production-rules"])],
+            [JSON.stringify(["review-incidents", "edit-production-rules", ...(scheduleAccess ? ["manage-factory-settings"] : [])])],
           );
         }
       } finally {
@@ -403,6 +408,7 @@ async function signUp(
 }
 
 test.afterAll(async () => {
+  await authorizedFixtures?.cleanup({ syncDates: [...canonicalSeedDates] });
   if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   try {
@@ -413,8 +419,14 @@ test.afterAll(async () => {
   }
 });
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ playwright }) => {
   await requireIsolatedTestDatabase("accessibility smoke browser check");
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    process.env.PLAYWRIGHT_API_BASE_URL ?? process.env.PLAYWRIGHT_BASE_URL
+      ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+    process.env.STAFF_SIGNUP_CODE ?? "",
+  );
 });
 
 async function seedPendingRun(page: Page): Promise<string> {
@@ -481,6 +493,19 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.removeItem("run-calc-day");
   });
+  const token = (await page.context().cookies(page.url()))
+    .find((cookie) => cookie.name === "rc_auth")?.value;
+  if (!token) throw new Error("Accessibility fixture requires an authenticated browser.");
+  // Stop the app before privileged, disposable-database initialization.
+  // Stoppage history is command-owned and must not be forged by a normal PUT.
+  await page.goto("about:blank");
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
+    token,
+    senderId: `a11y-${runId}`,
+    date,
+    payload,
+  });
+  canonicalSeedDates.add(date);
   await page.addInitScript((seed: { payload: typeof payload; runId: string }) => {
     // Init scripts run before every navigation, including reloads triggered by
     // authenticated startup (for example, a sandbox refresh). Keep the seed
@@ -498,45 +523,7 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.setItem("run-calc-day", JSON.stringify(seed.payload.dayState));
   }, { payload, runId });
-  // Seed the canonical server snapshot as well as browser storage. The app's
-  // initial SSE reconciliation can otherwise replace this local-only fixture
-  // with the server's empty day state before the workflow reaches its checks.
-  const serverSeed = await page.evaluate(async ({ date, payload, senderId }) => {
-    const epochResponse = await fetch("/api/sync/reset-epoch", {
-      credentials: "same-origin",
-    });
-    if (!epochResponse.ok) {
-      return {
-        ok: false,
-        step: "reading the sync reset epoch",
-        status: epochResponse.status,
-        body: await epochResponse.text(),
-      };
-    }
-
-    const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
-    const response = await fetch(
-      `/api/sync/today?today=${encodeURIComponent(date)}&epoch=${encodeURIComponent(String(epoch))}`,
-      {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId, payload }),
-      },
-    );
-    return {
-      ok: response.ok,
-      step: "writing the canonical today sync snapshot",
-      status: response.status,
-      body: response.ok ? "" : await response.text(),
-    };
-  }, { date, payload, senderId: `a11y-${runId}` });
-  if (!serverSeed.ok) {
-    throw new Error(
-      `Fixture ${serverSeed.step} failed (HTTP ${serverSeed.status}): ${serverSeed.body.slice(0, 300)}`,
-    );
-  }
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect
     .poll(
@@ -563,7 +550,7 @@ async function seedPendingRun(page: Page): Promise<string> {
   return runId;
 }
 
-async function seedBreakSchedule(): Promise<{
+async function seedBreakSchedule(completeInputs = false): Promise<{
   runIds: [string, string];
   deletedRunId: string;
 }> {
@@ -592,8 +579,8 @@ async function seedBreakSchedule(): Promise<{
           dayState: {
             date,
             runs: [
-              { id: runIds[0], brand: "Break E2E One", flavor: "Morning", casesNeeded: 0 },
-              { id: runIds[1], brand: "Break E2E Two", flavor: "Afternoon", casesNeeded: 0 },
+              { id: runIds[0], brand: "Break E2E One", flavor: "Morning", casesNeeded: 0, ...(completeInputs ? { subTab: "crusts" } : {}) },
+              { id: runIds[1], brand: "Break E2E Two", flavor: "Afternoon", casesNeeded: 0, ...(completeInputs ? { subTab: "crusts" } : {}) },
             ],
             currentIndex: 0,
             resetAt: 0,
@@ -604,8 +591,8 @@ async function seedBreakSchedule(): Promise<{
             ],
           },
           runValues: {
-            [runIds[0]]: { casesNeeded: 0, pizzasPerCase: 12, approxLineSpeed: 10 },
-            [runIds[1]]: { casesNeeded: 0, pizzasPerCase: 12, approxLineSpeed: 10 },
+            [runIds[0]]: { casesNeeded: completeInputs ? 100 : 0, pizzasPerCase: 12, approxLineSpeed: completeInputs ? 40 : 10, ...(completeInputs ? { freezerTime: 15 } : {}) },
+            [runIds[1]]: { casesNeeded: completeInputs ? 100 : 0, pizzasPerCase: 12, approxLineSpeed: completeInputs ? 40 : 10, ...(completeInputs ? { freezerTime: 15 } : {}) },
           },
           runValuesUpdatedAt: { [runIds[0]]: now, [runIds[1]]: now },
         }),
@@ -1075,6 +1062,363 @@ test.describe("accessibility smoke", () => {
     await operatorPage.close();
   });
 
+  test("touch break planning opens above Schedule and retains the saved draft", async ({ page }) => {
+    const errors: string[] = [];
+    const failedResponses: string[] = [];
+    const unexpectedRequestFailures: string[] = [];
+    const expectedNavigationAborts: string[] = [];
+    const cancelledReadsToVerify = new Map<string, string>();
+    const expectedWebKitNavigationMessages: string[] = [];
+    const inFlight = new Set<Request>();
+    const navigationRequests = new WeakSet<Request>();
+    const navigationPaths = new Set<string>();
+    const successfulOrigins = new Set<string>();
+    let requestPhase = "post-auth journey";
+    // Track requests from the first document, including those started before
+    // auth hydration; otherwise a later reload cannot identify their aborts.
+    page.on("request", request => {
+      inFlight.add(request);
+      // A destination component can start and cancel its own read while
+      // navigation is mounting it (including StrictMode effect cleanup).
+      // Retain request identity: requestfailed may arrive after the UI settles
+      // and requestPhase has returned to normal operation.
+      if (["persistence reload", "summary navigation"].includes(requestPhase)) {
+        navigationRequests.add(request);
+        navigationPaths.add(new URL(request.url()).pathname);
+      }
+    });
+    page.on("requestfinished", request => inFlight.delete(request));
+    page.on("response", response => {
+      if (response.ok()) successfulOrigins.add(new URL(response.url()).origin);
+    });
+    await signUp(page);
+    await seedBreakSchedule(true);
+    // Keep the fixture's local date, but make its planning hour deterministic.
+    // At late CI hours the 23:00 break can correctly land inside an unfinished
+    // run, which intentionally withholds the dependable day-finish preview.
+    const planningNow = await page.evaluate(() => {
+      const date = new Date();
+      date.setHours(6, 0, 0, 0);
+      return date.getTime();
+    });
+    await page.clock.setFixedTime(planningNow);
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    // Start diagnostics after signup/bootstrap and the fixture-backed reload so
+    // expected pre-auth 401s are not misclassified as failures in this journey.
+    const markNavigation = () => {
+      for (const request of inFlight) {
+        navigationRequests.add(request);
+        navigationPaths.add(new URL(request.url()).pathname);
+      }
+    };
+    page.on("pageerror", error => {
+      const cancelledPath = cancelledDocumentMessage({
+        webkit: test.info().project.name.endsWith("webkit"),
+        text: error.message,
+        successfulOrigins,
+        navigationPaths,
+        duringReload: requestPhase === "persistence reload",
+      });
+      if (cancelledPath) {
+        expectedWebKitNavigationMessages.push(`cancelled page error: ${cancelledPath}`);
+      } else {
+        errors.push(error.message);
+      }
+    });
+    page.on("console", message => {
+      if (message.type() === "error") {
+        const source = message.location().url;
+        const pathname = source ? new URL(source).pathname : "";
+        const text = message.text();
+        const cancelledPath = cancelledDocumentMessage({
+          webkit: test.info().project.name.endsWith("webkit"),
+          text, successfulOrigins, navigationPaths,
+          duringReload: requestPhase === "persistence reload",
+        });
+        if (cancelledPath) {
+          expectedWebKitNavigationMessages.push(`cancelled document: ${cancelledPath}`);
+        } else {
+          errors.push(`${text}${pathname ? ` [${pathname}]` : ""}`);
+        }
+      }
+    });
+    page.on("response", response => {
+      const pathname = new URL(response.url()).pathname;
+      const record = `${response.status()} ${response.request().method()} ${pathname}`;
+      if (response.status() >= 400) {
+        failedResponses.push(record);
+      }
+    });
+    page.on("requestfailed", request => {
+      const pathname = new URL(request.url()).pathname;
+      const code = request.failure()?.errorText ?? "unknown";
+      const record = `${request.method()} ${pathname} ${code}`;
+      const expectedAbort =
+        ["net::ERR_ABORTED", "Load request cancelled"].includes(code)
+        && (
+          ((requestPhase === "persistence reload" || navigationRequests.has(request)) && (
+            (request.method() === "GET" && pathname === "/api/sync/events")
+            || (pathname === "/api/factory-data" && ["GET", "PUT"].includes(request.method()))
+            || (request.method() === "GET" && pathname === "/api/incidents/actionable-count")
+          ))
+          || (requestPhase === "summary navigation"
+            && request.method() === "GET"
+            && pathname === "/api/sync/events")
+        );
+      const cancelledRead = cancelledJourneyRead({
+        method: request.method(), pathname, code,
+        knownOrigin: successfulOrigins.has(new URL(request.url()).origin),
+        duringNavigation: navigationRequests.has(request) || ["persistence reload", "summary navigation"].includes(requestPhase),
+      });
+      if (cancelledRead) cancelledReadsToVerify.set(request.url(), pathname);
+      if (expectedAbort || cancelledRead) {
+        expectedNavigationAborts.push(`${requestPhase}: ${record}`);
+      } else {
+        unexpectedRequestFailures.push(`${requestPhase}: ${record}`);
+      }
+      inFlight.delete(request);
+    });
+    const openEditor = async () => {
+      await page.getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+      await expect(page.getByRole("menu")).toHaveCount(0);
+      await page.getByTestId("schedule-today-card").getByRole("button", { name: "Edit", exact: true }).click();
+      const editor = page.getByRole("dialog", { name: /Plan for/ });
+      const toggle = editor.getByTestId("schedule-break-toggle");
+      if (await toggle.isVisible()) await toggle.click();
+      return editor;
+    };
+    const editor = await openEditor();
+    const scheduleLayer = await editor.evaluate(node => getComputedStyle(node.parentElement!).zIndex);
+    const choose = async (slot: number, value: string, label: string) => {
+      const control = editor.getByLabel(`Break ${slot} placement`, { exact: true });
+      if (await control.evaluate(node => node.tagName === "SELECT")) {
+        await control.selectOption(value);
+      } else {
+        await control.click();
+        await page.getByRole("dialog", { name: `Break ${slot} placement`, exact: true }).getByRole("option", { name: label, exact: true }).click();
+      }
+    };
+    for (const slot of [1, 2, 3]) {
+      const trigger = editor.getByLabel(`Break ${slot} placement`, { exact: true });
+      const touch = await trigger.evaluate(node => node.tagName === "BUTTON");
+      if (touch) {
+        await trigger.click();
+        const picker = page.getByRole("dialog", { name: `Break ${slot} placement`, exact: true });
+        const option = picker.getByRole("option", { name: "After a run", exact: true });
+        await expect(option).toBeVisible();
+        if (
+          slot === 1
+          && process.env.BREAK_REPRODUCE_ORIGINAL_LAYER === "1"
+          && test.info().project.name === "android-touch"
+        ) {
+          // Controlled reproduction of the original z-50 portal against the
+          // real z-70 Schedule, not a claim about a customer's physical phone.
+          await picker.evaluate(node => {
+            (node as HTMLElement).setAttribute("data-break-layer-probe", "break-1-picker");
+            const overlay = node.previousElementSibling as HTMLElement | null;
+            if (overlay) overlay.setAttribute("data-break-layer-probe", "break-1-overlay");
+          });
+          const layerSheet = await page.addStyleTag({ content: `
+            [role="dialog"][aria-labelledby][data-state="open"][data-break-layer-probe="break-1-picker"] {
+              z-index: 50 !important; transition: none !important;
+            }
+            [data-state="open"][data-break-layer-probe="break-1-overlay"] {
+              z-index: 50 !important; transition: none !important;
+            }
+          ` });
+          expect(await picker.evaluate(node => getComputedStyle(node).zIndex)).toBe("50");
+          expect(scheduleLayer).toBe("70");
+          await page.screenshot({ path: "../../.local/evidence/break-planning/original-layer-emulation.png" });
+          await layerSheet.evaluate(style => {
+            style.textContent = `
+              [role="dialog"][aria-labelledby][data-state="open"][data-break-layer-probe="break-1-picker"] {
+                z-index: 80 !important; transition: none !important;
+              }
+              [data-state="open"][data-break-layer-probe="break-1-overlay"] {
+                z-index: 80 !important; transition: none !important;
+              }
+            `;
+          });
+          await expect.poll(() => picker.evaluate(node => getComputedStyle(node).zIndex)).toBe("80");
+          await page.screenshot({ path: "../../.local/evidence/break-planning/repaired-layer-emulation.png" });
+        }
+        await expect.poll(() => option.evaluate((node) => {
+          const box = node.getBoundingClientRect();
+          return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        })).toBe(true);
+        await option.click();
+        await expect(picker).toBeHidden();
+        await editor.getByRole("button", { name: `Break ${slot} run`, exact: true }).click();
+        await page.getByRole("dialog", { name: `Break ${slot} run`, exact: true })
+          .getByRole("option", { name: /Run 1 —/ }).click();
+        await trigger.click();
+        await page.keyboard.press("Escape");
+        await expect(trigger).toBeFocused();
+        await expect(trigger).toHaveText(/After a run/);
+        await trigger.click();
+        await page.getByRole("dialog", { name: `Break ${slot} placement`, exact: true })
+          .getByRole("button", { name: "Cancel", exact: true }).click();
+      } else {
+        await trigger.selectOption("after-run");
+        await editor.getByLabel(`Break ${slot} run`, { exact: true }).selectOption({ index: 1 });
+      }
+      await choose(slot, "at-time", "At a clock time");
+      await editor.getByLabel(`Break ${slot} time`).fill("23:00");
+      await choose(slot, "off", "Not scheduled");
+      await expect(editor.getByLabel(`Break ${slot} time`)).toBeDisabled();
+      await choose(slot, "after-run", "After a run");
+    }
+    await choose(2, "at-time", "At a clock time");
+    await choose(3, "off", "Not scheduled");
+    const preview = await editor.getByTestId("schedule-break-preview").innerText();
+    const projectedFinish = preview.match(/day finish ([^\n]+)/)?.[1];
+    expect(projectedFinish).toBeTruthy();
+    const saved = page.waitForResponse((response) => response.url().includes("/api/sync/today") && response.request().method() === "PUT");
+    await editor.getByRole("button", { name: "Save Schedule", exact: true }).click();
+    expect((await saved).ok()).toBe(true);
+    requestPhase = "persistence reload";
+    markNavigation();
+    await page.reload({ waitUntil: "load" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    requestPhase = "post-auth journey";
+    const reopened = await openEditor();
+    const touch = await reopened.getByLabel("Break 1 placement", { exact: true }).evaluate(node => node.tagName === "BUTTON");
+    if (touch) {
+      await expect(reopened.getByLabel("Break 1 placement", { exact: true })).toHaveText(/After a run/);
+      await expect(reopened.getByLabel("Break 1 run", { exact: true })).toHaveText(/Run 1/);
+      await expect(reopened.getByLabel("Break 2 placement", { exact: true })).toHaveText(/At a clock time/);
+      await expect(reopened.getByLabel("Break 3 placement", { exact: true })).toHaveText(/Not scheduled/);
+    } else {
+      await expect(reopened.getByLabel("Break 1 placement", { exact: true })).toHaveValue("after-run");
+      await expect(reopened.getByLabel("Break 2 placement", { exact: true })).toHaveValue("at-time");
+      await expect(reopened.getByLabel("Break 3 placement", { exact: true })).toHaveValue("off");
+    }
+    await expect(reopened.getByLabel("Break 2 time")).toHaveValue("23:00");
+    await expect.poll(() => reopened.getByTestId("schedule-break-preview").innerText()).toBe(preview);
+    await choose(1, "off", "Not scheduled");
+    await reopened.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("dialog", { name: "Scheduled Days", exact: true }).getByRole("button", { name: /Close/ }).click();
+    const cancelled = await openEditor();
+    if (touch) await expect(cancelled.getByLabel("Break 1 placement", { exact: true })).toHaveText(/After a run/);
+    else await expect(cancelled.getByLabel("Break 1 placement", { exact: true })).toHaveValue("after-run");
+    await cancelled.getByRole("button", { name: "Close schedule editor", exact: true }).click();
+    requestPhase = "summary navigation";
+    markNavigation();
+    const summaryReads = [
+      "/api/background-operations/diagnostics",
+      "/api/reports/operational-view",
+    ].map(pathname => page.waitForResponse(response =>
+      new URL(response.url()).pathname === pathname
+      && response.request().method() === "GET" && response.status() === 200));
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page.getByTestId("day-timeline")).toContainText(projectedFinish!);
+    // The timeline renders before the manager's destination effects finish.
+    // Do not call navigation settled until their real reads and snapshot UI
+    // complete; merely seeing the timeline loses late abort event ownership.
+    await Promise.all(summaryReads);
+    await expect(page.getByTestId("canonical-run-view")).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByTestId("canonical-run-view")).toContainText("server snapshot");
+    requestPhase = "post-auth journey";
+    if (test.info().project.name === "android-touch") {
+      await page.getByTestId("day-timeline").screenshot({ path: "../../.local/evidence/break-planning/break-summary.png" });
+    }
+
+    // Cancellation is not a success receipt. Require fresh authenticated reads
+    // of every exact cancelled URL after reload/navigation; actual HTTP errors
+    // still fail, including the mounted manager diagnostics endpoint.
+    for (const [url, pathname] of cancelledReadsToVerify) {
+      const recovery = await page.request.get(url);
+      expect(recovery.ok(), `fresh read after navigation: ${pathname}`).toBe(true);
+      if (pathname === "/api/background-operations/diagnostics") {
+        expect(recovery.status()).toBe(200);
+        expect(recovery.headers()["content-type"]).toContain("application/json");
+        const diagnostics = await recovery.json();
+        expect(Array.isArray(diagnostics.warnings)).toBe(true);
+        expect(Number.isFinite(diagnostics.windowMs)).toBe(true);
+        expect(diagnostics.windowMs).toBeGreaterThan(0);
+        expect(typeof diagnostics.automaticTrackingBackoff?.deferredDateCount).toBe("number");
+        expect(typeof diagnostics.automaticTrackingBackoff?.deferredDateCountCapped).toBe("boolean");
+      }
+    }
+
+    console.log("bounded expected navigation cancellations with verified recovery:", {
+      expectedNavigationAborts,
+      expectedWebKitNavigationMessages,
+    });
+    expect({ errors, failedResponses, unexpectedRequestFailures }).toEqual({
+      errors: [],
+      failedResponses: [],
+      unexpectedRequestFailures: [],
+    });
+  });
+
+  test("break planning enlarged-text keyboard controls", async ({ page }) => {
+    await signUp(page);
+    await seedBreakSchedule();
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe("32px");
+
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await page.getByTestId("schedule-today-card").getByRole("button", { name: "Edit", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: /Plan for/ });
+    const toggle = editor.getByTestId("schedule-break-toggle");
+    if (await toggle.isVisible()) await toggle.click();
+    const trigger = editor.getByLabel("Break 1 placement", { exact: true });
+    await expect(trigger).toBeVisible();
+
+    if (await trigger.evaluate(node => node.tagName === "BUTTON")) {
+      await trigger.press("Enter");
+      console.log("enlarged keyboard modal state after Enter:", await page.evaluate(() => ({
+        activeTag: document.activeElement?.tagName,
+        activeLabel: document.activeElement?.getAttribute("aria-label"),
+        url: location.pathname,
+        dialogs: [...document.querySelectorAll('[role="dialog"]')].map(node => ({
+          state: node.getAttribute("data-state"),
+          hidden: node.getAttribute("aria-hidden"),
+          label: node.getAttribute("aria-label"),
+          labelledBy: node.getAttribute("aria-labelledby"),
+        })),
+      })));
+      await expect(page.getByRole("dialog", { name: "Break 1 placement", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(trigger).toBeFocused();
+    } else {
+      const next = editor.getByLabel("Break 1 run", { exact: true });
+      await trigger.press("Tab");
+      console.log("enlarged keyboard focus after Tab:", await page.evaluate(() => ({
+        activeTag: document.activeElement?.tagName,
+        activeLabel: document.activeElement?.getAttribute("aria-label"),
+        url: location.pathname,
+        dialogs: [...document.querySelectorAll('[role="dialog"]')].map(node => ({
+          state: node.getAttribute("data-state"),
+          hidden: node.getAttribute("aria-hidden"),
+          label: node.getAttribute("aria-label"),
+          labelledBy: node.getAttribute("aria-labelledby"),
+        })),
+      })));
+      await expect(next).toBeFocused();
+    }
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
+
   test("Android-sized PWA schedule editor exposes the break planner and preserves placements", async ({
     page,
   }) => {
@@ -1163,11 +1507,20 @@ test.describe("accessibility smoke", () => {
     await reopened.close();
   });
 
+  test("supervisors without scheduling capability cannot open Schedule", async ({ page }) => {
+    await signUp(page, "supervisor");
+    await page.getByRole("button", { name: "More" }).click();
+    await expect(page.getByRole("menuitem", { name: "Schedule", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Staff roster", exact: true })).toHaveCount(0);
+  });
+
   test("authorized supervisors can save all break slots without manager-only controls", async ({
     page,
   }) => {
     test.setTimeout(120_000);
-    await signUp(page, "supervisor");
+    // This test's explicitly authorized supervisor is granted only scheduling
+    // access in the disposable fixture, not manager/staff administration.
+    await signUp(page, "supervisor", uniqueTestId("a11y_schedule_supervisor"), true);
     await seedBreakSchedule();
     await page.evaluate(() => {
       for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {

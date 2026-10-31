@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // @vitest-environment jsdom
 //
 // Regression guard for "the importer keeps pulling my new flavors back onto

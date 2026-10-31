@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { buildSauceDailyNeeds } from "./sauceDailyNeeds";
 import type { FormValues, RunMeta } from "./types";

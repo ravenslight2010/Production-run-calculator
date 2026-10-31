@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // @vitest-environment jsdom
 //
 // Bad-alias cleanup after a CORRECTING re-import (task: clean up spec-import

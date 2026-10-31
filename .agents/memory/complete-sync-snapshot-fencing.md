@@ -20,3 +20,11 @@ For run values, an exact validated current base is stronger than device wall-clo
 **Why:** A fast device clock can otherwise turn a valid edit into a future LWW stamp that blocks later edits from normally clocked peers.
 
 **How to apply:** Keep the complete/partial snapshot validation under the row lock. Apply this ordering only to changed values from a validated base; keep stamp ordering for unbased compatibility writes, and compare client-local stamps using the server-adjusted clock.
+
+## Preserve invalidation when migrating a writer
+
+Moving a correction from snapshot merge to a command must preserve the station-specific automatic-claim invalidation, not just the corrected totals.
+
+**Why:** The totals can look correct immediately while a sleeping claimant still holds a valid old generation and later reasserts its progress.
+
+**How to apply:** Advance the existing channel's correction baseline using the accepting server mutation revision. Unrelated later station mutations must not change that correction's identity.

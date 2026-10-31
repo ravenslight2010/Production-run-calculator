@@ -12,10 +12,9 @@ const router: IRouter = Router();
 // Learned merge aliases: persisted mappings from a merged-away name to the
 // canonical name it was folded into, contributed automatically whenever a
 // merge is confirmed. The AI merge-suggester and the local "previously
-// merged" suggestions reuse them. All routes sit behind the router-level
-// requireAuth, so any signed-in user (operators included) can read and
-// contribute — intentionally NOT manager-gated, matching the import/spec
-// alias precedent.
+// merged" suggestions reuse them. All routes sit behind router-level
+// requireAuth: signed-in users can read aliases, while writes require the
+// manager-only `manage-profiles` capability.
 //
 // Every alias is scoped to a `category` (which merge tab it came from), so a
 // learned alias never leaks into an unrelated tab's suggestions. "flavor"

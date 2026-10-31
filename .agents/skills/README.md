@@ -32,6 +32,9 @@ changes to secondary or platform-managed content.
   procedure for adding a field or column to an existing table.
   `db-schema-change` is the concise compatibility router for broader schema
   work and must route field/column changes to that checklist.
+- `drizzle-best-practices` supplies version-aware PostgreSQL query guidance.
+  It composes with those schema skills; it does not authorize upgrades,
+  generator conversions or direct production migrations.
 
 ## Composition boundaries
 

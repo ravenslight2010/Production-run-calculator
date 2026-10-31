@@ -14,6 +14,7 @@ import { normalizeMixes, type Mix } from "@workspace/mixes";
 import { inventoryClientId } from "./inventoryShared";
 import { captureIngredientNamesToCatalog } from "./ingredients";
 import { adoptMasterDataConflict } from "./masterData";
+import { publishRecipeQcReviewAcknowledgement } from "./recipeQcReviewNotice";
 
 export class StaleMixSnapshotError extends Error {
   constructor(readonly canonicalItems: Mix[], readonly rejectedIds: string[]) {
@@ -42,7 +43,7 @@ export async function saveMixes(items: Mix[]): Promise<Mix[]> {
     },
     body: JSON.stringify({ items }),
   });
-  const data = (await res.json()) as { items?: unknown; rejectedIds?: unknown };
+  const data = (await res.json()) as { items?: unknown; rejectedIds?: unknown; recipeQcReview?: unknown };
   if (!res.ok) {
     if (res.status === 409 && Array.isArray(data.items)) {
       const canonicalItems = normalizeMixes(data.items);
@@ -57,6 +58,7 @@ export async function saveMixes(items: Mix[]): Promise<Mix[]> {
     }
     throw new Error(`Save mixes failed (${res.status})`);
   }
+  publishRecipeQcReviewAcknowledgement(data.recipeQcReview);
   // Fire-and-forget: any ingredient name newly typed into a mix row joins the
   // factory-wide catalog so it appears in every ingredient suggestion list.
   void captureIngredientNamesToCatalog(

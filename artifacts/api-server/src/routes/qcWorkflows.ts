@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { and, desc, eq, gt, gte, inArray, lt, lte, max, sql } from "drizzle-orm";
+import { isDeepStrictEqual } from "node:util";
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, max, notInArray, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import * as z from "zod";
 import {
@@ -18,6 +19,16 @@ import {
   resolveQcExpectedComponents,
   type QcComponentObservation,
 } from "../lib/qcComponentChecks";
+import { evaluateQcBrixCheck } from "../lib/qcBrixChecks";
+import { dateCodeObservedSchema, dateCodeReadabilitySchema, evaluateDateCodeCheck } from "../lib/qcDateCodeChecks";
+import { registerDateCodeWorkflows } from "./qcDateCodeWorkflows";
+import {
+  evaluateQcLabelCheck,
+  normalizeQcLabelObserved,
+  QC_LABEL_FIELDS,
+  type QcLabelField,
+  type QcLabelExpectedFields,
+} from "../lib/qcLabelChecks";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
@@ -26,6 +37,15 @@ import {
   type ActivityRunSource,
   type ActivitySnapshotRun,
 } from "./qcAllergenActivity";
+import {
+  buildQcIntelligenceReport,
+  qcIntelligenceCsv,
+  QcIntelligenceCsvLimitError,
+  type QcReportEvent,
+  type QcReportCoverage,
+  type QcReportFilters,
+  type QcReportView,
+} from "./qcIntelligenceReport";
 
 const router: IRouter = Router();
 const MAX_NOTE = 1_000;
@@ -37,6 +57,10 @@ const MAX_RUN_WEIGHT_CHECK_EVENTS = 5_000;
 const MAX_ALLERGEN_ACTIVITY_RUNS = 600;
 const MAX_ALLERGEN_ACTIVITY_EVENTS = 5_000;
 const MAX_EXPORT_PAGE = 500;
+const MAX_INTELLIGENCE_EVENTS = 5_000;
+const MAX_INTELLIGENCE_OVERLAYS = 10_000;
+const MAX_INTELLIGENCE_RUN_SOURCES = 50;
+const MAX_INTELLIGENCE_SNAPSHOT_BYTES = 1_048_576;
 type QcAuditDetail = {
   action: "correction" | "redaction";
   actorId: string | null;
@@ -46,6 +70,9 @@ type QcAuditDetail = {
 const UNIT = z.enum(["oz", "g", "lb", "kg"]);
 const STATION = z.enum(["dough", "sauce", "frontline", "warehouse", "packaging", "other"]);
 const CHECK_TYPE = z.enum(["pre-run", "30-minute"]);
+const BRIX_CHECK_TYPE = z.enum(["pre-run", "interval"]);
+const LABEL_CONTEXT = z.enum(["shipper-case", "carton-label"]);
+const LABEL_FIELD = z.enum(QC_LABEL_FIELDS);
 const CLEANING_METHOD = z.enum(["standard", "deep", "chemical", "other"]);
 const CLEANING_STATUS = z.enum(["verified", "unverified", "unknown", "not-applicable"]);
 const STAGED_STATUS = z.enum(["reviewed", "not-reviewed", "unknown"]);
@@ -71,8 +98,22 @@ const activityDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value
 const allergenActivityQuerySchema = z.object({
   date: activityDateSchema.optional(),
 }).strict();
-const profileKeySchema = z.string().trim().min(1).max(MAX_PROFILE_KEY);
+const qcPlanningQuerySchema = z.object({
+  today: activityDateSchema,
+  days: z.coerce.number().int().min(1).max(90).default(30),
+}).strict();
 const ingredientIdSchema = z.string().trim().min(1).max(200);
+const qcIntelligenceQuerySchema = z.object({
+  view: z.enum(["trends", "results", "traceability"]),
+  from: activityDateSchema.optional(),
+  to: activityDateSchema.optional(),
+  ingredientId: ingredientIdSchema.optional(),
+  station: STATION.optional(),
+  runId: runIdSchema.optional(),
+  checkType: z.enum(["pre-run", "30-minute", "interval"]).optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_INTELLIGENCE_EVENTS).default(1_000),
+}).strict();
+const profileKeySchema = z.string().trim().min(1).max(MAX_PROFILE_KEY);
 const noteSchema = z.string().trim().max(MAX_NOTE).optional().default("");
 
 const lotBodySchema = z.object({
@@ -104,6 +145,37 @@ const targetBodySchema = z.object({
   toleranceValue: z.number().finite().min(0).max(100_000).nullable(),
   reason: z.string().trim().min(1).max(500),
 });
+
+const brixTargetBodySchema = z.object({
+  operationId: operationIdSchema,
+  profileKey: profileKeySchema,
+  ingredientId: ingredientIdSchema,
+  targetBrix: z.number().finite().min(0).max(100).nullable(),
+  toleranceBrix: z.number().finite().min(0).max(100).nullable(),
+  reason: z.string().trim().min(1).max(500),
+  sourceDocument: z.string().trim().max(300).optional(),
+  sourceSection: z.string().trim().max(200).optional(),
+}).strict().superRefine((body, ctx) => {
+  if ((body.targetBrix === null) !== (body.toleranceBrix === null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["toleranceBrix"],
+      message: "A reviewed Brix target and tolerance must be set or cleared together",
+    });
+  }
+});
+
+const brixCheckBodySchema = z.object({
+  operationId: operationIdSchema,
+  runId: runIdSchema,
+  profileKey: profileKeySchema,
+  ingredientId: ingredientIdSchema,
+  station: STATION,
+  checkType: BRIX_CHECK_TYPE,
+  actualBrix: z.number().finite().min(0).max(100),
+  instrument: z.string().trim().max(120).optional().default(""),
+  note: noteSchema,
+}).strict();
 
 const footprintSchema = z.object({
   status: FOOTPRINT_STATUS,
@@ -173,6 +245,51 @@ const componentCheckBodySchema = z.object({
   }
 });
 
+const labelObservedSchema = z.object({
+  productName: z.string().max(200),
+  lotText: z.string().max(200),
+  dateText: z.string().max(100),
+}).strict();
+
+const labelCheckBodySchema = z.object({
+  operationId: operationIdSchema,
+  runId: runIdSchema,
+  context: LABEL_CONTEXT,
+  referenceId: z.string().uuid().optional(),
+  observed: labelObservedSchema,
+  note: noteSchema,
+}).strict().superRefine((body, ctx) => {
+  if (!QC_LABEL_FIELDS.some((field) => body.observed[field].trim())) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["observed"],
+      message: "Enter at least one observed label field",
+    });
+  }
+});
+
+const labelReferenceBodySchema = z.object({
+  operationId: operationIdSchema,
+  referenceId: z.string().uuid().optional(),
+  context: LABEL_CONTEXT,
+  productKey: z.string().trim().min(1).max(120),
+  expected: z.object({
+    productName: z.string().trim().max(200).optional(),
+    lotText: z.string().trim().max(200).optional(),
+    dateText: z.string().trim().max(100).optional(),
+  }).strict(),
+  requiredFields: z.array(LABEL_FIELD).min(1).max(3)
+    .refine((fields) => new Set(fields).size === fields.length, "Required fields must be unique"),
+  sourceIdentity: z.string().trim().min(1).max(200),
+  sourceDescription: z.string().trim().min(1).max(500),
+}).strict();
+
+const labelReferenceReviewBodySchema = z.object({
+  operationId: operationIdSchema,
+  decision: z.enum(["approved", "withdrawn"]),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
 const correctionBodySchema = z.object({
   operationId: operationIdSchema,
   reason: z.string().trim().min(1).max(500),
@@ -189,11 +306,48 @@ const redactionBodySchema = z.object({
     "actorId",
     "ingredientName",
     "payload.note",
+    "payload.reason",
+    "payload.summary",
+    "payload.before",
+    "payload.after",
+    "payload.changedFields",
+    "payload.instrument",
     "payload.lotNumber",
     "payload.expectedComponents",
+    "payload.observed.productName",
+    "payload.observed.lotText",
+    "payload.observed.dateText",
+    "payload.fieldResults.productName.observed",
+    "payload.fieldResults.productName.expected",
+    "payload.fieldResults.lotText.observed",
+    "payload.fieldResults.lotText.expected",
+    "payload.fieldResults.dateText.observed",
+    "payload.fieldResults.dateText.expected",
+    "payload.referenceSnapshot.expected.productName",
+    "payload.referenceSnapshot.expected.lotText",
+    "payload.referenceSnapshot.expected.dateText",
+    "payload.referenceSnapshot.sourceIdentity",
+    "payload.referenceSnapshot.sourceDescription",
+    "payload.batchContext",
+    "payload.observed.productionCode",
+    "payload.observed.bestByCode",
+    "payload.observed.otherCode",
+    "payload.fieldResults.productionCode.observed",
+    "payload.fieldResults.productionCode.expected",
+    "payload.fieldResults.bestByCode.observed",
+    "payload.fieldResults.bestByCode.expected",
+    "payload.fieldResults.otherCode.observed",
+    "payload.fieldResults.otherCode.expected",
+    "payload.referenceSnapshot.expected.productionCode",
+    "payload.referenceSnapshot.expected.bestByCode",
+    "payload.referenceSnapshot.expected.otherCode",
+    "payload.referenceSnapshot.batchContext",
+    "payload.referenceSnapshot.sourceVersion",
+    "payload.sourceDocument",
+    "payload.sourceSection",
   ]))
     .min(1)
-    .max(5)
+    .max(24)
     .refine((fields) => new Set(fields).size === fields.length, "Redaction fields must be unique"),
 });
 
@@ -214,10 +368,26 @@ type QcTarget = {
   targetValue: number | null;
   unit: string | null;
   toleranceValue: number | null;
+  targetVersion?: string;
+  targetRecordedAt?: string;
   source: "spec-import" | "qc-override" | "not-configured";
   state: "configured" | "not-evaluated";
   reason?: string;
   overrideEventId?: number;
+};
+
+type QcBrixTarget = {
+  ingredientId: string;
+  ingredientName: string;
+  targetBrix: number | null;
+  toleranceBrix: number | null;
+  source: "qc-override" | "not-configured";
+  state: "configured" | "not-evaluated";
+  reason?: string;
+  overrideEventId?: number;
+  targetRecordedAt?: string;
+  sourceDocument?: string;
+  sourceSection?: string;
 };
 
 function safeError(res: Response, status: number, message: string): void {
@@ -280,6 +450,172 @@ function recordObject(value: unknown): Record<string, unknown> | null {
 }
 
 type QcExecutor = Pick<typeof db, "select">;
+
+const MAX_LABEL_REFERENCES = 200;
+const MAX_LABEL_REFERENCE_EVENTS = 5_000;
+
+const storedLabelReferenceSchema = z.object({
+  referenceId: z.string().uuid(),
+  version: z.number().int().positive(),
+  context: LABEL_CONTEXT,
+  productKey: z.string().min(1).max(120),
+  expected: z.object({
+    productName: z.string().max(200).optional(),
+    lotText: z.string().max(200).optional(),
+    dateText: z.string().max(100).optional(),
+  }).strict(),
+  requiredFields: z.array(LABEL_FIELD).min(1).max(3),
+  sourceIdentity: z.string().min(1).max(200),
+  sourceDescription: z.string().min(1).max(500),
+}).strict();
+
+type StoredLabelReference = z.infer<typeof storedLabelReferenceSchema>;
+
+type LabelReferenceState = {
+  configuration: QcWorkflowEventRow;
+  value: StoredLabelReference;
+  review: QcWorkflowEventRow | null;
+  decision: "approved" | "withdrawn" | null;
+};
+
+async function latestLabelReference(
+  executor: QcExecutor,
+  scope: string,
+  referenceId: string,
+): Promise<QcWorkflowEventRow | null> {
+  const [row] = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "label-reference"),
+    sql`${qcWorkflowEventsTable.payload}->>'referenceId' = ${referenceId}`,
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(1);
+  return row ?? null;
+}
+
+async function labelReferenceState(
+  executor: QcExecutor,
+  scope: string,
+  configuration: QcWorkflowEventRow,
+): Promise<LabelReferenceState | null> {
+  const parsed = storedLabelReferenceSchema.safeParse(configuration.payload);
+  if (!parsed.success) return null;
+  const [review] = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "label-reference-review"),
+    eq(qcWorkflowEventsTable.relatedEventId, String(configuration.id)),
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(1);
+  const decision = review?.payload.decision === "approved" || review?.payload.decision === "withdrawn"
+    ? review.payload.decision
+    : null;
+  return { configuration, value: parsed.data, review: review ?? null, decision };
+}
+
+async function currentLabelReferences(
+  executor: QcExecutor,
+  scope: string,
+): Promise<{ items: LabelReferenceState[]; overflow: boolean }> {
+  const rows = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "label-reference"),
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(MAX_LABEL_REFERENCE_EVENTS + 1);
+  if (rows.length > MAX_LABEL_REFERENCE_EVENTS) return { items: [], overflow: true };
+  const latestById = new Map<string, QcWorkflowEventRow>();
+  for (const row of rows) {
+    const parsed = storedLabelReferenceSchema.safeParse(row.payload);
+    if (parsed.success && !latestById.has(parsed.data.referenceId)) {
+      latestById.set(parsed.data.referenceId, row);
+    }
+  }
+  if (latestById.size > MAX_LABEL_REFERENCES) return { items: [], overflow: true };
+  const states = await Promise.all(
+    [...latestById.values()].map((row) => labelReferenceState(executor, scope, row)),
+  );
+  return {
+    items: states.flatMap((state) => state ? [state] : []),
+    overflow: false,
+  };
+}
+
+function labelReferenceApi(state: LabelReferenceState, includeReviewReason: boolean) {
+  const { configuration, value, review, decision } = state;
+  return {
+    ...value,
+    configurationEventId: configuration.id,
+    state: decision ?? "draft",
+    reviewedBy: review?.actorId ?? null,
+    reviewedAt: review?.createdAt.toISOString() ?? null,
+    ...(includeReviewReason
+      ? { reviewReason: typeof review?.payload.reason === "string" ? review.payload.reason : null }
+      : {}),
+  };
+}
+
+function labelReferenceSnapshot(state: LabelReferenceState) {
+  const reviewPayload = state.review?.payload ?? {};
+  return {
+    referenceId: state.value.referenceId,
+    version: state.value.version,
+    context: state.value.context,
+    productKey: state.value.productKey,
+    expected: state.value.expected,
+    requiredFields: state.value.requiredFields,
+    sourceIdentity: state.value.sourceIdentity,
+    sourceDescription: state.value.sourceDescription,
+    configurationEventId: state.configuration.id,
+    approvalEventId: state.review?.id ?? null,
+    approvedBy: state.review?.actorId ?? null,
+    approvedAt: state.review?.createdAt.toISOString() ?? null,
+    approvalReason: typeof reviewPayload.reason === "string" ? reviewPayload.reason : null,
+  };
+}
+
+function evaluateStoredLabelCheck(payload: Record<string, unknown>) {
+  const observedObject = recordObject(payload.observed);
+  const observed = {
+    productName: typeof observedObject?.productName === "string" ? observedObject.productName : "",
+    lotText: typeof observedObject?.lotText === "string" ? observedObject.lotText : "",
+    dateText: typeof observedObject?.dateText === "string" ? observedObject.dateText : "",
+  };
+  const snapshot = recordObject(payload.referenceSnapshot);
+  const expected = recordObject(snapshot?.expected);
+  const requiredFields = Array.isArray(snapshot?.requiredFields)
+    ? snapshot.requiredFields.filter((field): field is QcLabelField =>
+      QC_LABEL_FIELDS.includes(field as QcLabelField))
+    : [];
+  const hasApprovedSnapshot = typeof snapshot?.approvalEventId === "number"
+    && snapshot.approvalEventId > 0
+    && requiredFields.length > 0;
+  const comparison = evaluateQcLabelCheck({
+    observed,
+    reference: hasApprovedSnapshot
+      ? {
+        expected: Object.fromEntries(QC_LABEL_FIELDS.flatMap((field) =>
+          typeof expected?.[field] === "string" ? [[field, expected[field] as string]] : [],
+        )) as QcLabelExpectedFields,
+        requiredFields,
+      }
+      : null,
+    ...(typeof payload.referenceUnavailableReason === "string"
+      ? { referenceUnavailableReason: payload.referenceUnavailableReason }
+      : {}),
+  });
+  return { ...payload, observed, fieldResults: comparison.fields, outcome: comparison.outcome };
+}
+
+function redactPayloadPath(payload: Record<string, unknown>, fieldPath: string): Record<string, unknown> {
+  const parts = fieldPath.replace(/^payload\./, "").split(".");
+  if (!parts.length || parts.some((part) => !part)) return payload;
+  const result = { ...payload };
+  let current: Record<string, unknown> = result;
+  for (const part of parts.slice(0, -1)) {
+    const nested = recordObject(current[part]);
+    if (!nested) return result;
+    const copy = { ...nested };
+    current[part] = copy;
+    current = copy;
+  }
+  current[parts[parts.length - 1]!] = "[redacted]";
+  return result;
+}
 
 type CanonicalRunSource = {
   kind: "completed-run-snapshot" | "current-day-canonical-settings";
@@ -504,7 +840,11 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
   }
   const latestOverrides = new Map<string, QcWorkflowEventRow>();
   for (const row of overrideRows) {
-    if (row.ingredientId && !latestOverrides.has(row.ingredientId)) {
+    if (
+      row.payload.measurementKind !== "brix"
+      && row.ingredientId
+      && !latestOverrides.has(row.ingredientId)
+    ) {
       latestOverrides.set(row.ingredientId, row);
     }
   }
@@ -535,6 +875,8 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
         targetValue,
         unit,
         toleranceValue,
+        targetVersion: `qc-override:${override.id}`,
+        targetRecordedAt: override.createdAt.toISOString(),
         source: targetValue !== null ? "qc-override" : "not-configured",
         state: targetValue !== null && unit !== null && toleranceValue !== null
           ? "configured"
@@ -553,6 +895,8 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
         targetValue: values[0]!,
         unit: "oz",
         toleranceValue: 0.1,
+        targetVersion: `profile:${profileRow[0]!.updatedAtMs}`,
+        targetRecordedAt: new Date(profileRow[0]!.updatedAtMs).toISOString(),
         source: "spec-import",
         state: "configured",
       });
@@ -583,6 +927,133 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
     }
   }
   return targets;
+}
+
+async function resolveBrixTargets(profileKey: string): Promise<QcBrixTarget[]> {
+  const scope = currentScope();
+  const [ingredientRows, brixTargetRows] = await Promise.all([
+    db.select({
+      id: ingredientsTable.id,
+      name: ingredientsTable.name,
+      enabled: ingredientsTable.enabled,
+      mergedInto: ingredientsTable.mergedInto,
+    }).from(ingredientsTable).where(eq(ingredientsTable.scope, scope)),
+    db.select().from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, scope),
+      eq(qcWorkflowEventsTable.eventType, "target-setting"),
+      eq(qcWorkflowEventsTable.profileKey, profileKey),
+      sql`${qcWorkflowEventsTable.payload}->>'measurementKind' = 'brix'`,
+    )).orderBy(desc(qcWorkflowEventsTable.id)),
+  ]);
+  const latestByIngredient = new Map<string, QcWorkflowEventRow>();
+  for (const row of brixTargetRows) {
+    if (row.ingredientId && !latestByIngredient.has(row.ingredientId)) {
+      latestByIngredient.set(row.ingredientId, row);
+    }
+  }
+  const projectedTargetRows = await hydrateEvents([...latestByIngredient.values()]);
+  const projectedByIngredient = new Map<string, (typeof projectedTargetRows)[number]>();
+  for (const row of projectedTargetRows) {
+    if (row.ingredientId) projectedByIngredient.set(row.ingredientId, row);
+  }
+  return ingredientRows
+    .filter((ingredient) => ingredient.enabled && !ingredient.mergedInto)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((ingredient): QcBrixTarget => {
+      const override = projectedByIngredient.get(ingredient.id);
+      const targetBrix = override?.payload.active === true
+        ? numericBrix(override.payload.targetBrix)
+        : null;
+      const toleranceBrix = override?.payload.active === true
+        ? numericBrix(override.payload.toleranceBrix)
+        : null;
+      const configured = targetBrix !== null && toleranceBrix !== null;
+      return {
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        targetBrix,
+        toleranceBrix,
+        source: configured ? "qc-override" : "not-configured",
+        state: configured ? "configured" : "not-evaluated",
+        ...(!configured
+          ? {
+            reason: override?.payload.active === true
+              ? "The reviewed Brix target or tolerance is invalid."
+              : override
+                ? "No reviewed Brix target is configured."
+                : "No manager-reviewed Brix target is configured.",
+          }
+          : {}),
+        ...(override ? { overrideEventId: override.id } : {}),
+        ...(override ? { targetRecordedAt: override.createdAt } : {}),
+        ...(typeof override?.payload.sourceDocument === "string"
+          && !override.redactedFields?.includes("payload.sourceDocument")
+          ? { sourceDocument: override.payload.sourceDocument }
+          : {}),
+        ...(typeof override?.payload.sourceSection === "string"
+          && !override.redactedFields?.includes("payload.sourceSection")
+          ? { sourceSection: override.payload.sourceSection }
+          : {}),
+      };
+    });
+}
+
+async function resolveBrixTarget(
+  executor: QcExecutor,
+  scope: string,
+  profileKey: string,
+  ingredientId: string,
+): Promise<QcBrixTarget | null> {
+  const [ingredient] = await executor.select({
+    id: ingredientsTable.id,
+    name: ingredientsTable.name,
+  }).from(ingredientsTable).where(and(
+    eq(ingredientsTable.scope, scope),
+    eq(ingredientsTable.id, ingredientId),
+    eq(ingredientsTable.enabled, true),
+  )).limit(1);
+  if (!ingredient) return null;
+  const [override] = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "target-setting"),
+    eq(qcWorkflowEventsTable.profileKey, profileKey),
+    eq(qcWorkflowEventsTable.ingredientId, ingredientId),
+    sql`${qcWorkflowEventsTable.payload}->>'measurementKind' = 'brix'`,
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(1);
+  const targetBrix = override?.payload.active === true
+    ? numericBrix(override.payload.targetBrix)
+    : null;
+  const toleranceBrix = override?.payload.active === true
+    ? numericBrix(override.payload.toleranceBrix)
+    : null;
+  const configured = targetBrix !== null && toleranceBrix !== null;
+  return {
+    ingredientId: ingredient.id,
+    ingredientName: ingredient.name,
+    targetBrix,
+    toleranceBrix,
+    source: configured ? "qc-override" : "not-configured",
+    state: configured ? "configured" : "not-evaluated",
+    ...(!configured
+      ? {
+        reason: override?.payload.active === true
+          ? "The reviewed Brix target or tolerance is invalid."
+          : override
+            ? "No reviewed Brix target is configured."
+            : "No manager-reviewed Brix target is configured.",
+      }
+      : {}),
+    ...(override ? { overrideEventId: override.id } : {}),
+    ...(override ? { targetRecordedAt: override.createdAt.toISOString() } : {}),
+    ...(typeof override?.payload.sourceDocument === "string" ? { sourceDocument: override.payload.sourceDocument } : {}),
+    ...(typeof override?.payload.sourceSection === "string" ? { sourceSection: override.payload.sourceSection } : {}),
+  };
+}
+
+function numericBrix(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : null;
 }
 
 function parseDateParam(value: unknown, endOfDay = false): Date | null | undefined {
@@ -631,11 +1102,12 @@ function parseHistoryFilters(req: Request, limitOverride?: number) {
 }
 
 function csvCell(value: unknown): string {
-  const text = value === null || value === undefined
+  const rawText = value === null || value === undefined
     ? ""
     : typeof value === "string"
       ? value
       : JSON.stringify(value);
+  const text = /^[\s]*[=+\-@]/.test(rawText) ? `'${rawText}` : rawText;
   return `"${text.replaceAll('"', '""')}"`;
 }
 
@@ -654,11 +1126,15 @@ function projectAuditActionForReader<
   } as T;
 }
 
-async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = false) {
+async function hydrateEvents(
+  rows: QcWorkflowEventRow[],
+  includeAuditDetails = false,
+  boundedOverlayRows?: QcWorkflowEventRow[],
+) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => String(row.id));
   const rowTypes = new Map(rows.map((row) => [String(row.id), row.eventType]));
-  const overlays = await db.select().from(qcWorkflowEventsTable).where(and(
+  const overlays = boundedOverlayRows ?? await db.select().from(qcWorkflowEventsTable).where(and(
     eq(qcWorkflowEventsTable.scope, currentScope()),
     inArray(qcWorkflowEventsTable.relatedEventId, ids),
   )).orderBy(qcWorkflowEventsTable.id);
@@ -687,7 +1163,16 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
       if (replacement && typeof replacement === "object" && !Array.isArray(replacement)) {
         const replacementFields = replacement as Record<string, unknown>;
         const prior = corrections.get(target) ?? {};
-        if (rowTypes.get(target) === "component-check" && Array.isArray(replacementFields.observations)) {
+        if (["label-check", "date-code-check"].includes(rowTypes.get(target) ?? "") && recordObject(replacementFields.observed)) {
+          corrections.set(target, {
+            ...prior,
+            ...replacementFields,
+            observed: {
+              ...(recordObject(prior.observed) ?? {}),
+              ...recordObject(replacementFields.observed),
+            },
+          });
+        } else if (rowTypes.get(target) === "component-check" && Array.isArray(replacementFields.observations)) {
           const merged = new Map<string, unknown>();
           if (Array.isArray(prior.observations)) {
             for (const observation of prior.observations) {
@@ -741,7 +1226,16 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     };
     const replacement = corrections.get(String(row.id));
     if (replacement) {
-      output.payload = { ...output.payload, ...replacement };
+      output.payload = ["label-check", "date-code-check"].includes(row.eventType) && recordObject(replacement.observed)
+        ? {
+          ...output.payload,
+          ...replacement,
+          observed: {
+            ...(recordObject(output.payload.observed) ?? {}),
+            ...recordObject(replacement.observed),
+          },
+        }
+        : { ...output.payload, ...replacement };
       const actualValue = numericPositive(output.payload.actualValue);
       const targetValue = numericPositive(output.payload.targetValue);
       const toleranceValue = numericTolerance(output.payload.toleranceValue);
@@ -756,6 +1250,15 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
               : Math.abs(actualValue - targetValue) <= toleranceValue
                 ? "within-tolerance"
                 : "out-of-tolerance",
+          }
+          : {}),
+        ...(row.eventType === "brix-check"
+          ? {
+            outcome: evaluateQcBrixCheck({
+              actualBrix: Number(output.payload.actualBrix),
+              targetBrix: numericBrix(output.payload.targetBrix),
+              toleranceBrix: numericBrix(output.payload.toleranceBrix),
+            }),
           }
           : {}),
       };
@@ -813,6 +1316,14 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
           outcome: evaluation.outcome,
         };
       }
+      if (row.eventType === "label-check") {
+        output.payload = evaluateStoredLabelCheck(output.payload);
+      }
+      if (row.eventType === "date-code-check") {
+        // Readability corrections are a complete map, while observed text may
+        // be patched field by field. Always compare with the original snapshot.
+        output.payload = evaluateDateCodeCheck(output.payload);
+      }
       output.corrected = true;
     }
     const station = correctedStations.get(String(row.id));
@@ -820,10 +1331,10 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     const fields = redactions.get(String(row.id));
     if (fields?.has("actorId")) output.actorId = null;
     if (fields?.has("ingredientName")) output.ingredientName = null;
-    if (fields?.has("payload.note")) output.payload = { ...output.payload, note: "[redacted]" };
-    if (fields?.has("payload.lotNumber")) output.payload = { ...output.payload, lotNumber: "[redacted]" };
-    if (fields?.has("payload.expectedComponents")) {
-      output.payload = { ...output.payload, expectedComponents: "[redacted]" };
+    for (const field of fields ?? []) {
+      if (field.startsWith("payload.")) {
+        output.payload = redactPayloadPath(output.payload, field);
+      }
     }
     if (fields?.size) output.redactedFields = [...fields];
     const details = auditDetails.get(String(row.id));
@@ -850,6 +1361,14 @@ function validateCorrection(
         checkType: CHECK_TYPE.optional(),
         note: correctionNote,
       }).strict()
+      : eventType === "brix-check"
+        ? z.object({
+          actualBrix: z.number().finite().min(0).max(100).optional(),
+          checkType: BRIX_CHECK_TYPE.optional(),
+          instrument: z.string().trim().max(120).optional(),
+          note: correctionNote,
+          station: STATION.optional(),
+        }).strict()
         : eventType === "component-check"
           ? z.object({
             observations: z.array(componentObservationSchema).max(200).optional(),
@@ -863,6 +1382,26 @@ function validateCorrection(
                 path: ["observations"],
                 message: "Each component may be corrected only once",
               });
+            }
+          })
+        : eventType === "date-code-check"
+          ? z.object({
+            observed: dateCodeObservedSchema.partial().optional(),
+            readability: dateCodeReadabilitySchema.optional(),
+            note: correctionNote,
+          }).strict().refine((replacement) =>
+            Boolean(replacement.readability || replacement.note !== undefined || Object.keys(replacement.observed ?? {}).length),
+          "Change observed text, readability or note")
+        : eventType === "label-check"
+          ? z.object({
+            observed: labelObservedSchema.partial().optional(),
+            note: correctionNote,
+          }).strict().superRefine((replacement, ctx) => {
+            if (
+              (!replacement.observed || Object.keys(replacement.observed).length === 0)
+              && replacement.note === undefined
+            ) {
+              ctx.addIssue({ code: "custom", message: "A correction must change observed text or the note" });
             }
           })
         : eventType === "allergen-review"
@@ -934,9 +1473,74 @@ router.get("/qc/targets", requireCapability("record-qc"), async (req, res) => {
     return;
   }
   try {
-    res.json({ profileKey, targets: await resolveTargets(profileKey) });
+    const [targets, brixTargets] = await Promise.all([
+      resolveTargets(profileKey),
+      resolveBrixTargets(profileKey),
+    ]);
+    res.json({ profileKey, targets, brixTargets });
   } catch (error) {
     reportRouteError(req, res, "failed to resolve QC weight targets", error);
+  }
+});
+
+router.post("/qc/brix-targets", requireCapability("manage-qc"), async (req, res) => {
+  const body = requireValid(brixTargetBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  try {
+    const ingredient = await findActiveIngredient(body.ingredientId);
+    if (!ingredient) {
+      safeError(res, 404, "Ingredient identity is unavailable");
+      return;
+    }
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(lockTarget(scope, body.profileKey, ingredient.id));
+      const existing = await findOperation(body.operationId, tx);
+      if (existing) {
+        const sameRequest = existing.eventType === "target-setting"
+          && existing.profileKey === body.profileKey
+          && existing.ingredientId === ingredient.id
+          && existing.payload.measurementKind === "brix"
+          && existing.payload.active === (body.targetBrix !== null)
+          && existing.payload.targetBrix === body.targetBrix
+          && existing.payload.toleranceBrix === body.toleranceBrix
+          && existing.payload.reason === body.reason
+          && (existing.payload.sourceDocument ?? "") === (body.sourceDocument ?? "")
+          && (existing.payload.sourceSection ?? "") === (body.sourceSection ?? "");
+        return sameRequest ? { event: existing, replayed: true } : { conflict: true as const };
+      }
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: randomUUID(),
+        eventType: "target-setting",
+        profileKey: body.profileKey,
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        payload: {
+          measurementKind: "brix",
+          active: body.targetBrix !== null,
+          targetBrix: body.targetBrix,
+          toleranceBrix: body.toleranceBrix,
+          unit: "brix",
+          source: "qc-override",
+          reason: body.reason,
+          ...(body.sourceDocument ? { sourceDocument: body.sourceDocument } : {}),
+          ...(body.sourceSection ? { sourceSection: body.sourceSection } : {}),
+        },
+      });
+      return { event, replayed: false };
+    });
+    if ("conflict" in result) {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    res.status(result.replayed ? 200 : 201).json({ event: publicEvent(result.event) });
+  } catch (error) {
+    reportRouteError(req, res, "failed to save QC Brix target override", error);
   }
 });
 
@@ -1076,6 +1680,8 @@ router.post("/qc/weight-checks", requireCapability("record-qc"), async (req, res
           targetUnit: targetIsConfigured ? target!.unit : null,
           toleranceValue: targetIsConfigured ? target!.toleranceValue : null,
           targetSource: targetIsConfigured ? target!.source : "not-configured",
+          targetVersion: targetIsConfigured ? target!.targetVersion ?? null : null,
+          targetRecordedAt: targetIsConfigured ? target!.targetRecordedAt ?? null : null,
           actualValue: body.actualValue,
           actualUnit: body.actualUnit,
           outcome,
@@ -1090,6 +1696,103 @@ router.post("/qc/weight-checks", requireCapability("record-qc"), async (req, res
       return;
     }
     reportRouteError(req, res, "failed to record QC weight check", error);
+  }
+});
+
+router.post("/qc/brix-checks", requireCapability("record-qc"), async (req, res) => {
+  const body = requireValid(brixCheckBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  try {
+    const ingredient = await findActiveIngredient(body.ingredientId);
+    if (!ingredient) {
+      safeError(res, 404, "Ingredient identity is unavailable");
+      return;
+    }
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(lockRun(scope, body.runId));
+      await tx.execute(lockTarget(scope, body.profileKey, ingredient.id));
+      const existing = await findOperation(body.operationId, tx);
+      if (existing) {
+        const sameRequest = existing.eventType === "brix-check"
+          && existing.runId === body.runId
+          && existing.profileKey === body.profileKey
+          && existing.ingredientId === ingredient.id
+          && existing.station === body.station
+          && existing.payload.checkType === body.checkType
+          && existing.payload.actualBrix === body.actualBrix
+          && existing.payload.instrument === body.instrument
+          && existing.payload.note === body.note;
+        return sameRequest ? { event: existing, replayed: true } : { conflict: true as const };
+      }
+      const sourceLookup = await resolveCanonicalRunSource(tx, scope, body.runId);
+      if (sourceLookup.state !== "found") return { source: sourceLookup } as const;
+      if (sourceLookup.source.profileKey !== body.profileKey) {
+        return { profileMismatch: true as const };
+      }
+      const target = await resolveBrixTarget(tx, scope, body.profileKey, ingredient.id);
+      const configured = target?.state === "configured"
+        && target.targetBrix !== null
+        && target.toleranceBrix !== null;
+      const targetBrix = configured ? target!.targetBrix : null;
+      const toleranceBrix = configured ? target!.toleranceBrix : null;
+      const outcome = evaluateQcBrixCheck({
+        actualBrix: body.actualBrix,
+        targetBrix,
+        toleranceBrix,
+      });
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: randomUUID(),
+        eventType: "brix-check",
+        runId: body.runId,
+        profileKey: body.profileKey,
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        station: body.station,
+        payload: {
+          measurementKind: "brix",
+          unit: "brix",
+          checkType: body.checkType,
+          actualBrix: body.actualBrix,
+          targetBrix,
+          toleranceBrix,
+          targetSource: configured ? "qc-override" : "not-configured",
+          targetVersion: configured ? target!.overrideEventId ?? null : null,
+          targetRecordedAt: configured ? target!.targetRecordedAt ?? null : null,
+          runSourceKind: sourceLookup.source.kind,
+          runSourceDate: sourceLookup.source.date,
+          runSourceRevision: sourceLookup.source.revision,
+          outcome,
+          instrument: body.instrument,
+          note: body.note,
+        },
+      });
+      return { event, replayed: false };
+    });
+    if ("conflict" in result) {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    if ("profileMismatch" in result) {
+      safeError(res, 409, "The selected profile does not match this run");
+      return;
+    }
+    if (result.source !== undefined) {
+      if (result.source.state === "not-found") {
+        safeError(res, 404, "Run is not available in this facility scope");
+      } else {
+        safeError(res, 409, "Canonical run settings are unavailable");
+      }
+      return;
+    }
+    res.status(result.replayed ? 200 : 201).json({ event: publicEvent(result.event) });
+  } catch (error) {
+    reportRouteError(req, res, "failed to record QC Brix check", error);
   }
 });
 
@@ -1387,6 +2090,514 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
   }
 });
 
+const MAX_QC_PLANNING_DAYS = 90;
+let qcPlanningReadFailureHookForTest: (() => void) | undefined;
+
+/** Test-only seam for verifying the endpoint reports source failures distinctly. */
+export function setQcPlanningReadFailureHookForTest(hook?: () => void): void {
+  qcPlanningReadFailureHookForTest = hook;
+}
+
+function addCalendarDays(date: string, count: number): string {
+  // This is calendar arithmetic on the client-provided production date. UTC is
+  // only used to avoid process-timezone/DST effects while adding whole days.
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + count);
+  return value.toISOString().slice(0, 10);
+}
+
+function nullablePlanningText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function projectQcPlanningDay(row: { date: string; data: unknown }) {
+  const data = recordObject(row.data);
+  const dayState = recordObject(data?.dayState);
+  const runValues = recordObject(data?.runValues);
+  if (!dayState || !Array.isArray(dayState.runs)) {
+    return { date: row.date, status: "unknown" as const, runs: [] };
+  }
+
+  const runs = dayState.runs.map((rawRun) => {
+    const run = recordObject(rawRun);
+    const runId = nullablePlanningText(run?.id);
+    const values = runId ? recordObject(runValues?.[runId]) : null;
+    const casesNeeded = values?.casesNeeded;
+    return {
+      runId,
+      brand: nullablePlanningText(run?.brand),
+      flavor: nullablePlanningText(run?.flavor),
+      casesNeeded:
+        typeof casesNeeded === "number" && Number.isFinite(casesNeeded) && casesNeeded >= 0
+          ? casesNeeded
+          : null,
+    };
+  });
+
+  return {
+    date: row.date,
+    status: runs.length > 0 ? "scheduled" as const : "empty" as const,
+    runs,
+  };
+}
+
+router.get("/qc/planning", requireCapability("record-qc"), async (req, res) => {
+  const parsed = qcPlanningQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    safeError(res, 400, "A valid client production date and a range of 1 to 90 days are required");
+    return;
+  }
+
+  const { today, days } = parsed.data;
+  const through = addCalendarDays(today, days - 1);
+  try {
+    qcPlanningReadFailureHookForTest?.();
+    const rows = await db.select({
+      date: dailySyncTable.date,
+      data: dailySyncTable.data,
+    }).from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, currentScope()),
+      gte(dailySyncTable.date, today),
+      lte(dailySyncTable.date, through),
+    )).orderBy(asc(dailySyncTable.date)).limit(MAX_QC_PLANNING_DAYS);
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      range: { from: today, through, days },
+      maxDays: MAX_QC_PLANNING_DAYS,
+      days: rows.map(projectQcPlanningDay),
+    });
+  } catch (error) {
+    req.log.warn({ err: error, scope: currentScope(), from: today, through }, "failed to read QC planning schedule");
+    safeError(res, 503, "Upcoming production schedule is unavailable. Retry the request.");
+  }
+});
+
+router.get("/qc/label-references", requireCapability("record-qc"), async (req, res) => {
+  try {
+    const scope = currentScope();
+    const references = await currentLabelReferences(db, scope);
+    if (references.overflow) {
+      safeError(res, 503, "The label reference list is over its review limit. Ask a QC manager to review the configuration.");
+      return;
+    }
+    const canManage = req.capabilities?.includes("manage-qc") === true;
+    res.json({
+      items: references.items
+        .filter((item) => canManage || item.decision === "approved")
+        .map((item) => labelReferenceApi(item, canManage)),
+    });
+  } catch (error) {
+    reportRouteError(req, res, "failed to load label references", error);
+  }
+});
+
+router.post("/qc/label-references", requireCapability("manage-qc"), async (req, res) => {
+  const body = requireValid(labelReferenceBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  try {
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"qc-label-references:" + scope}, 0))`);
+      const prior = await findOperation(body.operationId, tx);
+      const matchesPrior = (event: QcWorkflowEventRow) => {
+        const value = storedLabelReferenceSchema.safeParse(event.payload);
+        return event.eventType === "label-reference"
+          && value.success
+          && (!body.referenceId || value.data.referenceId === body.referenceId)
+          && value.data.context === body.context
+          && value.data.productKey === body.productKey
+          && isDeepStrictEqual(value.data.expected, body.expected)
+          && JSON.stringify(value.data.requiredFields) === JSON.stringify(body.requiredFields)
+          && value.data.sourceIdentity === body.sourceIdentity
+          && value.data.sourceDescription === body.sourceDescription;
+      };
+      if (prior) return matchesPrior(prior)
+        ? { kind: "duplicate" as const, event: prior }
+        : { kind: "conflict" as const };
+
+      const referenceId = body.referenceId ?? randomUUID();
+      const previous = await latestLabelReference(tx, scope, referenceId);
+      if (body.referenceId && !previous) return { kind: "not-found" as const };
+      const current = await currentLabelReferences(tx, scope);
+      if (current.overflow) return { kind: "overflow" as const };
+      const conflict = current.items.some((item) =>
+        item.value.referenceId !== referenceId
+        && item.value.context === body.context
+        && item.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") === body.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US"),
+      );
+      if (conflict) return { kind: "duplicate-key" as const };
+
+      const previousValue = previous
+        ? storedLabelReferenceSchema.safeParse(previous.payload)
+        : null;
+      if (previous && !previousValue?.success) return { kind: "invalid-prior" as const };
+      const value: StoredLabelReference = {
+        referenceId,
+        version: (previousValue?.success ? previousValue.data.version : 0) + 1,
+        context: body.context,
+        productKey: body.productKey,
+        expected: body.expected,
+        requiredFields: body.requiredFields,
+        sourceIdentity: body.sourceIdentity,
+        sourceDescription: body.sourceDescription,
+      };
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: referenceId,
+        eventType: "label-reference",
+        runId: null,
+        profileKey: null,
+        ingredientId: null,
+        ingredientName: null,
+        station: "packaging",
+        relatedEventId: previous ? String(previous.id) : null,
+        payload: value,
+      });
+      return { kind: "created" as const, event };
+    });
+    if (result.kind === "not-found") {
+      safeError(res, 404, "Label reference was not found in this facility scope");
+      return;
+    }
+    if (result.kind === "duplicate-key") {
+      safeError(res, 409, "A label reference already exists for this product and packaging context");
+      return;
+    }
+    if (result.kind === "invalid-prior") {
+      safeError(res, 409, "The current label reference cannot be versioned safely");
+      return;
+    }
+    if (result.kind === "overflow") {
+      safeError(res, 503, "The label reference list is over its review limit. Ask a QC manager to review the configuration.");
+      return;
+    }
+    if (result.kind === "conflict") {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    res.status(result.kind === "duplicate" ? 200 : 201).json({
+      event: publicEvent(result.event),
+      duplicate: result.kind === "duplicate",
+    });
+  } catch (error) {
+    const existing = await findOperation(body.operationId);
+    if (existing) {
+      const value = storedLabelReferenceSchema.safeParse(existing.payload);
+      const matches = existing.eventType === "label-reference"
+        && value.success
+        && (!body.referenceId || value.data.referenceId === body.referenceId)
+        && value.data.context === body.context
+        && value.data.productKey === body.productKey
+        && isDeepStrictEqual(value.data.expected, body.expected)
+        && JSON.stringify(value.data.requiredFields) === JSON.stringify(body.requiredFields)
+        && value.data.sourceIdentity === body.sourceIdentity
+        && value.data.sourceDescription === body.sourceDescription;
+      if (matches) {
+        res.status(200).json({ event: publicEvent(existing), duplicate: true });
+      } else {
+        safeError(res, 409, "This operation ID was already used for another request");
+      }
+      return;
+    }
+    reportRouteError(req, res, "failed to save label reference", error);
+  }
+});
+
+router.post("/qc/label-references/:eventId/review", requireCapability("manage-qc"), async (req, res) => {
+  const eventId = Number(req.params.eventId);
+  const body = requireValid(labelReferenceReviewBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  if (!Number.isSafeInteger(eventId) || eventId < 1) {
+    safeError(res, 400, "A valid label reference version ID is required");
+    return;
+  }
+  try {
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"qc-label-references:" + scope}, 0))`);
+      const prior = await findOperation(body.operationId, tx);
+      if (prior) {
+        const matches = prior.eventType === "label-reference-review"
+          && prior.relatedEventId === String(eventId)
+          && prior.payload.decision === body.decision
+          && prior.payload.reason === body.reason;
+        return matches
+          ? { kind: "duplicate" as const, event: prior }
+          : { kind: "operation-conflict" as const };
+      }
+      const [configuration] = await tx.select().from(qcWorkflowEventsTable).where(and(
+        eq(qcWorkflowEventsTable.scope, scope),
+        eq(qcWorkflowEventsTable.id, eventId),
+        eq(qcWorkflowEventsTable.eventType, "label-reference"),
+      )).limit(1);
+      if (!configuration) return { kind: "not-found" as const };
+      const parsed = storedLabelReferenceSchema.safeParse(configuration.payload);
+      if (!parsed.success) return { kind: "invalid-reference" as const };
+      const latest = await latestLabelReference(tx, scope, parsed.data.referenceId);
+      if (!latest || latest.id !== configuration.id) return { kind: "stale-version" as const };
+      const state = await labelReferenceState(tx, scope, configuration);
+      if (!state) return { kind: "invalid-reference" as const };
+
+      if (body.decision === "approved") {
+        if (state.decision === "approved") return { kind: "already-approved" as const };
+        const missingRequired = parsed.data.requiredFields.some((field) =>
+          typeof parsed.data.expected[field] !== "string" || !parsed.data.expected[field]?.trim(),
+        );
+        if (missingRequired) return { kind: "incomplete-reference" as const };
+        const current = await currentLabelReferences(tx, scope);
+        if (current.overflow) return { kind: "overflow" as const };
+        const ambiguous = current.items.some((item) =>
+          item.value.referenceId !== parsed.data.referenceId
+          && item.value.context === parsed.data.context
+          && item.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") === parsed.data.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US")
+          && item.decision === "approved",
+        );
+        if (ambiguous) return { kind: "duplicate-key" as const };
+      } else if (state.decision !== "approved") {
+        return { kind: "not-approved" as const };
+      }
+
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: configuration.recordId,
+        eventType: "label-reference-review",
+        runId: null,
+        profileKey: null,
+        ingredientId: null,
+        ingredientName: null,
+        station: "packaging",
+        relatedEventId: String(configuration.id),
+        payload: {
+          referenceId: parsed.data.referenceId,
+          version: parsed.data.version,
+          configurationEventId: configuration.id,
+          decision: body.decision,
+          reason: body.reason,
+        },
+      });
+      return { kind: "created" as const, event };
+    });
+    const conflicts: Record<string, { status: number; message: string }> = {
+      "not-found": { status: 404, message: "Label reference version was not found in this facility scope" },
+      "invalid-reference": { status: 409, message: "The label reference version cannot be reviewed safely" },
+      "stale-version": { status: 409, message: "A newer label reference version must be reviewed instead" },
+      "already-approved": { status: 409, message: "This label reference version is already approved" },
+      "incomplete-reference": { status: 400, message: "Every required field needs an expected text value before approval" },
+      "duplicate-key": { status: 409, message: "Another approved reference already uses this product and packaging context" },
+      "not-approved": { status: 409, message: "Only an approved label reference can be withdrawn" },
+      overflow: { status: 503, message: "The label reference list is over its review limit. Ask a QC manager to review the configuration." },
+      "operation-conflict": { status: 409, message: "This operation ID was already used for another request" },
+    };
+    if (result.kind === "created" || result.kind === "duplicate") {
+      res.status(result.kind === "duplicate" ? 200 : 201).json({
+        event: publicEvent(result.event),
+        duplicate: result.kind === "duplicate",
+      });
+      return;
+    }
+    const conflict = conflicts[result.kind];
+    if (conflict) {
+      safeError(res, conflict.status, conflict.message);
+      return;
+    }
+    throw new Error(`Unhandled label reference review result: ${result.kind}`);
+  } catch (error) {
+    const existing = await findOperation(body.operationId);
+    if (existing) {
+      const matches = existing.eventType === "label-reference-review"
+        && existing.relatedEventId === String(eventId)
+        && existing.payload.decision === body.decision
+        && existing.payload.reason === body.reason;
+      if (matches) {
+        res.status(200).json({ event: publicEvent(existing), duplicate: true });
+      } else {
+        safeError(res, 409, "This operation ID was already used for another request");
+      }
+      return;
+    }
+    reportRouteError(req, res, "failed to review label reference", error);
+  }
+});
+
+router.post("/qc/label-checks", requireCapability("record-qc"), async (req, res) => {
+  const body = requireValid(labelCheckBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  const observed = normalizeQcLabelObserved(body.observed);
+  const matchesPriorOperation = (event: QcWorkflowEventRow) => {
+    const payload = event.payload;
+    const priorObserved = labelObservedSchema.safeParse(payload.observed);
+    return event.eventType === "label-check"
+      && event.runId === body.runId
+      && payload.context === body.context
+      && (payload.referenceId ?? null) === (body.referenceId ?? null)
+      && priorObserved.success
+      && QC_LABEL_FIELDS.every((field) => priorObserved.data[field] === observed[field])
+      && payload.note === body.note;
+  };
+  try {
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(lockRun(scope, body.runId));
+      const prior = await findOperation(body.operationId, tx);
+      if (prior) return matchesPriorOperation(prior)
+        ? { kind: "duplicate" as const, event: prior }
+        : { kind: "operation-conflict" as const };
+
+      const canonical = await resolveCanonicalRunSource(tx, scope, body.runId);
+      if (canonical.state === "not-found") return { kind: "run-not-found" as const };
+      if (canonical.state === "unavailable") return { kind: "run-unavailable" as const };
+
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"qc-label-references:" + scope}, 0))`);
+      const runProductKey = canonical.source.profileKey?.normalize("NFC").trim().toLocaleLowerCase("en-US");
+      const productIdentityKnown = Boolean(runProductKey && runProductKey.split("__").length === 2
+        && !runProductKey.startsWith("__") && !runProductKey.endsWith("__"));
+      let approvedReference: LabelReferenceState | null = null;
+      let referenceSnapshot: Record<string, unknown> | null = null;
+      let referenceUnavailableReason: string | undefined;
+      if (!body.referenceId) {
+        referenceUnavailableReason = "No approved reference was selected.";
+      } else {
+        const configuration = await latestLabelReference(tx, scope, body.referenceId);
+        const state = configuration
+          ? await labelReferenceState(tx, scope, configuration)
+          : null;
+        if (!state) {
+          referenceUnavailableReason = "No approved applicable reference is available.";
+        } else if (!productIdentityKnown
+          || state.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") !== runProductKey) {
+          referenceSnapshot = {
+            referenceId: state.value.referenceId,
+            version: state.value.version,
+            productKey: state.value.productKey,
+            context: state.value.context,
+            configurationEventId: state.configuration.id,
+            state: "inapplicable",
+          };
+          referenceUnavailableReason = productIdentityKnown
+            ? "The selected reference is for a different product than the canonical run."
+            : "The canonical run product identity is incomplete or ambiguous; reference applicability cannot be established.";
+        } else if (state.value.context !== body.context) {
+          referenceSnapshot = {
+            referenceId: state.value.referenceId,
+            version: state.value.version,
+            context: state.value.context,
+            configurationEventId: state.configuration.id,
+            state: state.decision ?? "draft",
+          };
+          referenceUnavailableReason = "The selected reference is for a different packaging context.";
+        } else if (state.decision !== "approved" || !state.review) {
+          referenceSnapshot = {
+            referenceId: state.value.referenceId,
+            version: state.value.version,
+            context: state.value.context,
+            configurationEventId: state.configuration.id,
+            state: state.decision ?? "draft",
+          };
+          referenceUnavailableReason = "The selected reference version has not been approved.";
+        } else {
+          const current = await currentLabelReferences(tx, scope);
+          const matches = current.items.filter((item) =>
+            item.decision === "approved"
+            && item.value.context === state.value.context
+            && item.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") === runProductKey,
+          );
+          if (current.overflow || matches.length !== 1 || matches[0]?.value.referenceId !== state.value.referenceId) {
+            referenceUnavailableReason = current.overflow
+              ? "Approved reference availability could not be verified."
+              : "More than one approved reference matches this product and packaging context.";
+            referenceSnapshot = {
+              referenceId: state.value.referenceId,
+              version: state.value.version,
+              context: state.value.context,
+              configurationEventId: state.configuration.id,
+              state: "ambiguous",
+            };
+          } else {
+            approvedReference = state;
+            referenceSnapshot = {
+              state: "approved",
+              ...labelReferenceSnapshot(state),
+            };
+          }
+        }
+      }
+
+      const comparison = evaluateQcLabelCheck({
+        observed,
+        reference: approvedReference
+          ? { expected: approvedReference.value.expected, requiredFields: approvedReference.value.requiredFields }
+          : null,
+        ...(referenceUnavailableReason ? { referenceUnavailableReason } : {}),
+      });
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: randomUUID(),
+        eventType: "label-check",
+        runId: body.runId,
+        profileKey: canonical.source.profileKey ?? null,
+        ingredientId: null,
+        ingredientName: null,
+        station: "packaging",
+        relatedEventId: null,
+        payload: {
+          context: body.context,
+          runProductKey: productIdentityKnown ? runProductKey : null,
+          referenceId: body.referenceId ?? null,
+          referenceSnapshot,
+          ...(referenceUnavailableReason ? { referenceUnavailableReason } : {}),
+          observed,
+          fieldResults: comparison.fields,
+          outcome: comparison.outcome,
+          note: body.note,
+        },
+      });
+      return { kind: "created" as const, event };
+    });
+    if (result.kind === "run-not-found") {
+      safeError(res, 404, "Run was not found in this facility scope");
+      return;
+    }
+    if (result.kind === "run-unavailable") {
+      safeError(res, 409, "Canonical run records are unavailable; the label check was not saved");
+      return;
+    }
+    if (result.kind === "operation-conflict") {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    res.status(result.kind === "duplicate" ? 200 : 201).json({
+      event: publicEvent(result.event),
+      duplicate: result.kind === "duplicate",
+    });
+  } catch (error) {
+    const existing = await findOperation(body.operationId);
+    if (existing) {
+      if (matchesPriorOperation(existing)) {
+        res.status(200).json({ event: publicEvent(existing), duplicate: true });
+      } else {
+        safeError(res, 409, "This operation ID was already used for another request");
+      }
+      return;
+    }
+    reportRouteError(req, res, "failed to record label check", error);
+  }
+});
+
 router.post("/qc/component-checks", requireCapability("record-qc"), async (req, res) => {
   const body = requireValid(componentCheckBodySchema, req.body, res);
   const actorId = currentActor(req);
@@ -1401,7 +2612,7 @@ router.post("/qc/component-checks", requireCapability("record-qc"), async (req, 
     return event.eventType === "component-check"
       && event.runId === body.runId
       && payload.note === body.note
-      && JSON.stringify(payload.requestedObservations) === JSON.stringify(normalizedObservations);
+      && isDeepStrictEqual(payload.requestedObservations, normalizedObservations);
   };
   try {
     const result = await db.transaction(async (tx) => {
@@ -1696,6 +2907,16 @@ router.get("/qc/history", requireCapability("record-qc"), async (req, res) => {
   try {
     const scope = currentScope();
     const conditions = [eq(qcWorkflowEventsTable.scope, scope)];
+    // Reference administration is manager-only. Operators see approved
+    // references through the approved list and immutable applied check snapshots,
+    // never draft/version/review payloads through the general ledger.
+    if (req.capabilities?.includes("manage-qc") !== true) {
+      conditions.push(notInArray(qcWorkflowEventsTable.eventType, [
+        "date-code-reference", "date-code-reference-review",
+        "import-committed", "import-review",
+        "recipe-committed", "recipe-review",
+      ]));
+    }
     if (filters.runId) conditions.push(eq(qcWorkflowEventsTable.runId, filters.runId));
     if (filters.ingredientId) conditions.push(eq(qcWorkflowEventsTable.ingredientId, filters.ingredientId));
     if (filters.station) conditions.push(eq(qcWorkflowEventsTable.station, filters.station));
@@ -1745,6 +2966,8 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
       "actorId",
       "createdAt",
       "payload",
+      "sourceDocument",
+      "sourceSection",
     ].join(",") + "\r\n");
     let cursor: number | undefined;
     const includeAuditDetails =
@@ -1777,6 +3000,16 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
           event.actorId,
           event.createdAt,
           event.payload,
+          event.eventType === "target-setting"
+            && event.payload.measurementKind === "brix"
+            && !event.redactedFields?.includes("payload.sourceDocument")
+            ? event.payload.sourceDocument
+            : "",
+          event.eventType === "target-setting"
+            && event.payload.measurementKind === "brix"
+            && !event.redactedFields?.includes("payload.sourceSection")
+            ? event.payload.sourceSection
+            : "",
         ].map(csvCell).join(",") + "\r\n");
       }
       cursor = rows[rows.length - 1]!.id;
@@ -1786,6 +3019,279 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
     res.end();
   } catch (error) {
     reportRouteError(req, res, "failed to export QC history", error);
+  }
+});
+
+function reportDateBoundary(date: string, endOfDay: boolean): Date {
+  return new Date(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+}
+
+function parseQcIntelligenceQuery(value: unknown): {
+  view: QcReportView;
+  filters: QcReportFilters;
+  from: Date;
+  to: Date;
+  limit: number;
+} | null {
+  const parsed = qcIntelligenceQuerySchema.safeParse(value);
+  if (!parsed.success) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const defaultFrom = new Date(`${today}T12:00:00.000Z`);
+  defaultFrom.setUTCDate(defaultFrom.getUTCDate() - 29);
+  const fromDateText = parsed.data.from ?? defaultFrom.toISOString().slice(0, 10);
+  const toDateText = parsed.data.to ?? today;
+  const from = reportDateBoundary(fromDateText, false);
+  const to = reportDateBoundary(toDateText, true);
+  if (from > to || to.getTime() - from.getTime() >= 366 * 24 * 60 * 60_000) return null;
+  return {
+    view: parsed.data.view,
+    filters: {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      ingredientId: parsed.data.ingredientId ?? null,
+      station: parsed.data.station ?? null,
+      runId: parsed.data.runId ?? null,
+      checkType: parsed.data.checkType ?? null,
+    },
+    from,
+    to,
+    limit: parsed.data.limit,
+  };
+}
+
+async function resolveReportRunIdentities(
+  scope: string,
+  runIds: string[],
+): Promise<{ runs: Map<string, {
+  runId: string;
+  status: "available" | "unavailable";
+  source: "completed-run-snapshot" | "active-day-state" | null;
+  productionDate: string | null;
+  label: string | null;
+}>; overflow: boolean }> {
+  const runs = new Map<string, {
+    runId: string;
+    status: "available" | "unavailable";
+    source: "completed-run-snapshot" | "active-day-state" | null;
+    productionDate: string | null;
+    label: string | null;
+  }>();
+  if (runIds.length === 0) return { runs, overflow: false };
+  let overflow = runIds.length > MAX_INTELLIGENCE_RUN_SOURCES;
+  const boundedIds = runIds.slice(0, MAX_INTELLIGENCE_RUN_SOURCES);
+  const rows = await db.select({
+    runId: completedRunHistoryTable.runId,
+    date: completedRunHistoryTable.date,
+    snapshotHash: completedRunHistoryTable.snapshotHash,
+    snapshot: sql<unknown>`CASE WHEN octet_length(${completedRunHistoryTable.snapshot}::text) <= ${MAX_INTELLIGENCE_SNAPSHOT_BYTES} THEN ${completedRunHistoryTable.snapshot} ELSE NULL END`,
+  }).from(completedRunHistoryTable).where(and(
+    eq(completedRunHistoryTable.scope, scope),
+    inArray(completedRunHistoryTable.runId, boundedIds),
+  )).orderBy(asc(completedRunHistoryTable.completedAt))
+    .limit(MAX_INTELLIGENCE_RUN_SOURCES + 1);
+  if (rows.length > MAX_INTELLIGENCE_RUN_SOURCES) return { runs, overflow: true };
+  const seenCompleted = new Set<string>();
+  for (const row of rows) {
+    const runId = row.runId;
+    if (seenCompleted.has(runId)) {
+      runs.set(runId, {
+        runId, status: "unavailable", source: null, productionDate: null, label: null,
+      });
+      continue;
+    }
+    seenCompleted.add(runId);
+    if (row.snapshot === null) overflow = true;
+    const projected = projectActivitySnapshot(row.snapshot, row.date, "completed-snapshot");
+    const exactRun = projected.status === "available"
+      ? projected.runs.find((candidate) => candidate.runId === runId)
+      : null;
+    if (!exactRun || snapshotHash(row.snapshot) !== row.snapshotHash) {
+      runs.set(runId, {
+        runId, status: "unavailable", source: null, productionDate: null, label: null,
+      });
+      continue;
+    }
+    runs.set(runId, {
+      runId,
+      status: "available",
+      source: "completed-run-snapshot",
+      productionDate: row.date,
+      label: exactRun.label,
+    });
+  }
+  const missingIds = boundedIds.filter((runId) => !runs.has(runId));
+  const today = facilityDate();
+  if (missingIds.length > 0) {
+    const currentRows = await db.select({
+      data: sql<unknown>`CASE WHEN octet_length(${dailySyncTable.data}::text) <= ${MAX_INTELLIGENCE_SNAPSHOT_BYTES} THEN ${dailySyncTable.data} ELSE NULL END`,
+    }).from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, scope),
+      eq(dailySyncTable.date, today),
+    )).limit(2);
+    if (currentRows.length === 1) {
+      if (currentRows[0]!.data === null) overflow = true;
+      const projected = projectActivitySnapshot(currentRows[0]!.data, today, "active-day-state");
+      if (projected.status === "available") {
+        for (const runId of missingIds) {
+          const exactRun = projected.runs.find((candidate) => candidate.runId === runId);
+          if (exactRun && !exactRun.ended) {
+            runs.set(runId, {
+              runId,
+              status: "available",
+              source: "active-day-state",
+              productionDate: today,
+              label: exactRun.label,
+            });
+          }
+        }
+      }
+    }
+  }
+  return { runs, overflow };
+}
+
+async function loadQcIntelligenceReport(
+  req: Request,
+): Promise<ReturnType<typeof buildQcIntelligenceReport> | null> {
+  const parsed = parseQcIntelligenceQuery(req.query);
+  if (!parsed) return null;
+  const scope = currentScope();
+  const types: Array<typeof qcWorkflowEventsTable.$inferSelect.eventType> = parsed.view === "trends"
+    ? ["weight", "brix-check"]
+    : parsed.view === "results"
+      ? ["weight", "brix-check", "component-check", "label-check", "date-code-check"]
+      : ["lot"];
+  const conditions = [
+    eq(qcWorkflowEventsTable.scope, scope),
+    inArray(qcWorkflowEventsTable.eventType, types),
+    gte(qcWorkflowEventsTable.createdAt, parsed.from),
+    lte(qcWorkflowEventsTable.createdAt, parsed.to),
+  ];
+  if (parsed.filters.ingredientId) {
+    conditions.push(eq(qcWorkflowEventsTable.ingredientId, parsed.filters.ingredientId));
+  }
+  if (parsed.filters.runId) {
+    conditions.push(eq(qcWorkflowEventsTable.runId, parsed.filters.runId));
+  }
+  const rows = await db.select().from(qcWorkflowEventsTable)
+    .where(and(...conditions))
+    .orderBy(asc(qcWorkflowEventsTable.createdAt), asc(qcWorkflowEventsTable.id))
+    .limit(parsed.limit + 1);
+  const moreAvailable = rows.length > parsed.limit;
+  const sourceRows = rows.slice(0, parsed.limit);
+  let coverage: QcReportCoverage = {
+    status: moreAvailable ? "partial" as const : "complete" as const,
+    sampledEvents: sourceRows.length,
+    includedEvents: 0,
+    maxEvents: parsed.limit,
+    moreAvailable,
+    reason: moreAvailable ? "event-limit" as const : null,
+  };
+  const ids = sourceRows.map((row) => String(row.id));
+  let events: QcReportEvent[] = [];
+  if (ids.length > 0) {
+    const overlayRows = await db.select().from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, scope),
+      inArray(qcWorkflowEventsTable.relatedEventId, ids),
+      inArray(qcWorkflowEventsTable.eventType, ["correction", "redaction"]),
+    )).orderBy(asc(qcWorkflowEventsTable.id))
+      .limit(MAX_INTELLIGENCE_OVERLAYS + 1);
+    if (overlayRows.length > MAX_INTELLIGENCE_OVERLAYS) {
+      coverage = {
+        ...coverage,
+        status: "partial",
+        moreAvailable: true,
+        reason: "overlay-limit",
+      };
+    } else {
+      const hydrated = await hydrateEvents(sourceRows, false, overlayRows);
+      events = hydrated.map((event) => ({
+        id: event.id,
+        eventType: event.eventType,
+        runId: event.runId,
+        profileKey: event.profileKey,
+        ingredientId: event.ingredientId,
+        ingredientName: event.ingredientName,
+        station: event.station,
+        createdAt: event.createdAt,
+        payload: event.payload,
+        ...(event.redactedFields ? { redactedFields: event.redactedFields } : {}),
+      })).filter((event) =>
+        (!parsed.filters.station || event.station === parsed.filters.station)
+        && (!parsed.filters.checkType || event.payload.checkType === parsed.filters.checkType),
+      );
+      coverage = { ...coverage, includedEvents: events.length };
+    }
+  }
+  if (coverage.reason === "overlay-limit") {
+    return buildQcIntelligenceReport(parsed.view, [], parsed.filters, coverage);
+  }
+  let canonicalRuns = new Map<string, {
+    runId: string;
+    status: "available" | "unavailable";
+    source: "completed-run-snapshot" | "active-day-state" | null;
+    productionDate: string | null;
+    label: string | null;
+  }>();
+  if (parsed.view === "traceability") {
+    const resolved = await resolveReportRunIdentities(scope, [
+      ...new Set(events.flatMap((event) => event.runId ? [event.runId] : [])),
+    ]);
+    canonicalRuns = resolved.runs;
+    if (resolved.overflow) {
+      coverage = {
+        ...coverage,
+        status: "partial",
+        moreAvailable: true,
+        reason: "canonical-source-limit",
+      };
+    }
+  }
+  return buildQcIntelligenceReport(parsed.view, events, parsed.filters, coverage, canonicalRuns);
+}
+
+router.get("/qc/intelligence", requireCapability("manage-qc"), async (req, res) => {
+  if (!parseQcIntelligenceQuery(req.query)) {
+    safeError(res, 400, "Invalid or out-of-range QC intelligence report filters");
+    return;
+  }
+  try {
+    const report = await loadQcIntelligenceReport(req);
+    if (!report) {
+      safeError(res, 400, "Invalid or out-of-range QC intelligence report filters");
+      return;
+    }
+    res.json(report);
+  } catch (error) {
+    reportRouteError(req, res, "failed to load QC intelligence report", error);
+  }
+});
+
+router.get("/qc/intelligence.csv", requireCapability("manage-qc"), async (req, res) => {
+  if (!parseQcIntelligenceQuery(req.query)) {
+    safeError(res, 400, "Invalid or out-of-range QC intelligence export filters");
+    return;
+  }
+  try {
+    const report = await loadQcIntelligenceReport(req);
+    if (!report) {
+      safeError(res, 400, "Invalid or out-of-range QC intelligence export filters");
+      return;
+    }
+    const csv = qcIntelligenceCsv(report);
+    res.status(200);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="qc-${report.view}-${report.filters.from.slice(0, 10)}-to-${report.filters.to.slice(0, 10)}.csv"`,
+    );
+    res.send(csv);
+  } catch (error) {
+    if (error instanceof QcIntelligenceCsvLimitError) {
+      safeError(res, 413, "QC export exceeds its size bound. Narrow the date range or filters.");
+      return;
+    }
+    reportRouteError(req, res, "failed to export QC intelligence report", error);
   }
 });
 
@@ -1806,7 +3312,7 @@ router.post("/qc/events/:eventId/corrections", requireCapability("manage-qc"), a
       eq(qcWorkflowEventsTable.scope, currentScope()),
       eq(qcWorkflowEventsTable.id, eventId),
     )).limit(1);
-    if (!target || !["lot", "weight", "component-check", "allergen-review", "cleaning"].includes(target.eventType)) {
+    if (!target || !["lot", "weight", "brix-check", "component-check", "label-check", "date-code-check", "allergen-review", "cleaning"].includes(target.eventType)) {
       safeError(res, 404, "Correctable QC record not found");
       return;
     }
@@ -1900,6 +3406,9 @@ router.post("/qc/events/:eventId/redactions", requireCapability("manage-qc"), as
     }
     const event = await db.transaction(async (tx) => {
       if (target.runId) await tx.execute(lockRun(currentScope(), target.runId));
+      if (target.eventType === "import-committed" || target.eventType === "import-review") {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"import-operation:" + currentScope()}, 0))`);
+      }
       return appendRunEvent(tx, currentScope(), actorId, {
         operationId: body.operationId,
         recordId: target.recordId,
@@ -1922,5 +3431,11 @@ router.post("/qc/events/:eventId/redactions", requireCapability("manage-qc"), as
     reportRouteError(req, res, "failed to record QC redaction", error);
   }
 });
+
+export const qcDateCodeDependencies = {
+  requireValid, currentActor, safeError, publicEvent, reportRouteError,
+  resolveCanonicalRunSource, lockRun,
+};
+registerDateCodeWorkflows(router, qcDateCodeDependencies);
 
 export default router;

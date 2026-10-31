@@ -124,7 +124,7 @@ function QualityRow({ check }: { check: QualityCheckRecord }) {
               Unverified generated text — retain for audit only
             </p>
           )}
-          {check.summary && <p className="text-xs text-foreground/80">{check.summary}</p>}
+          {check.summary && <p className="break-words text-xs text-foreground/80 [overflow-wrap:anywhere]">{check.summary}</p>}
           {check.issues.length > 0 && (
             <ul className="space-y-1.5 mt-1">
               {check.issues.map((issue, i) => (
@@ -133,7 +133,7 @@ function QualityRow({ check }: { check: QualityCheckRecord }) {
                   className="flex items-start gap-2 text-xs rounded-md border border-border/60 bg-muted/30 p-2"
                 >
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 text-amber-500 shrink-0" />
-                  <span>
+                  <span className="min-w-0 break-words [overflow-wrap:anywhere]">
                     <span className="font-semibold capitalize">{issue.type}</span>{" "}
                     <span className="text-muted-foreground">({issue.severity})</span> —{" "}
                     {issue.detail}
@@ -143,7 +143,7 @@ function QualityRow({ check }: { check: QualityCheckRecord }) {
             </ul>
           )}
           {check.notes && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="break-words text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
               <span className="font-semibold">Context:</span> {check.notes}
             </p>
           )}
@@ -206,7 +206,7 @@ export default function QualityHistoryTab() {
                   key={p}
                   type="button"
                   onClick={() => setProduct(p)}
-                  className={`h-7 px-2.5 rounded-md border text-xs font-semibold capitalize transition-colors ${
+                  className={`min-h-10 px-3 py-1.5 rounded-md border text-xs font-semibold capitalize transition-colors ${
                     product === p
                       ? "border-primary/60 bg-primary/10 text-primary"
                       : "border-border/60 text-muted-foreground hover:bg-muted/50"
@@ -223,7 +223,7 @@ export default function QualityHistoryTab() {
                   key={s}
                   type="button"
                   onClick={() => setStatus(s)}
-                  className={`h-7 px-2.5 rounded-md border text-xs font-semibold capitalize transition-colors ${
+                  className={`min-h-10 px-3 py-1.5 rounded-md border text-xs font-semibold capitalize transition-colors ${
                     status === s
                       ? "border-primary/60 bg-primary/10 text-primary"
                       : "border-border/60 text-muted-foreground hover:bg-muted/50"

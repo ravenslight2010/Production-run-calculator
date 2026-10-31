@@ -16,7 +16,8 @@
 // Web-only for now (manager approval UI is web-only per task scope).
 
 import { inventoryClientId } from "./inventoryShared";
-import { loadHistory, loadRunValues } from "./storage";
+import { loadRunValues } from "./storage";
+import { hydrateCompletedHistory, loadCanonicalCompletedHistory } from "./completedHistorySync";
 import { computeSummaryStats } from "./utils";
 import { withTempOverrides, type FormValues, type RunMeta } from "./types";
 import { computeEffectiveLineSpeed } from "./lineSpeed";
@@ -380,15 +381,12 @@ export async function reportRunInsightsAfterFinalize(
       }
     }
     if (scopes.size === 0) return;
+    await hydrateCompletedHistory([], () => {});
+    if (signal?.aborted) return;
 
     const stats: FinishedRunStat[] = [];
-    for (const r of todayRuns) {
-      if (!r.startedAt || !r.endedAt) continue;
-      const s = statFromRun(r, loadRunValues(r.id));
-      if (s) stats.push(s);
-    }
     const cutoff = Date.now() - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
-    for (const day of loadHistory()) {
+    for (const day of loadCanonicalCompletedHistory()) {
       for (const r of day.runs ?? []) {
         if (!r.startedAt || !r.endedAt || r.endedAt < cutoff) continue;
         const vals = day.runValues?.[r.id];

@@ -40,6 +40,8 @@ interface ApiEntry {
   casesPerLayer: number;
   preTunnelMin?: number;
   postTunnelMin?: number;
+  pressOvenMin?: number;
+  frontlineMin?: number;
 }
 
 const REQUIRED_NUMERIC_FIELDS = [
@@ -50,7 +52,7 @@ const REQUIRED_NUMERIC_FIELDS = [
   "casesPerLayer",
 ] as const;
 
-const OPTIONAL_NUMERIC_FIELDS = ["preTunnelMin", "postTunnelMin"] as const;
+const OPTIONAL_NUMERIC_FIELDS = ["preTunnelMin", "postTunnelMin", "pressOvenMin", "frontlineMin"] as const;
 
 // Normalize one entry: trim the name, coerce/clamp numbers to finite,
 // non-negative values with a sane cap. Returns null for malformed entries.
@@ -78,11 +80,13 @@ function normalizeEntry(raw: unknown): ApiEntry | null {
     if (!Number.isFinite(n) || n < 0 || n > 100000) return null;
     out[field] = n;
   }
-  // Optional tunnel fields — present only when explicitly set by the manager.
+  // Legacy outer times preserve their positive-only sentinel behavior. The new
+  // split settings allow explicit zero to disable either section.
   for (const field of OPTIONAL_NUMERIC_FIELDS) {
     if (r[field] !== undefined && r[field] !== null) {
       const n = Number(r[field]);
-      if (Number.isFinite(n) && n > 0 && n <= 100000) out[field] = n;
+      const allowsZero = field === "pressOvenMin" || field === "frontlineMin";
+      if (Number.isFinite(n) && (allowsZero ? n >= 0 : n > 0) && n <= 100000) out[field] = n;
     }
   }
   return out;
@@ -100,6 +104,8 @@ function toApiEntry(row: DieLineDefaultsRow): ApiEntry {
   };
   if (row.preTunnelMin != null) entry.preTunnelMin = row.preTunnelMin;
   if (row.postTunnelMin != null) entry.postTunnelMin = row.postTunnelMin;
+  if (row.pressOvenMin != null) entry.pressOvenMin = row.pressOvenMin;
+  if (row.frontlineMin != null) entry.frontlineMin = row.frontlineMin;
   return entry;
 }
 
@@ -195,6 +201,8 @@ router.post(
             casesPerLayer: entry.casesPerLayer,
             preTunnelMin: entry.preTunnelMin ?? null,
             postTunnelMin: entry.postTunnelMin ?? null,
+            pressOvenMin: entry.pressOvenMin ?? existing?.pressOvenMin ?? null,
+            frontlineMin: entry.frontlineMin ?? existing?.frontlineMin ?? null,
             updatedAt: nextRevision(existing?.updatedAt),
           };
           if (!existing) {
@@ -212,6 +220,8 @@ router.post(
               casesPerLayer: values.casesPerLayer,
               preTunnelMin: values.preTunnelMin,
               postTunnelMin: values.postTunnelMin,
+              pressOvenMin: values.pressOvenMin,
+              frontlineMin: values.frontlineMin,
               updatedAt: values.updatedAt,
             })
             .where(

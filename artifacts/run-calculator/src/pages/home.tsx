@@ -1,5 +1,26 @@
-import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer, useSyncExternalStore } from "react";
 import { DEFAULT_RUN_TO_TIME } from "../runToTime";
+import { canonicalOperationalRun, canonicalOperationalValues, canonicalOperationalSnapshotForPublish } from "../domain/canonicalOperationalState";
+import { browserStorage as localStorage } from "../adapters/browserRecordStore";
+import { subscribeFactoryDirectory, factoryDirectoryState } from "../factoryDirectory";
+import { FactoryDirectoryStatus } from "../components/FactoryDirectoryStatus";
+import { SharedRecordsStatus } from "../components/SharedRecordsStatus";
+import { readLegacyMasterDataHistory, resolveLegacyMasterDataHistory } from "../legacyMasterDataHistory";
+import { SharedMasterDataHistory } from "../components/SharedMasterDataHistory";
+import { useGuardedChangeConfirmation } from "../hooks/useGuardedChangeConfirmation";
+import { adoptGuardedPendingReferences } from "../guardedMasterDataAdoption";
+import { prepareSharedMasterDataChange, commitSharedMasterDataChange, fetchSharedMasterDataHistory, type SharedMasterDataCommand, type SharedMasterDataCategory, type SharedMasterDataOperation } from "../sharedMasterDataUndo";
+import { pendingProfileWriteCount } from "../profileServerSync";
+import { pendingRunTemplateCount } from "../runTemplatesRepository";
+import { pendingFactoryDataWriteCount } from "../factoryDataSync";
+import { omitArchivedSyncHistory } from "../sharedRecordMigration";
+import { currentRunCsvRows, historyRunCsvRows } from "../runCsvRows";
+import { reconcileRunTemplates } from "../runTemplatesRepository";
+import { FactoryDirectoryBoundary } from "../components/FactoryDirectoryBoundary";
+import { purgeLegacyPinCopies } from "../purgeLegacyPinCopies";
+import { reviewProfileImport } from "../importProfileReview";
+import { ImportReviewCancelledError } from "../importSafetyReview";
+import { reviewScheduleImport, scheduleAppliedValues } from "../importScheduleReview";
 import { useEvent } from "../hooks/useEvent";
 import { createFrameRepeater } from "../frameRepeater";
 import {
@@ -18,12 +39,21 @@ import {
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { consumeForegroundRecoveryResponse, isRetryableRecoveryStatus } from "../foregroundRecoveryResponse";
-import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
+import {
+  describeServerWinsConflictOutcome,
+  rebaseStaleSyncIntent,
+  selectUnchangedRunValueIdsForRecovery,
+  shouldResetLiveFormForSync,
+} from "../syncStaleBaseRecovery";
 import {
   clearPendingSyncIntent,
   loadPendingSyncIntent,
+  pendingSyncRecoveryCopyNotice,
+  saveRebasedPendingSyncIntent,
   savePendingSyncIntent,
+  type PendingSyncRecoveryCopyStatus,
 } from "../syncPendingIntent";
+import { shouldSendDistinctQueuedSyncWork } from "../syncPushQueue";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
@@ -61,6 +91,7 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
+import { hasUnsavedFormValueChanges } from "../domain/runSyncPolicy";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
@@ -85,7 +116,6 @@ import {
   STOP_REASONS_KEY,
   SUPERVISOR_PIN_KEY,
   DEFAULT_STOP_REASONS,
-  DEFAULT_SUPERVISOR_PIN,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
@@ -142,10 +172,10 @@ import {
 import {
   calculateDayTimeline,
   defaultDayBreaks,
-  estimatedRunDurationSec,
   isValidLocalTime,
   normalizeDayBreaks,
 } from "../dayTimeline";
+import { buildProgressAwareTimelineRuns } from "../timelineProgress";
 import {
   fmtElapsed,
   fmtTime,
@@ -166,7 +196,7 @@ import {
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { reconcileLiveScheduleSave } from "../scheduleLiveReconciliation";
-import { fetchWithTimeout } from "../fetchWithTimeout";
+import { fetchAndConsumeWithTimeout, fetchWithTimeout } from "../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import {
   buildMixRunSnapshotUpdates,
@@ -260,7 +290,6 @@ import {
   captureMasterDataSnapshot,
   recordMasterDataChange,
   loadChangeHistory,
-  undoChange,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
   migrateIngredientListsToCatalogIfNeeded,
@@ -304,16 +333,18 @@ import {
   selectInboundRunLifecycles,
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
+  shouldKeepLocalSeedPlaceholder,
   shouldHealFormFromStored,
   shouldKeepLocalRunLifecycle,
   shouldResetFormOnRunSwitch,
 } from "../domain/runSyncPolicy";
+import { getStockClaimScheduleAfterRebase } from "../domain/autoTrackClaimSchedule";
 import {
   getEqualPackagingProgress,
   loadPackagingProgress,
   overlayPackagingProgress,
   overlayPackagingProgressForRun,
-  reconcilePackagingProgress,
+  reconcilePackagingProgressSnapshot,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
   savePackagingProgress,
@@ -341,6 +372,7 @@ import {
   reconcileProfilesFromServer,
   reconcileProfilesFromServerDetailed,
   seedProfilesFromServer,
+  startProfileReconciliation,
   type ProfileReconcileResult,
 } from "../profileServerSync";
 import {
@@ -422,7 +454,7 @@ import { IngredientSelect, TypeDropdown } from "../components/SetupPickerControl
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
-import { updateSupervisorPin } from "../supervisorPinApi";
+import { updateSupervisorPin, verifySupervisorPin } from "../supervisorPinApi";
 import {
   buildFreezerPullPlan,
   isMatchingSurplusProduct,
@@ -430,13 +462,15 @@ import {
   type FreezerSurplusLedger,
 } from "@workspace/freezer-pull";
 import {
-  confirmFreezerSurplus,
+  confirmFreezerSurplusOutcome,
+  fetchFreezerSurplusConfirmations,
   fetchFreezerSurplus,
   getFreezerSurplusRemainingMs,
   recordFreezerSurplusAdjustment,
   replaceFreezerSurplusAllocation,
   type FreezerSurplusAdjustment,
   type FreezerSurplusAdjustmentInput,
+  type FreezerSurplusConfirmation,
 } from "../freezerSurplus";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
@@ -475,11 +509,15 @@ import {
 import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
 import { markCycleCountCounted } from "../cycleCount";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cachedProfileKeys } from "../profileCache";
+import { cachedProfileKeys, getProfileCacheGeneration, subscribeProfileCache } from "../profileCache";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
+import {
+  REAL_SOURCE_CAPTURE_UI_AVAILABLE,
+  fetchImportGoldRetentionReminderCounts,
+} from "../importGold";
 import {
   clearPendingImportOperation,
   createImportOperationId,
@@ -511,6 +549,7 @@ import {
 import FillMissingPanel from "../components/FillMissingPanel";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
 import ManagerActionQueue from "../components/ManagerActionQueue";
+import ImportTemplateDownloads from "../components/ImportTemplateDownloads";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ManagerAttentionDialog, {
   buildManagerAttentionItems,
@@ -520,9 +559,11 @@ import ManagerAttentionDialog, {
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { TouchSelect } from "../components/TouchOptionPicker";
+import { DialogLayerProvider } from "../components/ui/dialog";
+import { RunEstimateBasis } from "../components/RunEstimateBasis";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
-import { moveEntries, relocateValues } from "@workspace/schedule-move";
+import { moveEntries } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
 import {
   dismissSauceAutoTrackFailure as dismissSauceAutoTrackFailureState,
@@ -594,14 +635,18 @@ import {
   savePendingDuplicateReviews,
   resolvePendingDuplicateReview,
   duplicateReviewGroupKey,
+  fetchDeniedMerges,
+  restoreDeniedMerges,
   isCurrentMergeSuggestionRequest,
   type ReviewedMergeSuggestion,
   type MergeSuggestCategory,
+  type DeniedMerge,
 } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordMemorySample, recordPerformance } from "../performanceDiagnostics";
+import { startImportReviewTiming } from "../importReviewTiming";
 import {
   buildActiveRunIds,
   buildPersistedRunValues,
@@ -628,9 +673,11 @@ import {
   publishAutoTrackSchedule,
   subscribeAutoTrackCoordination,
   DOUGH_TIMER_CONTROL_EVENT,
+  adoptDoughTimerControls,
+  type DoughTimerControl,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, reportRejectedManualSectionErrors, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import { captureOperationalIdentityFence, capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, getOperationalDeviceId, operationalIntentBlocksLifecycle, operationalIntentBlocksLifecycleAdoption, queueOperationalIntent, reportRejectedManualSectionErrors, retainOperationalSnapshotReview, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
 import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
 import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
@@ -688,6 +735,7 @@ import {
 } from "@workspace/production-rules";
 import { saveProductionRules, deleteProductionRules } from "../productionRules";
 import { useMe } from "../useRole";
+import { hasRoleSurfaceAccess } from "../roleSurfaceAccess";
 import { getImportAccess } from "../importAccess";
 import {
   Factory,
@@ -766,6 +814,8 @@ import {
 import { useAuth } from "@/useAuth";
 import type { ImportParseResult } from "@/utils/runExcel";
 import { loadWorkbookWorkflow } from "@/workbookWorkflow";
+import { useMixedImportQueue } from "../hooks/useMixedImportQueue";
+import type { WorkbookFileSelection } from "../mixedImportQueue";
 import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
 import {
   PENDING_DUPLICATE_REVIEW_SCAN,
@@ -871,9 +921,13 @@ const loadDoughGuideImportDialog = () =>
     default: module.DoughGuideImportDialog,
   }));
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
+const loadImportGoldLabCard = () => import("@/components/ImportGoldLabCard");
+const loadImportGoldRetentionCard = () => import("@/components/ImportGoldRetentionCard");
+const loadImportGoldApprovalsCard = () => import("@/components/ImportGoldApprovalsCard");
 const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
 const loadScreenModeView = () => import("../components/ScreenModeView");
 const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
+const loadMixedImportReviewQueue = () => import("../components/MixedImportReviewQueue");
 const loadImportHistoryPanel = () => import("../components/ImportHistoryPanel");
 const loadMixReconcilePanel = () => import("../components/MixReconcilePanel");
 const loadGlanceOverlay = () => import("../components/GlanceOverlay");
@@ -921,11 +975,7 @@ const loadLiveSummaryTabContent = () =>
 //
 // Data-hygiene migrations below are kept — they are no-ops on empty data but still
 // heal devices that carry legacy data.
-applyPepTaxonomyMigrationIfNeeded();
-applyIngredientDedupeMigrationIfNeeded();
 applyMachineTimeDefaultsHealIfNeeded();
-applyStrayMixRecategorizeIfNeeded();
-applyMixCheeseOverlapDedupeIfNeeded();
 // applyMixSlotRecategorizeIfNeeded / applyProfileCleanupIfNeeded /
 // purgeOrphanedProfilesIfNeeded rewrite PROFILES, which are manager-only
 // writes (manage-profiles capability) — they run in a capability-gated effect
@@ -1526,7 +1576,7 @@ const ListPanel = ({
                       <ConfirmDeleteButton
                         onConfirm={() => { onRemove(item); setExpandedItem(null); }}
                         title={`Remove "${item}"?`}
-                        description="This removes it from your saved list. You can undo master-data changes from Change History."
+                        description="This removes it from the saved list. Device-only notices cannot undo shared changes."
                         confirmLabel="Remove"
                       >
                         <button type="button"
@@ -1778,18 +1828,9 @@ function emitProductionRunSaveOutcome(
   });
 }
 
-function loadCachedSupervisorPin(): string | null {
-  try {
-    return typeof window === "undefined"
-      ? null
-      : localStorage.getItem(SUPERVISOR_PIN_KEY);
-  } catch {
-    // The server-backed preference still works when this offline cache is blocked.
-    return null;
-  }
-}
-
 export default function Home() {
+  const directoryReady = useSyncExternalStore(subscribeFactoryDirectory,
+    () => factoryDirectoryState().status === "ready", () => false);
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const specImportOperationRef = useRef<string | null>(null);
   const specImportStartedAtRef = useRef<number | null>(null);
@@ -1803,6 +1844,8 @@ export default function Home() {
   }
   const premixImportOperationRef = useRef<string | null>(null);
   const cheeseImportOperationRef = useRef<string | null>(null);
+  const sauceGuideSourceKeyRef = useRef<string | undefined>(undefined);
+  const doughGuideSourceKeyRef = useRef<string | undefined>(undefined);
   const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
   useEffect(() => {
     visibleTabScheduler.start();
@@ -1828,10 +1871,8 @@ export default function Home() {
       scope: me.sandbox ? "sandbox" : "live",
       userId: me.userId,
     } : null);
-    setCompletedHistoryScope(me ? (me.sandbox ? "sandbox" : "live") : null);
     if (me) {
       const scopedHistory = loadCompletedHistoryForActiveScope();
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(scopedHistory)); } catch {}
       setHistory(scopedHistory);
     }
   }, [me?.sandbox, me?.userId]);
@@ -1907,6 +1948,7 @@ export default function Home() {
   // callers — e.g. the mergeUniverse memo via collectMergeSurfaces() — run
   // before the sync-ref block and would hit a TDZ ReferenceError otherwise.
   const dayStateRef = useRef(dayState);
+  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
   // One identity adapter feeds autosave, packaging progress, rollover, and
@@ -1921,7 +1963,16 @@ export default function Home() {
     if (!section) return;
     const owner = currentRunIdRef.current ? `local:${currentRunIdRef.current}` : "local";
     if (!claimManualSectionLock(runId, section, owner)) return;
-    const allBaseline = (baselineOverride ?? loadRunValues(runId) ?? {}) as unknown as Record<string, number>;
+    const canonicalRunValues = run.endedAt
+      ? adoptedCanonicalSnapshotRef.current?.runValues?.[runId]
+      : undefined;
+    // Prior-run tunnel drain is local until an operator explicitly changes a
+    // count. Rebase that manual correction on the last accepted server values,
+    // not the locally advanced drain counters, so the server's section fence
+    // can distinguish this edit from a concurrent remote change.
+    const allBaseline = (
+      canonicalRunValues ?? baselineOverride ?? loadRunValues(runId) ?? {}
+    ) as unknown as Record<string, number>;
     const baseline = Object.fromEntries(
       MANUAL_SECTION_FIELDS[section].map((field) => [field, Number(allBaseline[field] ?? 0)]),
     );
@@ -1979,12 +2030,14 @@ export default function Home() {
       skidsCompleted: number,
       casesOnCurrentSkid: number,
       manualOverrideUntil?: number,
+      beforeOverride?: Record<string, number>,
     ) => {
       packagingManager.persistManualProgress(
         runId,
         skidsCompleted,
         casesOnCurrentSkid,
         manualOverrideUntil,
+        beforeOverride,
       );
       invalidateOperationalCalcForPackagingRun(runId);
     },
@@ -2014,21 +2067,27 @@ export default function Home() {
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
   useEffect(() => {
     if (!me) return;
-    const updatePending = () => setPendingHistoryUploads(pendingCompletedHistoryCount());
+    const updatePending = () => {
+      setPendingHistoryUploads(pendingCompletedHistoryCount());
+      setHistory(loadCompletedHistoryForActiveScope());
+    };
     const reconcile = async () => {
       await flushCompletedHistoryOutbox();
       updatePending();
       await hydrateCompletedHistory(loadHistory(), (days) => {
-        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(days)); } catch {}
         setHistory(days);
       });
     };
     void reconcile();
     const onOnline = () => { void reconcile(); };
     window.addEventListener("online", onOnline);
+    window.addEventListener("focus", onOnline);
+    const poll = window.setInterval(onOnline, 60_000);
     window.addEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
     return () => {
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("focus", onOnline);
+      window.clearInterval(poll);
       window.removeEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
     };
   }, [me?.sandbox, me?.userId]);
@@ -2678,6 +2737,10 @@ export default function Home() {
     dough: "Dough", sauce: "Sauce", cheese: "Cheese", mix: "Mix",
   };
   function moveRecipeName(name: string, from: RecipeNameCategory, to: RecipeNameCategory) {
+    if (from !== to) void runGuardedMasterDataCommand({ action: "move", category: from, sources: [name], destination: to });
+  }
+  /** Retained only as a reference while canonical command coverage is verified; not a UI callback. */
+  function deprecatedLocalMoveRecipeName(name: string, from: RecipeNameCategory, to: RecipeNameCategory) {
     if (from === to) return;
     const before = captureMasterDataSnapshot();
     // Which physical preset map a category stores its rows in.
@@ -2741,7 +2804,7 @@ export default function Home() {
     noteChange("move", `Moved "${name}" from ${RECIPE_CATEGORY_LABELS[from]} to ${RECIPE_CATEGORY_LABELS[to]}`, before);
     toast({
       title: "Recipe moved",
-      description: `"${name}" is now under ${RECIPE_CATEGORY_LABELS[to]}. Undo from Change History if needed.`,
+      description: `"${name}" is now under ${RECIPE_CATEGORY_LABELS[to]}. Device-only change notices cannot undo this move.`,
     });
   }
 
@@ -2755,6 +2818,12 @@ export default function Home() {
   const [freezerSurplusLoaded, setFreezerSurplusLoaded] = useState(false);
   const [freezerSurplusBusy, setFreezerSurplusBusy] = useState(false);
   const [freezerSurplusError, setFreezerSurplusError] = useState<string | null>(null);
+  const [freezerSurplusConfirmations, setFreezerSurplusConfirmations] = useState<
+    FreezerSurplusConfirmation[]
+  >([]);
+  const [freezerSurplusConfirmationsLoaded, setFreezerSurplusConfirmationsLoaded] = useState(false);
+  const [freezerSurplusConfirmationsError, setFreezerSurplusConfirmationsError] =
+    useState<string | null>(null);
   const refreshFreezerSurplus = useCallback(async () => {
     try {
       const next = await fetchFreezerSurplus();
@@ -2769,21 +2838,72 @@ export default function Home() {
     void refreshFreezerSurplus();
   }, [refreshFreezerSurplus]);
 
-  async function confirmRunSurplus(run: RunMeta, cases: number, productionDate: string) {
+  useEffect(() => {
+    let active = true;
+    setFreezerSurplusConfirmations([]);
+    setFreezerSurplusConfirmationsLoaded(false);
+    setFreezerSurplusConfirmationsError(null);
+    if (!me) return () => { active = false; };
+
+    const refreshConfirmations = async () => {
+      try {
+        const next = await fetchFreezerSurplusConfirmations();
+        if (!active) return;
+        setFreezerSurplusConfirmations((current) => {
+          const byRun = new Map(current.map((confirmation) => [confirmation.runId, confirmation]));
+          for (const confirmation of next) byRun.set(confirmation.runId, confirmation);
+          return [...byRun.values()].slice(-500);
+        });
+        setFreezerSurplusConfirmationsError(null);
+      } catch (error) {
+        if (!active) return;
+        setFreezerSurplusConfirmationsError(
+          error instanceof Error
+            ? error.message
+            : "Couldn't load saved freezer surplus confirmations.",
+        );
+      } finally {
+        if (active) setFreezerSurplusConfirmationsLoaded(true);
+      }
+    };
+    const onOnline = () => { void refreshConfirmations(); };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshConfirmations();
+    };
+    void refreshConfirmations();
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [me?.userId, me?.sandbox]);
+
+  async function confirmRunSurplus(
+    run: RunMeta,
+    cases: number,
+    productionDate?: string,
+  ): Promise<FreezerSurplusConfirmation> {
     setFreezerSurplusBusy(true);
     setFreezerSurplusError(null);
     try {
-      const next = await confirmFreezerSurplus({
-        brand: run.brand,
-        flavor: run.flavor,
-        productionDate,
+      const confirmation = await confirmFreezerSurplusOutcome({
+        runId: run.id,
         cases,
+        ...(productionDate ? { productionDate } : {}),
       });
-      setFreezerSurplus(next);
+      setFreezerSurplusConfirmations((current) => [
+        confirmation,
+        ...current.filter((saved) => saved.runId !== confirmation.runId),
+      ].slice(-500));
+      // The receipt is the authoritative success. The ledger refresh is a
+      // separate best-effort read and must not delay or undo the confirmation.
+      void refreshFreezerSurplus();
+      return confirmation;
     } catch (error) {
-      setFreezerSurplusError(error instanceof Error ? error.message : "Couldn't confirm this surplus.");
       throw error;
-         } finally {
+    } finally {
       setFreezerSurplusBusy(false);
     }
   }
@@ -3126,34 +3246,52 @@ export default function Home() {
   // manager device performs the heal. Each is marker-guarded (no-op re-runs).
   const profileBootHealsRef = useRef(false);
   useEffect(() => {
-    if (!canManageProfiles || profileBootHealsRef.current) return;
+    if (!canManageProfiles || !directoryReady || profileBootHealsRef.current) return;
     profileBootHealsRef.current = true;
     applyMixSlotRecategorizeIfNeeded();
     applyProfileCleanupIfNeeded();
-  }, [canManageProfiles]);
+  }, [canManageProfiles, directoryReady]);
   // Orphan cleanup can write profile tombstones back to the server. Do not
   // treat a populated local Brands cache as authoritative: wait until the
-  // accepted sync merge has persisted its canonical Brands snapshot.
+  // authenticated directory read has supplied the canonical Brands snapshot.
   useEffect(() => {
     if (
-      !canManageProfiles ||
+      !canManageProfiles || !directoryReady ||
       !adoptedBrandsForProfilePurge ||
       adoptedBrandsForProfilePurge.length === 0
     ) {
       return;
     }
     purgeOrphanedProfilesIfNeeded(adoptedBrandsForProfilePurge);
-  }, [canManageProfiles, adoptedBrandsForProfilePurge]);
+  }, [canManageProfiles, directoryReady, adoptedBrandsForProfilePurge]);
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
   const canManageAllergens = hasCapability("manage-allergens");
   const canRecordQc = hasCapability("record-qc");
   const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
+  const importGoldRetentionReminders = useQuery({
+    queryKey: ["import-gold-retention-reminder-counts", me?.userId, me?.sandbox],
+    queryFn: fetchImportGoldRetentionReminderCounts,
+    enabled: (canManageStaff || canManageQc) && screenMode === null,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const goldCaptureEnabled = canManageStaff && REAL_SOURCE_CAPTURE_UI_AVAILABLE;
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
   const canReviewIncidents = hasCapability("review-incidents");
   const canManageFactorySettings = hasCapability("manage-factory-settings");
+  const canAccessQcWorkflow = hasRoleSurfaceAccess(
+    "qcWorkflow",
+    me?.capabilities ?? [],
+  );
+  useEffect(() => {
+    if (me && !canAccessQcWorkflow && activeTab === "quality") {
+      setActiveTab("run");
+    }
+  }, [activeTab, canAccessQcWorkflow, me, setActiveTab]);
   // Keep import/export controls aligned to their server-authorized commit paths,
   // rather than relying on the broad manage-staff-derived `isManager` alias.
   const {
@@ -3211,7 +3349,13 @@ export default function Home() {
   // name and hydrate their rows from the chosen recipe. We keep a name (case-
   // insensitive) → rows map for hydration and a sorted name list for the run-form
   // dropdowns.
-  const { items: doughRecipesList } = useNamedRecipes("dough");
+  const {
+    items: doughRecipesList,
+    hasData: hasDoughRecipesData,
+    isStale: areDoughRecipesStale,
+    ensureLoaded: ensureDoughRecipesLoaded,
+  } = useNamedRecipes("dough");
+  const profileApplyGenerationRef = useRef(0);
   const { items: sauceRecipesList } = useNamedRecipes("sauce");
   const serverDoughRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
@@ -3669,7 +3813,10 @@ export default function Home() {
   // queued candidate can finish its POST and fan its stale value into the
   // profile/run fan-out after the newer manager edit has already succeeded.
   const queueBatchWeightChanges = useCallback(
-    (entries: { name: string; lbs: number }[]): Promise<void> => {
+    (
+      entries: { name: string; lbs: number }[],
+      refreshBeforeWrite = false,
+    ): Promise<void> => {
       if (screenMode !== null) return Promise.resolve();
       const changes = normalizeBatchWeightChanges(entries);
       if (changes.length === 0) return batchWeightSaveChainRef.current;
@@ -3679,6 +3826,17 @@ export default function Home() {
       batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
         .then(async () => {
           const submitted = [...pendingBatchWeightChangesRef.current.values()];
+          if (refreshBeforeWrite) {
+            // Manager edits can follow another shared-data action that advanced
+            // the write epoch while this page's five-minute query stayed cached.
+            // Refresh immediately before the explicit write; the server fence
+            // still rejects any change that races after this canonical read.
+            const latest = await fetchIngredientBatchWeights();
+            cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+              ["ingredientBatchWeights"],
+              latest,
+            );
+          }
           const canonical = await saveIngredientBatchWeights(submitted);
           cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
             ["ingredientBatchWeights"],
@@ -4248,17 +4406,17 @@ export default function Home() {
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
+  const pinIdentityRef = useRef("");
+  const pinAttemptRef = useRef(0);
+  const [pinVerifying, setPinVerifying] = useState(false);
+  pinIdentityRef.current = `${me?.userId}:${me?.sandbox}`;
   // Managers (server role) always have supervisor access without entering the
   // PIN; the PIN remains for operators on shared, logged-in devices. An empty
   // facility PIN ("") means "no gate" — every signed-in user is a supervisor
   // (mirrors the mobile no-PIN unlocked state for parity). We resolve from the
   // live server value when loaded, else the offline cache, so a cleared PIN
   // unlocks here even before the query resolves (matching mobile's local read).
-  const resolvedPin =
-    typeof serverPin === "string"
-      ? serverPin
-      : loadCachedSupervisorPin();
-  const noFacilityPin = resolvedPin === "";
+  const noFacilityPin = serverPin?.configured === false;
   const isSupervisor =
     isManager ||
     serverRole === "supervisor" ||
@@ -4271,9 +4429,17 @@ export default function Home() {
   const [showFloorMode, setShowFloorMode] = useState(false);
   // Combined per-user "Alerts & Floor Mode" settings panel (header menu).
   const [showAlertSettings, setShowAlertSettings] = useState(false);
+  const [headerMoreMenuOpen, setHeaderMoreMenuOpen] = useState(false);
+  const openAlertSettingsAfterMenuCloseRef = useRef(false);
+  const queueAlertSettingsOpenAfterMenuClose = (source: "click" | "select") => {
+    openAlertSettingsAfterMenuCloseRef.current = true;
+    setHeaderMoreMenuOpen(false);
+  };
   // One durable inbox for manager work. This is deliberately separate from
   // account alert preferences and local form errors.
   const [showManagerAttention, setShowManagerAttention] = useState(false);
+  const [managerAttentionFocusDestination, setManagerAttentionFocusDestination] =
+    useState<"staff" | "incidents" | null>(null);
   const managerAttentionTriggerRef = useRef<HTMLButtonElement>(null);
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
@@ -4311,10 +4477,13 @@ export default function Home() {
   // PIN cleared on another device must survive a reload/offline session here, or
   // the stale non-empty cache would wrongly re-lock this device.
   useEffect(() => {
-    if (typeof serverPin === "string") {
-      try { localStorage.setItem(SUPERVISOR_PIN_KEY, serverPin); } catch {}
-    }
-  }, [serverPin]);
+    pinAttemptRef.current++;
+    setRole("operator");
+    setPinVerifying(false);
+    setPinInput("");
+    setPinError("");
+    purgeLegacyPinCopies();
+  }, [serverPin, me?.userId, me?.sandbox]);
 
   // ── Downtime / stoppage log ───────────────────────────────────────────────
   const [showStopDialog, setShowStopDialog] = useState(false);
@@ -4504,6 +4673,66 @@ export default function Home() {
   // ── Manage Lists dialog ────────────────────────────────────────────────────
   const mergeFormRef = useRef<HTMLDivElement | null>(null);
   const [showManageDialog, setShowManageDialog] = useState(false);
+  const manageDialogRef = useRef<HTMLDivElement | null>(null);
+  const manageDialogFocusables = useCallback((dialog: HTMLElement) =>
+    Array.from(dialog.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, [tabindex]',
+    )).filter((element) =>
+      element.tabIndex >= 0
+      && !element.matches(":disabled")
+      && !element.closest('[aria-hidden="true"], [inert], [hidden]')
+      && element.getClientRects().length > 0
+      && window.getComputedStyle(element).visibility !== "hidden",
+    ), []);
+  useEffect(() => {
+    if (!showManageDialog) return;
+    const dialog = manageDialogRef.current;
+    if (!dialog) return;
+    (manageDialogFocusables(dialog)[0] ?? dialog).focus();
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const active = document.activeElement;
+      const activeDialog = active instanceof Element
+        ? active.closest<HTMLElement>('[role="dialog"][aria-modal="true"]')
+        : null;
+      // A nested modal owns its own keyboard focus while it is open.
+      if (activeDialog && activeDialog !== dialog) return;
+      const focusables = manageDialogFocusables(dialog);
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      if (!dialog.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const keepFocusInside = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || dialog.contains(target)) return;
+      const targetDialog = target.closest<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      const targetPopup = target.closest(
+        '[role="menu"], [role="listbox"], [role="tree"], [role="grid"], [data-radix-popper-content-wrapper]',
+      );
+      if ((targetDialog && targetDialog !== dialog) || targetPopup) return;
+      (manageDialogFocusables(dialog)[0] ?? dialog).focus();
+    };
+    document.addEventListener("keydown", trapTab, true);
+    document.addEventListener("focusin", keepFocusInside, true);
+    return () => {
+      document.removeEventListener("keydown", trapTab, true);
+      document.removeEventListener("focusin", keepFocusInside, true);
+    };
+  }, [manageDialogFocusables, showManageDialog]);
   const [manageCategory, setManageCategory] = useState("brands");
   const [manageBrandFilter, setManageBrandFilter] = useState("");
   const [manageInput, setManageInput] = useState("");
@@ -4537,6 +4766,26 @@ export default function Home() {
   const [mergeSuggestError, setMergeSuggestError] = useState("");
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
   const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
+  const [ignoredMergePanelOpen, setIgnoredMergePanelOpen] = useState(false);
+  const [ignoredMergeFilter, setIgnoredMergeFilter] = useState<{
+    scopeKey: string;
+    query: string;
+  } | null>(null);
+  const [ignoredMergeState, setIgnoredMergeState] = useState<{
+    scopeKey: string;
+    pairs: DeniedMerge[];
+  } | null>(null);
+  const [ignoredMergeBusy, setIgnoredMergeBusy] = useState(false);
+  const [ignoredMergeError, setIgnoredMergeError] = useState("");
+  const [restoringIgnoredMergeKey, setRestoringIgnoredMergeKey] = useState("");
+  const [recentlyIgnoredMerge, setRecentlyIgnoredMerge] = useState<{
+    key: string;
+    scopeKey: string;
+    category: MergeSuggestCategory;
+    brand?: string;
+    pairs: DeniedMerge[];
+    status: "ignored" | "restoring" | "restored" | "error" | "save-error";
+  } | null>(null);
   // Checked suggestion groups for batch apply, keyed by target+sources (stable
   // across list re-renders; stale keys from removed suggestions are harmless
   // because counts intersect against the live list).
@@ -4620,10 +4869,37 @@ export default function Home() {
     setManageCategory("merge");
   }, []);
 
-  // Local (per-device) master-data change history for the undo trail.
+  // Legacy evidence and metadata-only session notices are not Undo receipts.
   const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
   const [undoBusy, setUndoBusy] = useState(false);
-  // Record a change (snapshot already taken before the edit) and refresh the list.
+  const [sharedHistoryRevision, setSharedHistoryRevision] = useState(0);
+  const { uiConfirm, confirmationDialog } = useGuardedChangeConfirmation(`${me?.userId}:${me?.sandbox}`, serverRole === "manager" && showManageDialog);
+  const legacyHistoryProblem = useMemo(() => showManageDialog && serverRole === "manager"
+    ? readLegacyMasterDataHistory().problem : null, [showManageDialog, serverRole, me?.userId, me?.sandbox, changeHistory]);
+  const sharedMutationBusyRef = useRef(false);
+  async function resolveLegacyHistoryAfterReview() {
+    if (undoBusy || serverRole !== "manager" || !canManageFactorySettings) return;
+    setUndoBusy(true);
+    const generation = getProfileCacheGeneration();
+    try {
+      if (!await uiConfirm({ title: "Discard device-only legacy snapshots?",
+        description: "This permanently removes all old Undo snapshots from this browser's legacy history only, including unreadable entries. Close older tabs first. It does not undo shared changes, clear pending edits, remove session notices or erase server history. Discard only after deciding this legacy evidence is no longer needed.",
+        confirmLabel: "Discard legacy snapshots" })) return;
+      // No snapshot or arbitrary browser key is sent. The scoped online read
+      // rechecks the manager's current session and administrative access.
+      await fetchSharedMasterDataHistory();
+      if (generation !== getProfileCacheGeneration()) throw new Error("The signed-in identity changed. Legacy evidence was retained.");
+      resolveLegacyMasterDataHistory();
+      setChangeHistory(loadChangeHistory());
+      toast({ title: "Legacy snapshots discarded", description: "Only this browser's old Undo history was removed. Pending work and server history were not changed." });
+    } catch (error) {
+      toast({ title: "Legacy resolution was not confirmed", description: error instanceof Error ? error.message : "Retry online after reviewing this device's evidence.", variant: "destructive" });
+    } finally { setUndoBusy(false); }
+  }
+  useEffect(() => {
+    setChangeHistory(loadChangeHistory());
+  }, [me?.userId, me?.sandbox]);
+  // No browser before-snapshots are captured or persisted by this compatibility path.
   const noteChange = useCallback(
     (type: MasterDataChangeType, description: string, before: Record<string, string>) => {
       recordMasterDataChange(type, description, before);
@@ -4631,6 +4907,79 @@ export default function Home() {
     },
     [],
   );
+
+  async function refreshGuardedMasterData(operation: SharedMasterDataOperation): Promise<void> {
+    const generation = getProfileCacheGeneration();
+    const originRunId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+    const originalFormValues = form.getValues();
+    const [, , , canonicalDay] = await Promise.all([
+      fetchFactoryData().then((data) => { if (generation === getProfileCacheGeneration()) hydrateFromServer(data); }),
+      reconcileProfilesFromServer(),
+      reconcileRunTemplates(),
+      fetchSchedulePayload(todayStr()),
+      invalidateMasterDataBootstrap(cycleCountQc),
+    ]);
+    if (generation !== getProfileCacheGeneration()) return;
+    reloadMasterData();
+    setMergedAwayTomb(loadMergedAway());
+    if (!canonicalDay.available) throw new Error("Canonical run references could not be refreshed.");
+    if (canonicalDay.payload) {
+      applySyncCallbackRef.current(canonicalDay.payload);
+      const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+      const remoteRun = canonicalDay.payload.dayState.runs.find((run) => run.id === currentId);
+      if (currentId && currentId === originRunId && remoteRun && !remoteRun.startedAt && !remoteRun.endedAt) {
+        // Adopt only the setup references named by the receipt. Keep every
+        // unrelated local form value and all live counters/timers unchanged.
+        const values = adoptGuardedPendingReferences({ date: todayStr(), originRunId, run: remoteRun, original: originalFormValues,
+          current: form.getValues(), canonical: canonicalDay.payload.runValues[currentId] ?? {}, operation });
+        if (values) {
+          lastFormRunIdRef.current = currentId;
+          form.reset(values, { keepDirty: true, keepTouched: true, keepErrors: true });
+          resetFieldArrays(values);
+        }
+      }
+    }
+    await refreshScheduledDays();
+    if (pendingProfileWriteCount() || pendingRunTemplateCount() || pendingFactoryDataWriteCount()) {
+      throw new Error("The server confirmed the change, but this device still has retained shared-record drafts. Those drafts were not rebased or discarded. Review pending edits before treating every local display as canonical.");
+    }
+  }
+
+  async function runGuardedMasterDataCommand(command: SharedMasterDataCommand): Promise<boolean> {
+    if (sharedMutationBusyRef.current || undoBusy) return false;
+    sharedMutationBusyRef.current = true; setUndoBusy(true);
+    const generation = getProfileCacheGeneration();
+    try {
+      if (serverRole !== "manager") throw new Error("A manager account is required for shared master-data changes.");
+      if (!canManageFactorySettings || !canManageInventory || !canManageProfiles) {
+        throw new Error("Shared master-data changes require factory-settings, inventory and profile permissions.");
+      }
+      if (pendingProfileWriteCount() || pendingRunTemplateCount() || pendingFactoryDataWriteCount()) {
+        throw new Error("This device has pending shared-record edits. Reconnect and resolve or finish those edits before starting a guarded change; pending work has not been discarded.");
+      }
+      const operation = await prepareSharedMasterDataChange(command);
+      if (operation.eligible === false && !await uiConfirm({
+        title: "This change cannot be undone here",
+        description: operation.unavailableReason ?? "Protected downstream records prevent guarded compensation.",
+        confirmLabel: "Apply without Undo",
+      })) return false;
+      if (generation !== getProfileCacheGeneration()) return false;
+      const receipt = await commitSharedMasterDataChange(operation);
+      if (generation !== getProfileCacheGeneration()) return false;
+      setSharedHistoryRevision((value) => value + 1);
+      try { await refreshGuardedMasterData(receipt); }
+      catch {
+        toast({ title: "Change committed; refresh incomplete", description: "The server recorded the change, but this device has not refreshed every canonical record. Reconnect and refresh before another edit.", variant: "destructive" });
+        return true;
+      }
+      toast({ title: receipt.status === "undone" ? "Already undone on the server" : "Shared change recorded",
+        description: receipt.status === "unavailable" ? "Protected dependencies make this change unavailable for Undo." : "The result is recorded in Shared change history." });
+      return true;
+    } catch (error) {
+      if (generation === getProfileCacheGeneration()) toast({ title: "Shared change not confirmed", description: error instanceof Error ? error.message : "Reconnect and review shared history before retrying.", variant: "destructive" });
+      return false;
+    } finally { sharedMutationBusyRef.current = false; setUndoBusy(false); }
+  }
 
   // ── One-time recipe-name consolidation into the server master-data pools ──
   // The run-form pickers union server pool names with legacy LOCAL name lists,
@@ -5092,6 +5441,62 @@ export default function Home() {
         return { category: "ingredient", universe: mergeFullUniverse };
     }
   }, [mergeCategory, mergeBfMode, mergeBfBrand, mergeUniverse, mergeFullUniverse]);
+  const ignoredMergeScopeKey = JSON.stringify([
+    mergeSuggestScope.category,
+    mergeSuggestScope.category === "flavor" ? mergeSuggestScope.brand?.trim().toLowerCase() ?? "" : "",
+  ]);
+  const scopedIgnoredMerges =
+    ignoredMergeState?.scopeKey === ignoredMergeScopeKey ? ignoredMergeState.pairs : [];
+  // A query is only visible in the scope where it was entered, so scope changes
+  // never show old rows under a stale category or flavor brand.
+  const ignoredMergeFilterQuery =
+    ignoredMergeFilter?.scopeKey === ignoredMergeScopeKey ? ignoredMergeFilter.query : "";
+  const visibleIgnoredMerges = useMemo(() => {
+    const query = ignoredMergeFilterQuery.trim().toLowerCase();
+    if (!query) return scopedIgnoredMerges;
+    return scopedIgnoredMerges.filter((pair) =>
+      pair.nameA.toLowerCase().includes(query) || pair.nameB.toLowerCase().includes(query),
+    );
+  }, [ignoredMergeFilterQuery, scopedIgnoredMerges]);
+
+  useEffect(() => {
+    if (!ignoredMergePanelOpen || !canManageProfiles) return;
+    const controller = new AbortController();
+    let active = true;
+    setIgnoredMergeState(null);
+    setIgnoredMergeBusy(true);
+    setIgnoredMergeError("");
+    void fetchDeniedMerges(
+      mergeSuggestScope.category,
+      mergeSuggestScope.brand,
+      controller.signal,
+    )
+      .then((pairs) => {
+        if (active) setIgnoredMergeState({ scopeKey: ignoredMergeScopeKey, pairs });
+      })
+      .catch((error) => {
+        if (active && !controller.signal.aborted) {
+          setIgnoredMergeError(
+            error instanceof Error && error.message.includes("invalid ignored-match list")
+              ? "The ignored-match list couldn't be read. Refresh and try again."
+              : "Couldn't load ignored matches. Refresh and try again.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIgnoredMergeBusy(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [
+    canManageProfiles,
+    ignoredMergePanelOpen,
+    ignoredMergeScopeKey,
+    mergeSuggestScope.brand,
+    mergeSuggestScope.category,
+  ]);
 
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. When sources are selected, rank by best similarity to any selected
@@ -5440,11 +5845,29 @@ export default function Home() {
       persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
     }
     const scope = mergeSuggestScope;
+    const scopeKey = ignoredMergeScopeKey;
+    const key = mergeSuggestKey(s);
     try {
-      await denyMerge(s.target, sources, scope.category, scope.brand);
+      const pairs = await denyMerge(s.target, sources, scope.category, scope.brand);
+      if (canManageProfiles) {
+        setRecentlyIgnoredMerge({
+          key,
+          scopeKey,
+          category: scope.category,
+          brand: scope.brand,
+          pairs,
+          status: "ignored",
+        });
+      }
     } catch {
-      // Non-fatal: the suggestion is already hidden for this session; it may
-      // reappear on a later scan if the deny didn't persist.
+      setRecentlyIgnoredMerge(canManageProfiles ? {
+        key,
+        scopeKey,
+        category: scope.category,
+        brand: scope.brand,
+        pairs: [],
+        status: "save-error",
+      } : null);
     }
     if (mergeCategory === "ingredients") {
       void resolvePendingDuplicateReview(
@@ -5454,7 +5877,68 @@ export default function Home() {
     }
   }
 
+  async function undoRecentlyIgnoredMerge() {
+    const recent = recentlyIgnoredMerge;
+    if (
+      !canManageProfiles ||
+      !recent ||
+      recent.scopeKey !== ignoredMergeScopeKey ||
+      recent.pairs.length === 0 ||
+      (recent.status !== "ignored" && recent.status !== "error")
+    ) return;
+
+    setRecentlyIgnoredMerge({ ...recent, status: "restoring" });
+    setRestoringIgnoredMergeKey(recent.key);
+    try {
+      const remaining = await restoreDeniedMerges(
+        recent.pairs,
+        recent.category,
+        recent.brand,
+      );
+      setIgnoredMergeState({ scopeKey: recent.scopeKey, pairs: remaining });
+      setRecentlyIgnoredMerge({ ...recent, status: "restored" });
+      setMergeSuggestNote("Match restored. Scan again to see it in suggestions.");
+    } catch {
+      setRecentlyIgnoredMerge({ ...recent, status: "error" });
+    } finally {
+      setRestoringIgnoredMergeKey("");
+    }
+  }
+
+  async function restoreIgnoredMerge(pair: DeniedMerge) {
+    const scope = mergeSuggestScope;
+    const scopeKey = ignoredMergeScopeKey;
+    const pairKey = [pair.nameA, pair.nameB].sort().join("::");
+    setRestoringIgnoredMergeKey(pairKey);
+    setIgnoredMergeError("");
+    try {
+      const remaining = await restoreDeniedMerges([pair], scope.category, scope.brand);
+      setIgnoredMergeState({ scopeKey, pairs: remaining });
+      setMergeSuggestNote("Match restored. Scan again to see it in suggestions.");
+    } catch (error) {
+      setIgnoredMergeError(
+        error instanceof Error && error.message.includes("invalid ignored-match list")
+          ? "The server couldn't confirm the restored match. Refresh and check its status."
+          : "Couldn't restore this match. Please retry; if it continues, refresh and try again.",
+      );
+    } finally {
+      setRestoringIgnoredMergeKey("");
+    }
+  }
+
   async function handleApplyMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
+    const target = (targetArg ?? mergeTarget).trim();
+    const sources = (sourcesArg ?? mergeSources).filter((name) => name.trim() && name.trim().toLowerCase() !== target.toLowerCase());
+    if (!sources.length || !target) { setMergeError("Choose source ingredients and a target."); return false; }
+    setMergeBusy(true); setMergeError("");
+    try {
+      const accepted = await runGuardedMasterDataCommand({ action: "merge", category: "ingredient", sources, target });
+      if (accepted) resetMergeForm();
+      return accepted;
+    } finally { setMergeBusy(false); }
+  }
+  /** Not a maintained UI callback. No new browser rollback evidence is captured. */
+  async function deprecatedLocalIngredientMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
     const srcs = sourcesArg ?? mergeSources;
     const tgt = targetArg ?? mergeTarget;
     const map = buildMergeMap(srcs, tgt);
@@ -5566,8 +6050,8 @@ export default function Home() {
       // Clear the merge form. The panel stays open so the user can apply more
       // suggestions.
       resetMergeForm();
-      // Record the merge in the local undo trail (no-op-safe: skipped if nothing
-      // actually changed). Recorded last so a failed merge above never logs.
+      // Record a metadata-only session notice, not a reversible Undo receipt.
+      // Recorded last so a failed merge above never logs.
       noteChange(
         "merge",
         `Merged ${srcs.filter((s) => s.trim()).map((s) => `"${s}"`).join(", ")} into "${tgt}"`,
@@ -5659,7 +6143,19 @@ export default function Home() {
   // Apply a brand or flavor merge from the manual picker, then push the merged
   // payload (with its tombstones) immediately so an incoming sync-pull can't
   // re-add the merged-away names via the additive union — mirrors handleApplyMerge.
-  async function handleApplyBrandFlavorMerge(
+  async function handleApplyBrandFlavorMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
+    const target = (targetArg ?? mergeTarget).trim();
+    const sources = (sourcesArg ?? mergeSources).filter((name) => name.trim() && name.trim().toLowerCase() !== target.toLowerCase());
+    if (!sources.length || !target) { setMergeError("Choose source names and a target."); return false; }
+    setMergeBusy(true); setMergeError("");
+    try {
+      const accepted = await runGuardedMasterDataCommand({ action: "merge", category: mergeBfMode === "brands" ? "brand" : "flavor",
+        sources, target, ...(mergeBfMode === "flavors" ? { brand: mergeBfBrand } : {}) });
+      if (accepted) resetMergeForm();
+      return accepted;
+    } finally { setMergeBusy(false); }
+  }
+  async function deprecatedLocalBrandFlavorMerge(
     sourcesArg?: string[],
     targetArg?: string,
   ): Promise<boolean> {
@@ -5773,7 +6269,18 @@ export default function Home() {
   // inventory — it only re-points recipe-name selection fields, folds the name
   // list + recipe presets, and tombstones the merged-away names. Mirrors
   // handleApplyMerge's snapshot → rewrite → refresh → push → note flow.
-  async function handleApplyRecipeNameMerge(
+  async function handleApplyRecipeNameMerge(category: RecipeNameMergeCategory, sourcesArg?: string[], targetArg?: string): Promise<boolean> {
+    const target = (targetArg ?? mergeTarget).trim();
+    const sources = (sourcesArg ?? mergeSources).filter((name) => name.trim() && name.trim().toLowerCase() !== target.toLowerCase());
+    if (!sources.length || !target) { setMergeError("Choose source recipes and a target."); return false; }
+    setMergeBusy(true); setMergeError("");
+    try {
+      const accepted = await runGuardedMasterDataCommand({ action: "merge", category: category === "mixes" ? "mix" : category, sources, target });
+      if (accepted) resetMergeForm();
+      return accepted;
+    } finally { setMergeBusy(false); }
+  }
+  async function deprecatedLocalRecipeNameMerge(
     category: RecipeNameMergeCategory,
     sourcesArg?: string[],
     targetArg?: string,
@@ -6022,6 +6529,16 @@ export default function Home() {
   // local references, since those were cleared and tombstoned above.
   async function handleRemoveStaleReference(name: string): Promise<void> {
     if (!isRecipeNameCategory) return;
+    if ([...serverDoughNames, ...serverSauceNames, ...serverCheeseNames, ...serverMixNames]
+      .some((candidate) => candidate.trim().toLowerCase() === name.trim().toLowerCase())) {
+      toast({ title: "Review this recipe in its own section", description: "This is a real shared recipe, not a stale name reference.", variant: "destructive" });
+      return;
+    }
+    const category = mergeCategory as RecipeNameMergeCategory;
+    await runGuardedMasterDataCommand({ action: "remove", category: category === "mixes" ? "mix" : category, sources: [name] });
+  }
+  async function deprecatedLocalRemoveStaleReference(name: string): Promise<void> {
+    if (!isRecipeNameCategory) return;
     const category = mergeCategory as RecipeNameMergeCategory;
     const nameCi = name.trim().toLowerCase();
     const poolCi = new Set(
@@ -6095,42 +6612,27 @@ export default function Home() {
     if (cat === "brandflavor" && !mergeBfBrand && brands.length > 0) setMergeBfBrand(brands[0]);
   }
 
-  // Undo a master-data change (and every change made after it). Restores the
-  // entry's before-snapshot, refreshes every React surface, and re-pushes the
-  // restored master data to the server so the rollback propagates (and merged-
-  // away names don't get resurrected by the additive sync union).
+  // Keep compatibility consumers fail-closed. Device-only evidence cannot
+  // authorize any local restore, live-state push, or server compensation.
   async function handleUndoChange(entry: MasterDataChange) {
-    const list = loadChangeHistory();
-    const idx = list.findIndex((e) => e.id === entry.id);
-    const discarded = idx === -1 ? [] : list.slice(0, idx + 1);
-    const hasMerge = discarded.some((e) => e.type === "merge");
-    const warn = hasMerge
-      ? "\n\nNote: this reverses the ingredient names and lists, but does NOT un-fold any inventory stock that was combined by a merge. Re-check stock in Inventory."
-      : "";
-    const extra = discarded.length - 1;
-    const tail = extra > 0 ? ` and ${extra} later change${extra === 1 ? "" : "s"}` : "";
-    if (!window.confirm(`Undo "${entry.description}"${tail}?${warn}`)) return;
-    setUndoBusy(true);
-    try {
-      const ok = undoChange(entry.id);
-      if (!ok) {
-        setChangeHistory(loadChangeHistory());
-        return;
-      }
-      refreshAfterMerge();
-      setChangeHistory(loadChangeHistory());
-      try {
-        await pushTodayCanonical(buildSyncPayload(loadDayState()));
-      } catch {
-        // Non-fatal: the local restore already happened; tombstones back it up.
-      }
-    } finally {
-      setUndoBusy(false);
-    }
+    toast({
+      title: "Undo unavailable",
+      description: entry.evidence === "session-only"
+        ? "This notice is not a server-confirmed Undo receipt. Imports and profile repairs use their own guarded history."
+        : "This is non-portable legacy evidence, not shared Undo. Its original data remains on this device; no changes were restored.",
+      variant: "destructive",
+    });
   }
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  useEffect(() => {
+    if (!canManageFactorySettings && showScheduleDialog) {
+      setShowScheduleDialog(false);
+    }
+  }, [canManageFactorySettings, showScheduleDialog]);
+  // Automatic blank placeholders are device-local, not shared planned runs.
+  const todayPlannedRunCount = dayState.runs.filter((run) => !isPristineSeedRun(run)).length;
   const {
     showImportDialog, setShowImportDialog, importResult, setImportResult, importInputRef, scheduleImportInputRef,
     showSpecImport, setShowSpecImport, specImportLoading, setSpecImportLoading, specImportApplying, setSpecImportApplying, specImportError, setSpecImportError, specImportPrepared, setSpecImportPrepared, specImportProgress, setSpecImportProgress, specImportInputRef,
@@ -6176,6 +6678,8 @@ export default function Home() {
   const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
+  const scheduleEditorReviewIdentityRef = useRef("");
+  scheduleEditorReviewIdentityRef.current = JSON.stringify([scheduleEditorRuns, scheduleEditorRunValues]);
   const [scheduleEditorBreaks, setScheduleEditorBreaks] = useState<DayBreaks>(() => defaultDayBreaks());
   const [scheduleBreaksExpanded, setScheduleBreaksExpanded] = useState(false);
   const scheduleBreakSummary = useMemo(
@@ -6194,11 +6698,16 @@ export default function Home() {
   const [scheduleMove, setScheduleMove] = useState<{ from: string; runId: string | null } | null>(null);
   const [scheduleMoveDate, setScheduleMoveDate] = useState("");
   const [scheduleMoving, setScheduleMoving] = useState(false);
-  const scheduleMoveCleanupRef = useRef<{
-    fromDate: string;
-    toDate: string;
-    movedIds: string[];
+  const [scheduleSwapAvailability, setScheduleSwapAvailability] = useState<{
+    from: string;
+    to: string;
+    sourceScheduled: boolean;
+    destinationScheduled: boolean;
+    canSwap: boolean;
+    reason: string | null;
+    checking?: boolean;
   } | null>(null);
+  const scheduleSwapCheckRef = useRef(0);
 
   // ── Back-button trap (Android / PWA) ──────────────────────────────────────
   // Priority: close any open overlay first, then unwind tab history, then stay.
@@ -6210,6 +6719,8 @@ export default function Home() {
     if (showEditReasonsDialog)  { setShowEditReasonsDialog(false);  return; }
     if (showManageDialog)       { setShowManageDialog(false);       return; }
     if (showScheduleDialog)     { setShowScheduleDialog(false); setScheduleView("list"); return; }
+    if ((showImportDialog || showSpecImport || showPremixImport || showShippingImport ||
+      showSauceGuideImport || showDoughGuideImport || showCheeseImport) && !canCloseWorkbookReview()) return;
     if (closeTopmostImportDialog([
       { open: showImportDialog, close: () => setShowImportDialog(false) },
       { open: showSpecImport, close: () => setShowSpecImport(false) },
@@ -6464,6 +6975,7 @@ export default function Home() {
     payload: SyncPayload | null;
     available: boolean;
     snapshotId?: string;
+    revision?: number;
   }> {
     try {
       const res = date === todayStr()
@@ -6471,10 +6983,12 @@ export default function Home() {
         : await fetchWithTimeout(`/api/sync/${date}?today=${todayStr()}`, { cache: "no-store" }, 10_000);
       if (!res.ok) return { payload: null, available: false };
       const payload = await res.json() as SyncPayload | null;
+      const parsedRevision = Number(res.headers.get("X-Sync-Canonical-Revision") ?? 0);
       return {
         payload: payload?.dayState ? payload : null,
         available: true,
         snapshotId: res.headers.get("X-Sync-Snapshot") ?? undefined,
+        revision: Number.isSafeInteger(parsedRevision) && parsedRevision >= 0 ? parsedRevision : 0,
       };
     } catch {
       return { payload: null, available: false };
@@ -6486,18 +7000,71 @@ export default function Home() {
       setScheduledDays(normalizeScheduledDays(d));
     } catch {}
   }
-  // Move a whole scheduled day (sel "all") or a single run (sel.runId) to
-  // another future date or today's live plan. The live target is read from the
-  // canonical today row, then written through the normal today endpoint so its
-  // additive/tombstone/LWW protections and SSE peers remain in the loop.
-  // Target is written before the source is trimmed/deleted: a partial failure
-  // leaves the source intact and the move panel actionable instead of losing it.
+  async function refreshScheduleAfterMutation(fromDate: string, toDate: string) {
+    await refreshScheduledDays();
+    const today = todayStr();
+    if (fromDate === today || toDate === today) {
+      const canonicalToday = await fetchSchedulePayload(today);
+      if (canonicalToday.payload) applySyncCallbackRef.current(canonicalToday.payload);
+    }
+  }
+  async function checkScheduleSwapEligibility(from: string, to: string) {
+    const checkId = ++scheduleSwapCheckRef.current;
+    setScheduleSwapAvailability(null);
+    if (!from || !to || from === to) return;
+    const localToday = todayStr();
+    const localSourceExists = from === localToday || scheduledDays.some((day) => day.date === from);
+    const localDestinationExists = to === localToday || scheduledDays.some((day) => day.date === to);
+    setScheduleSwapAvailability({
+      from,
+      to,
+      sourceScheduled: localSourceExists,
+      destinationScheduled: localDestinationExists,
+      canSwap: false,
+      reason: null,
+      checking: true,
+    });
+    try {
+      const query = new URLSearchParams({ sourceDate: from, destinationDate: to });
+      const response = await fetch(`/api/sync/schedule-swap-eligibility?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("swap eligibility unavailable");
+      const result = await response.json() as {
+        sourceScheduled?: boolean;
+        destinationScheduled?: boolean;
+        canSwap?: boolean;
+        reason?: string | null;
+      };
+      if (checkId !== scheduleSwapCheckRef.current) return;
+      setScheduleSwapAvailability({
+        from,
+        to,
+        sourceScheduled: result.sourceScheduled === true,
+        destinationScheduled: result.destinationScheduled === true,
+        canSwap: result.canSwap === true,
+        reason: typeof result.reason === "string" ? result.reason : null,
+        checking: false,
+      });
+    } catch {
+      if (checkId !== scheduleSwapCheckRef.current) return;
+      setScheduleSwapAvailability({
+        from,
+        to,
+        sourceScheduled: localSourceExists,
+        destinationScheduled: localDestinationExists,
+        canSwap: false,
+        reason: "eligibility-unavailable",
+        checking: false,
+      });
+    }
+  }
+  // Run moves and swaps use server transactions: a lost response can be
+  // reconciled by reloading canonical dates without replaying a second write.
   async function performScheduleMove(fromDate: string, sel: "all" | { runId: string }, toDate: string): Promise<boolean> {
     setScheduleError(null);
     const today = todayStr();
     if (!toDate || toDate === fromDate) return false;
-    if (fromDate <= today || toDate < today) {
-      setScheduleError("Choose a future scheduled day and today or a future date.");
+    if (fromDate < today || toDate < today) {
+      setScheduleError("Choose today or a future date.");
       return false;
     }
     const sourceFetch = await fetchSchedulePayload(fromDate);
@@ -6510,6 +7077,12 @@ export default function Home() {
       setScheduleError("That scheduled day is no longer available. Refresh and try again.");
       return false;
     }
+    const targetResult = await fetchSchedulePayload(toDate);
+    if (!targetResult.available) {
+      setScheduleError("Couldn't load the destination plan. The source is unchanged; check your connection and try again.");
+      return false;
+    }
+    const destinationRuns = targetResult.payload?.dayState?.runs ?? [];
     let ids: string[] | "all";
     if (sel === "all") ids = "all";
     else {
@@ -6519,13 +7092,7 @@ export default function Home() {
       }
       ids = [sel.runId];
     }
-    const targetResult = await fetchSchedulePayload(toDate);
-    if (!targetResult.available) {
-      setScheduleError("Couldn't load the destination plan. The source is unchanged; check your connection and try again.");
-      return false;
-    }
-    const tgt = targetResult.payload;
-    const { source, target, idMap } = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId);
+    const { idMap } = moveEntries(src.dayState.runs, destinationRuns, ids, genId);
     if (idMap.length === 0) {
       setScheduleError("There were no runs to move. Refresh and try again.");
       return false;
@@ -6546,121 +7113,90 @@ export default function Home() {
       );
       return false;
     }
-    const vals = relocateValues(
-      (src.runValues ?? {}) as Record<string, FormValues>,
-      (tgt?.runValues ?? {}) as Record<string, FormValues>,
-      idMap,
-    );
-    const stamps = relocateValues(
-      src.runValuesUpdatedAt ?? {},
-      tgt?.runValuesUpdatedAt ?? {},
-      idMap,
-    );
-    const packaging = relocateValues(
-      src.packagingProgress ?? {},
-      tgt?.packagingProgress ?? {},
-      idMap,
-    );
-    const base = tgt ?? src;
-    const targetPayload: SyncPayload = {
-      ...base,
-      // A move is built from a canonical read, so send it as a complete
-      // merge. Reusing a cached partial-sync baseSnapshotId makes an otherwise
-      // valid move fall back when the normal live sync advances that snapshot
-      // between the read and this write.
-      syncVersion: 1,
-      completeness: "complete",
-      baseSnapshotId: targetResult.snapshotId,
-      dayState: {
-        ...(base.dayState ?? src.dayState),
-        runs: target,
-        date: toDate,
-        resetAt: writeDayResetAt(toDate, today, (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()),
-      },
-      runValues: vals.target,
-      runValuesUpdatedAt: stamps.target,
-      packagingProgress: packaging.target,
-    };
-    const selectedIds = idMap.map(({ from }) => from);
-    const pendingCleanup = scheduleMoveCleanupRef.current;
-    const retryingCleanup = !!pendingCleanup &&
-      pendingCleanup.fromDate === fromDate &&
-      pendingCleanup.toDate === toDate &&
-      pendingCleanup.movedIds.length === selectedIds.length &&
-      pendingCleanup.movedIds.every((id) => selectedIds.includes(id));
-    if (!retryingCleanup) {
-      let canonicalTarget: { body: unknown; stale: boolean };
-      try {
-        const tRes = await fetch(
-          toDate === today
-            ? `/api/sync/today?today=${today}&epoch=${getStoredResetEpoch()}`
-            : `/api/sync/${toDate}?today=${today}&epoch=${getStoredResetEpoch()}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: targetPayload }),
-          },
-        );
-        canonicalTarget = await consumeCanonicalSyncWriteResponse(tRes, toDate === today);
-        const canonicalTargetBody = canonicalTarget.body as { data?: unknown; partialFallback?: boolean } | null;
-        if (!tRes.ok || canonicalTarget.stale || canonicalTargetBody?.partialFallback || !canonicalTargetBody?.data) {
-          setScheduleError(
-            canonicalTarget.stale
-              ? "The destination was reset before the move completed. Refresh and try again."
-              : "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
-          );
-          return false;
-        }
-      } catch {
-        setScheduleError(
-          "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
-        );
+    try {
+      const response = await fetch("/api/sync/schedule-move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceDate: fromDate,
+          destinationDate: toDate,
+          sourceRevision: sourceFetch.revision ?? 0,
+          destinationRevision: targetResult.revision ?? 0,
+          resetEpoch: getStoredResetEpoch(),
+          runIds: ids,
+          senderId: clientId.current,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { code?: string };
+      if (!response.ok) {
+        setScheduleError(response.status >= 500
+          ? "The move result is uncertain. Refresh both dates before retrying; do not repeat it until confirmed."
+          : result.code === "SCHEDULE_REVISION_CONFLICT"
+            ? "A schedule changed before the move was saved. No changes were made; refresh and choose again."
+            : result.code === "SCHEDULE_RUN_ID_COLLISION"
+              ? "A run with the same ID is already on the destination date. The source was left unchanged."
+              : result.code === "SCHEDULE_RUN_ALREADY_STARTED"
+                ? "A run that has started cannot be moved."
+                : "The move was rejected. No changes were made; refresh and try again.");
+        await refreshScheduleAfterMutation(fromDate, toDate);
         return false;
       }
-      // If the second write fails, the next click can finish source cleanup
-      // without writing the already-canonical destination a second time.
-      scheduleMoveCleanupRef.current = { fromDate, toDate, movedIds: selectedIds };
-    }
-    try {
-      if (source.length === 0) {
-        const deleteRes = await fetch(`/api/sync/${fromDate}?today=${today}`, { method: "DELETE" });
-        if (!deleteRes.ok) {
-          setScheduleError("The run was added to today's plan, but the future source could not be removed. Retry Move to finish.");
-          return false;
-        }
-      } else {
-        const sourcePayload: SyncPayload = {
-          ...src,
-          dayState: {
-            ...src.dayState,
-            runs: source,
-            date: fromDate,
-          },
-          syncVersion: 1,
-          completeness: "complete",
-          baseSnapshotId: sourceFetch.snapshotId,
-          runValues: vals.source,
-          runValuesUpdatedAt: stamps.source,
-          packagingProgress: packaging.source,
-        };
-        const sRes = await fetch(`/api/sync/${fromDate}?today=${today}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ payload: sourcePayload }),
-        });
-        const sourceResult = await consumeCanonicalSyncWriteResponse(sRes, false);
-        const sourceResultBody = sourceResult.body as { partialFallback?: boolean } | null;
-        if (!sRes.ok || sourceResult.stale || sourceResultBody?.partialFallback) {
-          setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
-          return false;
-        }
-      }
     } catch {
-      setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
+      setScheduleError("The move could not be confirmed. Refresh both dates before trying again.");
+      await refreshScheduleAfterMutation(fromDate, toDate);
       return false;
     }
-    scheduleMoveCleanupRef.current = null;
-    await refreshScheduledDays();
+    await refreshScheduleAfterMutation(fromDate, toDate);
+    setScheduleSwapAvailability(null);
+    setScheduleError(null);
+    return true;
+  }
+
+  async function performScheduleSwap(fromDate: string, toDate: string): Promise<boolean> {
+    setScheduleError(null);
+    const sourceResult = await fetchSchedulePayload(fromDate);
+    const destinationResult = await fetchSchedulePayload(toDate);
+    if (
+      !sourceResult.available || !destinationResult.available
+      || !sourceResult.payload || !destinationResult.payload
+    ) {
+      setScheduleError("Both scheduled days must still be available. No changes were made; refresh and try again.");
+      await refreshScheduledDays();
+      return false;
+    }
+    try {
+      const response = await fetch("/api/sync/schedule-swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceDate: fromDate,
+          destinationDate: toDate,
+          sourceRevision: sourceResult.revision ?? 0,
+          destinationRevision: destinationResult.revision ?? 0,
+          resetEpoch: getStoredResetEpoch(),
+          senderId: clientId.current,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { code?: string };
+      if (!response.ok) {
+        setScheduleError(response.status >= 500
+          ? "The swap result is uncertain. Refresh both dates before retrying; do not repeat it until confirmed."
+          : result.code === "TODAY_SWAP_NOT_ELIGIBLE"
+          ? "Today's plan can no longer be swapped. You can append the runs or cancel."
+          : result.code === "SCHEDULE_REVISION_CONFLICT"
+            ? "A schedule changed before the swap. No changes were made; refresh and choose again."
+            : "The swap was not saved. No changes were made; refresh and try again.");
+        await refreshScheduleAfterMutation(fromDate, toDate);
+        await checkScheduleSwapEligibility(fromDate, toDate);
+        return false;
+      }
+    } catch {
+      setScheduleError("The swap could not be confirmed. Refresh both dates before trying again.");
+      await refreshScheduleAfterMutation(fromDate, toDate);
+      return false;
+    }
+    await refreshScheduleAfterMutation(fromDate, toDate);
+    setScheduleSwapAvailability(null);
     setScheduleError(null);
     return true;
   }
@@ -6738,6 +7274,7 @@ export default function Home() {
         peerReceivedAt?: number;
         peerResponseBytes?: number;
         allowForegroundCanonicalFormReset?: boolean;
+        acceptCanonicalRunValueIds?: string[];
       },
     ) => void
   >(() => {});
@@ -6767,9 +7304,6 @@ export default function Home() {
   // can loop against the missing-row fallback and lifecycle commands can race
   // a row that does not exist yet.
   const completeSyncEstablishedRef = useRef(false);
-  // Exact server snapshot used as the base for peer partial frames. Never
-  // substitute the locally merged React state here.
-  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
@@ -6806,13 +7340,23 @@ export default function Home() {
   // response is not terminal until this callback has installed its snapshot
   // and receipt, so ordinary snapshot writes and auto-track cannot race it.
   const operationalCanonicalRevisionRef = useRef(0);
+  const operationalRevisionScopeRef = useRef("");
   const operationalServerTimeOffsetRef = useRef(0);
   const operationalAdoptionInFlightRef = useRef(0);
   const operationalAdoptionGenerationRef = useRef(0);
+  function currentOperationalRevision(): number {
+    const scope = `${me?.sandbox ? "sandbox" : "live"}:${me?.userId ?? "signed-out"}:${todayStr()}:${getStoredResetEpoch()}`;
+    if (operationalRevisionScopeRef.current !== scope) {
+      operationalRevisionScopeRef.current = scope;
+      operationalCanonicalRevisionRef.current = 0;
+    }
+    return operationalCanonicalRevisionRef.current;
+  }
+  currentOperationalRevision();
   function adoptOperationalRevision(revision: unknown): void {
     if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) return;
     operationalCanonicalRevisionRef.current = Math.max(
-      operationalCanonicalRevisionRef.current,
+      currentOperationalRevision(),
       revision,
     );
   }
@@ -6856,6 +7400,36 @@ export default function Home() {
     serverCalcReceiptRef.current = receipt;
     setServerCalcReceipt(receipt);
   }
+  const confirmStationActivity = useCallback(async (station: "freezeTunnel" | "warehouse") => {
+    if (!isOnline || !currentRunId) {
+      throw new Error("Connect to the production network and select the active run to confirm activity.");
+    }
+    const response = await fetch(
+      `/api/sync/station-activity?today=${encodeURIComponent(todayStr())}&epoch=${getStoredResetEpoch()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: `line-map:${crypto.randomUUID()}`,
+          runId: currentRunId,
+          station,
+          senderId: getOperationalDeviceId(),
+        }),
+      },
+    );
+    const body = await response.json().catch(() => null) as {
+      ok?: boolean;
+      error?: string;
+      snapshotId?: string;
+      operationalProjection?: OperationalProjection | null;
+    } | null;
+    if (!response.ok || body?.ok !== true || !body.snapshotId) {
+      throw new Error(body?.error ?? "Activity could not be confirmed. Refresh and try again.");
+    }
+    if (body.operationalProjection) {
+      adoptOperationalProjection(body.operationalProjection, body.snapshotId);
+    }
+  }, [currentRunId, isOnline]);
   function adoptServerCalcReceipt(
     serverCalc: { runId: string; calc: Calc } | null | undefined,
     snapshotId: string | undefined,
@@ -6932,6 +7506,11 @@ export default function Home() {
     setOperationalIntentCanonicalAdopter(async (data, intent, outcome) => {
       const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
       operationalAdoptionInFlightRef.current += 1;
+      if (typeof intent.canonicalRevision === "number"
+        && intent.canonicalRevision < currentOperationalRevision()) {
+        operationalAdoptionInFlightRef.current -= 1;
+        return;
+      }
       setAutoTrackBlocked(true);
       setAutoTrackWakeRebaseReason(null);
       adoptOperationalRevision(intent.canonicalRevision);
@@ -6960,18 +7539,8 @@ export default function Home() {
         throw new Error("Operational command response did not include a canonical snapshot");
       }
       const payload = data as SyncPayload;
-      const acceptedFinalization =
-        outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
-      const acceptedStockStart =
-        outcome === "accepted"
-        && intent.action === "lifecycle"
-        && intent.lifecycle === "start"
-        && payload.runValues[intent.runId]?.applicatorStockInitialized === true;
-      if (outcome === "accepted" && !acceptedFinalization && intent.action !== "correction" && !acceptedStockStart) {
-        applySyncCallbackRef.current(payload);
-        adoptReceipt();
-        adoptionSucceeded = true;
-        return;
+      if (intent.action === "control" && intent.control?.kind === "dough-timer") {
+        adoptDoughTimerControls(payload.doughTimerControls);
       }
       if (
         outcome !== "accepted"
@@ -6985,7 +7554,7 @@ export default function Home() {
         adoptionSucceeded = true;
         return;
       }
-      // A finalization/review/rebase response is authoritative for the command it resolves,
+      // An accepted/review/rebase response is authoritative for the command it resolves,
       // even when the rejected browser edit minted a newer LWW stamp. Restore
       // only that command's lifecycle/correction fields before ordinary inbound
       // reconciliation, then feed the ordinary path the preserved hybrid so it
@@ -7086,14 +7655,19 @@ export default function Home() {
       scope: me.sandbox ? "sandbox" : "live",
       userId: me.userId,
     };
+    const controller = new AbortController();
     const pull = () => {
       void consumeOperationalMutationCursor(identity, (snapshot) =>
         applySyncCallbackRef.current(snapshot as SyncPayload),
+        controller.signal,
       );
     };
     pull();
     window.addEventListener("online", pull);
-    return () => window.removeEventListener("online", pull);
+    return () => {
+      controller.abort();
+      window.removeEventListener("online", pull);
+    };
   }, [me?.sandbox, me?.userId]);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
@@ -7101,12 +7675,23 @@ export default function Home() {
       return Promise.reject(new Error("Station displays are read-only"));
     }
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
+    const identityIsCurrent = captureOperationalIdentityFence();
+    const date = todayStr();
+    const epoch = getStoredResetEpoch();
+    const generation = () => {
+      const run = dayStateRef.current.runs.find((candidate) => candidate.id === claim.runId);
+      return run ? `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}` : undefined;
+    };
+    const observedGeneration = generation();
+    const contextIsCurrent = () => identityIsCurrent() && date === todayStr()
+      && epoch === getStoredResetEpoch() && currentRunIdRef.current === claim.runId
+      && observedGeneration !== undefined && observedGeneration === generation();
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
       .then(async (): Promise<AutoTrackEventResult> => {
     const sharedSyncSettled = () =>
       foregroundSyncAcknowledgement > 1 && !foregroundSyncBarrierRef.current;
-    while (navigator.onLine) {
+    while (navigator.onLine && contextIsCurrent()) {
       if (
         !foregroundSyncBarrierRef.current
         && (pushAcknowledgedRef.current || sharedSyncSettled())
@@ -7114,7 +7699,8 @@ export default function Home() {
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
     if (
-      !navigator.onLine
+      !contextIsCurrent()
+      || !navigator.onLine
       || foregroundSyncBarrierRef.current
       || (!pushAcknowledgedRef.current && !sharedSyncSettled())
     ) {
@@ -7138,8 +7724,14 @@ export default function Home() {
           };
         })
       : claim.mutations;
+    const claimSchedule = getStockClaimScheduleAfterRebase({
+      channel: claim.channel,
+      dueAt: claim.dueAt,
+      nextDueAt: claim.nextDueAt,
+      mutations: rebasedMutations,
+    });
     const response = await fetch(
-      `/api/sync/auto-track/claim?today=${encodeURIComponent(todayStr())}&epoch=${getStoredResetEpoch()}`,
+      `/api/sync/auto-track/claim?today=${encodeURIComponent(date)}&epoch=${epoch}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -7147,6 +7739,7 @@ export default function Home() {
           senderId: clientId.current,
           claim: {
             ...claim,
+            ...claimSchedule,
             baseUpdatedAt: currentBaseUpdatedAt,
             mutations: rebasedMutations,
             ...(claim.channel === "case"
@@ -7159,6 +7752,8 @@ export default function Home() {
         }),
       },
     );
+    if (!contextIsCurrent()) throw Object.assign(
+      new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
     if (response.status === 401) {
       reportUnauthorized();
       throw Object.assign(new Error("Automatic tracking needs authentication"), { retryable: false });
@@ -7172,7 +7767,11 @@ export default function Home() {
       values?: AutoTrackEventResult["values"];
       data?: SyncPayload;
       snapshotId?: string;
+      canonicalRevision?: number;
+      serverTime?: number;
     } | null;
+    if (!contextIsCurrent()) throw Object.assign(
+      new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
     if (!response.ok || !body?.outcome || !body.state || !body.values) {
       const retryable = response.status === 408
         || response.status === 425
@@ -7186,6 +7785,26 @@ export default function Home() {
     if (body.stale) {
       throw Object.assign(new Error("Automatic tracking is waiting for today's reset"), { retryable: false });
     }
+    if (!Number.isSafeInteger(body.canonicalRevision) || Number(body.canonicalRevision) < 0
+      || !Number.isFinite(body.serverTime) || !body.data
+      || (body.data.dayState?.date !== undefined && body.data.dayState.date !== date)
+      || !Array.isArray(body.data.dayState?.runs)
+      || !body.data.runValues || typeof body.data.runValues !== "object" || Array.isArray(body.data.runValues)
+      || typeof body.snapshotId !== "string" || !/^[a-f0-9]{64}$/.test(body.snapshotId)) {
+      throw Object.assign(new Error("Automatic tracking returned an incomplete confirmation"), { retryable: true });
+    }
+    if (!await syncPayloadMatchesSnapshot(body.data, body.snapshotId)) {
+      throw Object.assign(new Error("Automatic tracking returned an inconsistent snapshot confirmation"), { retryable: true });
+    }
+    if (!contextIsCurrent()) throw Object.assign(
+      new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
+    if (Number(body.canonicalRevision) < currentOperationalRevision()) {
+      throw Object.assign(new Error("A newer correction is already confirmed; waiting for its current automatic schedule"), { retryable: true });
+    }
+    adoptOperationalRevision(body.canonicalRevision);
+    const offset = Number(body.serverTime) - Date.now();
+    serverClockOffsetMsRef.current = offset;
+    setServerClockOffsetMs(offset);
     if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
     if (body.data) {
       adoptedCanonicalSnapshotRef.current = persistedSyncPayload(body.data);
@@ -7254,13 +7873,40 @@ export default function Home() {
   const canViewManagerAttention =
     isManager || canApproveResets || canReviewIncidents || canManageProfiles;
 
+  useEffect(() => {
+    if (!managerAttentionFocusDestination || activeTab !== managerAttentionFocusDestination) return;
+
+    let frame = 0;
+    let attempts = 0;
+    const focusDestinationAfterDialogCloses = () => {
+      const dialog = document.querySelector('[data-testid="manager-attention-dialog"]');
+      if (dialog && attempts < 120) {
+        attempts += 1;
+        frame = window.requestAnimationFrame(focusDestinationAfterDialogCloses);
+        return;
+      }
+      if (!dialog) {
+        document
+          .querySelector<HTMLElement>(
+            ".station-tabs [role='tabpanel'][data-state='active']",
+          )
+          ?.focus();
+      }
+      setManagerAttentionFocusDestination(null);
+    };
+    frame = window.requestAnimationFrame(focusDestinationAfterDialogCloses);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, managerAttentionFocusDestination]);
+
   function resolveManagerAttention(item: ManagerAttentionItem) {
     setShowManagerAttention(false);
     if (item.kind === "password-resets") {
+      setManagerAttentionFocusDestination("staff");
       setActiveTab("staff");
       return;
     }
     if (item.kind === "incidents") {
+      setManagerAttentionFocusDestination("incidents");
       setActiveTab("incidents");
       return;
     }
@@ -7281,6 +7927,7 @@ export default function Home() {
         peerReceivedAt?: number;
         peerResponseBytes?: number;
         allowForegroundCanonicalFormReset?: boolean;
+        acceptCanonicalRunValueIds?: string[];
       },
     ) => {
       let queuedIntentReapplied = false;
@@ -7289,12 +7936,18 @@ export default function Home() {
         const pending = loadPendingSyncIntent(scope, payload.dayState.date ?? "");
         if (pending) {
           if (pending.epoch !== getStoredResetEpoch()) {
-            clearPendingSyncIntent(scope, pending.date, pending.id);
+            if (retainOperationalSnapshotReview(pending, true)) {
+              clearPendingSyncIntent(scope, pending.date, pending.id);
+            } else {
+              savePendingSyncIntent({ ...pending, operationalReviewRequired: true });
+            }
             recordSyncEvent(
               "stale",
-              "Discarded queued sync recovery after a reset",
+              "Retained queued sync recovery for review after a reset; nothing was replayed",
               "reset-epoch",
             );
+          } else if (pending.operationalReviewRequired) {
+            if (retainOperationalSnapshotReview(pending)) clearPendingSyncIntent(scope, pending.date, pending.id);
           } else if (!isValidSyncSnapshotId(syncSnapshotIdRef.current)) {
             recordSyncEvent(
               "stale",
@@ -7310,9 +7963,17 @@ export default function Home() {
               {
                 snapshotId: syncSnapshotIdRef.current,
                 serverTime: payload.serverTime ?? Date.now() + serverClockOffsetMsRef.current,
+                enforceOperationalAuthority: true,
               },
             );
-            if (recovery.reappliedChanges > 0) {
+            if (recovery.reviewRequiredChanges) {
+              if (retainOperationalSnapshotReview(pending)) {
+                clearPendingSyncIntent(scope, pending.date, pending.id);
+              } else {
+                savePendingSyncIntent({ ...pending, operationalReviewRequired: true });
+              }
+              setWriteError("Older saved operational changes need review in the sync panel. Confirmed server state is shown; nothing was replayed.");
+            } else if (recovery.reappliedChanges > 0) {
               payload = recovery.payload;
               queuedIntentReapplied = true;
               const saved = savePendingSyncIntent({
@@ -7321,17 +7982,23 @@ export default function Home() {
                 baseline: canonical,
                 payload: recovery.payload,
               });
+              const conflictOutcome = describeServerWinsConflictOutcome(
+                recovery.retainedServerConflicts,
+              );
               recordSyncEvent(
                 "merge",
-                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${saved ? "" : " (recovery copy could not be updated)"}.`,
+                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes${conflictOutcome ? `; ${conflictOutcome}` : ""}${saved ? "" : " (recovery copy could not be updated)"}.`,
                 "stale-base-recovered",
               );
             } else {
               clearPendingSyncIntent(scope, pending.date, pending.id);
               if (recovery.retainedServerConflicts > 0) {
+                const conflictOutcome = describeServerWinsConflictOutcome(
+                  recovery.retainedServerConflicts,
+                );
                 recordSyncEvent(
                   "merge",
-                  `Kept ${recovery.retainedServerConflicts} newer server values during queued sync recovery`,
+                  `Queued sync recovery ${conflictOutcome}.`,
                   "stale-base-conflicts",
                 );
               }
@@ -7366,6 +8033,7 @@ export default function Home() {
         localResetAt,
         initialSnapshot,
       });
+      if (acceptRemoteDay) adoptDoughTimerControls(payload.doughTimerControls);
 
       // Per-run lost-update guard: compare each run's edit timestamp. We only
       // REJECT a remote run's values when our local edit is STRICTLY newer — so
@@ -7377,12 +8045,15 @@ export default function Home() {
       const localPackaging = loadPackagingProgress();
       // Date/reset acceptance fences packaging exactly like day/run values. A
       // stale payload from another day must never advance this independent map.
-      const packagingMerge = acceptRemoteDay
-        ? reconcilePackagingProgress(
-            atomicSeedSnapshot || remoteResetAt > localResetAt ? {} : localPackaging,
-            payload.packagingProgress,
-          )
-        : reconcilePackagingProgress(localPackaging, undefined);
+      // Within the same reset epoch, however, an omitted remote run is not a
+      // deletion: retain its newer local progress until the peer receives it.
+      const packagingMerge = reconcilePackagingProgressSnapshot({
+        local: localPackaging,
+        remote: payload.packagingProgress,
+        acceptRemoteDay,
+        resetBoundaryChanged:
+          atomicSeedSnapshot || remoteResetAt > localResetAt,
+      });
       if (acceptRemoteDay) savePackagingProgress(packagingMerge.merged);
       if (packagingMerge.rejectedRemoteIds.size > 0) rejectedStale = true;
       const packagingRunAtApplyStart =
@@ -7393,10 +8064,7 @@ export default function Home() {
       if (packagingFenceRaised) {
         invalidateOperationalCalcForPackagingRun(packagingRunAtApplyStart!);
         const accepted = packagingMerge.merged[packagingRunAtApplyStart];
-        autoSuppressUntilRef.current = Math.max(
-          autoSuppressUntilRef.current,
-          accepted?.manualOverrideUntil ?? 0,
-        );
+        autoSuppressUntilRef.current = accepted?.manualOverrideUntil ?? 0;
         // A newly accepted packaging register changes the case counter's
         // authoritative baseline even when the run lifecycle is unchanged.
         // Rebase before releasing the sync fence so hidden time cannot be
@@ -7429,6 +8097,9 @@ export default function Home() {
             rTs,
             lTs,
             runValueServerNow,
+          ) || (
+            options?.acceptCanonicalRunValueIds?.includes(id) === true
+            && !isEmptyOverPopulated(vals as FormValues, localVals)
           );
           let acceptedVals = localVals;
           if (!acceptWholeRun) {
@@ -7454,7 +8125,13 @@ export default function Home() {
               // arrives via SSE would otherwise display with decimals on screen.
               casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
             };
-            if (
+            if (options?.acceptCanonicalRunValueIds?.includes(id) === true) {
+              // An explicit stale-base rebase already resolved this run
+              // against the canonical server snapshot. Align its local stamp
+              // with that canonical value instead of letting the older
+              // queued edit's stamp reject the server-wins result.
+              mergedUpd[id] = rTs;
+            } else if (
               rTs > lTs
               || isRunValueStampAheadOfServerTime(lTs, runValueServerNow)
             ) mergedUpd[id] = rTs;
@@ -7475,6 +8152,7 @@ export default function Home() {
           if (app1Progress) acceptedVals = { ...acceptedVals, ...app1Progress };
           const stockProgress = serverOwnedApplicatorStockProgress(payload, id, localVals);
           if (stockProgress) acceptedVals = { ...acceptedVals, ...stockProgress };
+          acceptedVals = canonicalOperationalValues(acceptedVals, vals as FormValues);
           saveRunValues(id, acceptedVals);
         }
         // A partial sync may carry an accepted progress register without a
@@ -7614,8 +8292,14 @@ export default function Home() {
                 const mergedRemote = selectInboundRunLifecycles(
                   overlayRunMetaStamps(prev.runs),
                   remoteRuns,
-                );
+                ).map((run) => {
+                  const remote = remoteRuns.find((candidate) => candidate.id === run.id);
+                  return remote && !operationalIntentBlocksLifecycleAdoption(run.id)
+                    ? canonicalOperationalRun(run, remote) : run;
+                });
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
+                const hasRecentLocalEdit = Date.now() - lastLocalEditRef.current < 2000;
+                const hasDirtyForm = form.formState.isDirty;
                 const localOnly = prev.runs.filter(r => {
                   if (remoteIds.has(r.id)) return false;
                   // Drop our untouched auto-created placeholder run once the
@@ -7623,20 +8307,15 @@ export default function Home() {
                   // buildSyncPayload), and keeping it would leave a stray blank
                   // "Unnamed Run" appended to the adopted day on THIS device.
                   // Guards: never drop while the user might be mid-typing into
-                  // it (recent local edit, or the live form already holds
-                  // non-default values for it).
-                  if (
-                    remoteRuns.length > 0 &&
-                    isPristineSeedRun(r) &&
-                    !(
-                      r.id === currentLocalId &&
-                      (Date.now() - lastLocalEditRef.current < 2000 ||
-                        !deepEqual(form.getValues(), DEFAULT_VALUES))
-                    )
-                  ) {
-                    return false;
-                  }
-                  return true;
+                  // it (recent local edit or dirty form). Profile-loaded
+                  // defaults are not edits and must not retain this placeholder.
+                  return shouldKeepLocalSeedPlaceholder({
+                    run: r,
+                    remoteRunCount: remoteRuns.length,
+                    isCurrentRun: r.id === currentLocalId,
+                    hasRecentLocalEdit,
+                    hasDirtyForm,
+                  });
                 });
                 return [...mergedRemote, ...localOnly].filter(
                   r => !deletedRunSet.has(r.id.trim().toLowerCase()),
@@ -7800,10 +8479,7 @@ export default function Home() {
           );
         if (adoptedPackaging || equalPackagingEcho) {
           const progress = packagingMerge.merged[currentId!];
-          autoSuppressUntilRef.current = Math.max(
-            autoSuppressUntilRef.current,
-            progress?.manualOverrideUntil ?? 0,
-          );
+          autoSuppressUntilRef.current = progress?.manualOverrideUntil ?? 0;
         }
         const currentRunValues = currentId
           ? payload.runValues[currentId] as FormValues | undefined
@@ -7812,27 +8488,22 @@ export default function Home() {
           !!currentId &&
           !!currentRunValues &&
           isEmptyOverPopulated(currentRunValues, loadRunValues(currentId));
-        const canResetLiveForm = Boolean(
-          currentId &&
-          (currentRunValues || adoptedPackaging) &&
-          (
-            adoptedPackaging ||
-            (
-              curLocalTs <= curRemoteTs &&
-              // A successful foreground pull has already resolved this run's
-              // LWW merge. Its canonical value may bypass the ordinary quiet/
-              // acknowledgment guard, but a strictly newer local edit remains.
-              (
-                options?.allowForegroundCanonicalFormReset ||
-                (
-                  localEditQuietMs > 2000 &&
-                  pushAcknowledgedRef.current
-                )
-              )
-            )
-          ) &&
-          !emptyOverPopulatedFormReset,
-        );
+        const explicitCanonicalRunAdoption =
+          !!currentId
+          && options?.acceptCanonicalRunValueIds?.includes(currentId) === true;
+        const canResetLiveForm = shouldResetLiveFormForSync({
+          currentRunId: currentId,
+          hasCurrentRunValues: !!currentRunValues,
+          adoptedPackaging,
+          explicitRebaseAdoption: explicitCanonicalRunAdoption,
+          localUpdatedAt: curLocalTs,
+          remoteUpdatedAt: curRemoteTs,
+          allowForegroundCanonicalFormReset:
+            options?.allowForegroundCanonicalFormReset === true,
+          localEditQuietMs,
+          pushAcknowledged: pushAcknowledgedRef.current,
+          emptyOverPopulated: emptyOverPopulatedFormReset,
+        });
         if (canResetLiveForm) {
           // Read the already-reconciled durable copy rather than the raw payload:
           // the whole-run LWW and packaging register may have selected different
@@ -7880,14 +8551,18 @@ export default function Home() {
           }
         }
         if (currentId && payload.runValues[currentId]) {
+          const localApp1Values = form.getValues();
           const app1Progress = serverOwnedApp1BatchProgress(
             payload,
             currentId,
-            form.getValues(),
+            localApp1Values,
           );
           if (app1Progress) {
             for (const [field, value] of Object.entries(app1Progress)) {
-              const key = field as "app1BatchesMade" | "app1BatchCorrectionGeneration";
+              const key = field as
+                | "app1BatchesMade"
+                | "app1BatchCorrectionGeneration"
+                | "app1StockLbs";
               if (form.getValues(key) !== value) {
                 form.setValue(key, value, {
                   shouldDirty: false,
@@ -7913,70 +8588,8 @@ export default function Home() {
         }
       }
 
-      // ── Brands ──
-      if (payload.brands && payload.brands.length > 0) {
-        const local = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
-        const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
-        // Trim+case-insensitive dedup before the deletion-tombstone filter so
-        // trailing-space near-duplicates from an old import can't survive.
-        const preDrop = (() => {
-          const seen = new Map<string, string>();
-          for (const b of [...local, ...remoteSanitized]) {
-            const k = b.trim().toLowerCase();
-            if (!seen.has(k)) seen.set(k, b.trim());
-          }
-          return [...seen.values()];
-        })();
-        const merged = dropDeleted(preDrop, deletedMap, "brands").sort((a, b) => a.localeCompare(b));
-        saveList(BRANDS_KEY, merged);
-        setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
-        setAdoptedBrandsForProfilePurge((current) =>
-          current && arraysEqual(current, merged) ? current : merged,
-        );
-      }
-
-      // ── Brand flavors ──
-      if (payload.brandFlavors) {
-        const local = loadBrandFlavors();
-        const merged: Record<string, string[]> = {};
-        for (const [brand, flavors] of Object.entries(local)) {
-          if (STALE_BRANDS.includes(brand)) continue;
-          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue;
-          merged[brand] = dropDeleted(flavors, deletedMap, flavorNamespace(brand));
-        }
-        for (const [brand, flavors] of Object.entries(payload.brandFlavors)) {
-          if (STALE_BRANDS.includes(brand)) continue;
-          // A brand deleted on any peer takes its flavors with it — don't let an
-          // incoming flavor list resurrect a deleted brand.
-          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue;
-          merged[brand] = dropDeleted(
-            [...new Set([...(merged[brand] ?? []), ...flavors])],
-            deletedMap,
-            flavorNamespace(brand),
-          ).sort((a, b) => a.localeCompare(b));
-        }
-        saveBrandFlavors(merged);
-        setBrandFlavors(prev =>
-          JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged
-        );
-      }
-
-      // ── Ingredient types ──
-      // Rename legacy/near-duplicate names from incoming sync so an un-migrated
-      // peer can't re-add old spellings to the list.
-      if (payload.ingredientTypes && payload.ingredientTypes.length > 0) {
-        const local = dropMergedAway(loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES), tombSet);
-        const cleanedRemote = payload.ingredientTypes.map(t => INGREDIENT_RENAMES[t] ?? t);
-        const merged = dropDeleted(
-          dropMergedAway([...new Set([...local, ...cleanedRemote])], tombSet),
-          deletedMap,
-          "ingredientTypes",
-        ).sort((a, b) => a.localeCompare(b));
-        if (!arraysEqual(merged, loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES))) {
-          saveList(INGREDIENT_TYPES_KEY, merged);
-          setIngredientTypes(merged);
-        }
-      }
+      // Migrated directories are not adopted from old day-state snapshots.
+      // Scoped factory reads and canonical write acknowledgments own them.
 
       // Templates are no longer reconciled from the sync payload — merging them
       // out of the additive day-state union here would resurrect server-deleted
@@ -8005,12 +8618,6 @@ export default function Home() {
         saveList(key, merged);
         setter(merged);
       }
-      // Drop retired pep names + rename legacy ones from incoming sync so a peer that
-      // hasn't migrated yet can't re-add "Diced Pepperoni"/"Pep - Cured" to the list.
-      const cleanedRemotePep = (payload.pepTypes ?? [])
-        .map(t => PEP_TYPE_RENAMES[t] ?? t)
-        .filter(t => !RETIRED_PEP_TYPES.includes(t));
-      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
       // Die types deliberately NOT merged from the day-state sync payload any
       // more: they are a factory-wide server pool now (see the reconcile effect
       // near addDieType). Unioning a stale peer's list here would resurrect
@@ -8021,58 +8628,6 @@ export default function Home() {
       mergeList(SHIPPER_KEY, DEFAULT_SHIPPERS, payload.shipper, setShipper, "shipper", false);
       mergeList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, payload.skidStacking, setSkidStacking, "skidStacking", false);
       mergeList(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, payload.gripSheets, setGripSheets, "gripSheets", false);
-      const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
-      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients");
-      mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients");
-      // Strip topping items from incoming frontline payload — old server payloads may still carry them
-      const toppingSet = new Set(MIX_SEED.frontlineIngredients);
-      const cleanedIncomingFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => !toppingSet.has(i));
-      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, cleanedIncomingFrontline, setFrontlineIngredients, "frontlineIngredients");
-      // Redirect any toppings from the incoming frontline payload into mix ingredients
-      const toppingsFromFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => toppingSet.has(i));
-      const incomingMix = [...new Set([...(payload.mixIngredients ?? []), ...toppingsFromFrontline])];
-      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, incomingMix, setMixIngredients, "mixIngredients");
-      mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames, "doughRecipeNames");
-      // Filter mix-category names out of the incoming frontline list (server may still have old data)
-      // Pre-clean localStorage so mergeList doesn't re-add mix names from the local side
-      const cleanedLocalFrontline = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
-      saveList(FRONTLINE_RECIPE_NAMES_KEY, cleanedLocalFrontline);
-      const incomingFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
-      const incomingMixFromFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => SEED_MIX_RECIPE_NAMES.has(n));
-      mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], incomingFrontline, setFrontlineRecipeNames, "frontlineRecipeNames");
-      // Merge mix recipe names from both the redirected frontline names and the dedicated payload field
-      const allIncomingMix = [...new Set([...incomingMixFromFrontline, ...(payload.mixRecipeNames ?? [])])];
-      if (allIncomingMix.length > 0) {
-        mergeList(MIX_RECIPE_NAMES_KEY, [], allIncomingMix, setMixRecipeNames, "mixRecipeNames");
-      }
-      mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames, "cheeseRecipeNames");
-
-      // ── Recipe presets (remote wins for same name, local-only kept) ──
-      // Presets are keyed by recipe name, so a recipe-name merge folds keys away
-      // and tombstones them under the category namespace. Drop any key tombstoned
-      // there before/after the union, or a stale remote payload resurrects the
-      // folded-away recipe-name preset key (mirrors the list dropDeleted guard).
-      if (payload.doughRecipePresets && Object.keys(payload.doughRecipePresets).length > 0) {
-        const merged = { ...loadDoughRecipePresets(), ...payload.doughRecipePresets };
-        saveDoughRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "doughRecipeNames"));
-      }
-      if (payload.frontlineRecipePresets && Object.keys(payload.frontlineRecipePresets).length > 0) {
-        const merged = { ...loadFrontlineRecipePresets(), ...payload.frontlineRecipePresets };
-        saveFrontlineRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "frontlineRecipeNames"));
-      }
-      if (payload.cheeseRecipePresets && Object.keys(payload.cheeseRecipePresets).length > 0) {
-        const merged = { ...loadCheeseRecipePresets(), ...payload.cheeseRecipePresets };
-        // Mix recipe rows live in the same map keyed by name; a name moved
-        // Cheese → Mix is tombstoned under "cheeseRecipeNames" but its rows
-        // must survive while the name is alive in the mix list (mergeList for
-        // mix names ran above, so storage is current).
-        const mixAwareDeleted = dropTombstonesForAliveNames(
-          deletedMap,
-          "cheeseRecipeNames",
-          loadList(MIX_RECIPE_NAMES_KEY, []),
-        );
-        saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, mixAwareDeleted, "cheeseRecipeNames"));
-      }
 
       // ── Brand+flavor profiles: NO LONGER applied from the sync payload ──
       // Profiles moved to their own factory-wide server pool (/api/brand-profiles)
@@ -8082,30 +8637,8 @@ export default function Home() {
       // SEND brandProfiles/crustProfiles in their payload (the fields stay in
       // SyncPayload for tolerance) but they are deliberately ignored here.
 
-      // ── History (merge by date, union of runs per day) ──
-      if (payload.history && payload.history.length > 0) {
-        const local = loadHistory();
-        const byDate = new Map<string, HistoryDay>();
-        for (const day of [...local, ...payload.history]) {
-          const existing = byDate.get(day.date);
-          if (!existing) {
-            byDate.set(day.date, { ...day });
-          } else {
-            // Merge runs (de-dup by id, remote wins for same id)
-            const runMap = new Map<string, RunMeta>();
-            for (const r of [...existing.runs, ...day.runs]) runMap.set(r.id, r);
-            const mergedRunValues = { ...existing.runValues, ...day.runValues };
-            byDate.set(day.date, { date: day.date, runs: [...runMap.values()], runValues: mergedRunValues });
-          }
-        }
-        const merged = [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, MAX_HISTORY_DAYS);
-        // Skip the save + re-render when history is unchanged; the outgoing payload
-        // always echoes loadHistory(), so each SSE cycle would otherwise re-render.
-        if (JSON.stringify(merged) !== JSON.stringify(local)) {
-          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch {}
-          setHistory(merged);
-        }
-      }
+      // Legacy daily-sync history is not canonical immutable evidence.
+      // History reads are owned exclusively by completedHistorySync.
 
       requestAnimationFrame(() => {
         if (options?.peerReceivedAt !== undefined) {
@@ -8158,9 +8691,7 @@ export default function Home() {
         if (!res.ok) return;
         const { epoch, rollover } = (await res.json()) as { epoch: number; rollover?: boolean };
         if (typeof epoch === "number" && epoch > getStoredResetEpoch()) {
-          const generation = synchronizationStateMachineRef.current.beginReset(epoch);
-          if ((rollover ? applyRolloverEpoch(epoch) : applyResetWipe(epoch))) window.location.reload();
-          else synchronizationStateMachineRef.current.completeReset(generation);
+          adoptClientResetEpoch(epoch, rollover === true);
         }
       } catch {}
     })();
@@ -8170,9 +8701,9 @@ export default function Home() {
   // Best-effort call to POST /inventory/consume-day-start on first load. The
   // server is idempotent per date (runId = "day-start:{today}"), so subsequent
   // calls within the same day return applied=false with zero side-effects.
-  // Managers-only gate on the server; non-managers get a harmless 403.
+  // Only managers need the daily stock pass; the server capability check remains authoritative.
   useEffect(() => {
-    if (screenMode !== null) return;
+    if (screenMode !== null || !canManageInventory) return;
     (async () => {
       try {
         await fetch("/api/inventory/consume-day-start", {
@@ -8184,7 +8715,7 @@ export default function Home() {
         /* best-effort — daily reset will retry next boot if needed */
       }
     })();
-  }, [screenMode]);
+  }, [screenMode, canManageInventory]);
 
     // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
@@ -8193,10 +8724,22 @@ export default function Home() {
   // register the storage mutation hook so every subsequent localStorage write
   // for a cached key also fires a server write-through PUT.
   useEffect(() => {
+    let cancelled = false;
+    const unsubscribe = subscribeFactoryDirectory(() => {
+      refreshFactoryDataConsumers();
+    });
     (async () => {
       try {
         const data = await fetchFactoryData();
+        if (cancelled) return;
         hydrateFromServer(data);
+        setAdoptedBrandsForProfilePurge(loadList(BRANDS_KEY, []));
+        if (canManageFactorySettings) {
+          applyPepTaxonomyMigrationIfNeeded();
+          applyIngredientDedupeMigrationIfNeeded();
+          applyStrayMixRecategorizeIfNeeded();
+          applyMixCheeseOverlapDedupeIfNeeded();
+        }
         refreshFactoryDataConsumers();
         // Only flush after comparing each durable operation with the server
         // timestamp. A pre-read flush could let a sleeping device overwrite a
@@ -8218,41 +8761,41 @@ export default function Home() {
         putFactoryKey(key, value);
       }
     });
+    return () => { cancelled = true; unsubscribe(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screenMode]);
+  }, [screenMode, me?.userId, me?.sandbox, canManageFactorySettings]);
 
-  // ── Brand+flavor profile pool reconcile (boot) ──
-  // Profiles live in their own factory-wide server pool with per-profile
-  // last-write-wins stamps (they are no longer part of the sync payload —
-  // the old unstamped map let a stale device clobber fresh edits). On boot
-  // this runs the marker-guarded one-time migration (existing local profiles
-  // are pushed up with a floor stamp) and then reconciles: adopt server-newer
-  // copies into the localStorage cache, push local-newer ones up, and drop
-  // local copies of profiles deleted remotely. SSE invalidations and foreground
-  // recovery keep long-lived tabs converged; queued pushes retry on each pass.
-  // Best-effort — a fetch failure changes nothing locally.
+  // Profiles use scoped memory and owned recovery, independently of the daily
+  // sync baseline. Reattach even when a failed login restores the same user.
+  const profileRepositoryGeneration = useSyncExternalStore(
+    subscribeProfileCache, getProfileCacheGeneration,
+  );
   useEffect(() => {
-    if (screenMode !== null) return;
-    let cancelled = false;
-    const pass = async () => {
-      try {
-        const result = await reconcileProfilesFromServerDetailed();
-        if (cancelled || !result.changed) return;
-        // Profile-derived pickers/cards read localStorage lazily, but the die
-        // types list self-heals from profiles — re-run so an adopted profile's
-        // die size shows up without a reload.
-        setDieTypes(healDieTypesFromProfiles());
-        applyProfileReconcileRef.current(result);
-      } catch {}
-    };
-    void pass();
-    return () => { cancelled = true; };
-  }, [screenMode]);
+    if (screenMode !== null || !me) return;
+    return startProfileReconciliation((result) => {
+      if (!result.changed) return;
+      setDieTypes(healDieTypesFromProfiles());
+      applyProfileReconcileRef.current(result);
+    });
+  }, [screenMode, me?.userId, me?.sandbox, profileRepositoryGeneration]);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
   useEffect(() => {
-    const sync = () => schedulePush(dayStateRef.current, 0, "edit");
+    const sync = (event: Event) => {
+      const control = (event as CustomEvent<DoughTimerControl>).detail;
+      if (!control) return;
+      const run = dayStateRef.current.runs.find((candidate) => candidate.id === control.runId);
+      if (!run || control.generation !== `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`.slice(0, 160)) {
+        event.preventDefault();
+        return;
+      }
+      if (!queueOperationalControl(control.runId, {
+        kind: "dough-timer", paused: control.pausedAt > 0,
+        ...(control.resumeAt > control.pausedAt && control.pausedAt > 0
+          ? { durationMs: control.resumeAt - control.pausedAt } : {}),
+      })) event.preventDefault();
+    };
     window.addEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
     return () => window.removeEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
   }, []);
@@ -8275,6 +8818,8 @@ export default function Home() {
       const current = () => !cancelled && generation === configurationGeneration;
       if (families.has("master-data")) {
         await invalidateMasterDataBootstrap(cycleCountQc).catch(() => {});
+        if (!current()) return;
+        await reconcileRunTemplates().catch(() => {});
         if (!current()) return;
       }
       if (families.has("profiles")) {
@@ -8305,6 +8850,10 @@ export default function Home() {
         if (!current()) return;
       }
       if (families.has("supervisor-pin")) {
+        pinAttemptRef.current++;
+        setRole("operator");
+        setPinInput("");
+        pinIdentityRef.current = "";
         await cycleCountQc.invalidateQueries({ queryKey: ["supervisorPin"] }).catch(() => {});
         if (!current()) return;
       }
@@ -8392,6 +8941,7 @@ export default function Home() {
       // the foreground adoption barrier.
     },
     onMessage: async (e: MessageEvent, streamDate: string) => {
+      const identityIsCurrent = me ? captureOperationalIdentityFence() : () => screenMode !== null;
       try {
         // The coordination hook fences late callbacks from a closed stream,
         // but keep the date boundary here too so a frame cannot cross
@@ -8424,6 +8974,8 @@ export default function Home() {
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
+        if (!msg.reset && !msg.rollover && typeof msg.canonicalRevision === "number"
+          && msg.canonicalRevision < currentOperationalRevision()) return false;
         // Once an HTTP recovery owner is active it is the sole adoption owner.
         // Ignore stream frames until that owner either succeeds or remains
         // visibly retryable; this prevents two valid transports from applying
@@ -8436,7 +8988,6 @@ export default function Home() {
             || msg.snapshotId !== syncSnapshotIdRef.current
           ) return false;
         } else if (msg.completeness === "partial") {
-          const partialStartedAt = typeof performance === "undefined" ? 0 : performance.now();
           const reconstructed = await reconstructPartialSyncPayload(
             adoptedCanonicalSnapshotRef.current,
             syncSnapshotIdRef.current,
@@ -8463,19 +9014,20 @@ export default function Home() {
             void foregroundRecoveryRetryRef.current?.();
             return false;
           }
-          syncSnapshotIdRef.current = msg.snapshotId!;
-          adoptedCanonicalSnapshotRef.current = persistedSyncPayload(reconstructed);
+          // Keep the validated full snapshot through the common adoption path
+          // below. Applying here and then again as raw msg.data stores a sparse
+          // delta as the next baseline and can throw on missing dayState.
+          msg.data = reconstructed;
           recordSyncEvent("peer", "Partial peer update reconstructed", "partial");
-          applySyncCallbackRef.current(reconstructed, {
-            peerReceivedAt: partialStartedAt,
-            peerResponseBytes: new Blob([e.data as string]).size,
-          });
         } else if (msg.data) {
           if (
             !isCanonicalRecoverySyncPayload(msg.data, todayStr(), msg.completeness)
             || !isValidSyncSnapshotId(msg.snapshotId)
             || !await syncPayloadMatchesSnapshot(msg.data, msg.snapshotId)
-          ) return false;
+          ) {
+            recordSyncEvent("failure", "Peer snapshot did not match its canonical contract", "peer-snapshot-rejected");
+            return false;
+          }
           if (streamDate !== todayStr()) return false;
           if (foregroundSyncBarrierRef.current) return false;
         } else if (msg.initial) {
@@ -8494,6 +9046,9 @@ export default function Home() {
             || msg.snapshotId !== syncSnapshotIdRef.current
           ) return false;
         }
+        if (!identityIsCurrent() || streamDate !== todayStr()) return false;
+        if (!msg.reset && !msg.rollover && typeof msg.canonicalRevision === "number"
+          && msg.canonicalRevision < currentOperationalRevision()) return false;
         adoptOperationalRevision(msg.canonicalRevision);
         if (typeof msg.serverTime === "number" && Number.isFinite(msg.serverTime)) {
           const offset = msg.serverTime - Date.now();
@@ -8547,12 +9102,7 @@ export default function Home() {
         if ((msg.reset || msg.rollover) && typeof msg.resetEpoch === "number") {
           recordSyncEvent("reset", "Server reset received; local data will reload");
           if (initialResetRequiresReload(msg.resetEpoch, getStoredResetEpoch())) {
-            const generation = synchronizationStateMachineRef.current.beginReset(msg.resetEpoch);
-            const adopted = msg.rollover
-              ? applyRolloverEpoch(msg.resetEpoch)
-              : applyResetWipe(msg.resetEpoch);
-            if (adopted) window.location.reload();
-            else synchronizationStateMachineRef.current.completeReset(generation);
+            adoptClientResetEpoch(msg.resetEpoch, msg.rollover === true);
             return false;
           }
           // The server repeats its current reset marker on reconnect. Once this
@@ -8677,7 +9227,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify, isCurrent }): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify, isCurrent, signal }): Promise<boolean> => {
       if (screenMode !== null) dispatchScreenSync({ type: "recovery-started" });
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
@@ -8725,6 +9275,7 @@ export default function Home() {
       return (async () => {
         let reconciled = false;
         let permanentHttpFailure = false;
+        let failurePhase = "request";
         try {
           const snapshot = syncSnapshotIdRef.current;
           // Capture the facility-local production date once for this recovery
@@ -8732,32 +9283,29 @@ export default function Home() {
           // plus its adoption guard must agree on the same day.
           const clientDate = todayStr();
           const syncTodayRequest = createForegroundSyncTodayRequest(snapshot, clientDate);
-          const res = await fetchWithTimeout(
+          const recovery = await fetchAndConsumeWithTimeout(
             syncTodayRequest.url,
-            syncTodayRequest.init,
+            { ...syncTodayRequest.init, signal },
             10_000,
-          );
+            async (res, requestSignal) => {
+          failurePhase = "response-validation";
           permanentHttpFailure = !res.ok && !isRetryableRecoveryStatus(res.status);
           if (permanentHttpFailure) classify("non-retryable-http");
-          const recovery = await consumeForegroundRecoveryResponse({
+          return consumeForegroundRecoveryResponse({
             response: res,
             expectedDate: clientDate,
             requestedSnapshotId: snapshot,
             adoptReset: ({ resetEpoch, rollover }) => {
+              failurePhase = "reset-adoption";
               if (resetEpoch <= getStoredResetEpoch()) return false;
-              const generation = synchronizationStateMachineRef.current.beginReset(resetEpoch);
-              const adopted = rollover
-                ? applyRolloverEpoch(resetEpoch)
-                : applyResetWipe(resetEpoch);
-              if (adopted) {
-                window.location.reload();
-                return true;
-              }
-              synchronizationStateMachineRef.current.completeReset(generation);
-              return false;
+              return adoptClientResetEpoch(resetEpoch, rollover);
             },
-            isCurrent: isCurrentRecovery,
+            isCurrent: () => isCurrentRecovery() && !requestSignal.aborted,
             adoptUnchanged: (body) => {
+              failurePhase = "unchanged-response-adoption";
+              if (typeof body.canonicalRevision === "number" && body.canonicalRevision < currentOperationalRevision()) {
+                throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
+              }
               adoptOperationalRevision(body.canonicalRevision);
               if (body.operationalProjection) {
                 adoptOperationalProjection(
@@ -8769,6 +9317,10 @@ export default function Home() {
               pushAcknowledgedRef.current = true;
             },
             adoptCanonical: (payload, responseSnapshot) => {
+              failurePhase = "canonical-response-adoption";
+              if (typeof payload.canonicalRevision === "number" && payload.canonicalRevision < currentOperationalRevision()) {
+                throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
+              }
               adoptOperationalRevision(payload.canonicalRevision);
               syncSnapshotIdRef.current = responseSnapshot;
               adoptedCanonicalSnapshotRef.current = persistedSyncPayload(payload);
@@ -8780,6 +9332,8 @@ export default function Home() {
               }
             },
           });
+            },
+          );
           if (!recovery.accepted) {
             classify("cancelled");
             return false;
@@ -8795,6 +9349,7 @@ export default function Home() {
           // offline work here. The normal stamped push path will seed it.
           if (!isCurrentRecovery()) return false;
           if (payload) {
+            failurePhase = "canonical-state-adoption";
             // Preserve ordinary screen-off catch-up when the live row is
             // unchanged. Re-baselining every successful wake would erase the
             // legitimate production delta accumulated while the display slept.
@@ -8812,6 +9367,7 @@ export default function Home() {
             coordinateForegroundAdoption({
               payload,
               prepareLifecycle: () => {
+                failurePhase = "lifecycle-prepare";
                 const lifecycleAdoption = acceptsRemoteLifecycle
                   ? adoptStrictlyNewerRemoteLifecycles(
                       durableLocalDay,
@@ -8824,6 +9380,7 @@ export default function Home() {
                 };
               },
               persistLifecycle: (adoptedDayState) => {
+                failurePhase = "lifecycle-persist";
                 setAutoTrackWakeRebaseReason("lifecycle-replacement");
                 saveDayState(adoptedDayState, { stampMeta: false });
                 dayStateRef.current = adoptedDayState;
@@ -8831,6 +9388,7 @@ export default function Home() {
                 lastSyncSigRef.current = "";
               },
               applyGeneralMerge: (canonicalPayload) => {
+                failurePhase = "sync-merge";
                 applySyncCallbackRef.current(canonicalPayload, {
                   allowForegroundCanonicalFormReset: true,
                 });
@@ -8876,7 +9434,7 @@ export default function Home() {
            recordSyncEvent(
              "failure",
              "Foreground recovery failed; local work and lifecycle writes remain fenced",
-             "foreground-recovery",
+              `foreground-recovery:${failurePhase}`,
              foregroundStopIntentRef.current?.runId,
            );
            setSyncFailedCount((count) => count + 1);
@@ -8923,7 +9481,7 @@ export default function Home() {
                    );
                  }
                } else {
-                  showForegroundRecoveryNotice("outcome", "Production state synchronized.");
+                  showForegroundRecoveryNotice("outcome", "Latest production snapshot received. Unsaved edits are not confirmed by this refresh; resolve any section warning before saving again.");
                }
              if (!cancelled) {
                 releaseForegroundRecovery({
@@ -9170,13 +9728,52 @@ export default function Home() {
   // its response through this handler. A stale rejection means this device
   // hasn't honoured the latest data reset: adopt it (wipe + reload) so we stop
   // pushing pre-reset data. Returns true when the write was rejected as stale.
+  function cancelPendingSyncWritesForReset(): void {
+    // A callback already queued for animation-frame/timer execution could run
+    // after applyResetWipe records the new epoch and then publish the stale
+    // local day with that new epoch. Raise the same barrier used by wake
+    // reconciliation before changing the stored epoch.
+    foregroundSyncBarrierRef.current = true;
+    foregroundPushPendingRef.current = false;
+    syncApplyPushPendingRef.current = false;
+    syncPushGenerationRef.current += 1;
+    if (syncRetryTimerRef.current) {
+      clearTimeout(syncRetryTimerRef.current);
+      syncRetryTimerRef.current = null;
+    }
+    setSyncRetryWaiting(false);
+    syncPushTimingRef.current = null;
+    for (const controller of syncPushAbortControllersRef.current) controller.abort();
+    syncPushAbortControllersRef.current.clear();
+    if (pushTimerRef.current) {
+      clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = null;
+    }
+    syncPushQueueRef.current.reset();
+  }
+
+  function adoptClientResetEpoch(epoch: number, rollover = false): boolean {
+    const generation = synchronizationStateMachineRef.current.beginReset(epoch);
+    // A wake recovery that began before this reset must not release the
+    // barrier or replay its queued write after the new epoch is stored.
+    foregroundRecoveryOwnerRef.current = generation;
+    cancelPendingSyncWritesForReset();
+    const adopted = rollover
+      ? applyRolloverEpoch(epoch)
+      : applyResetWipe(epoch);
+    if (adopted) {
+      window.location.reload();
+      return true;
+    }
+    synchronizationStateMachineRef.current.completeReset(generation);
+    return false;
+  }
+
   function handleStaleSyncWrite(body: unknown): boolean {
     const b = body as { stale?: boolean; epoch?: number; rollover?: boolean } | null;
     if (!b?.stale) return false;
     if (typeof b.epoch === "number" && b.epoch > getStoredResetEpoch()) {
-      const generation = synchronizationStateMachineRef.current.beginReset(b.epoch);
-      if ((b.rollover ? applyRolloverEpoch(b.epoch) : applyResetWipe(b.epoch))) window.location.reload();
-      else synchronizationStateMachineRef.current.completeReset(generation);
+      adoptClientResetEpoch(b.epoch, b.rollover === true);
     }
     return true;
   }
@@ -9188,6 +9785,18 @@ export default function Home() {
   ): Promise<{ body: unknown; stale: boolean; recoverableConflict: boolean }> {
     const result = await consumeSyncWriteResponse<SyncPayload>(res, {
       shouldConsume,
+      canAdoptCanonical: async (body) => {
+        if (applyToLiveDay && (!Number.isSafeInteger(body.canonicalRevision) || Number(body.canonicalRevision) < 0)) {
+          throw new Error("Shared sync returned an incomplete server confirmation");
+        }
+        if (applyToLiveDay && Number(body.canonicalRevision) < currentOperationalRevision()) return false;
+        if (body.data && (!isValidSyncSnapshotId(body.snapshotId)
+          || !await syncPayloadMatchesSnapshot(body.data, body.snapshotId))) {
+          throw new Error("Shared sync returned a snapshot that does not match its confirmation");
+        }
+        return (!shouldConsume || shouldConsume())
+          && (!applyToLiveDay || Number(body.canonicalRevision) >= currentOperationalRevision());
+      },
       onServerTime: (serverTime) => {
         const offset = serverTime - Date.now();
         serverClockOffsetMsRef.current = offset;
@@ -9200,12 +9809,17 @@ export default function Home() {
         ? (canonical) => applySyncCallbackRef.current(canonical)
         : undefined,
     });
+    if (result.ignored) return { body: null, stale: false, recoverableConflict: result.recoverableConflict };
+    if (res.headers.get("X-Operational-Update-Required") === "commands-required") {
+      setWriteError("The server kept its newer confirmed live state. Use the live controls for operational changes; saved unconfirmed actions remain available in the sync panel for review.");
+    }
     if (result.malformed) {
       throw new Error("sync write returned a malformed response");
     }
     if (res.status === 409 && !result.recoverableConflict) {
       throw new Error("sync write returned a non-recoverable conflict");
     }
+    if (!applyToLiveDay) return result;
     const snapshot = result.body?.snapshotId;
     adoptOperationalRevision(
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
@@ -9256,6 +9870,7 @@ export default function Home() {
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
     if (screenMode !== null) throw new Error("Station displays are read-only");
     const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    payload = omitArchivedSyncHistory(payload);
     const date = payload.dayState.date ?? todayStr();
     const work = {
       payload,
@@ -9361,10 +9976,17 @@ export default function Home() {
   ) {
     if (screenMode !== null) return;
     if (generation !== syncPushGenerationRef.current) return;
+    const ownsSession = captureOperationalIdentityFence();
+    const deliveryIsCurrent = () => {
+      if (generation !== syncPushGenerationRef.current) return false;
+      if (ownsSession()) return true;
+      syncPushQueueRef.current.finish({ drainQueued: false });
+      return false;
+    };
     const pendingScope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
     const pendingDate = payload.dayState.date ?? todayStr();
     const priorIntent = loadPendingSyncIntent(pendingScope, pendingDate);
-    const matchesPriorIntent = priorIntent
+    const matchesPriorIntent = priorIntent && !priorIntent.operationalReviewRequired
       && JSON.stringify(priorIntent.payload) === JSON.stringify(payload);
     const baseSnapshot =
       timing?.baseSnapshot
@@ -9377,7 +9999,7 @@ export default function Home() {
       ?? genId();
     const work = { payload, sig, ...timing, baseSnapshot, pendingIntentId };
     if (pendingScope && baseSnapshot) {
-      const saved = savePendingSyncIntent({
+      const saved = (!priorIntent?.operationalReviewRequired || retainOperationalSnapshotReview(priorIntent)) && savePendingSyncIntent({
         version: 1,
         id: pendingIntentId,
         scope: pendingScope,
@@ -9449,7 +10071,7 @@ export default function Home() {
       queuedAtEpoch: timing?.queuedAtEpoch,
     }).then(async (res) => {
       responseStatus = res.status;
-      if (generation !== syncPushGenerationRef.current) return;
+      if (!deliveryIsCurrent()) return;
       // Authentication failures are permanent for this request. Retrying them
       // only creates a storm while the session is being repaired.
       if (res.status === 401 || res.status === 403) {
@@ -9488,10 +10110,10 @@ export default function Home() {
       let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
         true,
-        () => generation === syncPushGenerationRef.current,
+        deliveryIsCurrent,
       );
       recoverableConflictResponse = canonicalResult.recoverableConflict;
-      if (generation !== syncPushGenerationRef.current) return;
+      if (!deliveryIsCurrent()) return;
       if (!res.ok && !canonicalResult.recoverableConflict) {
         throw new Error(`Sync write failed: ${res.status}`);
       }
@@ -9499,12 +10121,12 @@ export default function Home() {
       // local change. Canonical response consumption runs first; rebuild from
       // that reconciled state and replay once against its exact snapshot.
       const partialFallbackBody = canonicalResult.body as
-        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+        | { partialFallback?: boolean; operationalUpdateRequired?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
         | null
         | undefined;
       let replayedAfterPartialFallback = false;
       let recoveredWithoutReplay = false;
-      if (shouldReplaySyncWrite(partialFallbackBody)) {
+      if (shouldReplaySyncWrite(partialFallbackBody, checkOperationalSnapshotRecovery(work, partialFallbackBody))) {
         replayedAfterPartialFallback = true;
         if (!partialFallbackBody?.data) {
           work.recoveryBlocked = true;
@@ -9533,18 +10155,18 @@ export default function Home() {
           canonicalResult = await consumeCanonicalSyncWriteResponse(
             res,
             true,
-            () => generation === syncPushGenerationRef.current,
+            deliveryIsCurrent,
           );
           recoverableConflictResponse = canonicalResult.recoverableConflict;
-          if (generation !== syncPushGenerationRef.current) return;
+          if (!deliveryIsCurrent()) return;
           if (!res.ok && !canonicalResult.recoverableConflict) {
             throw new Error(`Sync recovery write failed: ${res.status}`);
           }
           const secondFallback = canonicalResult.body as
-            | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+            | { partialFallback?: boolean; operationalUpdateRequired?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
             | null
             | undefined;
-          if (shouldReplaySyncWrite(secondFallback)) {
+          if (shouldReplaySyncWrite(secondFallback, checkOperationalSnapshotRecovery(work, secondFallback))) {
             if (!secondFallback?.data) {
               work.recoveryBlocked = true;
               throw new Error("Repeated stale sync response omitted canonical data");
@@ -9575,19 +10197,30 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount(0);
         setSyncRetryWaiting(false);
+        if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
         const queued = syncPushQueueRef.current.finish({ drainQueued: true });
         if (queued) {
           const freshPayload = buildSyncPayload(dayStateRef.current);
-          pushAcknowledgedRef.current = false;
-          setSyncPendingCount(1);
-          doFetch(
-            freshPayload,
-            3,
-            JSON.stringify(freshPayload),
-            syncPushGenerationRef.current,
-            false,
-            queued,
-          );
+          const freshSig = JSON.stringify(freshPayload);
+          if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
+            pushAcknowledgedRef.current = false;
+            setSyncPendingCount(1);
+            doFetch(
+              freshPayload,
+              3,
+              freshSig,
+              syncPushGenerationRef.current,
+              false,
+              queued,
+            );
+          } else {
+            recordSyncEvent(
+              "merge",
+              "Queued change already matches the confirmed server state; no duplicate write was sent",
+              "duplicate-suppressed",
+              currentRunId,
+            );
+          }
         }
         return;
       }
@@ -9656,14 +10289,14 @@ export default function Home() {
       clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
-       if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
-       if (payload.history !== undefined) {
-         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
-         if (work.payload.history !== payload.history) {
-           lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
-         }
-       } else if (work.payload.history !== undefined) {
-         lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
+      if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
+      if (payload.history !== undefined) {
+        lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+        if (work.payload.history !== payload.history) {
+          lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
+        }
+      } else if (work.payload.history !== undefined) {
+        lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
       }
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
@@ -9676,21 +10309,37 @@ export default function Home() {
         if (replayedAfterPartialFallback) {
           const freshPayload = buildSyncPayload(dayStateRef.current);
           const freshSig = JSON.stringify(freshPayload);
-          pushAcknowledgedRef.current = false;
-          doFetch(
-            freshPayload,
-            3,
-            freshSig,
-            syncPushGenerationRef.current,
-            false,
-            queued,
-          );
-        } else {
+          if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
+            pushAcknowledgedRef.current = false;
+            doFetch(
+              freshPayload,
+              3,
+              freshSig,
+              syncPushGenerationRef.current,
+              false,
+              queued,
+            );
+          } else {
+            recordSyncEvent(
+              "merge",
+              "Queued change already matches the confirmed server state; no duplicate write was sent",
+              "duplicate-suppressed",
+              currentRunId,
+            );
+          }
+        } else if (shouldSendDistinctQueuedSyncWork(queued.sig, work.sig)) {
           doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        } else {
+          recordSyncEvent(
+            "merge",
+            "Queued change already matches the confirmed server state; no duplicate write was sent",
+            "duplicate-suppressed",
+            currentRunId,
+          );
         }
       }
     }).catch(() => {
-      if (generation !== syncPushGenerationRef.current) return;
+      if (!deliveryIsCurrent()) return;
       if (controller.signal.aborted) {
         emitProductionRunSaveOutcome("incomplete", requestStartedAt);
         syncPushQueueRef.current.finish({ drainQueued: false });
@@ -9744,6 +10393,7 @@ export default function Home() {
         if (syncRetryTimerRef.current) clearTimeout(syncRetryTimerRef.current);
         syncRetryTimerRef.current = setTimeout(() => {
           syncRetryTimerRef.current = null;
+          if (!deliveryIsCurrent()) return;
           setSyncRetryWaiting(false);
           const queued = syncPushQueueRef.current.takeQueued();
           const next = queued ?? work;
@@ -9858,9 +10508,7 @@ export default function Home() {
     // factory KV store. Run tombstones are also retained in live sync because
     // the server's additive same-day run merge needs them atomically with the
     // shortened run list to prevent a stale peer from restoring removed runs.
-    const history = loadHistory();
-    const historySig = JSON.stringify(history);
-    return {
+    return canonicalOperationalSnapshotForPublish({
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       baseSnapshotId: syncSnapshotIdRef.current,
@@ -9874,11 +10522,10 @@ export default function Home() {
         } catch { return {}; }
       })(),
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
-      ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
       deletedItems: loadDeletedItems(),
       deletedStamps: loadDeletedStamps(),
       undeletedStamps: loadUndeletedStamps(),
-    };
+    }, adoptedCanonicalSnapshotRef.current);
   }
 
   // A short debounce keeps ordinary edits responsive without turning a burst
@@ -10020,6 +10667,32 @@ export default function Home() {
     setSyncPendingCount(1);
     doFetch(payload, 0, JSON.stringify(payload));
   }
+  function checkOperationalSnapshotRecovery(
+    work: { payload: SyncPayload; baseSnapshot?: SyncPayload; pendingIntentId?: string; recoveryBlocked?: boolean },
+    body: { operationalUpdateRequired?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number } | null | undefined,
+  ): boolean {
+    if (body?.operationalUpdateRequired !== true) return false;
+    let safe = false;
+    if (work.baseSnapshot && body.data) {
+      const check = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, persistedSyncPayload(body.data), {
+        enforceOperationalAuthority: true,
+      });
+      safe = check.reviewRequiredChanges === 0;
+    }
+    if (!safe) {
+      work.recoveryBlocked = true;
+      const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+      const date = work.payload.dayState.date ?? todayStr();
+      const pending = loadPendingSyncIntent(scope, date);
+      if (pending && pending.id === work.pendingIntentId) {
+        if (retainOperationalSnapshotReview(pending)) clearPendingSyncIntent(scope, date, pending.id);
+        else savePendingSyncIntent({ ...pending, operationalReviewRequired: true });
+      }
+      throw new Error("Operational snapshot changes require review; the original recovery request has not been replayed");
+    }
+    return true;
+  }
+
   function rebasePendingSyncWork(
     work: {
       payload: SyncPayload;
@@ -10036,11 +10709,18 @@ export default function Home() {
       if (!work.baseSnapshot) throw new Error("Stale sync write has no captured canonical baseline");
       if (!snapshotId) throw new Error("Stale sync response omitted its canonical snapshot identity");
 
+      // Preserve the exact request that received the stale-base response; work.payload
+      // is replaced with the rebased result below.
+      const sentRunValues = work.payload.runValues ?? {};
       const canonical = persistedSyncPayload(canonicalInput);
       const recovery = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, canonical, {
         snapshotId,
         serverTime,
+        enforceOperationalAuthority: true,
       });
+      if (recovery.reviewRequiredChanges) {
+        checkOperationalSnapshotRecovery(work, { operationalUpdateRequired: true, data: canonical });
+      }
       work.baseSnapshot = canonical;
       work.payload = recovery.payload;
       work.sig = JSON.stringify(recovery.payload);
@@ -10050,10 +10730,10 @@ export default function Home() {
       const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
       const date = recovery.payload.dayState.date ?? todayStr();
       const pending = loadPendingSyncIntent(scope, date);
-      let durable = false;
-      if (recovery.reappliedChanges > 0 && scope && work.pendingIntentId) {
-        if (!pending || pending.id === work.pendingIntentId) {
-          durable = savePendingSyncIntent({
+      let recoveryCopyStatus: PendingSyncRecoveryCopyStatus | null = null;
+      if (recovery.reappliedChanges > 0) {
+        recoveryCopyStatus = saveRebasedPendingSyncIntent(
+          scope && work.pendingIntentId ? {
             version: 1,
             id: work.pendingIntentId,
             scope,
@@ -10062,24 +10742,53 @@ export default function Home() {
             baseSnapshotId: snapshotId,
             baseline: canonical,
             payload: recovery.payload,
-          });
-        }
+          } : null,
+          pending,
+        );
       } else if (scope && work.pendingIntentId) {
         clearPendingSyncIntent(scope, date, work.pendingIntentId);
       }
 
+      const currentPayload = buildSyncPayload(dayStateRef.current);
+      const canonicalRunValueIds = selectUnchangedRunValueIdsForRecovery(
+        sentRunValues,
+        recovery.payload.runValues ?? {},
+        currentPayload.runValues ?? {},
+      );
+      const applyRecoveryPayload = () => applySyncCallbackRef.current(
+        recovery.payload,
+        {
+          acceptCanonicalRunValueIds: canonicalRunValueIds,
+          allowForegroundCanonicalFormReset: canonicalRunValueIds.includes(currentRunId),
+        },
+      );
+
       if (recovery.reappliedChanges > 0) {
-        applySyncCallbackRef.current(recovery.payload);
+        applyRecoveryPayload();
+        const recoveryCopyNotice = recoveryCopyStatus
+          ? pendingSyncRecoveryCopyNotice(recoveryCopyStatus)
+          : "";
+        const conflictOutcome = describeServerWinsConflictOutcome(
+          recovery.retainedServerConflicts,
+        );
         recordSyncEvent(
           "merge",
-          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${durable ? "" : " (reload recovery copy unavailable)"}.`,
+          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes${conflictOutcome ? `; ${conflictOutcome}` : ""}${recoveryCopyNotice ? `; ${recoveryCopyNotice}` : ""}.`,
           "stale-base-recovered",
           currentRunId,
         );
       } else if (recovery.retainedServerConflicts > 0) {
+        // Conflict-only recovery must still adopt the canonical payload. The
+        // server-wins merge has discarded the local conflicting values; leaving
+        // the form untouched would show a value that no longer exists on the
+        // server and that the operator explicitly chose not to retain.
+        applyRecoveryPayload();
+        const conflictOutcome = describeServerWinsConflictOutcome(
+          recovery.retainedServerConflicts,
+        );
         recordSyncEvent(
           "merge",
-          `Kept ${recovery.retainedServerConflicts} newer server values during stale-base recovery`,
+          `Stale-base recovery ${conflictOutcome}.`,
           "stale-base-conflicts",
           currentRunId,
         );
@@ -10218,6 +10927,24 @@ export default function Home() {
     const persistedDay = loadDayState();
     const persistedRun = persistedDay.runs.find((run) => run.id === liveRun.id);
     if (liveRun.startedAt || liveRun.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
+    const savedSubTab = loadProfileSubTab(brand, flavor);
+    if (savedSubTab && liveRun.subTab !== savedSubTab) {
+      const nextDayState = {
+        ...liveDay,
+        runs: liveDay.runs.map((run) =>
+          run.id === liveRun.id ? { ...run, subTab: savedSubTab } : run,
+        ),
+      };
+      setDayState(nextDayState);
+      saveDayState(nextDayState);
+      setDoughSubTab(savedSubTab);
+      try {
+        const ack = await pushTodayCanonical(buildSyncPayload(nextDayState));
+        if (!ack.ok) return;
+      } catch {
+        return;
+      }
+    }
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
     await runSharedRecipeRefresh(liveRun, async () => {
@@ -10651,6 +11378,10 @@ export default function Home() {
     initiatingRunId?: string,
   ) {
     if (screenMode !== null) return;
+    const backgroundGenerationIsCurrent = () =>
+      backgroundGeneration === undefined
+      || backgroundGeneration === sharedRecipeRefreshGenerationRef.current;
+    if (!backgroundGenerationIsCurrent()) return;
     const refreshRunId =
       initiatingRunId ?? dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     const onNamedProfileSaved = (brand: string, flavor: string) => {
@@ -10661,7 +11392,7 @@ export default function Home() {
       // make an acknowledged recipe edit look already propagated.
       if (acknowledgedNames && acknowledgedNames.size > 0) {
         const key = canonicalProfileKey(brand, flavor);
-        markProfileForceEdited(key);
+        markProfileForceEdited(key, { brand, flavor });
         propagateSigRef.current.delete(key);
       }
       return handleSetupProfileSaved(brand, flavor, undefined, backgroundGeneration);
@@ -10698,32 +11429,48 @@ export default function Home() {
         ...(variants.length > 0 ? { doughballVariants: variants } : {}),
       });
     }
+    const refreshLinkedProfiles = async (
+      patches: Parameters<typeof refreshNamedRecipeProfilesAndPropagate>[1],
+    ) => {
+      const acknowledged = patches.filter((patch) =>
+        acknowledgedNames?.has(normalizeSelectableName(patch.name).toLowerCase()),
+      );
+      const passive = patches.filter((patch) =>
+        !acknowledgedNames?.has(normalizeSelectableName(patch.name).toLowerCase()),
+      );
+      const touched = new Map<string, { brand: string; flavor: string }>();
+      for (const [selected, options] of [
+        [acknowledged, undefined],
+        [passive, { emptyRowsOnly: true }],
+      ] as const) {
+        if (selected.length === 0) continue;
+        const refreshed = await refreshNamedRecipeProfilesAndPropagate(
+          kind,
+          selected,
+          options,
+          onNamedProfileSaved,
+        );
+        for (const profile of refreshed) {
+          touched.set(
+            `${profile.brand.trim().toLowerCase()}__${profile.flavor.trim().toLowerCase()}`,
+            profile,
+          );
+        }
+      }
+      return [...touched.values()];
+    };
     const prev = namedPoolSnapRef.current[kind];
     namedPoolSnapRef.current[kind] = snap;
     if (prev === null) {
-      // First load: run a one-time full heal so profiles whose rows are wrong
-      // or empty (e.g. from a pre-fix recipe merge) are corrected immediately.
-      // After the marker is set on this device, subsequent page loads only fill
-      // profiles with empty rows (the fast ongoing-safe path).
+      // A pool snapshot observed during boot or from another browser is
+      // passive evidence. It may backfill missing rows, but populated profile
+      // rows remain authoritative; only an acknowledged manager save may
+      // replace them. This prevents an older peer bootstrap from undoing a
+      // newer recipe edit.
       const patches = [...byKey.values()].filter((p) => p.rows.length > 0);
       if (patches.length > 0) {
-        const markerKey = `run-calc-${kind}-row-heal-v1`;
-        if (!localStorage.getItem(markerKey)) {
-          await refreshNamedRecipeProfilesAndPropagate(
-            kind,
-            patches,
-            undefined,
-            onNamedProfileSaved,
-          );
-          localStorage.setItem(markerKey, "1");
-        } else {
-          await refreshNamedRecipeProfilesAndPropagate(
-            kind,
-            patches,
-            { emptyRowsOnly: true },
-            onNamedProfileSaved,
-          );
-        }
+        await refreshLinkedProfiles(patches);
+        if (!backgroundGenerationIsCurrent()) return;
       }
       return;
     }
@@ -10741,13 +11488,9 @@ export default function Home() {
     const touched = await orchestrateSharedRecipeRefresh({
       getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
       initiatingRunId: refreshRunId,
-        refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
-        kind,
-        changed,
-        undefined,
-        onNamedProfileSaved,
-      ),
+      refreshProfiles: () => refreshLinkedProfiles(changed),
       refreshOpenForm: async () => {
+        if (!backgroundGenerationIsCurrent()) return;
         const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
         if (!liveRun || liveRun.id !== refreshRunId) return;
         const persistedRun = liveRun
@@ -10789,12 +11532,14 @@ export default function Home() {
           formUpdated = true;
         }
         if (Object.keys(openRunUpdates).length > 0) {
+          if (!backgroundGenerationIsCurrent()) return;
           await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
             expectedRunId: refreshRunId,
           });
         }
       },
     });
+    if (!backgroundGenerationIsCurrent()) return;
     for (const recipe of changed) {
       await propagateRecipeRowsToPendingRuns(
         recipe.name,
@@ -10849,25 +11594,15 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sauceRecipesList, screenMode]);
 
-  // Cheese / mix recipe rows — parallel one-time boot heal + ongoing empty-row
-  // healing. Cheese and mix pools don't have a diff-and-update watcher like
-  // dough/sauce, so profiles whose rows are wrong or empty from a past merge
-  // would never self-correct without this. Strategy mirrors applyNamedPoolChange:
-  //   • First load after the fix: full heal (any stale rows corrected), set marker.
-  //   • Subsequent loads: empty-rows-only pass so a profile with no rows still
-  //     gets filled even after the marker is set.
-  // Heal saved profiles + the open form so mix recipe rows show the imported
-  // oz/pizza amounts from the premix sheet rather than all-zero placeholders.
+  // Passive cheese/mix pool observations only fill empty or all-zero linked
+  // profile rows. A pool snapshot can lag an acknowledged profile edit, so it
+  // must not replace populated saved rows. Explicit manager saves/imports keep
+  // their authoritative full-replacement path.
   //
-  // Two-tier strategy:
-  //   • First-time full heal (marker not yet set): runs once when at least one
-  //     pool has data, overwrites ALL rows so stale pre-import zeros are fixed.
-  //     Protected by cheeseMixFullHealDoneRef so it fires exactly once per mount.
-  //   • Ongoing emptyRowsOnly heal (marker already set): runs every time the
-  //     mixes/cheese pool changes (e.g. after a fresh premix import while the
-  //     app is open) WITHOUT the ref guard, so newly imported amounts are
-  //     picked up immediately without a page reload.
-  const cheeseMixFullHealDoneRef = useRef(false);
+  // The initial pass waits for pool data and runs once per mount; later pool
+  // changes repeat the same empty-only repair so new profiles can be filled
+  // without overwriting existing recipe data.
+  const cheeseMixInitialPassDoneRef = useRef(false);
   const acknowledgedCheeseSaveFingerprintRef = useRef<string | null>(null);
   const acknowledgedMixSaveFingerprintRef = useRef<string | null>(null);
   async function applyAcknowledgedMixSave(
@@ -10909,7 +11644,10 @@ export default function Home() {
         // row helper has already written the linked profile locally; upgrade
         // its queued operation before flushing so an older profile stamp cannot
         // prevent the pending-run fan-out.
-        markProfileForceEdited(canonicalProfileKey(profile.brand, profile.flavor));
+        markProfileForceEdited(canonicalProfileKey(profile.brand, profile.flavor), {
+          brand: profile.brand,
+          flavor: profile.flavor,
+        });
         // A recipe edit must always publish its dependent pending-run snapshot,
         // even if an earlier same-session profile propagation recorded an
         // identical signature before the manager acknowledgement completed.
@@ -11003,40 +11741,40 @@ export default function Home() {
         }
       };
       if (markerSet) {
-        // Ongoing pass — recipe edits are authoritative for linked pending work,
-        // not just for profiles whose rows happened to be empty.
+        // Passive pool observations are not authoritative over populated
+        // profile rows; fill only missing/all-zero slots.
         for (const r of cheeseRecipesList) {
           const name = normalizeSelectableName(r.name);
           if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         for (const m of mixes) {
           const name = normalizeSelectableName(m.name);
           if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
       } else {
-        // First-time full heal — wait for pool data, run once per mount.
+        // First passive pass — wait for pool data, run once per mount.
         if (cheeseRecipesList.length === 0 && mixes.length === 0) return;
-        if (cheeseMixFullHealDoneRef.current) return;
-        cheeseMixFullHealDoneRef.current = true;
+        if (cheeseMixInitialPassDoneRef.current) return;
+        cheeseMixInitialPassDoneRef.current = true;
         for (const r of cheeseRecipesList) {
           const name = normalizeSelectableName(r.name);
           if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         for (const m of mixes) {
           const name = normalizeSelectableName(m.name);
           if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         localStorage.setItem(markerKey, "1");
       }
@@ -11244,6 +11982,7 @@ export default function Home() {
     pauseDecisionRunId,
     dismissPauseDecision: setPauseDecisionRunId,
   } = useRunLifecycleManager({
+    getOperationalNowMs: () => Date.now() + serverClockOffsetMsRef.current,
     dayStateRef, setDayState, saveDayState, form, lastFormRunIdRef, formHandoffRef, currentRun, currentRunId,
     flushFormWrites: flushPendingHomeFormWrites,
     loadRunValues: loadPackagingAwareRunValues, saveRunValues, markRunValuesUpdated,
@@ -11254,6 +11993,7 @@ export default function Home() {
     operationalIntentBlocksLifecycle,
     showForegroundRecoveryNotice, recordSyncEvent,
     queueOperationalIntent, flushOperationalIntentOutbox, browserIsOnline,
+    queueOperationalControl,
     capturePreEndLifecycle, computeRunConsumptionLines, effectiveValuesForRun,
     overlayRunMetaStamps, isolatePendingRunPackagingProgress,
     recordManualPackagingProgress, persistManualPackagingProgress,
@@ -11452,36 +12192,76 @@ export default function Home() {
     schedulePush(newDs, 0);
   }
 
-  // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
-  // target brand+flavor and make it current, in one dayState computation, so
-  // the existing current run is never renamed/clobbered. Saves the outgoing
-  // run's values/profile exactly like addRun, then loads the target profile
-  // into the form exactly like setRunBrandFlavor (single-tick sequencing of
-  // addRun()+setRunBrandFlavor() would work off a stale dayState closure and
-  // drop the new run). Returns false at the run cap — caller must fall back
-  // without touching anything.
-  function addRunWithIdentity(brand: string, flavor: string): boolean {
-    if (dayState.runs.length >= MAX_RUNS) return false;
+  function loadDoughRecipesForProfile(
+    profile: ReturnType<typeof loadProfile>,
+  ): typeof doughRecipesList | Promise<typeof doughRecipesList | null> {
+    if (!normalizeSelectableName(profile?.doughRecipeName ?? "")) {
+      return doughRecipesList;
+    }
+    if (hasDoughRecipesData && !areDoughRecipesStale) return doughRecipesList;
+    toast({
+      title: "Checking shared recipe status",
+      description: "This profile will be applied after recipe data loads.",
+    });
+    return ensureDoughRecipesLoaded().catch(() => {
+      toast({
+        title: "Profile not applied",
+        description: "Shared recipe details could not be loaded. No profile values or run mode were changed. Check your connection and select the profile again.",
+        variant: "destructive",
+      });
+      return null;
+    });
+  }
+
+  function commitAddRunWithIdentity(
+    brand: string,
+    flavor: string,
+    recipes: typeof doughRecipesList,
+    targetRunId: string | null,
+    requestGeneration: number,
+  ): boolean {
+    if (requestGeneration !== profileApplyGenerationRef.current) return false;
+    if (targetRunId !== currentRunIdRef.current) {
+      toast({
+        title: "Setup changed",
+        description: "The active run changed while recipe data was loading. Select the profile again.",
+        variant: "destructive",
+      });
+      return false;
+    }
     flushPendingHomeFormWrites();
+    if (targetRunId !== currentRunIdRef.current) return false;
+    const outgoingDay = dayStateRef.current;
+    const outgoingRun = outgoingDay.runs[outgoingDay.currentIndex] ?? outgoingDay.runs[0];
+    if (targetRunId && outgoingRun?.id !== targetRunId) return false;
+    if (outgoingDay.runs.length >= MAX_RUNS) return false;
     const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    if (outgoingRun) saveRunValues(outgoingRun.id, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+    if (canManageProfiles && outgoingRun && (outgoingRun.brand || outgoingRun.flavor)) {
+      if (saveProfile(outgoingRun.brand, outgoingRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(outgoingRun.brand, outgoingRun.flavor);
       }
     }
     const newId = genId();
-    const preferredSubTab = loadProfileSubTab(brand, flavor);
+    const profile = loadProfile(brand, flavor);
+    const profileDoughName = normalizeSelectableName(profile?.doughRecipeName ?? "").toLowerCase();
+    const linkedDoughRecipe = recipes.find(
+      (recipe) =>
+        recipe.enabled !== false &&
+        normalizeSelectableName(recipe.name).toLowerCase() === profileDoughName,
+    );
+    const preferredSubTab = linkedDoughRecipe?.isPremadeCrust
+      ? "crusts"
+      : loadProfileSubTab(brand, flavor);
     const newDs = {
-      runs: [...dayState.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
-      currentIndex: dayState.runs.length,
+      runs: [...outgoingDay.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
+      currentIndex: outgoingDay.runs.length,
     };
     setDayState(newDs);
     saveDayState(newDs);
     if (preferredSubTab) setDoughSubTab(preferredSubTab);
-    const profile = loadProfile(brand, flavor);
     if (profile) {
       // Strip mix recipe names from sauce fields — they belong in the applicator mix field
       if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
@@ -11498,42 +12278,92 @@ export default function Home() {
     return true;
   }
 
-  function setRunBrandFlavor(brand: string, flavor: string) {
+  // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
+  // target brand+flavor and make it current, in one dayState computation, so
+  // the existing current run is never renamed/clobbered. It resolves false at
+  // the run cap and waits for linked shared recipe data before applying a profile.
+  function addRunWithIdentity(brand: string, flavor: string): boolean | Promise<boolean> {
+    if (dayStateRef.current.runs.length >= MAX_RUNS) return false;
+    const requestGeneration = ++profileApplyGenerationRef.current;
+    const targetRunId = currentRunIdRef.current;
+    const recipes = loadDoughRecipesForProfile(loadProfile(brand, flavor));
+    if (Array.isArray(recipes)) {
+      return commitAddRunWithIdentity(brand, flavor, recipes, targetRunId, requestGeneration);
+    }
+    return recipes.then((loadedRecipes) =>
+      loadedRecipes
+        ? commitAddRunWithIdentity(brand, flavor, loadedRecipes, targetRunId, requestGeneration)
+        : false,
+    );
+  }
+
+  function commitRunBrandFlavor(
+    brand: string,
+    flavor: string,
+    recipes: typeof doughRecipesList,
+    targetRunId: string | null,
+    requestGeneration: number,
+  ): void {
+    if (requestGeneration !== profileApplyGenerationRef.current) return;
+    if (targetRunId !== currentRunIdRef.current) {
+      toast({
+        title: "Setup changed",
+        description: "The active run changed while recipe data was loading. Select the profile again.",
+        variant: "destructive",
+      });
+      return;
+    }
     flushPendingHomeFormWrites();
-    // Save current values to old profile
+    if (targetRunId !== currentRunIdRef.current) return;
+    const liveDay = dayStateRef.current;
+    const liveRun = liveDay.runs[liveDay.currentIndex] ?? liveDay.runs[0];
+    if (!liveRun || (targetRunId && liveRun.id !== targetRunId)) return;
+    // Save current values to old profile.
     const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    saveRunValues(liveRun.id, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+    if (canManageProfiles && (liveRun.brand || liveRun.flavor)) {
+      if (saveProfile(liveRun.brand, liveRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(liveRun.brand, liveRun.flavor);
       }
     }
 
     // Update run meta — also carry the saved line-type preference so the run
     // starts in Dough or Crust mode automatically, without needing the user to
     // toggle it every time they assign this brand+flavor.
-    const preferredSubTab = loadProfileSubTab(brand, flavor);
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
-        ? { ...r, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }
-        : r
+    const profile = loadProfile(brand, flavor);
+    const profileDoughName = normalizeSelectableName(profile?.doughRecipeName ?? "").toLowerCase();
+    const linkedDoughRecipe = recipes.find(
+      (recipe) =>
+        recipe.enabled !== false &&
+        normalizeSelectableName(recipe.name).toLowerCase() === profileDoughName,
     );
-    const newDs = { ...dayState, runs: newRuns };
+    const currentRunHasStarted = Boolean(liveRun.startedAt || liveRun.endedAt);
+    const preferredSubTab = currentRunHasStarted
+      ? undefined
+      : linkedDoughRecipe?.isPremadeCrust
+        ? "crusts"
+        : loadProfileSubTab(brand, flavor);
+    const newRuns = liveDay.runs.map((run, index) =>
+      index === liveDay.currentIndex
+        ? { ...run, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }
+        : run,
+    );
+    const newDs = { ...liveDay, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
     if (preferredSubTab) setDoughSubTab(preferredSubTab);
 
-    // Load profile for new brand+flavor if it exists
-    const profile = loadProfile(brand, flavor);
+    // Load profile for new brand+flavor if it exists.
     if (profile) {
-      // Strip mix recipe names from sauce fields — they belong in the applicator mix field
+      // Strip mix recipe names from sauce fields — they belong in the applicator mix field.
       if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
         profile.frontlineRecipeName = "";
         profile.frontlineRecipe = [];
       }
-      form.reset(profile); resetFieldArrays(profile);
+      form.reset(profile);
+      resetFieldArrays(profile);
     } else {
       // No saved profile for the new identity — reset to defaults. Keeping the
       // OLD run's values here silently rebrands them as the new brand/flavor,
@@ -11544,6 +12374,21 @@ export default function Home() {
       resetFieldArrays(DEFAULT_VALUES);
     }
     schedulePush(newDs, 0);
+  }
+
+  function setRunBrandFlavor(brand: string, flavor: string): void {
+    const requestGeneration = ++profileApplyGenerationRef.current;
+    const targetRunId = currentRunIdRef.current;
+    const recipes = loadDoughRecipesForProfile(loadProfile(brand, flavor));
+    if (Array.isArray(recipes)) {
+      commitRunBrandFlavor(brand, flavor, recipes, targetRunId, requestGeneration);
+      return;
+    }
+    void recipes.then((loadedRecipes) => {
+      if (loadedRecipes) {
+        commitRunBrandFlavor(brand, flavor, loadedRecipes, targetRunId, requestGeneration);
+      }
+    });
   }
 
   function addBrand(name: string) {
@@ -12107,29 +12952,24 @@ export default function Home() {
     maybeLearnTypeRename("dieType", oldName, trimmed);
   }
 
-  function checkPin() {
-    // Resolve the facility PIN: live server value when loaded, else the offline
-    // cache, else the default. An empty resolved value ("") means "no gate" — we
-    // unlock without comparing. Using the same resolution offline ensures a PIN
-    // cleared on another device unlocks here too (not just when serverPin is live).
-    const stored =
-      (typeof serverPin === "string" ? serverPin : null) ??
-      localStorage.getItem(SUPERVISOR_PIN_KEY) ??
-      DEFAULT_SUPERVISOR_PIN;
-    if (stored === "") {
+  async function checkPin() {
+    if (pinVerifying) return;
+    const identity = `${me?.userId}:${me?.sandbox}`;
+    const attempt = ++pinAttemptRef.current;
+    const entered = pinInput;
+    setPinInput("");
+    setPinVerifying(true);
+    try {
+      await verifySupervisorPin(entered);
+      if (pinIdentityRef.current !== identity || pinAttemptRef.current !== attempt) return;
       setRole("supervisor");
       setShowPinDialog(false);
-      setPinInput("");
       setPinError("");
-      return;
-    }
-    if (pinInput === stored) {
-      setRole("supervisor");
-      setShowPinDialog(false);
-      setPinInput("");
-      setPinError("");
-    } else {
-      setPinError("Incorrect PIN. Try again.");
+    } catch (error) {
+      if (pinIdentityRef.current !== identity || pinAttemptRef.current !== attempt) return;
+      setPinError(error instanceof Error ? error.message : "Verification unavailable. Retry online.");
+    } finally {
+      if (pinAttemptRef.current === attempt) setPinVerifying(false);
     }
   }
 
@@ -12395,6 +13235,44 @@ export default function Home() {
     savedFlashTimer.current = setTimeout(() => { if (savedFlashRef.current) savedFlashRef.current.style.opacity = "0"; }, 1800);
   }
 
+  function queueOperationalControl(
+    runId: string,
+    control: import("@workspace/sync-contract").OperationalControl,
+  ): boolean {
+    const run = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
+    if (!run || screenMode !== null || foregroundSyncBarrierRef.current) {
+      setWriteError("This control is not confirmed. Wait for recovery, then try again.");
+      return false;
+    }
+    if (control.kind !== "pause-policy" && operationalIntentBlocksLifecycle(runId)) {
+      setWriteError("A run action is still pending or needs review. Confirm that action before changing this control.");
+      return false;
+    }
+    try {
+      queueOperationalIntent({
+        runId, action: "control", control,
+        date: dayStateRef.current.date ?? todayStr(),
+        observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`.slice(0, 160),
+        baseRevision: operationalCanonicalRevisionRef.current,
+        effectiveAt: Date.now(),
+      });
+      void flushOperationalIntentOutbox();
+      return true;
+    } catch {
+      setWriteError("This control could not be saved for delivery. Your last confirmed state is unchanged; please try again.");
+      return false;
+    }
+  }
+
+  function queueStoppageChanges(runs: RunMeta[]): boolean {
+    for (const run of runs) {
+      const previous = dayStateRef.current.runs.find((candidate) => candidate.id === run.id);
+      if (previous && !deepEqual(previous.stoppages, run.stoppages)
+        && !queueOperationalControl(run.id, { kind: "stoppages", values: run.stoppages ?? [] })) return false;
+    }
+    return true;
+  }
+
   // ── Downtime log ──────────────────────────────────────────────────────────
   function logStop(reason = "", notes = "") {
     const id = genId();
@@ -12405,6 +13283,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     setActiveStopId(id);
@@ -12420,6 +13299,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 600);
@@ -12439,6 +13319,7 @@ export default function Home() {
       i === dayState.currentIndex ? { ...r, stoppages: merged } : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);
@@ -12453,6 +13334,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     setActiveStopId(null);
@@ -12467,6 +13349,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     if (activeStopId === stopId) setActiveStopId(null);
@@ -12474,11 +13357,14 @@ export default function Home() {
   }
 
   function updateRunMeta(id: string, patch: Partial<RunMeta>) {
+    if (patch.autoTrackDisabled !== undefined
+      && !queueOperationalControl(id, { kind: "auto-track", enabled: !patch.autoTrackDisabled })) return false;
     const newRuns = dayState.runs.map(r => r.id === id ? { ...r, ...patch } : r);
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 600);
+    return true;
   }
 
   function buildRunCsvRow(date: string, run: RunMeta, vals: FormValues): string[] {
@@ -12504,12 +13390,8 @@ export default function Home() {
   }
 
   function exportCSV() {
-    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual PPM", "Notes", "Stoppages"];
-    const rows: string[][] = [header];
-    for (const run of dayState.runs) {
-      const vals = run.id === currentRunId ? v : loadRunValues(run.id);
-      rows.push(buildRunCsvRow(todayStr(), run, vals));
-    }
+    const rows = currentRunCsvRows(todayStr(), dayState.runs,
+      (run) => run.id === currentRunId ? v : loadRunValues(run.id), buildRunCsvRow);
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -12519,12 +13401,7 @@ export default function Home() {
   }
 
   function exportHistoryCSV(day: HistoryDay) {
-    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual PPM", "Notes", "Stoppages"];
-    const rows: string[][] = [header];
-    for (const run of day.runs) {
-      const vals = day.runValues[run.id] ?? DEFAULT_VALUES;
-      rows.push(buildRunCsvRow(day.date, run, vals as FormValues));
-    }
+    const rows = historyRunCsvRows(day, buildRunCsvRow);
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -12557,7 +13434,7 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
@@ -12574,6 +13451,7 @@ export default function Home() {
       setShowImportDialog(true);
     } catch (err) {
       recordImportPreparationFailure("schedule", file.name, err);
+      mixedImportQueue.outcome("schedule", "failed", "Workbook preparation failed. No schedule requests were sent.");
       toast({
         variant: "destructive",
         title: "Couldn't read that file",
@@ -12598,6 +13476,35 @@ export default function Home() {
   const shippingImportFileNameRef = useRef<string>("");
   const sauceGuideImportGenRef = useRef(0);
   const doughGuideImportGenRef = useRef(0);
+
+  const mixedImportQueue = useMixedImportQueue({
+    identity: `${me?.userId ?? ""}:${me?.sandbox ?? false}:${[...enabledImporterTypes].sort().join(",")}`,
+    enabled: enabledImporterTypes,
+    states: {
+      spec: { open: showSpecImport, loading: specImportLoading, applying: specImportApplying, error: specImportError, progress: specImportProgress },
+      premix: { open: showPremixImport, loading: premixImportLoading, applying: premixImportApplying, error: premixImportError, progress: premixImportProgress },
+      cheese: { open: showCheeseImport, loading: cheeseImportLoading, applying: cheeseImportApplying, error: cheeseImportError, progress: cheeseImportProgress },
+      shipping: { open: showShippingImport, loading: shippingImportLoading, applying: shippingImportApplying, error: shippingImportError },
+      sauce: { open: showSauceGuideImport, loading: sauceGuideImportLoading, applying: sauceGuideImportApplying, error: sauceGuideImportError },
+      dough: { open: showDoughGuideImport, loading: doughGuideImportLoading, applying: doughGuideImportApplying, error: doughGuideImportError },
+      schedule: { open: showImportDialog, applying: !!importProgress, progress: importProgress },
+    },
+    start: {
+      spec: handleSpecImportFile, premix: handlePremixImportFile, cheese: handleCheeseImportFile,
+      shipping: handleShippingImportFile, sauce: handleSauceGuideImportFile, dough: handleDoughGuideImportFile,
+      schedule: handleImportFile,
+    },
+  });
+
+  function canCloseWorkbookReview() {
+    if (mixedImportQueue.canCloseReview()) return true;
+    toast({
+      title: "Import save is not confirmed",
+      description: "Keep this review open and use its original Apply or retry action. Do not prepare a replacement import.",
+      variant: "destructive",
+    });
+    return false;
+  }
 
   /**
    * History never auto-replays an import: snapshots open their existing
@@ -12760,7 +13667,7 @@ export default function Home() {
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
   // single review/summary screen. Nothing is written until the user confirms.
-  async function handleSpecImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSpecImportFile(e: WorkbookFileSelection) {
     const selectedFiles = Array.from(e.target.files ?? []);
     e.target.value = "";
     noteBreadcrumb(selectedFiles.length > 0 ? `spec import: ${selectedFiles.length} file(s) selected` : "spec import: picker canceled");
@@ -12841,9 +13748,8 @@ export default function Home() {
       if (gen !== specImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
         recordPerformance("import-spec-parse", performance.now() - parseStartedAt, "api");
-        recordPerformance("import-spec-review-open", 0, "render");
-        recordMemorySample("import-spec-review-open");
       }
+      startImportReviewTiming(prepared, "spec");
       // Remember which file(s) this came from so each distinct spec sheet keeps
       // its own two most recent versions (per-file retention, newest = default).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
@@ -13013,6 +13919,7 @@ export default function Home() {
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
     destructiveChangesAcknowledged = false,
     destructiveReviewSignature?: string,
+    _captureGoldCase = false,
   ) {
     if (!specImportPrepared) return;
     // The commit spans profile and inventory master-data writes after an AI
@@ -13048,14 +13955,22 @@ export default function Home() {
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
-    // Capture the pre-import local state so the existing undo trail can restore
-    // a workbook replacement when a manager decides it was not intended.
+    // Legacy compatibility argument only: capture returns no browser data.
+    // Import Undo remains owned by the committed server import operation.
     const importRollbackBefore = captureMasterDataSnapshot();
     const operationId = specImportOperationRef.current ?? createImportOperationId();
     specImportOperationRef.current = operationId;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
-        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
+        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(
+          toCommit,
+          forceUpdateProfileKeys,
+          acceptedNewMixIngredientNames,
+          operationId,
+          undefined, // Capture stays unavailable until a verified approval can be selected.
+        );
+      mixedImportQueue.outcome("spec", aliasSaveFailed || toCommit.note?.includes("could not be read") ? "partial" : "applied",
+        "Server confirmed this import. Any Undo remains scoped to this operation in Import history.");
       finishSpecImportOutcome("success");
       setSpecImportReviewNotice(null);
       setSpecImportRetryPending(false);
@@ -13182,7 +14097,12 @@ export default function Home() {
             t.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
         );
         const profile = touched ? loadProfile(liveRun.brand, liveRun.flavor) : null;
-        if (profile) {
+        const persistedLiveRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+        const liveRunAlreadyStarted = Boolean(
+          liveRun.startedAt || liveRun.endedAt ||
+          persistedLiveRun?.startedAt || persistedLiveRun?.endedAt,
+        );
+        if (profile && !liveRunAlreadyStarted) {
           // Strip mix recipe names from sauce fields — they belong in the applicator mix field
           if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
             profile.frontlineRecipeName = "";
@@ -13194,21 +14114,22 @@ export default function Home() {
           lastLocalEditRef.current = now;
           form.reset(profile);
           resetFieldArrays(profile);
-          // If this profile is a purchased-crust product (no die type, crust-named
-          // doughName), automatically switch the run's Line Type to "Crust" so the
-          // operator doesn't have to toggle it manually. Mirrors the manual button
-          // handler at the "Crust" toggle (resolveCrustLineDefaults + subTab update).
-          const isImportedCrust = crustProfiles.some(
-            (c) =>
-              c.brand.toLowerCase() === (liveRun.brand ?? "").toLowerCase() &&
-              c.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
+          // Only an explicit manager classification on the linked shared recipe
+          // selects Crust mode. Workbook names and empty formulas are not proof.
+          const importedDoughName = normalizeSelectableName(profile.doughRecipeName ?? "").toLowerCase();
+          const linkedPremadeCrust = doughRecipesList.some(
+            (recipe) =>
+              recipe.enabled !== false &&
+              recipe.isPremadeCrust === true &&
+              normalizeSelectableName(recipe.name).toLowerCase() === importedDoughName,
           );
-          if (isImportedCrust && doughSubTab !== "crusts") {
+          if (linkedPremadeCrust && doughSubTab !== "crusts") {
             setDoughSubTab("crusts");
-            const updatedRuns = dayStateRef.current.runs.map((r: any, i: any) =>
-              i === dayStateRef.current.currentIndex ? { ...r, subTab: "crusts" as const } : r,
+            const currentDay = dayStateRef.current;
+            const updatedRuns = currentDay.runs.map((r) =>
+              r.id === liveRun.id ? { ...r, subTab: "crusts" as const } : r,
             );
-            const updatedDs = { ...dayStateRef.current, runs: updatedRuns };
+            const updatedDs = { ...currentDay, runs: updatedRuns };
             setDayState(updatedDs);
             saveDayState(updatedDs);
             const fills = resolveCrustLineDefaults(form.getValues());
@@ -13462,6 +14383,12 @@ export default function Home() {
       });
       specImportOperationRef.current = null;
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) {
+        specImportOperationRef.current = null;
+        setSpecImportError(null);
+        setSpecImportReviewNotice(null);
+        return;
+      }
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
         if (specImportRetryPending) {
           setSpecImportRetryBlocked(true);
@@ -13553,6 +14480,7 @@ export default function Home() {
       await retryPendingImportOperation(operationId);
       clearPendingImportOperation(operationId);
       specImportOperationRef.current = null;
+      mixedImportQueue.outcome("spec", "applied", "Server confirmed the exact earlier operation. Current data is being refreshed.");
       await cycleCountQc.invalidateQueries();
       finishSpecImportOutcome("success");
       setShowSpecImport(false);
@@ -13596,7 +14524,7 @@ export default function Home() {
   // Mix deterministically (the AI only disambiguates product names), ground the
   // names, and show a single review/summary screen. Nothing is written until the
   // user confirms; re-importing updates existing mixes by id.
-  async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePremixImportFile(e: WorkbookFileSelection) {
     const { premixImport } = await loadWorkbookWorkflow();
     const files = Array.from(e.target.files ?? []).slice(0, premixImport.MAX_PREMIX_IMPORT_FILES);
     e.target.value = "";
@@ -13635,9 +14563,8 @@ export default function Home() {
       if (gen !== premixImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
         recordPerformance("import-premix-parse", performance.now() - parseStartedAt, "api");
-        recordPerformance("import-premix-review-open", 0, "render");
-        recordMemorySample("import-premix-review-open");
       }
+      startImportReviewTiming(prepared, "premix");
       // Remember which file(s) this came from so each distinct premix workbook
       // keeps its own two most recent versions (per-file retention).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
@@ -13673,6 +14600,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     mixesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
+    _captureGoldCase = false,
   ) {
     if (!premixImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -13704,6 +14632,7 @@ export default function Home() {
         newAliases,
         mixesToRemove,
         operationId,
+        undefined, // Never submit the former input-only capture payload.
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
@@ -13758,6 +14687,8 @@ export default function Home() {
       // Refresh the Mix Monitoring saved-sheet lists so the just-saved premix
       // sheet snapshot shows up immediately.
       setSheetListSignal((c) => c + 1);
+      mixedImportQueue.outcome("premix", result.warning || premixImportPrepared.note ? "partial" : "applied",
+        result.warning || "Server confirmed this import. Guarded Undo remains in Import history.");
       setShowPremixImport(false);
       setPremixImportPrepared(null);
       const parts = [
@@ -13780,6 +14711,7 @@ export default function Home() {
         });
       }
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) return;
       void recordImportHistory({
         importType: "premix",
         sourceKey: deriveSourceKey(premixImportPrepared?.sourceNames ?? []),
@@ -13803,7 +14735,7 @@ export default function Home() {
   // parse the per-brand table, map each row onto the packaging fields the app
   // already has, and show a review screen. Nothing is written until the user
   // confirms; unmappable values are kept as-is (never guessed).
-  async function handleShippingImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleShippingImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     noteBreadcrumb(file ? "shipping import: file selected" : "shipping import: picker canceled");
@@ -13847,7 +14779,11 @@ export default function Home() {
     }
     setShippingImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).shippingImport.commitShippingImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review shipping guide changes", rows, "shipping", deriveSourceKey(shippingImportFileNameRef.current ? [shippingImportFileNameRef.current] : []));
+      if (!reviewed) return;
+      const result = workflow.shippingImport.commitShippingImport(rows, acknowledged);
+      reviewed.verify();
       const shippingSkipped = rows.filter((row) => !row.brand.trim() || Object.keys(row.patch).length === 0).length;
       void recordImportHistory({
         importType: "shipping",
@@ -13855,6 +14791,7 @@ export default function Home() {
         sourceLabel: buildShippingGuideLabel(rows.length, shippingImportFileNameRef.current),
         status: shippingSkipped > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed brand links", commit: "committed profile patches" },
           source: { rows: rows.length, fields: rows.reduce((n, r) => n + Object.keys(r.patch).length, 0) },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -13911,6 +14848,8 @@ export default function Home() {
       ).catch(() => {
         /* snapshot is advisory; import already applied */
       });
+      mixedImportQueue.outcome("shipping", shippingSkipped > 0 ? "partial" : "applied",
+        `${result.rowsApplied} rows verified locally. Not a server transaction or delivery receipt; unselected rows were not applied.`);
       setShowShippingImport(false);
       setShippingImportPrepared(null);
       toast({
@@ -13927,10 +14866,11 @@ export default function Home() {
   }
 
   // ── Sauce Guide importer (Joe's Sauce Guide .docx) ──────────────────────────
-  async function handleSauceGuideImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSauceGuideImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    sauceGuideSourceKeyRef.current = deriveSourceKey([file.name]);
     const gen = ++sauceGuideImportGenRef.current;
     setSauceGuideImportPrepared(null);
     setSauceGuideImportError(null);
@@ -13942,7 +14882,7 @@ export default function Home() {
         fetchNamedRecipes("sauce").catch(() => [] as NamedRecipe[]),
       ]);
       const extraSauceNames = serverSauceRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareSauceGuideImport(buffer, extraSauceNames);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareSauceGuideImport(buffer, extraSauceNames, file.name);
       if (gen !== sauceGuideImportGenRef.current) return;
       setSauceGuideImportPrepared(prepared);
     } catch (err) {
@@ -13969,12 +14909,20 @@ export default function Home() {
     }
     setSauceGuideImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review sauce guide changes", rows
+        .filter((row) => row.brand.trim() && row.recipeName.trim() && row.ozPerPizza > 0 && !(row.wasNullBrand && row.wasNullRecipe))
+        .map((row) => ({ ...row, patch: { frontlineRecipeName: row.recipeName.trim(), sauceOzPerPizza: row.ozPerPizza } })), "sauce", sauceGuideSourceKeyRef.current);
+      if (!reviewed) return;
+      const result = workflow.recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
+      reviewed.verify();
       void recordImportHistory({
         importType: "sauce",
+        sourceKey: sauceGuideSourceKeyRef.current,
         sourceLabel: "Sauce recipe guide",
         status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
           source: { rows: rows.length },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -13985,6 +14933,8 @@ export default function Home() {
         },
       }).catch(() => {});
       reloadMasterData();
+      mixedImportQueue.outcome("sauce", result.rowsSkippedBothUnmatched > 0 ? "partial" : "applied",
+        `${result.rowsApplied} rows verified locally; ${result.rowsSkippedBothUnmatched} skipped. Not a server delivery receipt.`);
       setShowSauceGuideImport(false);
       setSauceGuideImportPrepared(null);
       const skippedNote = result.rowsSkippedBothUnmatched > 0
@@ -14002,10 +14952,11 @@ export default function Home() {
   }
 
   // ── Dough Guide importer (Pizza to Dough Recipes .xlsx) ──────────────────────
-  async function handleDoughGuideImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleDoughGuideImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    doughGuideSourceKeyRef.current = deriveSourceKey([file.name]);
     const gen = ++doughGuideImportGenRef.current;
     setDoughGuideImportPrepared(null);
     setDoughGuideImportError(null);
@@ -14046,12 +14997,20 @@ export default function Home() {
     }
     setDoughGuideImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review dough guide changes", rows
+        .filter((row) => row.brand.trim() && row.doughRecipeName.trim() && !(row.wasNullBrand && row.wasNullRecipe))
+        .map((row) => ({ ...row, patch: { doughRecipeName: row.doughRecipeName.trim() } })), "dough", doughGuideSourceKeyRef.current);
+      if (!reviewed) return;
+      const result = workflow.recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
+      reviewed.verify();
       void recordImportHistory({
         importType: "dough",
+        sourceKey: doughGuideSourceKeyRef.current,
         sourceLabel: "Dough recipe guide",
         status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
           source: { rows: rows.length },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -14062,6 +15021,8 @@ export default function Home() {
         },
       }).catch(() => {});
       reloadMasterData();
+      mixedImportQueue.outcome("dough", result.rowsSkippedBothUnmatched > 0 ? "partial" : "applied",
+        `${result.rowsApplied} rows verified locally; ${result.rowsSkippedBothUnmatched} skipped. Not a server delivery receipt.`);
       setShowDoughGuideImport(false);
       setDoughGuideImportPrepared(null);
       const skippedNote = result.rowsSkippedBothUnmatched > 0
@@ -14083,7 +15044,7 @@ export default function Home() {
   // assignment lines, per-batch pounds), and show a single review screen.
   // Nothing is written until the user confirms; re-importing updates existing
   // cheese recipes by id.
-  async function handleCheeseImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleCheeseImportFile(e: WorkbookFileSelection) {
     const { cheeseImport } = await loadWorkbookWorkflow();
     const files = Array.from(e.target.files ?? []).slice(0, cheeseImport.MAX_CHEESE_IMPORT_FILES);
     e.target.value = "";
@@ -14120,9 +15081,8 @@ export default function Home() {
       if (gen !== cheeseImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
         recordPerformance("import-cheese-parse", performance.now() - parseStartedAt, "api");
-        recordPerformance("import-cheese-review-open", 0, "render");
-        recordMemorySample("import-cheese-review-open");
       }
+      startImportReviewTiming(prepared, "cheese");
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setCheeseImportPrepared(prepared);
     } catch (err) {
@@ -14156,6 +15116,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     recipesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
+    _captureGoldCase = false,
   ) {
     if (!cheeseImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -14181,7 +15142,14 @@ export default function Home() {
     const operationId = cheeseImportOperationRef.current ?? createImportOperationId();
     cheeseImportOperationRef.current = operationId;
     try {
-      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove, operationId);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(
+        cheeseImportPrepared,
+        recipesToApply,
+        newAliases,
+        recipesToRemove,
+        operationId,
+        undefined, // Never submit the former input-only capture payload.
+      );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -14258,6 +15226,8 @@ export default function Home() {
       // immediately in the manager list and the run "Cheese" pickers.
       void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
       setSheetListSignal((c) => c + 1);
+      mixedImportQueue.outcome("cheese", result.warning || cheeseImportPrepared.note?.includes("could not be read") ? "partial" : "applied",
+        result.warning || "Server confirmed this import. Guarded Undo remains in Import history.");
       setShowCheeseImport(false);
       setCheeseImportPrepared(null);
       toast({
@@ -14271,6 +15241,7 @@ export default function Home() {
       // recipes by name, and refresh pending runs + the open form.
       void propagateCheeseRecipeUpdates(result.saved);
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) return;
       void recordImportHistory({
         importType: "cheese",
         sourceKey: deriveSourceKey(cheeseImportPrepared?.sourceNames ?? []),
@@ -14320,8 +15291,6 @@ export default function Home() {
   }
 
   async function commitExcelImport(payload: ImportCommit) {
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     const date = payload.date;
     // Fetch the existing day payload so we can append additively WITHOUT
     // dropping any existing run metadata (started/ended times, stoppages,
@@ -14336,6 +15305,7 @@ export default function Home() {
       }
     } catch {}
     if (!existingSnapshotId) {
+      mixedImportQueue.outcome("schedule", "failed", "Current schedule could not be loaded. No schedule write was sent.");
       setShowImportDialog(false);
       setImportResult(null);
       toast({
@@ -14372,6 +15342,19 @@ export default function Home() {
       deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
       undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
     };
+    const appliedValues = scheduleAppliedValues(date, payload.runs);
+    if (!await reviewScheduleImport(date,
+      { runs: existingRuns.map((run) => ({ ...run, casesPlanned: existingRunValues[run.id]?.casesNeeded })) },
+      {
+        runs: runs.map((run) => ({ ...run, casesPlanned: runValues[run.id]?.casesNeeded })),
+        brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+        flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+      }, false, payload.sourceKey, appliedValues,
+    )) return;
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+    outPayload.brands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
+    outPayload.brandFlavors = loadBrandFlavors();
     let ok = false;
     try {
       // Key the day boundary + live-view broadcast on the operator's local
@@ -14408,11 +15391,15 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     if (ok) {
+      mixedImportQueue.outcome("schedule", "applied", `Schedule day ${date} acknowledged separately by the server.`);
+      payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
         status: "complete",
         summary: {
+          ...(appliedValues ? { appliedValues, persistence: "sync-acknowledged" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed brand/flavor links", commit: "saved schedule day" },
           source: { runs: payload.runs.length, brands: payload.createBrands.length, flavors: payload.createFlavors.length },
           landed: { runs: payload.runs.length },
@@ -14425,6 +15412,7 @@ export default function Home() {
         description: `${payload.runs.length} run${payload.runs.length === 1 ? "" : "s"} imported to ${date}.`,
       });
     } else {
+      mixedImportQueue.outcome("schedule", "partial", "Schedule request was not confirmed. Check the current day before reviewing again; no rollback or automatic retry.");
       toast({
         variant: "destructive",
         title: "Import failed",
@@ -14433,9 +15421,7 @@ export default function Home() {
     }
   }
 
-  function importExcelIntoEditor(payload: ImportCommit) {
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+  async function importExcelIntoEditor(payload: ImportCommit) {
     const newRuns: { id: string; brand: string; flavor: string; casesNeeded: number }[] = [];
     const newVals: Record<string, FormValues> = {};
     for (const r of payload.runs) {
@@ -14444,6 +15430,20 @@ export default function Home() {
       newVals[id] = { ...(profile ?? DEFAULT_VALUES), casesNeeded: r.casesPlanned };
       newRuns.push({ id, brand: r.brand, flavor: r.flavor, casesNeeded: r.casesPlanned });
     }
+    const originalEditor = JSON.stringify([scheduleEditorRuns, scheduleEditorRunValues]);
+    if (!await reviewScheduleImport(payload.date,
+      { runs: scheduleEditorRuns.map((run) => ({ ...run, casesPlanned: run.casesNeeded })) },
+      {
+        runs: [...scheduleEditorRuns.filter(r => r.brand || r.casesNeeded), ...newRuns].map((run) => ({ ...run, casesPlanned: run.casesNeeded })),
+        brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+        flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+      }, true)) return;
+    if (originalEditor !== scheduleEditorReviewIdentityRef.current) {
+      toast({ title: "Schedule changed", description: "Review the import again before adding it to the editor.", variant: "destructive" });
+      return;
+    }
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     setScheduleEditorRunValues(prev => ({ ...prev, ...newVals }));
     // Drop any empty placeholder rows so the imported rows don't leave a blank
     // run that blocks the Save Schedule validation.
@@ -14452,6 +15452,7 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     setImportIntoEditor(false);
+    // No learning or successful-Apply receipt: the editor still needs Save.
   }
 
   // Multi-sheet schedule planner commit: each date in `payload.byDate` is written
@@ -14461,14 +15462,15 @@ export default function Home() {
   // in-progress day isn't wiped). Only dates present in the file are touched.
   async function commitMultiDayImport(payload: ImportCommit) {
     const { runExcel } = await loadWorkbookWorkflow();
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     const byDate = payload.byDate ?? [];
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
-    let failed = 0;
+    let notSentDays = 0;
+    let unconfirmedDays = 0;
+    let confirmedDays = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
+    const appliedScheduleRows: NonNullable<ReturnType<typeof scheduleAppliedValues>>["runs"] = [];
     // Skipped file rows whose planned cases differ from the matched IN-PROGRESS
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
@@ -14486,7 +15488,7 @@ export default function Home() {
         }
       } catch {}
       if (!existingSnapshotId) {
-        failed++;
+        notSentDays++;
         done++;
         lastErrorDetail = `Couldn't load the latest ${date} plan before saving it.`;
         setImportProgress({ done, total: byDate.length });
@@ -14559,6 +15561,57 @@ export default function Home() {
         deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
         undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
       };
+      const appliedValues = scheduleAppliedValues(date, dayRuns);
+      if (!await reviewScheduleImport(date,
+        { runs: existingRuns.map((run) => ({ ...run, casesPlanned: existingRunValues[run.id]?.casesNeeded })) },
+        {
+          runs: runs.map((run) => ({ ...run, casesPlanned: runValues[run.id]?.casesNeeded })),
+          brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+          flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+        }, false, payload.sourceKey, appliedValues,
+      )) {
+        setImportProgress(null);
+        if (done > 0) {
+          mixedImportQueue.outcome("schedule", "partial",
+            `${confirmedDays} days confirmed saved; ${unconfirmedDays} requests unconfirmed and ${notSentDays} days not sent. Cancelled and remaining days were not sent. Earlier saves were not undone.`);
+          // Days are independently acknowledged. Cancelling a later proposal
+          // cannot roll back earlier writes or claim the whole file was cancelled.
+          void recordImportHistory({
+            importType: "schedule",
+            sourceKey: payload.sourceKey,
+            sourceLabel: "Schedule workbook",
+            status: "partial",
+            summary: {
+              counts: { confirmedDays, unconfirmedDays, notSentDays, processedDays: done },
+              warnings: [
+                `Stopped after ${done} processed days; ${confirmedDays} were confirmed saved, ${unconfirmedDays} requests were unconfirmed, and ${notSentDays} days were not sent.`,
+                ...(unconfirmedDays > 0 ? ["An unconfirmed request may have reached the server."] : []),
+              ],
+              followUp: [unconfirmedDays > 0
+                ? "Reload the schedule and inspect each unconfirmed day before deciding whether to retry. The cancelled day and remaining days were not sent; earlier saves were not undone."
+                : "The cancelled day and remaining days were not sent. Review the saved schedule before resuming; earlier acknowledged saves were not undone."],
+            },
+          }).catch(() => {});
+          void fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(async (response) => {
+            if (!response.ok) throw new Error("Could not refresh the partially imported schedule.");
+            setScheduledDays(normalizeScheduledDays(await response.json()));
+          }).catch(() => {
+            toast({ title: "Reload the schedule", description: "Earlier day saves were not undone. The planner could not be refreshed.", variant: "destructive" });
+          });
+          setShowImportDialog(false);
+          setImportResult(null);
+          setImportIntoEditor(false);
+          toast({
+            title: "Schedule import stopped partway through",
+            description: `${confirmedDays} days were confirmed saved; ${unconfirmedDays} requests were unconfirmed and ${notSentDays} days were not sent. The cancelled day and remaining days were not sent. Earlier saves were not undone.`,
+          });
+        }
+        return;
+      }
+      for (const b of payload.createBrands) addBrand(b);
+      for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+      outPayload.brands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
+      outPayload.brandFlavors = loadBrandFlavors();
       let dayOk = false;
       try {
         // Pass the client's local `today` so the server keys the day boundary
@@ -14615,7 +15668,11 @@ export default function Home() {
       } catch (err) {
         if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
       }
-      if (!dayOk) failed += 1;
+      if (!dayOk) unconfirmedDays += 1;
+      else {
+        confirmedDays += 1;
+        if (appliedValues) appliedScheduleRows.push(...appliedValues.runs);
+      }
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
@@ -14626,12 +15683,18 @@ export default function Home() {
     setImportIntoEditor(false);
     // Tell the user why today's run count may be lower than the file's.
     const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
-    if (failed === 0) {
+    if (unconfirmedDays === 0 && notSentDays === 0) {
+      mixedImportQueue.outcome("schedule", skippedToday > 0 ? "partial" : "applied",
+        `${byDate.length} day requests acknowledged separately; ${skippedToday} already-started rows skipped.`);
+      payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
         status: skippedToday > 0 ? "partial" : "complete",
         summary: {
+          ...(appliedScheduleRows.length <= 500 && JSON.stringify(appliedScheduleRows).length <= 95_000
+            ? { appliedValues: { runs: appliedScheduleRows }, persistence: "sync-acknowledged" as const } : {}),
           phases: { parse: "deterministic multi-day parse", linking: "reviewed brand/flavor links", commit: "saved schedule days" },
           source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
           landed: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) - skippedToday },
@@ -14646,23 +15709,51 @@ export default function Home() {
         description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.${skippedNote}`,
       });
     } else {
+      const sourceRunCount = byDate.reduce((n, day) => n + day.runs.length, 0);
+      const outcomeStatus = confirmedDays > 0 || unconfirmedDays > 0 ? "partial" : "failed";
+      const recoveryAction = unconfirmedDays > 0
+        ? "Reload the schedule and inspect each unconfirmed date before deciding whether to retry. The server may already have saved an unconfirmed request; do not resend without reviewing the current day."
+        : confirmedDays > 0
+          ? "The confirmed days are saved. The other days were not sent because their latest plans could not be loaded; restore the connection before reviewing those source rows again."
+          : "No schedule write was sent because the latest day could not be loaded. Restore the connection, then review the source again.";
+      mixedImportQueue.outcome("schedule", outcomeStatus,
+        `${confirmedDays} day requests acknowledged; ${unconfirmedDays} unconfirmed and ${notSentDays} not sent. Earlier saves were not undone. Reload and inspect current days before another review.`);
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
-        status: "failed",
+        status: outcomeStatus,
         summary: {
-          phases: { parse: "deterministic multi-day parse", linking: "completed", commit: "partially saved" },
-          source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
-          landed: { days: byDate.length - failed, runs: 0 },
-          counts: { parsed: byDate.length, landedDays: byDate.length - failed, failedDays: failed, skipped: skippedToday },
-          mismatches: [`${failed} schedule day(s) could not be saved.`],
-          followUp: ["Retry the import after checking the failed day(s)."],
+          phases: {
+            parse: "deterministic multi-day parse",
+            linking: "completed",
+            commit: unconfirmedDays > 0 ? "some day requests have no confirmed reply" : "no day write was sent",
+          },
+          source: { days: byDate.length, runs: sourceRunCount },
+          counts: {
+            requestedDays: byDate.length,
+            confirmedDays,
+            unconfirmedDays,
+            notSentDays,
+            skippedToday,
+          },
+          mismatches: [
+            ...(unconfirmedDays > 0 ? [`${unconfirmedDays} schedule day request(s) ended without a confirmed reply; server state may have changed.`] : []),
+            ...(notSentDays > 0 ? [`${notSentDays} schedule day(s) were not sent because the latest plan could not be loaded.`] : []),
+          ],
+          followUp: [recoveryAction],
         },
       }).catch(() => {});
+      const resultNotConfirmed = unconfirmedDays > 0;
+      const resultPartlySaved = confirmedDays > 0 && notSentDays > 0;
       toast({
         variant: "destructive",
-        title: failed === byDate.length ? "Import failed" : "Import partly failed",
-        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Please try again.${skippedNote}`,
+        title: unconfirmedDays > 0
+          ? confirmedDays > 0 ? "Schedule import partly confirmed" : "Schedule result not confirmed"
+          : resultPartlySaved ? "Schedule import partly saved" : "Schedule was not saved",
+        description: resultNotConfirmed
+          ? `${confirmedDays} of ${byDate.length} day requests were confirmed; ${unconfirmedDays} did not receive a confirmed reply${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. An unconfirmed day may already have been saved. Reload and inspect affected dates before deciding whether to retry.${skippedNote}`
+          : `${confirmedDays} of ${byDate.length} day requests were confirmed; ${notSentDays} were not sent${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Restore the connection before reviewing those source rows again.${skippedNote}`,
       });
     }
     // OFFER (never auto-apply) new case counts for in-progress runs whose
@@ -14723,8 +15814,12 @@ export default function Home() {
     : "pending";
 
   const hasActiveRun = dayState.runs.some((run) => run.startedAt && !run.endedAt);
-  const hasUnsavedForm =
-    Boolean(currentRunId) && !deepEqual(v, loadRunValues(currentRunId));
+  const savedCurrentRunValues = currentRunId ? loadRunValues(currentRunId) : undefined;
+  const hasUnsavedForm = Boolean(currentRunId)
+    && hasUnsavedFormValueChanges(
+      v as unknown as Record<string, unknown>,
+      savedCurrentRunValues as unknown as Record<string, unknown> | undefined ?? {},
+    );
   // Keep every Home-owned modal/full-screen interaction in one named inventory.
   // Locally owned surfaces (for example Ingredient Detail inside Summary) use
   // useAutomaticUpdateReloadBlocker and are aggregated by the external store.
@@ -14801,7 +15896,6 @@ export default function Home() {
     hasPendingSync: syncPendingCount > 0 || !pushAcknowledgedRef.current,
     hasFailedSync: syncPushFailed || syncRetryWaiting,
   });
-
   useEffect(() => {
     reportAutomaticUpdateReloadSafety(automaticUpdateReloadSafe);
     return () => reportAutomaticUpdateReloadSafety(false);
@@ -15237,7 +16331,8 @@ export default function Home() {
   const homeCtxValue = useMemo(() => ({
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, addBrand,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
-    confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus,
+    freezerSurplusConfirmations, freezerSurplusConfirmationsLoaded, freezerSurplusConfirmationsError,
+    confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus, confirmStationActivity,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
@@ -15246,7 +16341,7 @@ export default function Home() {
     applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
     autoSandboxResetRef, autoSuppressUntilRef, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
-    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageProfiles, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory, checkPin, checklistAcks,
     checklistSatisfied, cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields, cheeseImportApplying,
     cheeseImportError, cheeseImportGenRef, cheeseImportInputRef, cheeseImportLoading, cheeseImportPrepared, cheeseImportProgress,
@@ -15267,7 +16362,7 @@ export default function Home() {
     handleApplyMerge, handleApplyRecipeNameMerge, handleCheeseImportConfirm, handleCheeseImportFile, handleConfirmMerge, handleImportFile,
     handlePremixImportConfirm, handlePremixImportFile, handleRemoveStaleReference, handleScheduleImportFile, handleSetupProfileSaved, handleShippingImportConfirm,
     handleShippingImportFile, handleSpecImportConfirm, handleSpecImportFile, handleStaleSyncWrite, handleSuggestMerges, handleUndoChange,
-    hasCapability, histBenchmarkPpm, history, ignoreMergeSuggestion, importDefaultDate, importExcelIntoEditor,
+    hasCapability, histBenchmarkPpm, history, ignoreMergeSuggestion, restoreIgnoredMerge, importDefaultDate, importExcelIntoEditor,
     importInputRef, importIntoEditor, importProgress, importResult, ingredientCatalog, ingredientTypeOptions,
     ingredientTypes, initialFinishTimestampRef, isFullscreen, isManager, isOnline, isRecipeNameCategory,
     isSupervisor, isSyncApplyingRef, lastEndedRun, lastLocalEditRef, lastRunRecall, lastSyncSigRef,
@@ -15279,6 +16374,8 @@ export default function Home() {
     mergeFormRef, mergeFromImport, mergeFullUniverse, mergeMap, mergePoolLabel, mergePreviewCount,
     mergeSources, mergeStaleCi, mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected, mergeSuggestions, mergeTarget,
+    ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError, ignoredMergeScopeKey,
+    ignoredMergeFilterQuery, visibleIgnoredMerges, scopedIgnoredMerges, restoringIgnoredMergeKey,
     mergeTargetOptions, mergeUniverse, mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput,
     mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
@@ -15297,7 +16394,7 @@ export default function Home() {
     renameBrand, renameCatalogEntry, renameCheeseIngredient, renameCheeseRecipeName, renameDieType, renameDoughIngredient,
     renameDoughRecipeName, renameFlavor, renameFrontlineIngredient, renameFrontlineRecipeName, renameIngredientType, renameMixIngredient,
     renameMixRecipeName, renamePepType, replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
-    replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm, resolvedPin,
+    replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm,
     resumeRun, revalidate, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
     saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
@@ -15318,6 +16415,7 @@ export default function Home() {
     setMergeBfMode, setMergeBusy, setMergeCategory, setMergeConfirming, setMergeError,
     setMergeFromImport, setMergeSources, setMergeSuggestBusy, setMergeSuggestError, setMergeSuggestNote, setMergeSuggestRan,
     setMergeSuggestSelected, setMergeSuggestions, setMergeTarget, setMergedAwayTomb, setMgIngInput, setMgNamesInput,
+    setIgnoredMergePanelOpen, setIgnoredMergeState, setIgnoredMergeFilter,
     setMgPresetRows, setMgSelectedPreset, setMgStandaloneInput, setMixIngredients, setMixMakeDay, setMixRecipeNames,
     setNewPin, setNewPinConfirm, setNewReasonInput, setPep1ShowB, setPep2ShowB, setPepTypes,
     setPinChangeMsg, setPinError, setPinInput, setPremixImportApplying, setPremixImportError, setPremixImportLoading,
@@ -15332,7 +16430,7 @@ export default function Home() {
     setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTour, setSkidStacking,
     setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
     setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setUndoBusy, setWriteError, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice, setupEditorBrand,
+    setWriteError, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice, setupEditorBrand,
     setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
     shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
     showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,
@@ -15356,8 +16454,9 @@ export default function Home() {
     // contract or their correctness is guaranteed by the state deps below.
     activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
+    freezerSurplusConfirmations, freezerSurplusConfirmationsLoaded, freezerSurplusConfirmationsError,
     batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brandInput, brands,
-    canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    canApproveResets, canEditRules, canManageInventory, canManageProfiles, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
     checklistAcks, checklistSatisfied,
     cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields,
@@ -15385,6 +16484,9 @@ export default function Home() {
     mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected,
     mergeSuggestions, mergeTarget, mergeTargetOptions, mergeUniverse,
+    ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError,
+    ignoredMergeScopeKey, ignoredMergeFilterQuery, visibleIgnoredMerges, scopedIgnoredMerges,
+    restoringIgnoredMergeKey,
     mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput, mgPresetRows,
     mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, newPin, newPinConfirm, newReasonInput, nextRunDieType,
@@ -15392,7 +16494,7 @@ export default function Home() {
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
     premixImportPrepared, premixImportProgress, productionStartTime, productionRules,
-    promotingRecipeKind, productionStartTime, resolvedPin, pauseDecisionRunId, role, ruleViolations,
+    promotingRecipeKind, productionStartTime, pauseDecisionRunId, role, ruleViolations,
     runStatus, runSummaryStatsById, runToTime, runValuesById, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
     scheduleEditorIsLiveDay, scheduleEditorRunValues, scheduleEditorRuns,
@@ -15445,6 +16547,7 @@ export default function Home() {
       // ── Production / run state ──
       activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
       freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
+      freezerSurplusConfirmations, freezerSurplusConfirmationsLoaded, freezerSurplusConfirmationsError,
       batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brands,
       canApproveResets, canEditRules, canManageInventory, canManageStaff,
       caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
@@ -15561,6 +16664,8 @@ export default function Home() {
         swipeCueTimer.current = setTimeout(() => setSwipeCue(null), 450);
       }}
     >
+      <FactoryDirectoryStatus />
+      <SharedRecordsStatus />
       {/* ── Alerts & Floor Mode settings (per-user, follows the account) ── */}
       <AlertSettingsDialog
         open={showAlertSettings}
@@ -15842,31 +16947,20 @@ export default function Home() {
         // on every per-second Home re-render and lose their local state.
 
         // Standalone tabs: still use a single input
-        // History instrumentation wrappers: snapshot before the edit, run it, then
-        // record (recordMasterDataChange skips no-ops). This is the single point
-        // where every manageable list add/remove/rename gets an undo entry — the
-        // merge and PIN tabs are intentionally not wrapped (merge records itself;
-        // PIN isn't master data).
-        const histAdd = (label: string, fn: (v: string) => void) => (v: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(v);
-          noteChange("add", `Added "${v}" to ${label}`, before);
+        const guardedCategories: Record<string, SharedMasterDataCategory> = {
+          Brands: "brand", Flavors: "flavor", "Applicator Types": "applicator", "Pep Types": "pep", "Die Types": "die",
+          "Dough Recipe Names": "dough", "Sauce Recipe Names": "sauce", "Dough Ingredients": "doughIngredient", "Sauce Ingredients": "sauceIngredient",
         };
-        const histRemove = (label: string, fn: (v: string) => void) => (v: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(v);
-          noteChange("remove", `Removed "${v}" from ${label}`, before);
+        const guardedListAction = (label: string, action: SharedMasterDataCommand["action"], source: string, target?: string) => {
+          const category = guardedCategories[label];
+          if (!category) { toast({ title: "Unsupported shared action", description: "No records were changed. Review this list's canonical editor.", variant: "destructive" }); return; }
+          void runGuardedMasterDataCommand({ action, category, sources: [source], ...(target ? { target } : {}),
+            ...(category === "flavor" ? { brand: manageBrandFilter } : {}) });
         };
-        const histRename = (label: string, fn: (o: string, n: string) => void) => (o: string, n: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(o, n);
-          noteChange("rename", `Renamed "${o}" to "${n}" in ${label}`, before);
-        };
-        const histMerge = (label: string, fn: (from: string, into: string) => void) => (from: string, into: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(from, into);
-          noteChange("rename", `Merged "${from}" into "${into}" in ${label}`, before);
-        };
+        const histAdd = (label: string, _fn: (v: string) => void) => (v: string) => guardedListAction(label, "add", v);
+        const histRemove = (label: string, _fn: (v: string) => void) => (v: string) => guardedListAction(label, "remove", v);
+        const histRename = (label: string, _fn: (o: string, n: string) => void) => (o: string, n: string) => guardedListAction(label, "rename", o, n);
+        const histMerge = (label: string, _fn: (from: string, into: string) => void) => (from: string, into: string) => guardedListAction(label, "merge", from, into);
         type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; onMerge?: (from: string, into: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: histAdd("Brands", addBrand), onRemove: histRemove("Brands", removeBrand), onRename: histRename("Brands", renameBrand) },
@@ -15887,7 +16981,7 @@ export default function Home() {
 
         const settingsTabs: { key: string; label: string }[] = [
           { key: "import", label: "Import" },
-          ...(isSupervisor ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
+          ...(canManageProfiles ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
           ...(canManageInventory ? [{ key: "mixes", label: "Mix Recipes" }] : []),
@@ -15896,6 +16990,9 @@ export default function Home() {
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
            ...(canManageStaff ? [{ key: "audit", label: "Data Health & Audit" }] : []),
+           ...(canManageStaff || canManageQc ? [{ key: "gold-retention", label: "Gold Lab Retention" }] : []),
+          ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
+            ? [{ key: "gold-approvals", label: "Gold Lab Approvals" }] : []),
           ...(canManageStaff ? [{ key: "ai-corrections", label: "AI Memory" }] : []),
         ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -15909,7 +17006,8 @@ export default function Home() {
           brands: "Brands", flavors: "Flavors", ingredientTypes: "Applicator Types",
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
-           cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", pin: "Change PIN",
+            cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", "gold-retention": "Gold Lab Retention", pin: "Change PIN",
+          "gold-approvals": "Gold Lab Approvals",
           allergens: "Allergen Mappings",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
           "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
@@ -15940,6 +17038,9 @@ export default function Home() {
               ...(canManageInventory ? ["dieDefaults", "freezer", "cycleCount"] : []),
               ...(canManageStaff || canApproveResets ? ["staff"] : []),
               ...(canManageStaff ? ["audit", "ai-corrections"] : []),
+              ...(canManageStaff || canManageQc ? ["gold-retention"] : []),
+              ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
+                ? ["gold-approvals"] : []),
               "pin",
               ...(isSupervisor ? ["runs"] : []),
             ],
@@ -15947,7 +17048,7 @@ export default function Home() {
           {
             key: "tools",
             label: "Tools",
-            subTabs: ["import", ...(isSupervisor ? ["setupProfiles"] : []), "merge"],
+            subTabs: ["import", ...(canManageProfiles ? ["setupProfiles"] : []), "merge"],
           },
         ] as { key: string; label: string; subTabs: string[] }[]).filter(s => s.subTabs.length > 0);
         const sectionForTab: Record<string, string> = {};
@@ -15996,10 +17097,11 @@ export default function Home() {
         const handlePinSave = () => {
           if (!newPin) { setPinChangeMsg("Enter a new PIN."); return; }
           if (newPin !== newPinConfirm) { setPinChangeMsg("PINs don't match."); return; }
-          updateSupervisorPin(newPin)
+          const entered = newPin;
+          setNewPin(""); setNewPinConfirm("");
+          updateSupervisorPin(entered)
             .then((saved) => {
-              try { localStorage.setItem(SUPERVISOR_PIN_KEY, saved); } catch {}
-              cycleCountQc.setQueryData(["supervisorPin"], saved);
+              cycleCountQc.setQueriesData({ queryKey: ["supervisorPin"] }, saved);
               setNewPin(""); setNewPinConfirm("");
               setPinChangeMsg("PIN updated successfully.");
             })
@@ -16017,8 +17119,7 @@ export default function Home() {
         const handlePinClear = () => {
           updateSupervisorPin("")
             .then((saved) => {
-              try { localStorage.setItem(SUPERVISOR_PIN_KEY, saved); } catch {}
-              cycleCountQc.setQueryData(["supervisorPin"], saved);
+              cycleCountQc.setQueriesData({ queryKey: ["supervisorPin"] }, saved);
               setNewPin(""); setNewPinConfirm("");
               setPinChangeMsg("PIN removed — settings are now unlocked.");
             })
@@ -16037,9 +17138,11 @@ export default function Home() {
             onClick={() => setShowManageDialog(false)}
           >
             <div
+              ref={manageDialogRef}
               role="dialog"
               aria-modal="true"
               aria-labelledby="manage-lists-dialog-title"
+              tabIndex={-1}
               className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col`}
               onClick={e => e.stopPropagation()}
             >
@@ -16083,7 +17186,9 @@ export default function Home() {
               </div>
 
               {/* Content */}
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+              <fieldset aria-busy={undoBusy} disabled={undoBusy || (!directoryReady && !["pin", "staff", "audit", "gold-retention", "rules", "runs", "ai-corrections", "cycleCount", "freezer"].includes(manageCategory))}
+                className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                {!directoryReady && <p role="status" className="mb-3 text-sm text-amber-500">Operational lists unavailable. Connect online and use Retry operational lists above.</p>}
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
                   <div className="space-y-4">
@@ -16231,6 +17336,112 @@ export default function Home() {
                         : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated. Separate inventory products are preserved and follow their production ingredient link. This can't be undone."}
                     </p>
 
+                    {canManageProfiles &&
+                      !(mergeSuggestScope.category === "flavor" && !mergeSuggestScope.brand) && (
+                      <section
+                        data-testid="ignored-merge-matches"
+                        aria-label="Previously ignored matches"
+                        className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-2"
+                      >
+                        <button
+                          type="button"
+                          aria-expanded={ignoredMergePanelOpen}
+                          aria-controls="ignored-merge-pair-list"
+                          onClick={() => setIgnoredMergePanelOpen((open) => !open)}
+                          className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-foreground"
+                        >
+                          <span>Previously ignored matches</span>
+                          {ignoredMergeState?.scopeKey === ignoredMergeScopeKey && (
+                            <span className="text-[11px] font-normal text-muted-foreground">
+                              {scopedIgnoredMerges.length}
+                            </span>
+                          )}
+                        </button>
+                        {ignoredMergePanelOpen && (
+                          <div id="ignored-merge-pair-list" className="space-y-2">
+                            {ignoredMergeError && (
+                              <p role="alert" className="text-[11px] text-amber-600 dark:text-amber-500">
+                                {ignoredMergeError}
+                              </p>
+                            )}
+                            {ignoredMergeBusy ? (
+                              <p className="text-[11px] text-muted-foreground">Loading ignored matches…</p>
+                            ) : scopedIgnoredMerges.length > 0 ? (
+                              <>
+                                <label
+                                  htmlFor="ignored-merge-filter"
+                                  className="block text-[11px] font-medium text-muted-foreground"
+                                >
+                                  Filter ignored matches by recipe name
+                                </label>
+                                <div className="flex gap-2">
+                                  <input
+                                    id="ignored-merge-filter"
+                                    type="search"
+                                    value={ignoredMergeFilterQuery}
+                                    onChange={(event) => setIgnoredMergeFilter({
+                                      scopeKey: ignoredMergeScopeKey,
+                                      query: event.currentTarget.value,
+                                    })}
+                                    placeholder="Search either recipe name"
+                                    autoComplete="off"
+                                    className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                  />
+                                  {ignoredMergeFilterQuery && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIgnoredMergeFilter({
+                                        scopeKey: ignoredMergeScopeKey,
+                                        query: "",
+                                      })}
+                                      className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted"
+                                    >
+                                      Clear filter
+                                    </button>
+                                  )}
+                                </div>
+                                {visibleIgnoredMerges.length > 0 ? (
+                                  <ul className="space-y-1.5">
+                                    {visibleIgnoredMerges.map((pair) => {
+                                      const pairKey = [pair.nameA, pair.nameB].sort().join("::");
+                                      return (
+                                        <li
+                                          key={pairKey}
+                                          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/60 px-2.5 py-2"
+                                        >
+                                          <span className="min-w-0 break-words text-xs">
+                                            {pair.nameA} ↔ {pair.nameB}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            aria-label={`Restore ignored match ${pair.nameA} and ${pair.nameB}`}
+                                            disabled={Boolean(restoringIgnoredMergeKey)}
+                                            onClick={() => void restoreIgnoredMerge(pair)}
+                                            className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50"
+                                          >
+                                            {restoringIgnoredMergeKey === pairKey ? "Restoring…" : "Restore"}
+                                          </button>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    No ignored matches contain “{ignoredMergeFilterQuery.trim()}”.
+                                    Clear the filter to see all ignored matches.
+                                  </p>
+                                )}
+                              </>
+                            ) : !ignoredMergeError ? (
+                              <p className="text-[11px] text-muted-foreground">
+                                No ignored matches in this selection.
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </section>
+                    )}
+
                     {/* Deterministic + optional AI suggestions: each tab scans ONLY its own
                         name pool (mergeSuggestScope.universe) — Ingredients scans
                         the full cross-category ingredient list, every recipe-name
@@ -16241,6 +17452,47 @@ export default function Home() {
                     {mergeSuggestScope.universe.length > 0 &&
                       !(mergeCategory === "brandflavor" && mergeBfMode === "flavors" && !mergeBfBrand) && (
                       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2">
+                        {canManageProfiles &&
+                          recentlyIgnoredMerge?.scopeKey === ignoredMergeScopeKey && (
+                          <div
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/70 px-2.5 py-2"
+                            role={
+                              recentlyIgnoredMerge.status === "error" ||
+                              recentlyIgnoredMerge.status === "save-error"
+                                ? "alert"
+                                : "status"
+                            }
+                          >
+                            <span className="min-w-0 break-words text-xs">
+                              {recentlyIgnoredMerge.status === "save-error"
+                                ? "Couldn't save this ignore. It may appear again on a later scan."
+                                : recentlyIgnoredMerge.status === "error"
+                                ? "Couldn't undo this ignore. Please retry."
+                                : recentlyIgnoredMerge.status === "restored"
+                                ? "Ignore undone. Scan again to see this match in suggestions."
+                                : `Ignored: ${recentlyIgnoredMerge.pairs
+                                    .map((pair) => `${pair.nameA} ↔ ${pair.nameB}`)
+                                    .join(", ")}`}
+                            </span>
+                            {(recentlyIgnoredMerge.status === "ignored" ||
+                              recentlyIgnoredMerge.status === "restoring" ||
+                              recentlyIgnoredMerge.status === "error") && (
+                              <button
+                                type="button"
+                                aria-label={`Undo ignore ${recentlyIgnoredMerge.pairs
+                                  .map((pair) => `${pair.nameA} and ${pair.nameB}`)
+                                  .join(", ")}`}
+                                disabled={recentlyIgnoredMerge.status === "restoring"}
+                                onClick={() => void undoRecentlyIgnoredMerge()}
+                                className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-semibold hover:bg-muted disabled:opacity-50"
+                              >
+                                {recentlyIgnoredMerge.status === "restoring"
+                                  ? "Undoing…"
+                                  : "Undo ignore"}
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <div className="flex items-center justify-between gap-2">
                           <div>
                             <p className="text-xs font-semibold text-foreground">Suggested merges</p>
@@ -16531,13 +17783,13 @@ export default function Home() {
                       className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                       Save PIN
                     </button>
-                    {serverPin ? (
+                    {serverPin?.configured ? (
                       <button type="button" onClick={handlePinClear}
                         className="w-full px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:text-foreground">
                         Remove PIN lock
                       </button>
                     ) : (
-                      <p className="text-xs text-center text-muted-foreground">No PIN set — all settings are unlocked.</p>
+                      <p className="text-xs text-center text-muted-foreground">{serverPin?.configured === false ? "No PIN set — all settings are unlocked." : "PIN status unavailable. Connect online and retry."}</p>
                     )}
                   </div>
                 )}
@@ -16587,7 +17839,7 @@ export default function Home() {
                       items={weightItems}
                       learnedWeights={learnedBatchWeights}
                       onSave={(entries) => {
-                        queueBatchWeightChanges(entries);
+                        queueBatchWeightChanges(entries, true);
                       }}
                     />
                   );
@@ -16598,7 +17850,7 @@ export default function Home() {
                 )}
 
                 {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
-                {manageCategory === "setupProfiles" && isSupervisor && (
+                {manageCategory === "setupProfiles" && canManageProfiles && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">
                       Edit the saved setup for any brand &amp; flavor — line settings, recipes, and packaging — without touching the current run. New runs auto-load these saved profiles.
@@ -16614,6 +17866,12 @@ export default function Home() {
                 {manageCategory === "import" && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
+                    <ImportTemplateDownloads enabled={enabledImporterTypes} />
+                    <DeferredSurface
+                      label="related workbook reviews"
+                      load={loadMixedImportReviewQueue}
+                      componentProps={{ queue: mixedImportQueue, enabledImporters: enabledImporterTypes }}
+                    />
                     {canManageInventory && pendingDuplicateReviewCount !== 0 && (
                       <div
                         className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between"
@@ -17000,22 +18258,63 @@ export default function Home() {
                     />
                     <SyncConflictStatsCard />
                     <AuditLogCard />
+                    <DeferredSurface
+                      label="import gold evaluation lab"
+                      load={loadImportGoldLabCard}
+                      componentProps={{}}
+                    />
                   </div>
+                )}
+                {manageCategory === "gold-retention" && (canManageStaff || canManageQc) && (
+                  <DeferredSurface
+                    label="Gold Lab retention"
+                    load={loadImportGoldRetentionCard}
+                    componentProps={{ standalone: true }}
+                  />
+                )}
+                {manageCategory === "gold-approvals" &&
+                  (serverRole === "manager" || serverRole === "qc-manager") &&
+                  (canManageStaff || canManageQc) && (
+                    <DeferredSurface
+                      key={`gold-approvals:${me?.userId}:${me?.sandbox}`}
+                      label="Gold Lab approvals"
+                      load={loadImportGoldApprovalsCard}
+                      componentProps={{}}
+                    />
                 )}
 
                 {/* AI corrections memory — manager-only view + delete */}
                 {manageCategory === "ai-corrections" && canManageStaff && <AiCorrectionsCard />}
 
                 {/* Manage runs — supervisor-only panel to remove individual or blank runs */}
-                {manageCategory === "runs" && isSupervisor && <ManageRunsPanel />}
+                {manageCategory === "runs" && canManageFactorySettings && <ManageRunsPanel />}
 
-                {/* Recent changes: local per-device undo trail for master-data edits */}
-                {!["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
+                {confirmationDialog}
+                {serverRole === "manager" && canManageFactorySettings && !["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
+                  <SharedMasterDataHistory identity={`${me?.userId}:${me?.sandbox ? "sandbox" : "live"}`}
+                    canUndo={canManageInventory && canManageProfiles}
+                    revision={sharedHistoryRevision} onRefresh={refreshGuardedMasterData} onBusyChange={setUndoBusy} mutationBusy={undoBusy}
+                    onOpenImports={() => setManageCategory("import")} onOpenDataHealth={canManageStaff ? () => setManageCategory("audit") : undefined}
+                    confirm={(operation) => uiConfirm({ title: "Undo this shared change?",
+                      description: `${operation.description}. The server will check ${operation.affectedRecords} records and ${operation.affectedReferences} pending-run references. A changed dependency blocks the entire Undo.`,
+                      confirmLabel: "Undo" })} />
+                )}
+                {/* Device-only evidence is not an administrative server history. */}
+                {serverRole === "manager" && canManageFactorySettings && !["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
                   <div className="mt-6 pt-4 border-t border-border">
-                    <h3 className="text-sm font-semibold mb-1">Recent changes</h3>
+                    <h3 className="text-sm font-semibold mb-1">Device-only change notices</h3>
+                    {(legacyHistoryProblem || changeHistory.some((item) => item.evidence === "legacy-only")) && (
+                      <Button type="button" size="sm" variant="outline" disabled={undoBusy}
+                        onClick={() => { void resolveLegacyHistoryAfterReview(); }}>Resolve legacy snapshots</Button>
+                    )}
                     <p className="text-[11px] text-muted-foreground mb-3">
-                      Edits to lists, recipes, and merges on this device. Undo also reverts any changes made after it. (Stored locally, not synced.)
+                      These notices are not server-confirmed Undo receipts. Legacy evidence is non-portable and retained on this device, but cannot restore shared records. Use Import history or Data Health for their supported guarded Undo actions.
                     </p>
+                    {legacyHistoryProblem && (
+                      <p role="status" className="text-xs text-amber-600 dark:text-amber-300 mb-3">
+                        {legacyHistoryProblem}
+                      </p>
+                    )}
                     {changeHistory.length === 0 ? (
                       <p className="text-xs text-muted-foreground italic">No recent changes.</p>
                     ) : (
@@ -17032,19 +18331,16 @@ export default function Home() {
                               <p className="text-xs truncate" title={entry.description}>{entry.description}</p>
                               <p className="text-[10px] text-muted-foreground">{new Date(entry.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}</p>
                             </div>
-                            <button
-                              type="button"
-                              disabled={undoBusy}
-                              onClick={() => handleUndoChange(entry)}
-                              className="shrink-0 px-2.5 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50"
-                            >Undo</button>
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {entry.evidence === "session-only" ? "Session notice" : "Legacy only"} · Undo unavailable
+                            </span>
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
                 )}
-              </div>
+              </fieldset>
             </div>
           </div>
         );
@@ -17054,7 +18350,7 @@ export default function Home() {
       {showPinDialog && (
           <div
            className={HOME_DIALOG_OVERLAY_CLASS}
-          onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
+          onClick={() => { pinAttemptRef.current++; setPinVerifying(false); setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
             role="dialog"
@@ -17082,14 +18378,15 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
+                onClick={() => { pinAttemptRef.current++; setPinVerifying(false); setShowPinDialog(false); setPinInput(""); setPinError(""); }}
                 className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted transition-colors"
               >Cancel</button>
               <button
                 type="button"
                 onClick={checkPin}
+                disabled={pinVerifying}
                 className="flex-1 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-              >Unlock</button>
+              >{pinVerifying ? "Verifying online…" : "Unlock"}</button>
             </div>
           </div>
         </div>
@@ -17155,6 +18452,7 @@ export default function Home() {
               pendingCount={syncPendingCount}
               failedCount={syncFailedCount}
               diagnostics={syncDiagnostics}
+              pendingScope={me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : undefined}
               canViewConflicts={canManageStaff}
               onRetry={retryLatestSync}
               onExportDiagnostics={exportSyncDiagnostics}
@@ -17219,7 +18517,9 @@ export default function Home() {
             </button>
             {/* Header overflow menu */}
             <DropdownMenu
+              open={headerMoreMenuOpen}
               onOpenChange={(open) => {
+                setHeaderMoreMenuOpen(open);
                 if (open && (canManageStaff || canApproveResets)) {
                   preloadStaffManagementSurface();
                 }
@@ -17248,7 +18548,18 @@ export default function Home() {
                   )}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                align="end"
+                className="[&_[role=menuitem]]:min-h-10"
+                onCloseAutoFocus={(event) => {
+                  if (!openAlertSettingsAfterMenuCloseRef.current) return;
+                  openAlertSettingsAfterMenuCloseRef.current = false;
+                  event.preventDefault();
+                  window.requestAnimationFrame(() => {
+                    setShowAlertSettings(true);
+                  });
+                }}
+              >
                 {canViewManagerAttention && (
                   <DropdownMenuItem
                     aria-label={
@@ -17304,7 +18615,7 @@ export default function Home() {
                     <ClipboardList className="w-4 h-4 mr-2" /> Manager action queue
                   </DropdownMenuItem>
                 )}
-                {(canRecordQc || isManager) && (
+                {canAccessQcWorkflow && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
                     <ShieldCheck className="w-4 h-4 mr-2" /> QC workflows &amp; history
                   </DropdownMenuItem>
@@ -17319,7 +18630,7 @@ export default function Home() {
                     <Users className="w-4 h-4 mr-2" /> Staff roster
                   </DropdownMenuItem>
                 )}
-                {isSupervisor && (
+                {canManageFactorySettings && (
                   <DropdownMenuItem onClick={() => { fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
                     {scheduledDays.length > 0 && (
@@ -17329,7 +18640,10 @@ export default function Home() {
                     )}
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
+                <DropdownMenuItem
+                  onSelect={() => queueAlertSettingsOpenAfterMenuClose("select")}
+                  onClick={() => queueAlertSettingsOpenAfterMenuClose("click")}
+                >
                   <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -17375,6 +18689,77 @@ export default function Home() {
 
         <Form {...form}>
           <form>
+            {activeTab === "run" && screenMode === null && (canManageStaff || canManageQc) && (
+              importGoldRetentionReminders.isError ? (
+                <div
+                  className="mb-3 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  role="status"
+                  data-testid="gold-retention-reminder-error"
+                >
+                  <span>Gold Lab deadline reminders are unavailable. Open the retention register to retry.</span>
+                  <button
+                    type="button"
+                    className="min-h-11 shrink-0 rounded border border-border px-3 py-2 text-sm font-medium"
+                    onClick={() => {
+                      setManageCategory("gold-retention");
+                      setManageInput("");
+                      setPinChangeMsg("");
+                      setShowManageDialog(true);
+                    }}
+                  >
+                    Open retention register
+                  </button>
+                </div>
+              ) : (
+                (importGoldRetentionReminders.data?.dueSoonCount ?? 0) +
+                  (importGoldRetentionReminders.data?.overdueCount ?? 0) > 0 && (
+                  <section
+                    className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+                    aria-label="Gold Lab retention reminders"
+                    data-testid="gold-retention-reminders"
+                  >
+                    <p className="mb-2 text-sm font-medium">Gold Lab retention reminders</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      {Boolean(importGoldRetentionReminders.data?.dueSoonCount) && (
+                        <button
+                          type="button"
+                          className="min-h-11 rounded border border-border px-3 py-2 text-left text-sm font-medium"
+                          data-testid="gold-retention-due-soon-reminder"
+                          onClick={() => {
+                            setManageCategory("gold-retention");
+                            setManageInput("");
+                            setPinChangeMsg("");
+                            setShowManageDialog(true);
+                          }}
+                        >
+                          {importGoldRetentionReminders.data!.dueSoonCount} deadline
+                          {importGoldRetentionReminders.data!.dueSoonCount === 1 ? "" : "s"} due within 7 days
+                        </button>
+                      )}
+                      {Boolean(importGoldRetentionReminders.data?.overdueCount) && (
+                        <button
+                          type="button"
+                          className="min-h-11 rounded border border-destructive/40 px-3 py-2 text-left text-sm font-medium text-destructive"
+                          data-testid="gold-retention-overdue-reminder"
+                          onClick={() => {
+                            setManageCategory("gold-retention");
+                            setManageInput("");
+                            setPinChangeMsg("");
+                            setShowManageDialog(true);
+                          }}
+                        >
+                          {importGoldRetentionReminders.data!.overdueCount} overdue deadline
+                          {importGoldRetentionReminders.data!.overdueCount === 1 ? "" : "s"}
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Manual reminders only; no case details or customer data are shown here.
+                    </p>
+                  </section>
+                )
+              )
+            )}
             {(syncPushFailed || writeError) && (
               <div className="print:hidden mb-3 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
@@ -17550,7 +18935,7 @@ export default function Home() {
                 {isManager && <QcDowntimeSurface days={downtimeDays} />}
               </TabsContent>
 
-              <TabsContent value="quality">
+              {canAccessQcWorkflow && <TabsContent value="quality">
                 <QcQualitySurface
                   runId={currentRunId}
                   runStartedAt={currentRun?.startedAt ?? null}
@@ -17564,7 +18949,7 @@ export default function Home() {
                   canManageQc={canManageQc}
                   canViewPhotos={canManageInventory}
                 />
-              </TabsContent>
+              </TabsContent>}
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
@@ -18087,7 +19472,7 @@ export default function Home() {
           <input
             ref={sauceGuideImportInputRef}
             type="file"
-            accept=".docx,.doc,.txt"
+            accept=".docx,.doc,.txt,.xlsx"
             className="hidden"
             onChange={handleSauceGuideImportFile}
           />
@@ -18130,16 +19515,19 @@ export default function Home() {
             presentation="dialog"
             componentProps={{
               open: true,
-              onClose: () => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); },
+              onClose: () => { if (!canCloseWorkbookReview()) return; setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); },
               result: importResult,
               brands,
               brandFlavors,
               canCreate: isSupervisor,
               defaultDate: importDefaultDate,
               onConfirm: (payload) => {
-                if (payload.multiDay) { void commitMultiDayImport(payload); return; }
-                if (importIntoEditor) importExcelIntoEditor(payload);
-                else void commitExcelImport(payload);
+                const work = payload.multiDay ? commitMultiDayImport(payload)
+                  : importIntoEditor ? importExcelIntoEditor(payload) : commitExcelImport(payload);
+                void mixedImportQueue.confirm("schedule", () => work).catch((error: unknown) => {
+                  setImportProgress(null);
+                  toast({ title: "Schedule import needs review", description: error instanceof Error ? error.message : "The schedule could not be verified. No automatic retry was made.", variant: "destructive" });
+                });
               },
               progress: importProgress,
             }}
@@ -18155,6 +19543,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             if (specImportRetryPending) {
               toast({
                 title: "Import status not confirmed",
@@ -18200,7 +19589,7 @@ export default function Home() {
               retryPending: specImportRetryPending,
               retryBlocked: specImportRetryBlocked,
               retryingPending: specImportRetryingPending,
-              onRetryPending: () => void handleRetryPendingSpecImport(),
+              onRetryPending: () => void mixedImportQueue.confirm("spec", handleRetryPendingSpecImport),
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
               aiRetryAvailable: specImportAiRetryCount === 0 &&
@@ -18214,7 +19603,8 @@ export default function Home() {
                     values: form.getValues(),
                   }
                 : null,
-              onConfirm: handleSpecImportConfirm,
+              goldCaptureEnabled,
+              onConfirm: (...args) => mixedImportQueue.confirm("spec", () => handleSpecImportConfirm(...args)),
             }}
           />
         )}
@@ -18228,6 +19618,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             premixImportGenRef.current++;
             premixImportAbortRef.current?.abort();
             premixImportAbortRef.current = null;
@@ -18248,7 +19639,8 @@ export default function Home() {
               error: premixImportError,
               prepared: premixImportPrepared,
               applying: premixImportApplying,
-              onConfirm: handlePremixImportConfirm,
+              goldCaptureEnabled,
+              onConfirm: (...args) => mixedImportQueue.confirm("premix", () => handlePremixImportConfirm(...args)),
             }}
           />
         )}
@@ -18262,6 +19654,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             shippingImportGenRef.current++;
             if (shippingImportLoading) {
               toast({
@@ -18278,7 +19671,7 @@ export default function Home() {
               error: shippingImportError,
               prepared: shippingImportPrepared,
               applying: shippingImportApplying,
-              onConfirm: handleShippingImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("shipping", () => handleShippingImportConfirm(...args)),
             }}
           />
         )}
@@ -18292,6 +19685,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             sauceGuideImportGenRef.current++;
             setShowSauceGuideImport(false);
             setSauceGuideImportPrepared(null);
@@ -18302,7 +19696,7 @@ export default function Home() {
               error: sauceGuideImportError,
               prepared: sauceGuideImportPrepared,
               applying: sauceGuideImportApplying,
-              onConfirm: handleSauceGuideImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("sauce", () => handleSauceGuideImportConfirm(...args)),
             }}
           />
         )}
@@ -18316,6 +19710,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             doughGuideImportGenRef.current++;
             setShowDoughGuideImport(false);
             setDoughGuideImportPrepared(null);
@@ -18326,7 +19721,7 @@ export default function Home() {
               error: doughGuideImportError,
               prepared: doughGuideImportPrepared,
               applying: doughGuideImportApplying,
-              onConfirm: handleDoughGuideImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("dough", () => handleDoughGuideImportConfirm(...args)),
             }}
           />
         )}
@@ -18340,6 +19735,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             cheeseImportGenRef.current++;
             cheeseImportAbortRef.current?.abort();
             cheeseImportAbortRef.current = null;
@@ -18360,7 +19756,8 @@ export default function Home() {
               error: cheeseImportError,
               prepared: cheeseImportPrepared,
               applying: cheeseImportApplying,
-              onConfirm: handleCheeseImportConfirm,
+              goldCaptureEnabled,
+              onConfirm: (...args) => mixedImportQueue.confirm("cheese", () => handleCheeseImportConfirm(...args)),
             }}
           />
         )}
@@ -18427,7 +19824,8 @@ export default function Home() {
         )}
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
-        {showScheduleDialog && (
+        {showScheduleDialog && canManageFactorySettings && (
+          <DialogLayerProvider value={80}>
           <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScheduleDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md flex flex-col`} onClick={e => e.stopPropagation()}>
               {scheduleView === "list" ? (
@@ -18481,7 +19879,7 @@ export default function Home() {
                           <p className="text-sm font-semibold truncate">
                             Today — {new Date(todayStr() + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
                           </p>
-                          <p className="text-xs text-muted-foreground">{dayState.runs.length} run{dayState.runs.length !== 1 ? "s" : ""} on today's plan</p>
+                          <p className="text-xs text-muted-foreground">{todayPlannedRunCount} run{todayPlannedRunCount !== 1 ? "s" : ""} on today's plan</p>
                         </div>
                         <button
                           type="button"
@@ -18505,6 +19903,14 @@ export default function Home() {
                       </div>
                     ) : scheduledDays.map(day => {
                       const isExpanded = expandedScheduleDay === day.date;
+                      const moveChoice = scheduleSwapAvailability?.from === day.date
+                        && scheduleSwapAvailability.to === scheduleMoveDate
+                        ? scheduleSwapAvailability
+                        : null;
+                      const destinationAlreadyScheduled = !!moveChoice
+                        && !moveChoice.checking
+                        && moveChoice.sourceScheduled
+                        && moveChoice.destinationScheduled;
                       return (
                         <div key={day.date} data-testid={`schedule-day-${day.date}`} className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
                           {/* ── Header row ── */}
@@ -18533,9 +19939,12 @@ export default function Home() {
                                 setScheduleError(null);
                                   if (scheduleMove?.from === day.date && scheduleMove.runId === null) {
                                     setScheduleMove(null);
+                                    setScheduleSwapAvailability(null);
                                   } else {
                                     setScheduleMove({ from: day.date, runId: null });
-                                    setScheduleMoveDate(tomorrowStr());
+                                    const nextDate = tomorrowStr();
+                                    setScheduleMoveDate(nextDate);
+                                    void checkScheduleSwapEligibility(day.date, nextDate);
                                   }
                                 }}
                                 className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
@@ -18569,35 +19978,153 @@ export default function Home() {
                           {scheduleMove?.from === day.date && scheduleMove.runId === null && (
                             <div className="border-t border-border/40 px-3 py-2.5 bg-primary/5">
                               <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Move all runs to</label>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <input
                                   type="date"
                                   value={scheduleMoveDate}
-                                   min={todayStr()}
-                                  onChange={e => setScheduleMoveDate(e.target.value)}
-                                  className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
-                                  onClick={async () => {
-                                    setScheduleMoving(true);
-                                   const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
-                                   setScheduleMoving(false);
-                                   if (moved) setScheduleMove(null);
+                                  min={todayStr()}
+                                  onChange={e => {
+                                    const nextDate = e.target.value;
+                                    setScheduleMoveDate(nextDate);
+                                    void checkScheduleSwapEligibility(day.date, nextDate);
                                   }}
-                                  className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                                >
-                                  {scheduleMoving ? "Moving…" : "Move"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setScheduleMove(null)}
-                                  className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                                >
-                                  Cancel
-                                </button>
+                                  className="w-full sm:flex-1 h-10 sm:h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
+                                />
                               </div>
+                              {moveChoice?.checking ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs text-muted-foreground" role="status">Checking destination options…</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : moveChoice && !moveChoice.sourceScheduled ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs text-muted-foreground" role="status">The source schedule is no longer available. Refresh before moving it.</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : destinationAlreadyScheduled ? (
+                                <div className="mt-2 space-y-2">
+                                  <p className="text-xs text-muted-foreground">
+                                    This date already has a schedule. Choose to swap the day schedules, append these runs, or cancel without changes.
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {moveChoice.canSwap ? (
+                                      <button
+                                        type="button"
+                                        disabled={scheduleMoving}
+                                        onClick={async () => {
+                                          setScheduleMoving(true);
+                                          const swapped = await performScheduleSwap(day.date, scheduleMoveDate);
+                                          setScheduleMoving(false);
+                                          if (swapped) setScheduleMove(null);
+                                        }}
+                                        className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                      >
+                                        {scheduleMoving ? "Saving…" : "Swap day schedules"}
+                                      </button>
+                                    ) : (
+                                      <p className="w-full text-xs text-muted-foreground" role="status">
+                                        {moveChoice.reason === "today-started-after-6am"
+                                          ? "Today’s plan has started; swaps are unavailable after 6:59 a.m. Append or cancel instead."
+                                          : "Swap availability could not be confirmed. Append runs or cancel instead."}
+                                      </p>
+                                    )}
+                                    <button
+                                      type="button"
+                                      disabled={scheduleMoving}
+                                      onClick={async () => {
+                                        setScheduleMoving(true);
+                                        const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                        setScheduleMoving(false);
+                                        if (moved) setScheduleMove(null);
+                                      }}
+                                      className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-foreground hover:bg-muted/80 disabled:opacity-50"
+                                    >
+                                      {scheduleMoving ? "Saving…" : "Append runs"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={scheduleMoving}
+                                      onClick={() => {
+                                        setScheduleMove(null);
+                                        setScheduleSwapAvailability(null);
+                                      }}
+                                      className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : moveChoice ? (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <button
+                                    type="button"
+                                    disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                    onClick={async () => {
+                                      setScheduleMoving(true);
+                                      const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                      setScheduleMoving(false);
+                                      if (moved) setScheduleMove(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                  >
+                                    {scheduleMoving ? "Moving…" : "Move"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <button
+                                    type="button"
+                                    disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                    onClick={async () => {
+                                      setScheduleMoving(true);
+                                      const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                      setScheduleMoving(false);
+                                      if (moved) setScheduleMove(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                  >
+                                    {scheduleMoving ? "Moving…" : "Move"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                           {/* ── Expandable run list ── */}
@@ -18637,10 +20164,12 @@ export default function Home() {
                                       onClick={() => {
                                         if (scheduleMove?.from === day.date && scheduleMove.runId === run.id) {
                                           setScheduleMove(null);
+                                          setScheduleSwapAvailability(null);
                                         } else {
                                           setScheduleError(null);
                                           setScheduleMove({ from: day.date, runId: run.id });
                                           setScheduleMoveDate(tomorrowStr());
+                                          setScheduleSwapAvailability(null);
                                         }
                                       }}
                                       className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"
@@ -18841,15 +20370,27 @@ export default function Home() {
                           </div>
                         ))}
                         {(() => {
+                          const nowMs = Date.now();
                           const preview = calculateDayTimeline({
                             date: scheduleEditorDate || todayStr(),
                             productionStartTime,
-                            runs: scheduleEditorRuns.map(run => ({
-                              run: { id: run.id, brand: run.brand, flavor: run.flavor },
-                              durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
-                            })),
+                            runs: buildProgressAwareTimelineRuns(scheduleEditorRuns.map(run => ({
+                              subTab: scheduleEditorLoadedRunsRef.current.find(loaded => loaded.id === run.id)?.subTab,
+                              ...(scheduleEditorDate === todayStr() ? dayState.runs.find(actual => actual.id === run.id) : {}),
+                              id: run.id, brand: run.brand, flavor: run.flavor,
+                            })), run => {
+                              const progress = scheduleEditorDate === todayStr()
+                                ? run.id === currentRunId ? form.getValues() : loadRunValues(run.id)
+                                : undefined;
+                              return {
+                                ...scheduleEditorRunValues[run.id],
+                                ...(progress ? { skidsCompleted: progress.skidsCompleted, casesOnCurrentSkid: progress.casesOnCurrentSkid } : {}),
+                                casesNeeded: scheduleEditorRuns.find(draft => draft.id === run.id)?.casesNeeded,
+                              };
+                            }, nowMs, scheduleEditorDate === todayStr()),
                             breaks: scheduleEditorBreaks,
-                            nowMs: Date.now(),
+                            nowMs,
+                            isToday: scheduleEditorDate === todayStr(),
                           });
                           return (
                             <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
@@ -18863,6 +20404,14 @@ export default function Home() {
                               {preview.projectedFinishMs && (
                                 <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
                               )}
+                              {preview.incomplete && <p className="text-amber-400">Incomplete projection — no dependable day finish. Resolve missing inputs or pending/unassigned breaks.</p>}
+                              <p className="mt-1">Projected finish means packaging clear. Recorded run ends remain actual, even if product is still draining. Upcoming runs are sequential through freezer/line transit; actual overlapping runs keep their timestamps. Each placed break adds 30 min. Pending breaks add no time and never pause production automatically.</p>
+                              {preview.runs.map((item, i) => (
+                                <div key={item.runId} className="mt-2">
+                                  <span>Run {i + 1}: {item.startMs ? fmtClock(item.startMs) : "unknown"} → {item.finishMs ? fmtClock(item.finishMs) : "unknown"}</span>
+                                  <RunEstimateBasis estimate={item.estimate} />
+                                </div>
+                              ))}
                             </div>
                           );
                         })()}
@@ -19270,6 +20819,7 @@ export default function Home() {
               ) : null}
             </div>
           </div>
+          </DialogLayerProvider>
         )}
 
 
@@ -19278,7 +20828,7 @@ export default function Home() {
   );
 
   return (
-    <Profiler id="home" onRender={recordHomeCommit}>
+    <FactoryDirectoryBoundary><Profiler id="home" onRender={recordHomeCommit}>
       <HomeCtx.Provider value={homeCtxValue}>
         <HomeTabCtx.Provider value={homeTabCtxValue}>
         <DepartmentProvider value={departmentContext}>
@@ -19308,9 +20858,9 @@ export default function Home() {
         claimAutoTrackEvent={claimAutoTrackEvent}
         onAutomaticClaimFailure={reportSauceAutoTrackFailure}
         onAutomaticClaimSuccess={clearSauceAutoTrackFailure}
-        onAutoTrackProgressChange={(enabled) => {
-          updateRunMeta(currentRunId, { autoTrackDisabled: !enabled });
-        }}
+          onAutoTrackProgressChange={(enabled) =>
+            updateRunMeta(currentRunId, { autoTrackDisabled: !enabled })
+          }
         operationalSnapshotReceipt={serverCalcReceipt}
         operationalServerCalc={serverCalc}
         operationalProjection={serverProjection}
@@ -19335,7 +20885,7 @@ export default function Home() {
         </DepartmentProvider>
         </HomeTabCtx.Provider>
       </HomeCtx.Provider>
-    </Profiler>
+    </Profiler></FactoryDirectoryBoundary>
   );
 }
 

@@ -20,6 +20,7 @@ vi.mock("@workspace/db", () => {
   const cheeseRecipesTable = table("cheeseRecipes");
   const mixesTable = table("mixes");
   return {
+    deferUntilDatabaseCommit: (_callback: () => void) => false,
     db: {
       select: () => ({
         from: (selected: { kind: string }) => ({
@@ -77,6 +78,43 @@ afterAll(async () => {
 });
 
 describe("GET /master-data/bootstrap transport savings", () => {
+  it("preserves reserved-looking mix recipe and component names", async () => {
+    const reservedMixes = [
+      {
+        id: "reserved-recipe-proto",
+        name: "__proto__",
+        components: [{ ingredient: "Flour", perPizza: 1.25 }],
+      },
+      {
+        id: "reserved-recipe-constructor",
+        name: "constructor",
+        components: [{ ingredient: "Sugar", perPizza: 2 }],
+      },
+      {
+        id: "reserved-recipe-prototype",
+        name: "prototype",
+        components: [{ ingredient: "Salt", perPizza: 3.5 }],
+      },
+      {
+        id: "reserved-component-names",
+        name: "Reserved topping prep",
+        components: [
+          { ingredient: "__proto__", perPizza: 1.25 },
+          { ingredient: "constructor", perPizza: 2 },
+          { ingredient: "prototype", perPizza: 3.5 },
+        ],
+      },
+    ];
+    state.rows.set("mixes", reservedMixes);
+    invalidateMasterDataBootstrapCache("test-scope");
+
+    const response = await fetch(`${baseUrl}/master-data/bootstrap`);
+    const body = await response.json() as { mixes: typeof reservedMixes };
+
+    expect(response.status).toBe(200);
+    expect(body.mixes).toEqual(reservedMixes);
+  });
+
   it("compresses the catalog and returns 304 for an unchanged representation", async () => {
     const first = await fetch(`${baseUrl}/master-data/bootstrap`, {
       headers: { "accept-encoding": "gzip" },

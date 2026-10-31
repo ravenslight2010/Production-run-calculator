@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 import { describe, it, expect, beforeEach } from "vitest";
 import { applyStrayMixRecategorizeIfNeeded } from "./storage";
 import {

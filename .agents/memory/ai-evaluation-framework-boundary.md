@@ -80,3 +80,17 @@ to Git.
 workspace mount and quota behavior. If the home overlay is constrained, use
 non-versioned workspace storage and verify the approved model digest before
 sending any prompt.
+
+For the pinned local Qwen scorer, accept a wrapped response only when it contains
+exactly one balanced JSON object, then apply the existing safe-JSON and expected
+shape checks. Keep Gemini whole-response parsing strict and do not retain raw
+model output to diagnose wrapper format.
+
+**Why:** The private Qwen3.5-9B endpoint returned one valid score object inside a
+`<think>` wrapper despite reasoning being disabled. A bounded synthetic probe
+identified the shape without saving the completion; strict whole-response
+parsing otherwise classified it as `invalid_output`.
+
+**How to apply:** On the local-only scoring path, test one wrapped object as
+accepted and malformed or multiple objects as rejected. Do not widen the
+provider adapter, change general-AI routing, or use real-source data to test it.

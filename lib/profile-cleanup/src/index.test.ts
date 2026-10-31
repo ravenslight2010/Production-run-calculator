@@ -5,6 +5,7 @@ import {
   PROFILE_REBUILD_DOUGHBALL_OZ,
   splitProfileKey,
   profileHasRecipeData,
+  profileHasSavedModeDefault,
   planProfileCleanup,
   brandsToRemoveAfterDeletes,
 } from "./index";
@@ -35,6 +36,12 @@ describe("profileHasRecipeData", () => {
     expect(profileHasRecipeData({ app3CheeseRecipeName: "Whole Mozzarella Cheese Mix" })).toBe(true);
     expect(profileHasRecipeData({ pep1Type: "Pepperoni Stick" })).toBe(true);
     expect(profileHasRecipeData({ pep1Sticks: 9 })).toBe(true);
+  });
+  it("keeps explicit line-mode metadata separate from recipe data", () => {
+    expect(profileHasRecipeData({ _subTab: "crusts" })).toBe(false);
+    expect(profileHasSavedModeDefault({ _subTab: "dough" })).toBe(true);
+    expect(profileHasSavedModeDefault({ _subTab: "crusts" })).toBe(true);
+    expect(profileHasSavedModeDefault({ _subTab: "other" })).toBe(false);
   });
 });
 
@@ -75,6 +82,14 @@ describe("planProfileCleanup", () => {
     };
     const { deleteKeys } = planProfileCleanup((k) => store[k] ?? null);
     expect(deleteKeys).toContain("11\" lowe's__bbq chicken");
+  });
+  it("does not prune an explicit saved line-mode default beside a populated twin", () => {
+    const store: Record<string, Record<string, unknown>> = {
+      "11\" lowe's__bbq chicken": { doughRecipeName: "Default Dough", _subTab: "crusts" },
+      "lowe's__bbq chicken": { dieType: "11\"", app1Type: "cheese" },
+    };
+    const { deleteKeys } = planProfileCleanup((key) => store[key] ?? null);
+    expect(deleteKeys).not.toContain("11\" lowe's__bbq chicken");
   });
   it("never deletes when the empty side actually has recipe data", () => {
     const store: Record<string, Record<string, unknown>> = {

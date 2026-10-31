@@ -1,12 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, mixesTable, type MixRow } from "@workspace/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, mixesTable, qcWorkflowEventsTable, type MixRow } from "@workspace/db";
 import { SaveMixesBody, DeleteMixesBody } from "@workspace/api-zod";
 import { normalizeMix, type Mix } from "@workspace/mixes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { buildRecipeQcCapture, lockRecipeQcFamily } from "../lib/recipeQcReview";
 import { writeAuditEvent } from "./auditLogs";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
@@ -149,10 +150,9 @@ router.post(
 
     try {
       const correlationId = requestCorrelationId(req);
+      let qcChangedCount = 0;
       await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${"mixes:" + currentScope()}))`,
-        );
+        await lockRecipeQcFamily(tx, currentScope(), "mix");
         const existingRows = await tx
           .select()
           .from(mixesTable)
@@ -184,6 +184,18 @@ router.post(
             : [...MIX_RECIPE_AUDIT_FIELDS];
           if (!existing) {
             await tx.insert(mixesTable).values(values);
+            const capture = buildRecipeQcCapture("mix", mix.id, undefined, mix);
+            if (capture) {
+              await tx.insert(qcWorkflowEventsTable).values({
+                scope: currentScope(),
+                operationId: capture.operationId,
+                recordId: capture.recordId,
+                eventType: "recipe-committed",
+                actorId: req.userId!,
+                payload: capture.payload,
+              });
+              qcChangedCount += 1;
+            }
             await writeAuditEvent(tx, {
               action: "mix_recipe_created",
               resource: `mix_recipe:${mix.id}`,
@@ -219,6 +231,18 @@ router.post(
                 eq(mixesTable.scope, currentScope()),
               ),
             );
+          const capture = buildRecipeQcCapture("mix", mix.id, toApiItem(existing), mix);
+          if (capture) {
+            await tx.insert(qcWorkflowEventsTable).values({
+              scope: currentScope(),
+              operationId: capture.operationId,
+              recordId: capture.recordId,
+              eventType: "recipe-committed",
+              actorId: req.userId!,
+              payload: capture.payload,
+            });
+            qcChangedCount += 1;
+          }
           if (fieldNames.length > 0) {
             await writeAuditEvent(tx, {
               action: "mix_recipe_updated",
@@ -231,7 +255,12 @@ router.post(
       invalidateMasterDataBootstrapCache();
       broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");
       const items = await listAll();
-      res.json({ items });
+      res.json({
+        items,
+        ...(qcChangedCount
+          ? { recipeQcReview: { status: "applied-awaiting-review", changedCount: qcChangedCount } }
+          : {}),
+      });
     } catch (err) {
       if (err instanceof RecipeRevisionConflict) {
         res.status(409).json({
@@ -266,6 +295,7 @@ router.delete(
       if (ids.length > 0) {
         const correlationId = requestCorrelationId(req);
         await db.transaction(async (tx) => {
+          await lockRecipeQcFamily(tx, currentScope(), "mix");
           const deletedRows = await tx
             .delete(mixesTable)
             .where(

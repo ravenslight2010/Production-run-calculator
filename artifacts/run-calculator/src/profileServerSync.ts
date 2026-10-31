@@ -6,29 +6,16 @@
 // their own server pool (like Cheese / Dough / Sauce recipes) with a
 // per-profile last-write-wins stamp enforced SERVER-side.
 //
-// An authenticated, scope-bound in-memory repository is the read cache.
-// localStorage keeps scoped offline snapshots and the legacy
-// `run-calc-profile-*` / `run-calc-crust-profile-*` blobs only for bounded
-// migration compatibility. This module adds:
-//
-//   • a per-profile local edit-stamp map (ms epoch) bumped on every real edit
-//   • a persisted push queue + serialized flush, so edits survive offline
-//     stretches and are retried on the next kick/poll
-//   • `reconcileProfilesFromServer()` — adopt server-newer profiles into the
-//     cache, push local-newer ones up, push never-synced local profiles up
-//     (self-healing migration), and drop local copies of profiles that were
-//     deleted on the server (guarded by the "was ever synced" map so a
-//     never-pushed local profile is never destroyed)
-//   • a marker-guarded one-time migration that enqueues every existing local
-//     profile with stamp fallback 1, so first-migrator wins on ties but ANY
-//     real edit (Date.now() stamps) beats a migrated blob
-//
-// Everything here is fail-safe: storage errors and network failures are
-// swallowed (the queue persists and retries), so profile saving never breaks
-// the run form even fully offline.
+// Authenticated reads populate observable scoped memory. Durable operations own
+// their payload/revision; acknowledged directory copies are not persisted.
+// Legacy bytes remain review evidence unless ownership and exact canonical
+// equality permit safe reconciliation. Reconnect/focus/poll retry owned work.
+// Network failures retain pending operations; explicit saves reject missing
+// acknowledgements and storage exhaustion is surfaced separately in the UI.
 
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import { masterDataEpoch, masterDataEpochHeaders } from "./masterDataEpoch";
 import {
   activeProfileCacheOwnsLegacyData,
   cachedProfileKeys,
@@ -39,6 +26,9 @@ import {
   replaceCachedProfiles,
   scopeProfileCacheStorageKey,
   writeCachedProfileBlobs,
+  reconcileLegacyProfileReads,
+  setProfileReadStatus,
+  notifyProfileRecoveryChanged,
 } from "./profileCache";
 
 const DOUGH_PREFIX = "run-calc-profile-";
@@ -59,6 +49,35 @@ export function canonicalProfileKey(brand: string, flavor: string): string {
   return `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 }
 
+export type ProfileDisplayIdentity = { brand: string; flavor: string };
+
+type CachedProfileDisplayIdentity = ProfileDisplayIdentity & { generation: number };
+const profileDisplayIdentityByKey = new Map<string, CachedProfileDisplayIdentity>();
+
+function validDisplayIdentity(
+  key: string,
+  identity?: ProfileDisplayIdentity,
+): ProfileDisplayIdentity | undefined {
+  if (!identity || typeof identity.brand !== "string" || typeof identity.flavor !== "string") return undefined;
+  const normalized = { brand: identity.brand.trim(), flavor: identity.flavor.trim() };
+  if ((!normalized.brand && !normalized.flavor) || canonicalProfileKey(normalized.brand, normalized.flavor) !== key) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function rememberDisplayIdentity(key: string, identity: ProfileDisplayIdentity): void {
+  const valid = validDisplayIdentity(key, identity);
+  if (!valid) return;
+  profileDisplayIdentityByKey.set(key, { ...valid, generation: getProfileCacheGeneration() });
+}
+
+function knownDisplayIdentity(key: string): ProfileDisplayIdentity | undefined {
+  const cached = profileDisplayIdentityByKey.get(key);
+  if (!cached || cached.generation !== getProfileCacheGeneration()) return undefined;
+  return { brand: cached.brand, flavor: cached.flavor };
+}
+
 function doughStorageKey(key: string): string {
   return `${DOUGH_PREFIX}${key}`;
 }
@@ -75,7 +94,14 @@ type StampMap = Record<string, number>;
 // an op re-enqueued while a round-trip is in flight (e.g. a forced apply
 // replacing an in-flight plain save) is never mistaken for the completed one
 // and silently dropped before it was ever sent.
-type QueueOp = { t: "up" | "del"; key: string; force?: boolean; g?: number };
+type QueueOp = {
+  t: "up" | "del"; key: string; force?: boolean; g?: number;
+  blobs?: { dough: string | null; crust: string | null };
+  updatedAt?: number;
+  undoEpoch?: string;
+  /** Preserve the display spelling lost by the case-folded canonical key. */
+  displayIdentity?: ProfileDisplayIdentity;
+};
 
 let genCounter = Date.now();
 function nextGen(): number {
@@ -93,11 +119,15 @@ function nextGen(): number {
 // Ops held only in memory do not survive a reload — hence flushing right away.
 const memoryQueues = new Map<string, QueueOp[]>();
 const memoryMaps = new Map<string, StampMap>();
+export function profileRecoveryIsMemoryOnly(): boolean {
+  return (memoryQueues.get(scopeProfileCacheStorageKey(QUEUE_KEY))?.length ?? 0) > 0;
+}
 
 /** Test-only: clear the in-memory storage fallbacks between test cases. */
 export function resetProfileSyncMemoryFallbackForTests(): void {
   memoryQueues.clear();
   memoryMaps.clear();
+  profileDisplayIdentityByKey.clear();
 }
 
 function readProfileBlobs(key: string): { dough: string | null; crust: string | null } {
@@ -173,6 +203,7 @@ function writeQueue(ops: QueueOp[]): void {
     // caller's flush kick still pushes these ops to the server right away.
     memoryQueues.set(scopedKey, [...ops]);
   }
+  notifyProfileRecoveryChanged();
 }
 
 /**
@@ -184,7 +215,20 @@ function writeQueue(ops: QueueOp[]): void {
 function enqueue(op: QueueOp): void {
   const prev = readQueue().find((o) => o.key === op.key);
   const ops = readQueue().filter((o) => o.key !== op.key);
-  const stamped = { ...op, g: nextGen() };
+  const displayIdentity = op.t === "up"
+    ? validDisplayIdentity(op.key, op.displayIdentity)
+      ?? (prev?.t === "up" ? validDisplayIdentity(op.key, prev.displayIdentity) : undefined)
+    : undefined;
+  const stamped = {
+    ...op,
+    ...(displayIdentity ? { displayIdentity } : {}),
+    g: nextGen(), undoEpoch: op.undoEpoch ?? (prev ? prev.undoEpoch ?? "unbound"
+      : adoptedProfileEpochGeneration === getProfileCacheGeneration() ? adoptedProfileWriteEpoch : "unbound"),
+    ...(op.t === "up" ? {
+      blobs: op.blobs ?? readProfileBlobs(op.key),
+      updatedAt: op.updatedAt ?? (getProfileStamp(op.key) || 1),
+    } : {}),
+  };
   if (op.t === "up" && prev?.t === "up" && prev.force && !op.force) {
     ops.push({ ...stamped, force: true });
   } else {
@@ -204,12 +248,15 @@ export function getProfileStamp(key: string): number {
  * upsert, and kick a background flush. Call AFTER the localStorage blobs were
  * written.
  */
-export function markProfileEdited(key: string): void {
+export function markProfileEdited(key: string, displayIdentity?: ProfileDisplayIdentity): void {
+  if (!profileCacheIsActive()) return;
   if (!key || key === "__") return;
   const stamps = readMap(STAMPS_KEY);
   stamps[key] = Math.max(Date.now(), (stamps[key] ?? 0) + 1);
   writeMap(STAMPS_KEY, stamps);
-  enqueue({ t: "up", key });
+  const identity = validDisplayIdentity(key, displayIdentity) ?? knownDisplayIdentity(key);
+  if (identity) rememberDisplayIdentity(key, identity);
+  enqueue({ t: "up", key, ...(identity ? { displayIdentity: identity } : {}) });
   void flushProfileQueue();
 }
 
@@ -222,12 +269,15 @@ export function markProfileEdited(key: string): void {
  * Masala reimport-blocked incident). Call AFTER the localStorage blobs were
  * written.
  */
-export function markProfileForceEdited(key: string): void {
+export function markProfileForceEdited(key: string, displayIdentity?: ProfileDisplayIdentity): void {
+  if (!profileCacheIsActive()) return;
   if (!key || key === "__") return;
   const stamps = readMap(STAMPS_KEY);
   stamps[key] = Math.max(Date.now(), (stamps[key] ?? 0) + 1);
   writeMap(STAMPS_KEY, stamps);
-  enqueue({ t: "up", key, force: true });
+  const identity = validDisplayIdentity(key, displayIdentity) ?? knownDisplayIdentity(key);
+  if (identity) rememberDisplayIdentity(key, identity);
+  enqueue({ t: "up", key, force: true, ...(identity ? { displayIdentity: identity } : {}) });
   void flushProfileQueue();
 }
 
@@ -236,6 +286,7 @@ export function markProfileForceEdited(key: string): void {
  * delete, kick a flush. Call AFTER the localStorage blobs were removed.
  */
 export function markProfileDeleted(key: string): void {
+  if (!profileCacheIsActive()) return;
   if (!key || key === "__") return;
   const stamps = readMap(STAMPS_KEY);
   delete stamps[key];
@@ -302,7 +353,17 @@ async function apiList(): Promise<ApiProfile[]> {
     );
     if (!res.ok) throw new Error(`List brand profiles failed (${res.status})`);
     const data = (await res.json()) as { items: ApiProfile[] };
-    return Array.isArray(data.items) ? data.items : [];
+    if (!Array.isArray(data?.items) || data.items.some((item) =>
+      !item || typeof item.key !== "string" || !item.key.includes("__")
+      || !Number.isFinite(item.updatedAt)
+      || !item.values || typeof item.values !== "object" || Array.isArray(item.values)
+      || !item.crustValues || typeof item.crustValues !== "object" || Array.isArray(item.crustValues)
+    )) throw new Error("Invalid profile directory response");
+    for (const item of data.items) {
+      rememberDisplayIdentity(item.key, { brand: item.brand, flavor: item.flavor });
+    }
+    profileReadEpochs.set(data.items, { generation: cacheGeneration, epoch: res.headers.get("x-master-data-epoch") ?? "unbound" });
+    return data.items;
   })();
   apiListInFlight = { generation: cacheGeneration, promise };
   try {
@@ -313,6 +374,9 @@ async function apiList(): Promise<ApiProfile[]> {
 }
 
 let apiListInFlight: { generation: number; promise: Promise<ApiProfile[]> } | null = null;
+const profileReadEpochs = new WeakMap<ApiProfile[], { generation: number; epoch: string }>();
+let adoptedProfileWriteEpoch = "unbound";
+let adoptedProfileEpochGeneration = -1;
 
 /**
  * Read a fresh profile snapshot for exports. Unlike reconciliation this does
@@ -380,9 +444,11 @@ class ProfileWriteForbiddenError extends Error {
   }
 }
 
-async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
+async function apiSave(items: ApiProfile[], undoEpoch: string): Promise<Map<string, number>> {
+  const generation = getProfileCacheGeneration();
   const serverStamps = new Map<string, number>();
   for (const part of chunk(items, SERVER_MAX_BATCH)) {
+    if (generation !== getProfileCacheGeneration()) throw new Error("Profile identity changed");
     const res = await fetchWithTimeout(
       "/api/brand-profiles",
       {
@@ -390,6 +456,7 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
         headers: {
           "Content-Type": "application/json",
           "x-client-id": inventoryClientId(),
+          ...masterDataEpochHeaders("brand-profiles", undoEpoch),
         },
         body: JSON.stringify({ items: part }),
       },
@@ -410,6 +477,7 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
     for (const item of data.items) {
       if (item && typeof item.key === "string" && typeof item.updatedAt === "number") {
         serverStamps.set(item.key, item.updatedAt);
+        rememberDisplayIdentity(item.key, { brand: item.brand, flavor: item.flavor });
       }
     }
     // The endpoint's response is the acknowledgement boundary. A stamp/key
@@ -432,8 +500,10 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
   return serverStamps;
 }
 
-async function apiDelete(keys: string[]): Promise<void> {
+async function apiDelete(keys: string[], undoEpoch: string): Promise<void> {
+  const generation = getProfileCacheGeneration();
   for (const part of chunk(keys, SERVER_MAX_BATCH)) {
+    if (generation !== getProfileCacheGeneration()) throw new Error("Profile identity changed");
     const res = await fetchWithTimeout(
       "/api/brand-profiles",
       {
@@ -441,6 +511,7 @@ async function apiDelete(keys: string[]): Promise<void> {
         headers: {
           "Content-Type": "application/json",
           "x-client-id": inventoryClientId(),
+          ...masterDataEpochHeaders("brand-profiles", undoEpoch),
         },
         body: JSON.stringify({ keys: part }),
       },
@@ -486,6 +557,7 @@ export function flushProfileQueue(): Promise<void> {
 export function hasPendingProfileWrite(key: string): boolean {
   return readQueue().some((op) => op.t === "up" && op.key === key);
 }
+export const pendingProfileWriteCount = () => profileCacheIsActive() ? readQueue().length : 0;
 
 /**
  * Explicit-save acknowledgement boundary. Unlike ordinary background saves,
@@ -524,6 +596,7 @@ export async function flushProfileQueueStrict(): Promise<void> {
 }
 
 async function flushOnce(): Promise<void> {
+  if (!profileCacheIsActive()) return;
   const cacheGeneration = getProfileCacheGeneration();
   const ops = readQueue();
   if (ops.length === 0) return;
@@ -540,21 +613,25 @@ async function flushOnce(): Promise<void> {
       deleteKeys.push(op.key);
       continue;
     }
-    const { dough, crust } = readProfileBlobs(op.key);
+    // Old key-only operations cannot acquire a new payload from a later read.
+    // Preserve them for review rather than inventing or silently dropping work.
+    if (profileCacheIsActive() && (!op.blobs || !Number.isFinite(op.updatedAt))) continue;
+    const { dough, crust } = op.blobs ?? readProfileBlobs(op.key);
     if (dough === null && crust === null) {
       // Blobs vanished since the edit (deleted meanwhile) — drop the stale op;
       // the deletion path enqueued its own delete op.
       dropKeys.push(op.key);
       continue;
     }
-    const { brand, flavor } = splitKey(op.key);
+    const displayIdentity = validDisplayIdentity(op.key, op.displayIdentity) ?? knownDisplayIdentity(op.key);
+    const { brand, flavor } = displayIdentity ?? splitKey(op.key);
     upserts.push({
       key: op.key,
       brand,
       flavor,
       values: parseBlob(dough),
       crustValues: parseBlob(crust),
-      updatedAt: stamps[op.key] ?? 1,
+      updatedAt: op.updatedAt ?? stamps[op.key] ?? 1,
       ...(op.force ? { force: true } : {}),
     });
     upsertKeys.push(op.key);
@@ -565,8 +642,10 @@ async function flushOnce(): Promise<void> {
   if (upserts.length > 0) {
     let serverStamps: Map<string, number> | null = null;
     try {
-      serverStamps = await apiSave(upserts);
-      if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) return;
+      const epochs = new Set(ops.map((op) => op.undoEpoch ?? "unbound"));
+      if (epochs.size !== 1) throw new Error("Pending profiles cross a shared Undo boundary. Review the pending edits; none were sent.");
+      serverStamps = await apiSave(upserts, ops[0]!.undoEpoch ?? "unbound");
+      if (cacheGeneration !== getProfileCacheGeneration()) return;
     } catch (err) {
       // Includes 403: keeping the operation is the only safe outcome. A
       // background retry is harmless, while dropping it makes an authoritative
@@ -609,7 +688,12 @@ async function flushOnce(): Promise<void> {
       }
       synced[item.key] = stamp;
     }
-    if (localStampsChanged) writeMap(STAMPS_KEY, localStamps);
+    if (localStampsChanged) {
+      writeMap(STAMPS_KEY, localStamps);
+      writeQueue(readQueue().map((op) => pendingKeys.has(op.key) && op.t === "up"
+        ? { ...op, updatedAt: Math.max(op.updatedAt ?? 0, localStamps[op.key] ?? 0) }
+        : op));
+    }
     writeMap(SYNCED_KEY, synced);
     doneKeys = doneKeys.concat(upsertKeys);
     }
@@ -618,8 +702,10 @@ async function flushOnce(): Promise<void> {
   if (deleteKeys.length > 0) {
     let deleted = true;
     try {
-      await apiDelete(deleteKeys);
-      if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) return;
+      const epochs = new Set(ops.map((op) => op.undoEpoch ?? "unbound"));
+      if (epochs.size !== 1) throw new Error("Pending profiles cross a shared Undo boundary. Review the pending edits; none were sent.");
+      await apiDelete(deleteKeys, ops[0]!.undoEpoch ?? "unbound");
+      if (cacheGeneration !== getProfileCacheGeneration()) return;
     } catch (err) {
       throw err;
     }
@@ -675,16 +761,8 @@ function localProfileKeys(): string[] {
  * enqueue completes; the actual upload retries until it succeeds.
  */
 export function migrateLocalProfilesToServerIfNeeded(): void {
-  try {
-    if (localStorage.getItem(MIGRATED_KEY)) return;
-  } catch {
-    return;
-  }
-  for (const key of localProfileKeys()) enqueue({ t: "up", key });
-  try {
-    localStorage.setItem(MIGRATED_KEY, "1");
-  } catch {}
-  void flushProfileQueue();
+  // Migration is read reconciliation only. Owned legacy queued payloads are
+  // upgraded by setProfileCacheIdentity; unowned snapshots are review evidence.
 }
 
 /**
@@ -709,8 +787,13 @@ export type ProfileReconcileResult = {
  * boolean wrapper below is intentionally kept for existing boot/poll callers.
  */
 export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReconcileResult> {
+  if (!profileCacheIsActive()) {
+    return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
+  }
   const cacheGeneration = getProfileCacheGeneration();
   migrateLocalProfilesToServerIfNeeded();
+  const pendingAtRead = readQueue().map((op) => op.key);
+  const stampsAtRead = readMap(STAMPS_KEY);
 
   let serverItems: ApiProfile[];
   try {
@@ -718,9 +801,10 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
   } catch {
     // Offline / signed-out — retry queued pushes anyway and bail quietly.
     void flushProfileQueue();
+    if (profileCacheGenerationIsCurrent(cacheGeneration)) setProfileReadStatus("unavailable");
     return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
   }
-  if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) {
+  if (cacheGeneration !== getProfileCacheGeneration()) {
     return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
   }
 
@@ -731,18 +815,22 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
   const stamps = readMap(STAMPS_KEY);
   const synced = readMap(SYNCED_KEY);
   const serverByKey = new Map(serverItems.map((it) => [it.key, it]));
-  const pending = new Set(readQueue().map((op) => op.key));
+  const pending = new Set([...pendingAtRead, ...readQueue().map((op) => op.key)]);
+  for (const key of new Set([...Object.keys(stamps), ...Object.keys(stampsAtRead)])) {
+    if (stamps[key] !== stampsAtRead[key]) pending.add(key);
+  }
   const nextCache = new Map(
     localProfileKeys().map((key) => [key, readProfileBlobs(key)] as const),
   );
 
   for (const item of serverItems) {
     if (!item.key || item.key === "__") continue;
+    if (pending.has(item.key)) continue;
     // A scoped cache with no value must always adopt the authenticated server
     // row. Legacy/global stamps are bookkeeping only and must never make an
     // empty new identity look newer than its canonical facility data.
     const localStamp = nextCache.has(item.key) ? (stamps[item.key] ?? 0) : 0;
-    if (item.updatedAt > localStamp) {
+    if (profileCacheIsActive() || item.updatedAt > localStamp) {
       try {
         if (!profileCacheIsActive()) {
           localStorage.setItem(doughStorageKey(item.key), JSON.stringify(item.values ?? {}));
@@ -799,7 +887,7 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
     } else {
       // Local-only profile the server has never seen (offline creation, or a
       // blob written after migration ran) — push it up.
-      enqueue({ t: "up", key });
+      if (!profileCacheIsActive()) enqueue({ t: "up", key });
     }
   }
 
@@ -808,6 +896,12 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
   if (profileCacheIsActive() && !replaceCachedProfiles(nextCache, cacheGeneration)) {
     return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
   }
+  if (profileCacheIsActive()) {
+    reconcileLegacyProfileReads(new Map(serverItems.map((item) => [item.key, {
+      dough: JSON.stringify(item.values), crust: JSON.stringify(item.crustValues),
+    }])));
+    setProfileReadStatus("ready");
+  }
 
   // One-time: inject legacy :subtab preferences into dough profile blobs so
   // the server pool carries them to fresh tablets. Runs here — after server
@@ -815,12 +909,51 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
   // against a newer server _subTab value.
   if (!profileCacheIsActive()) injectSubTabIntoProfileBlobsIfNeeded(stamps);
 
+  const epochReceipt = profileReadEpochs.get(serverItems);
+  if (epochReceipt?.generation === getProfileCacheGeneration()) {
+    adoptedProfileWriteEpoch = epochReceipt.epoch; adoptedProfileEpochGeneration = epochReceipt.generation;
+  }
   void flushProfileQueue();
   return { changed, adoptedKeys, deletedKeys, deletedSnapshots };
 }
 
 export async function reconcileProfilesFromServer(): Promise<boolean> {
   return (await reconcileProfilesFromServerDetailed()).changed;
+}
+
+/** Reconnect/focus retries belong to the authenticated repository generation,
+ * not to the daily-sync baseline (which may already be acknowledged). */
+export function startProfileReconciliation(
+  onReconciled: (result: ProfileReconcileResult) => void,
+): () => void {
+  if (!profileCacheIsActive()) return () => {};
+  const generation = getProfileCacheGeneration();
+  let cancelled = false;
+  let running = false;
+  const current = () => !cancelled && profileCacheGenerationIsCurrent(generation);
+  const pass = async () => {
+    if (!current() || running) return;
+    running = true;
+    try {
+      await flushProfileQueue();
+      if (!current()) return;
+      const result = await reconcileProfilesFromServerDetailed();
+      if (current()) onReconciled(result);
+    } finally {
+      running = false;
+    }
+  };
+  const kick = () => { void pass().catch(() => {}); };
+  window.addEventListener("online", kick);
+  window.addEventListener("focus", kick);
+  const poll = window.setInterval(kick, 30_000);
+  kick();
+  return () => {
+    cancelled = true;
+    window.removeEventListener("online", kick);
+    window.removeEventListener("focus", kick);
+    window.clearInterval(poll);
+  };
 }
 
 /**
@@ -889,30 +1022,11 @@ function injectSubTabIntoProfileBlobsIfNeeded(stamps: Record<string, number>): v
  * boot reconciliation having finished first.
  */
 export async function seedProfilesFromServer(): Promise<{ brand: string; flavor: string }[]> {
+  if (!profileCacheIsActive()) return [];
   const cacheGeneration = getProfileCacheGeneration();
-  const items = await apiList();
-  if (profileCacheIsActive() && !profileCacheGenerationIsCurrent(cacheGeneration)) return [];
-  for (const item of items) {
-    const doughKey = doughStorageKey(item.key);
-    const crustKey = crustStorageKey(item.key);
-    // Only write if no local blob exists — do not clobber a local edit that
-    // hasn't been pushed yet (the upload queue will reconcile it shortly).
-    try {
-      if (!profileCacheIsActive() && !localStorage.getItem(doughKey)) {
-        localStorage.setItem(doughKey, JSON.stringify(item.values ?? {}));
-      }
-      if (!profileCacheIsActive() && !localStorage.getItem(crustKey)) {
-        localStorage.setItem(crustKey, JSON.stringify(item.crustValues ?? {}));
-      }
-      const cached = readCachedProfileBlobs(item.key);
-      writeCachedProfileBlobs(item.key, {
-        dough: cached.dough ?? JSON.stringify(item.values ?? {}),
-        crust: cached.crust ?? JSON.stringify(item.crustValues ?? {}),
-      });
-    } catch {
-      // Quota exceeded or storage unavailable — skip this profile; the caller
-      // will still process whatever it already has in localStorage.
-    }
-  }
+  // Use the same pending-edit/deletion and generation fences as ordinary reads.
+  // Never recreate an unscoped snapshot if logout happens during this request.
+  const [items] = await Promise.all([apiList(), reconcileProfilesFromServerDetailed()]);
+  if (!profileCacheGenerationIsCurrent(cacheGeneration)) return [];
   return items.map(i => ({ brand: i.brand, flavor: i.flavor }));
 }

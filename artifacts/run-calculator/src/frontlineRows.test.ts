@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VALUES, type FormValues } from "./types";
 import {
@@ -19,6 +20,9 @@ const quantities: FrontlineQuantitySource = {
 };
 
 describe("deriveFrontlineNeedRows", () => {
+  it("does not invent ingredient rows or crash on partially populated legacy history", () => {
+    expect(deriveFrontlineNeedRows({ casesNeeded: 13 } as FormValues, quantities)).toEqual([]);
+  });
   it("derives applicator needs from partial and empty recipe rows", () => {
     const values: FormValues = {
       ...DEFAULT_VALUES,
@@ -58,7 +62,7 @@ describe("deriveFrontlineNeedRows", () => {
       app1Lbs: 145,
       app1Batches: 145 / 40,
       app2Lbs: 270,
-      app2Batches: 5.4,
+      app2Batches: 0,
       pep1Lbs: 12,
       pep1Batches: 0,
     });
@@ -80,8 +84,8 @@ describe("deriveFrontlineNeedRows", () => {
       {
         key: "app2",
         label: "App 2 — Mix",
-        amount: 5.4,
-        unit: "batches",
+        amount: 270,
+        unit: "lbs",
         totalLbs: 270,
         recipeName: "House Mix",
       },

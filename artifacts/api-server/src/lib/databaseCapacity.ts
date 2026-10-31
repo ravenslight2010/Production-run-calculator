@@ -49,7 +49,13 @@ SELECT pg_is_in_recovery() AS replica,
        count(*)::int AS client_backends,
        count(*) FILTER (WHERE state = 'active')::int AS active_backends,
        count(*) FILTER (WHERE state = 'idle')::int AS idle_backends,
-       count(*) FILTER (WHERE state IS NOT NULL)::int AS visible_states
+       count(*) FILTER (WHERE state IS NOT NULL)::int AS visible_states,
+       count(*) FILTER (
+         WHERE state = 'active' AND wait_event_type IS NOT NULL
+       )::int AS active_wait_backends,
+       count(*) FILTER (
+         WHERE state = 'active' AND wait_event_type = 'Lock'
+       )::int AS lock_wait_backends
 FROM pg_stat_activity
 WHERE backend_type = 'client backend'`;
 
@@ -96,6 +102,16 @@ export async function collectDatabaseCapacity(pool: CapacityPool) {
     const superuserReserved = count(row.superuser_reserved);
     const roleReserved = count(row.role_reserved);
     const clients = count(row.client_backends);
+    const activeBackends = count(row.active_backends);
+    const activeWaitingBackends = count(row.active_wait_backends);
+    const lockWaitingBackends = count(row.lock_wait_backends);
+    if (
+      activeBackends > clients ||
+      activeWaitingBackends > activeBackends ||
+      lockWaitingBackends > activeWaitingBackends
+    ) {
+      throw new Error("invalid capacity wait counts");
+    }
     return {
       status: row.replica ? "non_primary" : "observed",
       primaryVerified: !row.replica,
@@ -103,8 +119,10 @@ export async function collectDatabaseCapacity(pool: CapacityPool) {
       superuserReservedSlots: superuserReserved,
       roleReservedSlots: roleReserved,
       serverClientBackends: clients,
-      activeBackends: count(row.active_backends),
+      activeBackends,
       idleBackends: count(row.idle_backends),
+      activeWaitingBackends,
+      lockWaitingBackends,
       stateVisibilityComplete: count(row.visible_states) === clients,
       // A conservative PostgreSQL estimate, not provider-wide capacity proof.
       // Includes the diagnostic's own backend; provider reserves may add limits.

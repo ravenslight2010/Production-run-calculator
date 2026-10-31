@@ -2,8 +2,18 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import SyncStatusPopover from "./SyncStatusPopover";
+import {
+  flushOperationalIntentOutbox,
+  queueOperationalIntent,
+  setOperationalIntentIdentity,
+} from "../operationalIntentOutbox";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setOperationalIntentIdentity(null);
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 const baseProps: ComponentProps<typeof SyncStatusPopover> = {
   status: "connected",
@@ -20,10 +30,42 @@ const baseProps: ComponentProps<typeof SyncStatusPopover> = {
 };
 
 function openPopover() {
-  fireEvent.click(screen.getByRole("button", { name: "Connected" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sync status: Connected" }));
 }
 
 describe("SyncStatusPopover wake-recovery activity", () => {
+  it.each([
+    ["delayed", "Delayed"],
+    ["failed", "Sync failed"],
+  ] as const)("names the %s status independently of the compact numeric badge", (status, label) => {
+    render(<SyncStatusPopover {...baseProps} status={status} connected={false}
+      pendingCount={status === "delayed" ? 5 : 0}
+      failedCount={status === "failed" ? 5 : 0} />);
+    const button = screen.getByRole("button", { name: `Sync status: ${label}` });
+    expect(button.textContent).toContain("5");
+    expect(button.getAttribute("data-testid")).toBe("sync-status-button");
+    fireEvent.click(button);
+    expect(screen.getByText(/It is not shared until the server acknowledges it/)).toBeTruthy();
+  });
+
+  it("offers correction guidance, not unchanged retry, for a permanently rejected action", async () => {
+    setOperationalIntentIdentity({ scope: "live", userId: "rejection-fixture" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false, status: 400, json: async () => ({ error: "Invalid command" }),
+    }));
+    queueOperationalIntent({
+      runId: "run", observedGeneration: "run:1", effectiveAt: 1,
+      action: "lifecycle", lifecycle: "start",
+    });
+    await flushOperationalIntentOutbox();
+    render(<SyncStatusPopover {...baseProps} />);
+    openPopover();
+    expect(screen.getByText(/cannot be retried unchanged/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry", exact: true })).toBeNull();
+    expect(screen.getByRole("button", { name: "Discard", exact: true })).toBeTruthy();
+  });
+
   it("shows bounded timing details for a successful wake recovery", () => {
     render(
       <SyncStatusPopover
@@ -80,7 +122,7 @@ describe("SyncStatusPopover wake-recovery activity", () => {
     );
   });
 
-  it("shows bounded stale-base recovery and server-conflict counts", () => {
+  it("shows that same-field local values were discarded in favor of server values", () => {
     render(
       <SyncStatusPopover
         {...baseProps}
@@ -89,7 +131,7 @@ describe("SyncStatusPopover wake-recovery activity", () => {
           kind: "merge",
           at: 1_758_211_200_000,
           date: "2026-09-18",
-          message: "Recovered stale-base write: reapplied 4 changes; retained 2 server conflicts",
+          message: "Recovered stale-base write: reapplied 4 changes; kept server values for 2 conflicts; discarded the conflicting local values; review the current values before editing again",
           response: "stale-base-recovered",
         }]}
       />,
@@ -98,7 +140,7 @@ describe("SyncStatusPopover wake-recovery activity", () => {
     openPopover();
 
     expect(screen.getByTestId("sync-activity-stale-base-recovered").textContent).toContain(
-      "Recovered stale-base write: reapplied 4 changes; retained 2 server conflicts [stale-base-recovered]",
+      "Recovered stale-base write: reapplied 4 changes; kept server values for 2 conflicts; discarded the conflicting local values; review the current values before editing again [stale-base-recovered]",
     );
   });
 

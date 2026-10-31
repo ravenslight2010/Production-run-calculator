@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LifeBuoy,
@@ -56,17 +56,58 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+function requestOperationLabel(value?: string): string {
+  switch (value) {
+    case "authentication": return "Checking account access";
+    case "sync": return "Syncing saved changes";
+    case "other": return "Using another app function";
+    default: return value?.replaceAll("_", " ") || "App activity not recorded";
+  }
+}
+
+function requestOutcomeLabel(value?: string): string {
+  switch (value) {
+    case "http_client_error": return "the server rejected the request";
+    case "http_server_error": return "the server reported an error";
+    case "authentication_rejected": return "account access was rejected";
+    case "timeout": return "no reply arrived before the app stopped waiting";
+    case "cancelled": return "the request stopped before a reply arrived";
+    case "transport_failure": return "the network request could not reach the server";
+    case "offline_failure": return "the browser reported no connection";
+    default: return value?.replaceAll("_", " ") || "the result was not recorded";
+  }
+}
+
+function diagnosticDetailLabel(value?: string): string {
+  return value?.replaceAll("_", " ").replaceAll("-", " ") || "not recorded";
+}
+
+function supportRouteLabel(value?: string): string {
+  return value === "other"
+    ? "not identified in the available diagnostics"
+    : diagnosticDetailLabel(value);
+}
+
 function IncidentRow({
   incident,
   assignees,
   initiallyExpanded = false,
+  onIncidentFocus,
+  onIncidentBlur,
+  onHeaderButtonRef,
 }: {
   incident: Incident;
   assignees: Array<{ userId: string; name: string; role: string }>;
   initiallyExpanded?: boolean;
+  onIncidentFocus: (incidentId: string) => void;
+  onIncidentBlur: (relatedTarget: EventTarget | null) => void;
+  onHeaderButtonRef: (incidentId: string, element: HTMLButtonElement | null) => void;
 }) {
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(initiallyExpanded || incident.status === "new");
+  const previousStatus = useRef(incident.status);
+  const resolveButtonRef = useRef<HTMLButtonElement>(null);
+  const headerButtonRef = useRef<HTMLButtonElement>(null);
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["incidents"] });
     void qc.invalidateQueries({ queryKey: ["unreviewedIncidentCount"] });
@@ -86,12 +127,53 @@ function IncidentRow({
   const [note, setNote] = useState("");
   const busy = review.isPending || resolve.isPending || workflow.isPending;
 
+  useEffect(() => {
+    const oldStatus = previousStatus.current;
+    previousStatus.current = incident.status;
+    if (oldStatus === "new" && incident.status === "reviewed") {
+      resolveButtonRef.current?.focus();
+    } else if (oldStatus !== "resolved" && incident.status === "resolved") {
+      headerButtonRef.current?.focus();
+    }
+  }, [incident.id, incident.status]);
+
   const isCrash = incident.source === "auto_crash";
   const ctx = incident.context ?? {};
+  const plainLanguageSummary = ctx.requestHttpStatus === 403
+    ? "This request was denied because this account does not currently have permission. Ask a manager to check access before trying again."
+    : ctx.requestHttpStatus === 409
+      ? "The shared value changed before this save reached the server. Compare it with the current run and resolve the difference before retrying."
+      : ctx.requestHttpStatus === 400 || ctx.requestHttpStatus === 422
+        ? ctx.requestOperationCategory === "sync"
+          ? "This sync update did not pass a validation check. Review the current values and run state, keep your draft, and do not retry it unchanged."
+          : "The app rejected this action because some information did not pass a validation check. Review it before trying again."
+      : ctx.requestOutcome === "cancelled"
+        ? "The browser stopped waiting before a reply arrived. This does not show whether the server accepted the request."
+        : ctx.requestOutcome === "timeout"
+          ? "The browser gave up waiting for a reply. The measured wait can include time when the app was in the background; it is not server processing time."
+          : ctx.requestOutcome === "transport_failure" || ctx.requestOutcome === "offline_failure"
+            ? "The app could not get a network reply. Check the connection, then retry retained work once while online."
+            : /stale_deployment_asset|failed to fetch dynamically imported module/i.test(ctx.errorMessage ?? "")
+              ? "This browser could not load a code file for its app version. Use the guarded update action only when no work is active or unsaved; do not clear browser data."
+              : null;
 
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div
+      data-testid="incident-row"
+      className="rounded-lg border border-border bg-card"
+      onFocusCapture={() => onIncidentFocus(incident.id)}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        onIncidentBlur(next);
+      }}
+    >
       <button
+        ref={(element) => {
+          headerButtonRef.current = element;
+          onHeaderButtonRef(incident.id, element);
+        }}
+        data-incident-header={incident.id}
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-start gap-3 p-3 text-left"
@@ -159,6 +241,12 @@ function IncidentRow({
               </p>
             </div>
           )}
+          {plainLanguageSummary && (
+            <div className="rounded-md border border-sky-500/40 bg-sky-500/5 p-2">
+              <p className="text-xs font-semibold text-foreground">In plain language</p>
+              <p className="mt-1 text-sm text-muted-foreground">{plainLanguageSummary}</p>
+            </div>
+          )}
           {incident.recurrence && (
             <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 w-fit">
               <History className="w-3.5 h-3.5" />
@@ -179,44 +267,54 @@ function IncidentRow({
             {ctx.requestOperationCategory && ctx.requestOutcome && (
               <>
                 <p className="mt-1">
-                  <span className="font-semibold text-foreground">Request:</span>{" "}
-                  {ctx.requestOperationCategory} · {ctx.requestOutcome.replaceAll("_", " ")}
+                  <span className="font-semibold text-foreground">App activity:</span>{" "}
+                  {requestOperationLabel(ctx.requestOperationCategory)} · {requestOutcomeLabel(ctx.requestOutcome)}
                   {ctx.requestHttpStatus ? ` · HTTP ${ctx.requestHttpStatus}` : ""}
-                  {ctx.requestRoute ? ` · ${ctx.requestRoute.replaceAll("_", " ")}` : ""}
+                  {ctx.requestRoute ? ` · support route: ${supportRouteLabel(ctx.requestRoute)}` : ""}
                 </p>
                 {ctx.requestReasonCode && (
                   <p className="mt-1">
-                    <span className="font-semibold text-foreground">Reason code:</span>{" "}
+                    <span className="font-semibold text-foreground">Support code:</span>{" "}
                     <code>{ctx.requestReasonCode}</code>
                   </p>
                 )}
                 {ctx.requestObservedAt && (
                   <p className="mt-1">
-                    Browser-observed at {new Date(ctx.requestObservedAt).toLocaleString()}
+                    Observed by this browser at {new Date(ctx.requestObservedAt).toLocaleString()}
                     {typeof ctx.requestElapsedMs === "number"
-                      ? ` · elapsed request lifetime ${ctx.requestElapsedMs === 10_000_000 ? "at least " : ""}${Math.round(ctx.requestElapsedMs)} ms`
+                      ? ` · browser waited ${ctx.requestElapsedMs === 10_000_000 ? "at least " : ""}${Math.round(ctx.requestElapsedMs)} ms`
                       : ""}
                   </p>
                 )}
                 <p className="mt-1">
                   {ctx.requestBackgroundInvolvement === "observed"
-                    ? "A background/hidden transition was observed during the request."
+                    ? "The app was in the background while waiting; the phone operating system may also have paused it."
                     : ctx.requestBackgroundInvolvement === "not_observed"
-                      ? "No browser-hidden transition was observed; OS suspension is unknown."
-                      : "Background involvement is unknown."}
-                  {" "}Elapsed request lifetime is not server processing time.
+                      ? "No background change was detected; the operating-system pause state is unknown."
+                      : "It is unknown whether the app or operating system paused in the background."}
+                  {" "}The browser wait is not server processing time.
                 </p>
               </>
             )}
             <p className="mt-1">
-              {ctx.action ?? "unknown action"} · {ctx.outcome ?? "unknown outcome"} · retry {ctx.retryCount ?? 0} ·
-              {" "}{ctx.connectivity ?? "unknown connection"} · {ctx.syncState ?? "unknown sync"} ·
-              {" "}{ctx.browserFamily ?? incident.appPlatform}/{ctx.deviceClass ?? "unknown device"} · build {incident.appVersion ?? "unknown"}
+              <span className="font-semibold text-foreground">Extra details for support:</span>{" "}
+              {diagnosticDetailLabel(ctx.action)} · {diagnosticDetailLabel(ctx.outcome)} · {ctx.retryCount ?? 0} automatic retries ·
+              {" "}{diagnosticDetailLabel(ctx.connectivity)} connection · {diagnosticDetailLabel(ctx.syncState)} sync status ·
+              {" "}{diagnosticDetailLabel(ctx.browserFamily ?? incident.appPlatform)} on {diagnosticDetailLabel(ctx.deviceClass)} ·
+              {" "}build reference {incident.appVersion ?? "not recorded"}
             </p>
             <p className="mt-1">
               {ctx.requestOutcome === "cancelled"
                 ? "Next step: this request ended before a response, so it does not show that the server rejected the session. If it happened during sign-in, sign-out, or an account switch, no action is needed. Otherwise, review the available diagnostics if it recurs; the cancellation source is unknown."
-                : "Next step: retry once; if it repeats, reload or update the app, then give this reference to a developer."}
+                : ctx.requestHttpStatus === 409
+                  ? "Next step: review the conflicting change against the current shared run. Keep the local draft and resolve the conflict; retrying unchanged or reloading does not save it."
+                  : ctx.requestHttpStatus === 400 || ctx.requestHttpStatus === 422
+                    ? "Next step: review the rejected action and correct its inputs or run state. Do not retry the unchanged action. Keep this reference for a developer if the reason is unclear."
+                    : ctx.requestHttpStatus === 401
+                      ? "Next step: sign in again, confirm the current shared run, then explicitly retry eligible retained work."
+                      : ctx.requestHttpStatus === 403
+                        ? "Next step: ask an authorized manager to review access before retrying eligible retained work."
+                        : "Next step: check connectivity and retry eligible retained work once. If it repeats, keep this reference for a developer; do not reload or update while work is active or unsaved."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 p-2">
@@ -255,7 +353,12 @@ function IncidentRow({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {incident.status === "new" && (
-              <Button size="sm" variant="outline" onClick={() => review.mutate()} disabled={busy}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => review.mutate()}
+                disabled={busy}
+              >
                 {review.isPending ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
@@ -271,7 +374,12 @@ function IncidentRow({
               </p>
             )}
             {incident.status !== "resolved" ? (
-              <Button size="sm" onClick={() => resolve.mutate()} disabled={busy}>
+              <Button
+                ref={resolveButtonRef}
+                size="sm"
+                onClick={() => resolve.mutate()}
+                disabled={busy}
+              >
                 {resolve.isPending ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
@@ -633,6 +741,9 @@ export default function IncidentsTab() {
     const match = window.location.hash.match(/^#incidents\/(.+)$/);
     return match ? decodeURIComponent(match[1]) : null;
   });
+  const incidentListHeadingRef = useRef<HTMLHeadingElement>(null);
+  const incidentHeaderButtons = useRef(new Map<string, HTMLButtonElement>());
+  const focusedIncidentId = useRef<string | null>(null);
   const { data: assignees = [] } = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canReview });
   const { data: fieldChecks, isLoading: fieldChecksLoading, error: fieldChecksError } = useQuery({
     queryKey: ["fieldChecks", fieldFilters],
@@ -656,6 +767,17 @@ export default function IncidentsTab() {
       }),
     [incidents, status, platform, source, workflowState],
   );
+  useEffect(() => {
+    const incidentId = focusedIncidentId.current;
+    if (!incidentId) return;
+    if (filtered.some((incident) => incident.id === incidentId)) return;
+    const nextIncident = filtered[0];
+    const nextHeader = nextIncident
+      ? incidentHeaderButtons.current.get(nextIncident.id)
+      : undefined;
+    (nextHeader ?? incidentListHeadingRef.current)?.focus();
+    focusedIncidentId.current = null;
+  }, [filtered]);
 
   if (!roleLoading && !canReview) {
     return (
@@ -693,7 +815,12 @@ export default function IncidentsTab() {
         />
         {hasIncidents && <IncidentPatternsPanel disabled={isLoading} />}
         <section aria-labelledby="incident-list-heading" className="space-y-3">
-          <h2 id="incident-list-heading" className="text-sm font-semibold text-foreground">
+          <h2
+            id="incident-list-heading"
+            ref={incidentListHeadingRef}
+            tabIndex={-1}
+            className="text-sm font-semibold text-foreground"
+          >
             Incident list
           </h2>
           {hasAnyIssues && (
@@ -771,6 +898,17 @@ export default function IncidentsTab() {
               incident={incident}
               assignees={assignees}
               initiallyExpanded={incident.id === selectedIncidentId}
+              onIncidentFocus={(incidentId) => {
+                focusedIncidentId.current = incidentId;
+              }}
+              onIncidentBlur={(relatedTarget) => {
+                if (!relatedTarget || relatedTarget === document.body) return;
+                focusedIncidentId.current = null;
+              }}
+              onHeaderButtonRef={(incidentId, element) => {
+                if (element) incidentHeaderButtons.current.set(incidentId, element);
+                else incidentHeaderButtons.current.delete(incidentId);
+              }}
             />
           ))}
           </div>

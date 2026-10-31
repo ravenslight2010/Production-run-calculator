@@ -93,6 +93,7 @@ export function preparePublishSource(root = PROJECT_ROOT, { reuse = false } = {}
 }
 
 export function buildSourceRecord(root = PROJECT_ROOT, mode = "publish") {
+  if (!["publish", "development"].includes(mode)) throw new Error("Invalid production build mode.");
   if (mode === "development") return createSourceRecord(root, mode);
   const file = path.join(root, SOURCE_RECORD_PATH);
   if (!existsSync(file)) return preparePublishSource(root);
@@ -122,7 +123,8 @@ function partFile(root, stage) {
     "artifacts/run-calculator/dist/public/build-source-part.json");
 }
 
-function outputFingerprint(root, stage) {
+export function outputFingerprint(root, stage) {
+  if (!["api", "web"].includes(stage)) throw new Error("Invalid build stage.");
   const directory = path.dirname(partFile(root, stage));
   const entry = stage === "api" ? "index.mjs" : "index.html";
   if (!existsSync(path.join(directory, entry))) throw new Error("Compiled build entry is missing.");

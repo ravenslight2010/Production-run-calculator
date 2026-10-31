@@ -10,18 +10,10 @@ and a `builtin` flag. There is NO hardcoded role ladder anymore. A user's access
 is the union of their assigned role's capabilities. First user seen bootstraps as
 **manager**; new accounts default to **operator**.
 
-## The 6 capabilities
-`manage-staff`, `manage-inventory`, `edit-production-rules`,
-`approve-password-resets`, `review-incidents`, `use-ai-tools`.
-
-## Seeded roles (only created if absent — additive seed)
-- **manager** — all capabilities, builtin + protected.
-- **operator** — no capabilities, builtin.
-- **supervisor** — review-incidents + edit-production-rules (editable).
-- **qc-operator** — use-ai-tools.
-- **qc-manager** — use-ai-tools + review-incidents.
-- **warehouse** — none.
-- **inventory** — manage-inventory.
+## Capability and role source of truth
+The catalog and starter role grants evolve. Read the current capability list and
+seed definitions in the server before reviewing access. Seeds create missing
+roles; stored definitions are editable and may not match current defaults.
 
 ## Server resolution — the test gotcha
 `requireCapability` resolves a user's capabilities by looking up their role NAME
@@ -32,25 +24,29 @@ capabilities → 403. **Any integration test exercising a capability-gated route
 `lib/roles`, which binds the @workspace/db pool before DATABASE_URL is repointed).
 Also add the roles table to the test TRUNCATE set.
 
-## Capability → UI gate map (web + mobile parity)
-- **manage-inventory:** inventory add/settings/delete/reorder-threshold.
-- **approve-password-resets:** `usePendingResetCount`, StaffRolesCard reset queue.
-- **manage-staff:** StaffRolesCard roster + the roles editor; also the `isManager`
-  alias used for OUT-OF-SCOPE /sync gates (mobile ExcelImportModal, master-data,
-  configure) + web home PIN bypass.
-- **review-incidents:** `useUnreviewedIncidentCount`, incidents tab/badge.
-- **use-ai-tools:** assistant advanced, quality, fill-missing bulk, voice advanced.
-- `isManager` is now an alias for `hasCapability("manage-staff")`.
+## Client/server boundary
+Use the capability required by the protected API for the matching client control;
+role names and broad `isManager` aliases are not substitutes. UI visibility is
+convenience only: the server remains authoritative, and open clients need a
+bounded refresh path after role edits.
 
 ## Role administration (manager = has manage-staff)
 CRUD on roles via `/roles` (GET/POST/PUT/DELETE). Managers can create/edit/delete
 roles and assign any role. Guardrails:
 - **Privilege-escalation guard:** you can't grant a capability you don't hold —
   applied to role create, role edit, AND user-role assignment (`setUserRole`).
+- **Owner-approved role edit policy (2026-10-30):** an editor may remove only
+  capabilities they currently hold. Keep this boundary separate from the grant
+  check; enforce both when editing a role.
 - Can't delete a role that is assigned to any user.
-- Can't remove the **last `manage-staff` holder** (error: "Cannot remove the last
-  staff manager — assign someone else first.") — covers demotion and deletion.
+- Can't remove the last enabled, non-sandbox `manage-staff` holder. Manager-set
+  mutations use a shared transaction-scoped lock so concurrent operations cannot
+  strand the team without an enabled manager.
 - The builtin **manager** role must always keep `manage-staff`.
+
+Higher-capability account deletion is a separate explicit owner policy; see
+`staff-account-deletion-policy.md`. Do not infer its boundary from the generic
+role-edit privilege ceiling.
 
 ## Collision to avoid
 Web `home.tsx` has an UNRELATED client-side PIN "supervisor mode" (local state

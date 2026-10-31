@@ -61,5 +61,6 @@ export function shouldUseServerCalc(args: {
   if (!args.receipt) return false;
   const windowMs = args.windowMs ?? LIVE_CALC_STALE_MS;
   return Number.isFinite(args.receipt.capturedAt)
+    && args.nowMs >= args.receipt.capturedAt
     && args.nowMs - args.receipt.capturedAt <= windowMs;
 }

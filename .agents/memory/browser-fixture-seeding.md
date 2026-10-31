@@ -3,11 +3,52 @@ name: Browser fixture seeding
 description: Reliable ways to seed master data for authenticated browser journeys that reload and hydrate from the server.
 ---
 
+Use the production surface's rendered accessibility tree when selecting
+portaled controls; do not assume a standalone component demo's named wrapper
+also exists in the operational page.
+
+**Why:** A calendar demo supplied its own named region, while the real Schedule
+calendar lived in a separate popover dialog. Reusing the demo's container
+selector made valid calendar controls appear missing and obscured diagnosis.
+
+**How to apply:** Confirm the actual container before adapting component-demo
+selectors into an operational journey, and bound locator waits so a missing
+wrapper fails before fixture cleanup loses its test-time budget.
+
+Full-suite ordering can expose stale fixture epochs that a fresh-database
+standalone browser run cannot.
+
+**Why:** Guarded Undo advances a scope-wide master-data epoch. Later tests using
+raw API fixture writers can then fail before their journey begins, even under a
+different fixture account; restarting on an empty database hides that cause.
+
+**How to apply:** Exercise newly prepared fixture seeds against an advanced
+canonical epoch when confirming repairs. Preserve rejection of stale pending
+edits: fetching a new epoch must not become automatic replay of a rejected
+mutation.
+
+When a manual-counter browser fixture requires fixed totals, disable automatic
+tracking in the canonical seeded run as well as matching local recovery data.
+
+**Why:** Legitimate server coordination can otherwise consume staged supply
+between UI steps, making a correct live baseline look like a hydration failure.
+Browser-only preferences do not disable the server coordinator.
+
+**How to apply:** Set the fixture's canonical `autoTrackDisabled` control, or
+derive assertions from an observed canonical baseline when automatic work is
+part of the scenario. Keep production defaults and station math unchanged.
+
 Browser tests that reload the app must seed master-data names through the server-backed fixture path or use names already present in the server pool; browser-only localStorage seeds can be replaced during sync hydration.
 
 **Why:** The app reconciles factory master data during startup, so a localStorage-only brand can disappear after reload even though the test wrote it before navigation.
 
 **How to apply:** Prefer API/DB fixtures for saved sheets and master data. If the test only needs an existing mapping, use a stable built-in name and keep unique IDs/labels for the records under test.
+
+After reload, a mounted app shell is not proof that canonical master data has hydrated.
+
+**Why:** Deliberate startup deferral can leave recipe lists temporarily empty even after the fixture write was acknowledged; a default visibility assertion may expire before loading begins.
+
+**How to apply:** Arm a master-data response wait before navigation, verify the expected fixture slice in that response, then assert its rendered controls. Keep real bootstrap reads enabled rather than bypassing deferral or using fixed sleeps.
 
 For authenticated accessibility journeys that intentionally seed local day-state, use the browser-local date and write a complete canonical today document through authenticated `/api/sync/today` with the current reset epoch. Leave the real GET/bootstrap and normal sync-write paths enabled; do not intercept the canonical GET or broadly delete `daily_sync` rows.
 
@@ -33,6 +74,24 @@ For sequential same-date station scenarios, remove the disposable today snapshot
 
 **How to apply:** Clear browser storage, navigate away from the app, remove the isolated date row, seed the replacement document, then navigate back to the app.
 
+For browser matrices whose projects share one disposable database, reset test-owned operational state between projects instead of relying only on global setup.
+
+**Why:** Global setup runs once for the matrix; an earlier viewport can leave a live run in the shared fixture and make later projects start from the wrong state.
+
+**How to apply:** In each test's setup, remove only the current test's live-day fixture rows from the guarded disposable database, and keep the normal Home hydration path enabled.
+
+Immutable approval/audit fixtures need explicit test-owned record cleanup as
+well as account cleanup, even inside a disposable multi-project browser run.
+
+**Why:** Such ledgers intentionally survive actor deletion; one viewport's
+retained records can invalidate another viewport's empty-list assumption.
+Reusing the lifecycle record for a second fixture can also correctly conflict.
+
+**How to apply:** Give each independently seeded ledger record a unique opaque
+reference, track those references, and remove only those records in the guarded
+disposable database during cleanup. Do not weaken ledger retention or reset
+shared application data to make a fixture pass.
+
 For cold-reload journey tests, finish and canonically confirm lifecycle setup before reloading, then make the tested destination the first post-reload navigation.
 
 **Why:** Starting another run after reload exercises a separate hydration and adoption path, which can obscure whether the cold destination itself restored the expected state.
@@ -56,3 +115,15 @@ update its shared profile while a pending-run snapshot remains stale.
 **How to apply:** After mounting the Run tab, assert the operational state badge
 shows `Confirmed server baseline` before the first edit, then separately assert
 the fixture run selection/count. Avoid fixed sleeps.
+
+For independent-browser and serial-project fixtures, bind assertions to the
+rendered form's run identity, not equal settings or the server's current index.
+
+**Why:** Device-local selection can differ from server selection, and earlier
+matrix cases can leave another run with identical settings. Matching those values
+selected an ended run rather than the paused run actually being tested.
+
+**How to apply:** Read the rendered owner ID, verify canonical values under that
+exact key, and explicitly select that same run in the independent browser. Keep
+its operational storage empty; copying cached run values would hide hydration
+failures.

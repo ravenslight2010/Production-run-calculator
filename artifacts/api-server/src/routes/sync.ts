@@ -1,8 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { hasOperationalSnapshotMutation } from "../lib/operationalSnapshotAuthority";
+import { isExactOperationalCommandRetry } from "../lib/operationalCommandIdentity";
 import { createHash, randomUUID } from "node:crypto";
 import { computeSummaryStats, type SummaryStats, type SummaryStatsInput } from "@workspace/inventory-math";
 import {
   db,
+  deferUntilDatabaseCommit,
   dailySyncTable,
   dataResetTable,
   brandProfilesTable,
@@ -45,19 +48,30 @@ import {
   operationalIntentLedgerTable,
   completedRunHistoryTable,
 } from "@workspace/db";
-import { and, eq, gt, gte, lte, asc, sql, inArray } from "drizzle-orm";
+import { and, eq, gt, gte, lte, asc, desc, sql, inArray } from "drizzle-orm";
 import { currentScope, runWithScope, type Scope } from "../lib/requestScope";
-import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
+import {
+  isTodayScheduleSwapAllowed,
+  moveEntries,
+  relocateValues,
+  swapDateScopedScheduleState,
+} from "@workspace/schedule-move";
+import { protectRunValues, preserveAndInvalidateAutoTrackCoordination, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
-import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
+import {
+  applyAutoTrackClaim,
+  attachServerOwnedAutoTrackClaim,
+  parseAutoTrackClaim,
+  type AutoTrackClaim,
+} from "../lib/autoTrackCoordination";
 import { executeAutoTrackClaim } from "../lib/autoTrackClaimService";
 import {
   buildNetSecondServerClaims,
-  buildWallClockServerClaims,
 } from "../lib/autoTrackServerTicks";
+import { buildServerWallClockPlans, fitServerWallClockPlans } from "../lib/serverWallClockPlans";
 import { parseOperationalIntent } from "../lib/operationalIntents";
 import {
   reconcileOperationalIntentInTransaction,
@@ -72,6 +86,7 @@ import {
   reconcileRunConsumptionInTransaction,
 } from "./inventory";
 import { logger } from "../lib/logger";
+import { getBuildInfo } from "../lib/buildInfo";
 import {
   recordSseFrame,
   recordSsePeerFrameSkippedExactSnapshot,
@@ -105,17 +120,21 @@ import {
   computeAutoTrackSchedule,
   computeAutoTrackElapsedMs,
   buildOperationalProjection,
-  computeServerCalc,
+  computeSharedServerCalc,
+  selectCanonicalLiveRun,
   applyTemporaryOverrides,
   type AutoTrackSchedule,
   type AutoTrackScheduleInput,
   type OperationalProjection,
   type ServerCalcResult,
+  type StationActivityId,
   APPLICATOR_STOCK_REGISTERS,
   applicatorStockFields,
   computeApplicatorStockCapacityLbs,
   capSauceStock,
 } from "@workspace/live-calc";
+import { deriveStationActivity } from "../lib/stationActivity";
+import { createStationActivityCache } from "../lib/stationActivityCache";
 import {
   DEFAULT_LIVE_CALC_TICK_MS,
   buildLiveCalcTickFrame,
@@ -230,6 +249,7 @@ type ProtectedUpsertResult = {
   serverTime: number;
   staleEpoch?: number;
   legacyRejected?: boolean;
+  operationalRejected?: boolean;
 };
 
 const LEGACY_SYNC_SUNSET = "Wed, 21 Oct 2026 00:00:00 GMT";
@@ -433,8 +453,9 @@ export function buildAutoTrackSchedule(
   calcResult: ServerCalcResult | null,
   nowMs = Date.now(),
 ): AutoTrackSchedule | null {
-  const run = payload?.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
-  if (!run || typeof run.id !== "string" || run.autoTrackDisabled === true || !calcResult) return null;
+  const run = selectCanonicalLiveRun(payload?.dayState?.runs);
+  if (!run || typeof run.id !== "string" || run.autoTrackDisabled === true
+    || !calcResult || calcResult.runId !== run.id) return null;
   const runId = run.id;
   const rawValues = payload?.runValues?.[runId];
   if (!rawValues || typeof rawValues !== "object") return null;
@@ -507,7 +528,7 @@ function computeServerLiveState(
       if (cacheKey && serverCalcCache.has(cacheKey)) {
         serverCalc = serverCalcCache.get(cacheKey)!;
       } else {
-        serverCalc = computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs);
+        serverCalc = computeSharedServerCalc(payload as Parameters<typeof computeSharedServerCalc>[0], [], nowMs);
         if (cacheKey && serverCalc) {
           serverCalcCache.set(cacheKey, serverCalc);
           // Evict old entries when cache is full
@@ -576,7 +597,78 @@ function computeServerLiveState(
   }
 }
 
-function broadcast(
+const STATION_MANUAL_COMMAND_TYPES = [
+  "auto-track",
+  "manual-section:dough",
+  "manual-section:sauce",
+  "manual-section:sauce-stock",
+  "manual-section:packaging",
+  "manual-section:app1",
+  "manual-section:app2",
+  "manual-section:app3",
+  "manual-section:app4",
+  "manual-section:pep1",
+  "manual-section:pep2",
+  "station-activity-confirmation",
+] as const;
+const stationActivityRowsCache = createStationActivityCache(async (scope, date, runId) => {
+  const rows = await db.select({
+    commandType: operationalIntentLedgerTable.commandType,
+    actionData: operationalIntentLedgerTable.actionData,
+    serverReceivedAt: operationalIntentLedgerTable.serverReceivedAt,
+    outcome: operationalIntentLedgerTable.outcome,
+  }).from(operationalIntentLedgerTable).where(and(
+    eq(operationalIntentLedgerTable.scope, scope),
+    eq(operationalIntentLedgerTable.date, date),
+    eq(operationalIntentLedgerTable.outcome, "accepted"),
+    inArray(operationalIntentLedgerTable.commandType, [...STATION_MANUAL_COMMAND_TYPES]),
+    sql`${operationalIntentLedgerTable.actionData}->>'runId' = ${runId}`,
+  )).orderBy(desc(operationalIntentLedgerTable.serverReceivedAt));
+  return rows.map((row) => ({
+    commandType: row.commandType,
+    actionData: row.actionData,
+    serverReceivedAt: row.serverReceivedAt,
+    outcome: row.outcome,
+  }));
+});
+
+function invalidateStationActivityRows(scope: Scope, date: string): void {
+  stationActivityRowsCache.invalidate(scope, date);
+}
+
+async function computeServerLiveStateWithStationActivity(
+  data: unknown,
+  nowMs: number,
+  calculationRevision: number,
+  scope: Scope,
+  date: string,
+  evidenceNowMs = nowMs,
+) {
+  const liveState = computeServerLiveState(data, nowMs, calculationRevision);
+  const projection = liveState.operationalProjection;
+  if (!projection) return liveState;
+  try {
+    const rows = await stationActivityRowsCache.read(scope, date, projection.runId);
+    const stationActivity = deriveStationActivity({
+      runId: projection.runId,
+      rows,
+      nowMs: evidenceNowMs,
+    });
+    return {
+      ...liveState,
+      operationalProjection: { ...projection, stationActivity },
+    };
+  } catch (error) {
+    logger.warn({ err: error, event: "station_activity_projection_read" },
+      "Station activity evidence is unavailable");
+    return {
+      ...liveState,
+      operationalProjection: { ...projection, stationActivity: null },
+    };
+  }
+}
+
+async function broadcast(
   data: unknown,
   senderId: string,
   scope: Scope,
@@ -590,16 +682,30 @@ function broadcast(
     force?: boolean;
     onlyClient?: SseClient;
   } = {},
-): void {
+): Promise<void> {
   data = completeSyncData(data);
+  invalidateStationActivityRows(scope, date);
   const snapshotId = data == null ? undefined : syncSnapshotId(data);
-  const computedLiveState = computeServerLiveState(
+  const computedLiveState = await computeServerLiveStateWithStationActivity(
     data,
     meta.serverTime ?? Date.now(),
     meta.canonicalRevision ?? 0,
+    scope,
+    date,
   );
   const liveState = Object.prototype.hasOwnProperty.call(meta, "operationalProjection")
-    ? { ...computedLiveState, operationalProjection: meta.operationalProjection ?? null }
+    ? {
+        ...computedLiveState,
+        operationalProjection: meta.operationalProjection
+          ? {
+              ...meta.operationalProjection,
+              stationActivity: meta.operationalProjection.stationActivity
+                ?? (meta.operationalProjection.runId === computedLiveState.operationalProjection?.runId
+                  ? computedLiveState.operationalProjection.stationActivity
+                  : null),
+            }
+          : null,
+      }
     : computedLiveState;
   for (const client of clients) {
     if (meta.onlyClient && client !== meta.onlyClient) continue;
@@ -782,6 +888,7 @@ export function broadcastMasterDataChanged(
   family: ConfigurationInvalidationFamily = "master-data",
   outboxAlreadyPersisted = false,
 ): void {
+  if (deferUntilDatabaseCommit(() => broadcastMasterDataChanged(senderId, scope, family, outboxAlreadyPersisted))) return;
   if (!outboxAlreadyPersisted) {
     void recordSyncOutboxEvent({
       kind: "configuration",
@@ -844,7 +951,7 @@ async function reconcileOutboxGap(scope: Scope, latestCursor: number): Promise<v
       eq(dailySyncTable.scope, scope),
       eq(dailySyncTable.date, date),
     ));
-    broadcast(
+    await broadcast(
       completeSyncData(row?.data ?? emptySyncData(date)),
       "",
       scope,
@@ -868,7 +975,7 @@ async function dispatchSyncOutboxEvent(event: StoredSyncOutboxEvent): Promise<vo
         eq(dailySyncTable.date, event.date),
       ));
       if (row) {
-        broadcast(row.data, event.senderId, event.scope, event.date, {
+        await broadcast(row.data, event.senderId, event.scope, event.date, {
           canonicalRevision: row.canonicalRevision,
         });
       }
@@ -884,7 +991,21 @@ async function dispatchSyncOutboxEvent(event: StoredSyncOutboxEvent): Promise<vo
         eq(dailySyncTable.date, event.date),
       ));
       if (row) {
-        broadcast(row.data, "", event.scope, event.date, {
+        await broadcast(row.data, "", event.scope, event.date, {
+          canonicalRevision: row.canonicalRevision,
+          force: true,
+        });
+      }
+      return;
+    }
+    case "station-activity": {
+      stationActivityRowsCache.clear();
+      const [row] = await db.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, event.scope),
+        eq(dailySyncTable.date, event.date),
+      ));
+      if (row) {
+        await broadcast(row.data, event.senderId, event.scope, event.date, {
           canonicalRevision: row.canonicalRevision,
           force: true,
         });
@@ -1525,6 +1646,7 @@ async function upsertProtected(
         // hold a newer local marker before it receives this row, but that marker
         // must never erase other operators' scheduled or live runs.
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
+        const operationalRejected = hasOperationalSnapshotMutation(serverOwnedPayload, canonicalExisting);
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
           // The exact locked snapshot is the causal ordering signal for
@@ -1532,6 +1654,7 @@ async function upsertProtected(
           // regardless of client clock order and receive a server-time stamp.
           acceptCurrentBaseRunValueEdits: currentBaseSnapshotValidated,
           nowMs: serverTime,
+          enforceOperationalAuthority: true,
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
@@ -1589,6 +1712,7 @@ async function upsertProtected(
           // behavior remain intact; canonicalRevision advances only on change.
           wrote: true,
           inventoryChanged,
+          operationalRejected,
           partialFallback: false,
           retries: attempt,
           canonicalRevision,
@@ -1636,7 +1760,9 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
-  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
+  const liveState = await computeServerLiveStateWithStationActivity(
+    data, serverTime, canonicalRevision, scope, clientToday(req),
+  );
   if (unchangedResponse(res, data, requestedSnapshot(req), {
     resetEpoch: resetState.epoch,
     rollover: resetState.rollover,
@@ -1778,7 +1904,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
-  if (result.wrote) broadcast(merged, senderId, scope, today, result);
+  if (result.wrote) await broadcast(merged, senderId, scope, today, result);
   if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
@@ -1788,13 +1914,22 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
   const responseBody = buildSyncWriteEnvelope(merged, {
-    requestedSnapshotId: requestedId,
+    requestedSnapshotId: result.operationalRejected ? undefined : requestedId,
     partialFallback: result.partialFallback,
     ...(merged === null
       ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(today))) }
       : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  if (result.operationalRejected) {
+    res.status(409);
+    res.setHeader("X-Operational-Update-Required", "commands-required");
+    Object.assign(responseBody, {
+      ok: false, operationalUpdateRequired: true, code: "SYNC_OPERATIONAL_COMMAND_REQUIRED",
+      error: "Live operational fields were not applied. Use an updated device's live controls or review saved actions. The returned snapshot includes any accepted setup edits.",
+    });
+    res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  }
   const telemetryMode: SyncPutMode = result.partialFallback
     ? "fallback"
     : !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
@@ -1810,7 +1945,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   });
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
   const liveState = merged
-    ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
+    ? await computeServerLiveStateWithStationActivity(
+        merged, result.serverTime, result.canonicalRevision, scope, today,
+      )
     : null;
   // Fixed names, numeric durations, no document identities or payload values.
   // acquisition includes BEGIN; lock-read includes its SQL round trips.
@@ -1832,8 +1969,12 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
 // Atomic, section-scoped correction. The daily row is the serialization point;
 // the operational ledger makes retries return the original canonical answer.
 router.post("/sync/manual-section", async (req: Request, res: Response): Promise<void> => {
-  const reject = (status: 400 | 409, code: ManualSectionRejectionCode) => {
-    res.status(status).json({ error: "Manual section edit was rejected", code });
+  const reject = (status: 400 | 409, code: ManualSectionRejectionCode,
+    canonical?: { data: Record<string, any>; revision: number; serverTime: number }) => {
+    res.status(status).json({ error: "Manual section edit was rejected", code,
+      ...(canonical ? { outcome: "conflicted", data: canonical.data,
+        canonicalRevision: canonical.revision, serverTime: canonical.serverTime,
+        snapshotId: syncSnapshotId(canonical.data) } : {}) });
   };
   let requestAborted = false;
   req.once("aborted", () => { requestAborted = true; });
@@ -1850,6 +1991,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
   const observedGeneration = body?.observedGeneration;
   const deviceId = body?.deviceId;
   const requestedDate = body?.date;
+  const resumePackaging = body?.operation === "resume-packaging";
+  const correctionGeneration = body?.correctionGeneration;
+  if ((body?.operation !== undefined && !resumePackaging)
+    || (resumePackaging && (section !== "packaging"
+      || !Number.isSafeInteger(correctionGeneration) || (correctionGeneration as number) < 1))) {
+    reject(400, "invalid_edit"); return;
+  }
   if (typeof id !== "string" || id.length < 1 || id.length > 160
     || !/^[A-Za-z0-9:_-]+$/.test(id)
     || typeof requestedDate !== "string" || requestedDate !== date
@@ -1877,9 +2025,17 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     reject(400, "invalid_baseline"); return;
   }
   if (MANUAL_SECTION_FIELDS[section as ManualSection].some((field) =>
-    !Object.prototype.hasOwnProperty.call(baseValues, field)
-    || typeof (baseValues as Record<string, unknown>)[field] !== "number")) {
+    !field.endsWith("StockConsumedLbs") && (
+      !Object.prototype.hasOwnProperty.call(baseValues, field)
+      || typeof (baseValues as Record<string, unknown>)[field] !== "number"))) {
     reject(400, "invalid_baseline"); return;
+  }
+  // The additive consumption ledger may be absent in older clients' baselines.
+  // A physical load/correction must never change that ledger.
+  if (entries.some(([field, value]) => field.endsWith("StockConsumedLbs")
+    && (typeof (baseValues as Record<string, unknown>)[field] !== "number"
+      || value !== (baseValues as Record<string, unknown>)[field]))) {
+    reject(400, "invalid_values"); return;
   }
   const ownerId = String(deviceId ?? req.userId ?? "unknown");
   await recordSyncOutboxEvent({
@@ -1920,12 +2076,34 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     const [seen] = await tx.select().from(operationalIntentLedgerTable)
       .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, date),
         eq(operationalIntentLedgerTable.intentId, id))).for("update");
-    if (seen) return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
+    if (seen) {
+      if (!isExactOperationalCommandRetry(seen, {
+        commandType: resumePackaging ? "packaging:resume" : `manual-section:${section}`,
+        actorId: req.userId ?? "unknown", deviceId: (deviceId as string | undefined) ?? "unknown",
+        baseRevision: baseRevision as number,
+        actionData: { runId, section, values, baseValues, observedGeneration,
+          ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration } : {}) },
+      })) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+      return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
+    }
     const run = (current.dayState?.runs as Array<Record<string, any>> | undefined)?.find((candidate) => candidate.id === runId);
     if (!run || `${runId}:${String(run.metaUpdatedAt ?? run.startedAt ?? 0)}` !== observedGeneration) {
       return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "run_changed" };
     }
     const currentValues = current.runValues?.[runId] ?? {};
+    if (resumePackaging) {
+      const progress = current.packagingProgress?.[runId];
+      // Compare both lifecycle and correction identity under the same row lock.
+      // Resume is not allowed to write counters, including on an old retry.
+      if (progress?.correctionGeneration !== correctionGeneration) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+      if (entries.some(([field, value]) => value !== Number(currentValues[field] ?? 0))) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+    }
     const stockRegisters = section === "app1" || section === "app2" || section === "app3" || section === "app4"
       ? [section as "app1" | "app2" | "app3" | "app4"]
       : section === "pep1" ? ["pep1", "pep1b"] as const
@@ -1941,6 +2119,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         .every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
         return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
+      // The client expands a section edit to its complete baseline. An untouched
+      // companion (including an unconfigured pepperoni slot) is not a refill and
+      // must not require capacity or a new generation. The full baseline fence
+      // below still rejects concurrent changes to any field in this section.
+      if ([fields.stock, fields.anchor, fields.correctionGeneration].every(
+        (field) => (values as Record<string, unknown>)[field] === (baseValues as Record<string, unknown>)[field],
+      )) continue;
       const onHand = Number((values as Record<string, unknown>)[fields.stock]);
       const anchor = Number((values as Record<string, unknown>)[fields.anchor]);
       const correctionGeneration = Number((values as Record<string, unknown>)[fields.correctionGeneration]);
@@ -2019,6 +2204,12 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     if (hasSauceStockUpdate) updatedRunValues.sauceStockInitialized = true;
     next.runValues = { ...(next.runValues ?? {}), [runId]: updatedRunValues };
     next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
+    // A section command replaces the old snapshot mutation, including its
+    // channel invalidation. Revoke sleeping claims with the locked revision,
+    // never a caller's clock or a reused per-millisecond generation.
+    Object.assign(next, preserveAndInvalidateAutoTrackCoordination(
+      next, current.autoTrackCoordination, current, currentRevision + 1,
+    ));
     if (section === "packaging") {
       const progressMap = current.packagingProgress
         && typeof current.packagingProgress === "object"
@@ -2031,7 +2222,9 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         && previousProgress.correctionGeneration >= 0
           ? previousProgress.correctionGeneration as number
           : 0;
-      const correctionGeneration = Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
+      const correctionGeneration = resumePackaging
+        ? previousGeneration
+        : Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
       const canonicalValues = next.runValues[runId] ?? {};
       const canonicalCounter = (value: unknown) =>
         typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
@@ -2042,7 +2235,9 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
           casesOnCurrentSkid: canonicalCounter(canonicalValues.casesOnCurrentSkid),
           correctionGeneration,
           updatedAt: serverTime,
-          manualOverrideUntil: serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
+          manualOverrideUntil: resumePackaging
+            ? Math.min(Number(previousProgress?.manualOverrideUntil) || 0, serverTime)
+            : serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
         },
       };
     }
@@ -2055,9 +2250,10 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     }
     await tx.insert(operationalIntentLedgerTable).values({
       scope, date, intentId: id, outcome: "accepted", snapshot: next,
-      commandType: `manual-section:${section}`, actorId: req.userId ?? "unknown",
+      commandType: resumePackaging ? "packaging:resume" : `manual-section:${section}`, actorId: req.userId ?? "unknown",
       deviceId: (deviceId as string | undefined) ?? "unknown", baseRevision: baseRevision as number,
-      canonicalRevision: revision, actionData: { runId, section, values, baseValues }, serverReceivedAt: new Date(),
+      canonicalRevision: revision, actionData: { runId, section, values, baseValues, observedGeneration,
+        ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration } : {}) }, serverReceivedAt: new Date(),
     });
     await appendSyncOutboxEvent(tx, {
       kind: "day-state",
@@ -2069,7 +2265,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     return { status: 200, data: next, revision, duplicate: false, serverTime };
     });
     if (result.status === 200 && !result.duplicate) {
-      broadcast(result.data, ownerId, scope, date, { canonicalRevision: result.revision, serverTime: result.serverTime });
+      await broadcast(result.data, ownerId, scope, date, { canonicalRevision: result.revision, serverTime: result.serverTime });
     }
   } finally {
     await recordSyncOutboxEvent({
@@ -2088,7 +2284,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
   }
   if (requestAborted) return;
   if (result.status !== 200) {
-    reject(result.status, result.rejectionCode ?? "invalid_edit");
+    reject(result.status, result.rejectionCode ?? "invalid_edit", result);
     return;
   }
   res.status(result.status).json({
@@ -2102,13 +2298,161 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
   });
 });
 
+// Explicit activity confirmations are durable, run-bound events. They do not
+// edit counters or the persisted day-state snapshot.
+router.post("/sync/station-activity", async (req: Request, res: Response): Promise<void> => {
+  const id = req.body?.id;
+  const runId = req.body?.runId;
+  const station = req.body?.station;
+  const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
+  const rawEpoch = req.query.epoch;
+  const suppliedEpoch = rawEpoch === undefined ? 0 : Number(rawEpoch);
+  if (
+    typeof id !== "string" || id.length < 8 || id.length > 160
+    || !/^[A-Za-z0-9:_-]+$/.test(id)
+    || typeof runId !== "string" || runId.length < 1 || runId.length > 160
+    || (station !== "freezeTunnel" && station !== "warehouse")
+    || !Number.isSafeInteger(suppliedEpoch) || suppliedEpoch < 0
+  ) {
+    res.status(400).json({ error: "Invalid station activity confirmation." });
+    return;
+  }
+
+  const scope = currentScope();
+  const date = clientToday(req);
+  const nowMs = Date.now();
+  try {
+    const result = await db.transaction(async (tx) => {
+      await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(nowMs) }).onConflictDoNothing();
+      const [reset] = await tx.select().from(dataResetTable)
+        .where(eq(dataResetTable.scope, scope)).for("update");
+      const [currentRow] = await tx.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date))).for("update");
+      const data = (currentRow?.data ?? emptySyncData(date)) as Record<string, any>;
+      const canonicalRevision = currentRow?.canonicalRevision ?? 0;
+      if ((reset?.epoch ?? 0) !== suppliedEpoch) {
+        return { status: 409 as const, code: "SYNC_RESET_CHANGED", data, canonicalRevision };
+      }
+
+      const [seen] = await tx.select().from(operationalIntentLedgerTable)
+        .where(and(
+          eq(operationalIntentLedgerTable.scope, scope),
+          eq(operationalIntentLedgerTable.date, date),
+          eq(operationalIntentLedgerTable.intentId, id),
+        )).for("update");
+      if (seen) {
+        const action = seen.actionData && typeof seen.actionData === "object" && !Array.isArray(seen.actionData)
+          ? seen.actionData as Record<string, unknown>
+          : {};
+        if (seen.commandType !== "station-activity-confirmation"
+          || action.runId !== runId || action.station !== station) {
+          return { status: 409 as const, code: "IDEMPOTENCY_KEY_REUSED", data, canonicalRevision };
+        }
+        return {
+          status: 200 as const,
+          duplicate: true,
+          data,
+          canonicalRevision,
+          eventAtServerMs: seen.serverReceivedAt.getTime(),
+        };
+      }
+
+      const dayState = data.dayState as { currentIndex?: number; runs?: Array<Record<string, unknown>> } | undefined;
+      const currentIndex = Number.isInteger(dayState?.currentIndex) ? dayState!.currentIndex! : 0;
+      const selectedRun = dayState?.runs?.[currentIndex];
+      const startedAt = Number(selectedRun?.startedAt);
+      if (
+        selectedRun?.id !== runId
+        || !Number.isFinite(startedAt) || startedAt <= 0
+        || selectedRun?.pausedAt != null || selectedRun?.endedAt != null
+      ) {
+        return { status: 409 as const, code: "RUN_NOT_ACTIVE", data, canonicalRevision };
+      }
+
+      const eventAtServerMs = Date.now();
+      await tx.insert(operationalIntentLedgerTable).values({
+        scope,
+        date,
+        intentId: id,
+        outcome: "accepted",
+        snapshot: null,
+        commandType: "station-activity-confirmation",
+        actorId: req.userId ?? "unknown",
+        deviceId: senderId || "unknown",
+        baseRevision: canonicalRevision,
+        canonicalRevision,
+        actionData: { runId, station },
+        serverReceivedAt: new Date(eventAtServerMs),
+      });
+      await appendSyncOutboxEvent(tx, {
+        kind: "station-activity",
+        scope,
+        date,
+        senderId,
+      });
+      return { status: 200 as const, duplicate: false, data, canonicalRevision, eventAtServerMs };
+    });
+
+    if (result.status !== 200) {
+      res.status(409).json({
+        error: result.code === "SYNC_RESET_CHANGED"
+          ? "The production day changed. Refresh the Line Map and try again."
+          : result.code === "RUN_NOT_ACTIVE"
+            ? "The selected run is no longer active. Refresh the Line Map and try again."
+            : "This confirmation could not be applied. Refresh the Line Map and try again.",
+        code: result.code,
+      });
+      return;
+    }
+
+    stationActivityRowsCache.clear();
+    await broadcast(result.data, senderId, scope, date, {
+      canonicalRevision: result.canonicalRevision,
+      serverTime: result.eventAtServerMs,
+      force: true,
+    });
+    const liveState = await computeServerLiveStateWithStationActivity(
+      result.data,
+      result.eventAtServerMs,
+      result.canonicalRevision,
+      scope,
+      date,
+    );
+    res.json({
+      ok: true,
+      duplicate: result.duplicate,
+      runId,
+      station,
+      eventAtServerMs: result.eventAtServerMs,
+      canonicalRevision: result.canonicalRevision,
+      serverTime: result.eventAtServerMs,
+      snapshotId: syncSnapshotId(result.data),
+      operationalProjection: liveState.operationalProjection,
+    });
+  } catch (error) {
+    req.log.error({ err: error, event: "station_activity_confirmation" },
+      "Station activity confirmation failed");
+    res.status(500).json({ error: "Station activity could not be confirmed. Please retry." });
+  }
+});
+
 // Offline operational commands are not snapshots. Their stable ID is retained
 // with a bounded outcome trail so retries after a timeout/restart return the
 // original answer instead of applying a second pause or correction.
 router.post("/sync/operational-intents", async (req: Request, res: Response): Promise<void> => {
   const now = Date.now();
-  const intent = parseOperationalIntent(req.body?.intent, now);
+  // Only parser stages and the fixed boundary stages below are logged; never
+  // retain inventory keys, correction values, identities or rejected payloads.
+  const logValidationRejection = (stage: string) => req.log.warn({
+    event: "operational_intent_rejected",
+    requestId: req.id,
+    correlationId: (req as Request & { correlationId?: string }).correlationId,
+    stage,
+    build: getBuildInfo()?.appBuildId ?? "unknown",
+  }, "Operational intent contract rejected");
+  const intent = parseOperationalIntent(req.body?.intent, now, logValidationRejection);
   if (!intent || intent.date !== clientToday(req)) {
+    if (intent) logValidationRejection("production-date");
     res.status(400).json({ error: "Invalid operational intent or production date" }); return;
   }
   const command = commandContext(req, {
@@ -2117,6 +2461,8 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     date: intent.date,
     runId: intent.runId,
     action: intent.action,
+    control: intent.control,
+    pauseId: intent.pauseId,
     lifecycle: intent.lifecycle,
     effectiveAt: intent.effectiveAt,
     observedGeneration: intent.observedGeneration,
@@ -2125,6 +2471,7 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     inventoryLines: intent.inventoryLines,
   }, intent.baseRevision ?? 0);
   if (!command) {
+    logValidationRejection("command-context");
     res.status(400).json({ error: "Invalid or oversized operational command" });
     return;
   }
@@ -2148,7 +2495,7 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     }
     if (!result) throw new Error("Operational intent did not complete");
     if (!result.duplicate) {
-      broadcast(
+      await broadcast(
         result.data,
         command.deviceId,
         scope,
@@ -2239,12 +2586,14 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       return;
     }
     if (result.outcome === "accepted") {
-      broadcast(result.data, senderId, scope, date, result);
+      await broadcast(result.data, senderId, scope, date, result);
     }
-    const liveState = computeServerLiveState(
+    const liveState = await computeServerLiveStateWithStationActivity(
       result.data,
       result.serverTime,
       result.canonicalRevision,
+      scope,
+      date,
     );
     req.log.info({
       event: "auto_track_claim",
@@ -2319,7 +2668,9 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const snapshotId = syncSnapshotId(data);
   const requested = requestedSnapshot(req);
   const initialServerTime = Date.now();
-  const liveState = computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0);
+  const liveState = await computeServerLiveStateWithStationActivity(
+    data, initialServerTime, row?.canonicalRevision ?? 0, scope, watchDate,
+  );
   const initialFrame = `data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
@@ -2386,7 +2737,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       registeredSnapshotId !== registeredClient.lastSnapshotId
       || registeredRevision !== registeredClient.lastCanonicalRevision
     ) {
-      broadcast(registeredData, "", scope, watchDate, {
+      await broadcast(registeredData, "", scope, watchDate, {
         canonicalRevision: registeredRevision,
         force: true,
         canonicalReconcile: true,
@@ -2419,7 +2770,9 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
         }
         const heartbeatServerTime = Date.now();
         const live = fresh?.data
-          ? computeServerLiveState(fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0)
+          ? await computeServerLiveStateWithStationActivity(
+              fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0, scope, watchDate,
+            )
           : null;
         if (live?.autoTrackSchedule) {
           res.write(`data: ${JSON.stringify({
@@ -2446,29 +2799,39 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   // (setup-form calcs).  The active-run tick takes priority; if it fires, the
   // setup tick is skipped for that interval to avoid duplicate frames.
   calcTick = setInterval(() => {
-    if (!client || client.lastData == null) return;
-    const nowMs = Date.now();
-    const activeTick = buildLiveCalcTickFrame(
-      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
-    );
-    if (activeTick) {
-      client.lastCalcEmitMs = activeTick.lastCalcEmitMs;
-      const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
+    void (async () => {
+      const tickClient = client;
+      if (!tickClient || tickClient.lastData == null) return;
+      const data = tickClient.lastData;
+      const nowMs = Date.now();
+      const activeTick = buildLiveCalcTickFrame(
+        data, nowMs, tickClient.lastCalcEmitMs, tickClient.lastCanonicalRevision, liveCalcTickMs,
+      );
+      if (activeTick) {
+        tickClient.lastCalcEmitMs = activeTick.lastCalcEmitMs;
+        const live = await computeServerLiveStateWithStationActivity(
+          data, nowMs, tickClient.lastCanonicalRevision, scope, watchDate,
+        );
+        if (client !== tickClient || tickClient.lastData !== data) return;
+        try {
+          tickClient.res.write(`data: ${JSON.stringify({ ...activeTick.frame, ...live })}\n\n`);
+        } catch {}
+        return;
+      }
+      // Fallback: setup-form tick for pending (or any) selected run with runValues
+      const setupTick = buildSetupCalcTickFrame(
+        data, nowMs, tickClient.lastCalcEmitMs, tickClient.lastCanonicalRevision, liveCalcTickMs,
+      );
+      if (!setupTick) return;
+      tickClient.lastCalcEmitMs = setupTick.lastCalcEmitMs;
+      const live = await computeServerLiveStateWithStationActivity(
+        data, nowMs, tickClient.lastCanonicalRevision, scope, watchDate,
+      );
+      if (client !== tickClient || tickClient.lastData !== data) return;
       try {
-        client.res.write(`data: ${JSON.stringify({ ...activeTick.frame, ...live })}\n\n`);
+        tickClient.res.write(`data: ${JSON.stringify({ ...setupTick.frame, ...live })}\n\n`);
       } catch {}
-      return;
-    }
-    // Fallback: setup-form tick for pending (or any) selected run with runValues
-    const setupTick = buildSetupCalcTickFrame(
-      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
-    );
-    if (!setupTick) return;
-    client.lastCalcEmitMs = setupTick.lastCalcEmitMs;
-    const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
-    try {
-      client.res.write(`data: ${JSON.stringify({ ...setupTick.frame, ...live })}\n\n`);
-    } catch {}
+    })().catch(() => {});
   }, liveCalcTickMs);
 });
 
@@ -2485,18 +2848,47 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
     res.status(400).json({ error: "A valid nowMs is required" });
     return;
   }
+  const startOffsetMs = req.body?.startOffsetMs === undefined
+    ? 0
+    : Number(req.body.startOffsetMs);
+  if (
+    !Number.isSafeInteger(startOffsetMs)
+    || startOffsetMs < 0
+    || startOffsetMs > 15 * 60_000
+    || (startOffsetMs > 0 && req.body?.rearm !== true)
+  ) {
+    res.status(400).json({ error: "A valid E2E run start offset is required" });
+    return;
+  }
   const scope = currentScope();
   const date = clientToday(req);
   if (req.body?.rearm === true) {
-    await db.transaction(async (tx) => {
+    const rearmed = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(dailySyncTable).where(and(
         eq(dailySyncTable.scope, scope),
         eq(dailySyncTable.date, date),
       )).for("update");
-      if (!locked) return;
+      if (!locked) return false;
       const data = locked.data as Record<string, any>;
-      const run = data.dayState?.runs?.[data.dayState?.currentIndex ?? 0];
-      if (!run?.id || !run.startedAt || run.pausedAt || run.endedAt) return;
+      const runs = Array.isArray(data.dayState?.runs) ? data.dayState.runs : [];
+      const currentIndex = Number.isSafeInteger(data.dayState?.currentIndex)
+        ? data.dayState.currentIndex
+        : 0;
+      const run = runs[currentIndex];
+      if (!run?.id || !run.startedAt || run.pausedAt || run.endedAt) return false;
+      const updatedRuns = runs.slice();
+      if (startOffsetMs > 0) {
+        const adjustedStartedAt = Number(run.startedAt) - startOffsetMs;
+        if (!Number.isSafeInteger(adjustedStartedAt) || adjustedStartedAt <= 0) return false;
+        updatedRuns[currentIndex] = {
+          ...run,
+          startedAt: adjustedStartedAt,
+          metaUpdatedAt: Math.max(
+            Date.now(),
+            (Number(run.metaUpdatedAt) || 0) + 1,
+          ),
+        };
+      }
       const serverState = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
         ? data.autoTrackServerState as Record<string, any>
         : {};
@@ -2505,6 +2897,9 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       await tx.update(dailySyncTable).set({
         data: {
           ...data,
+          ...(startOffsetMs > 0
+            ? { dayState: { ...data.dayState, runs: updatedRuns } }
+            : {}),
           autoTrackServerState: {
             ...serverState,
             version: 1,
@@ -2516,7 +2911,12 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
         eq(dailySyncTable.scope, scope),
         eq(dailySyncTable.date, date),
       ));
+      return true;
     });
+    if (startOffsetMs > 0 && !rearmed) {
+      res.status(409).json({ error: "An active run is required for the E2E start offset" });
+      return;
+    }
   }
   const summary = req.body?.skipAutoTrack === true
     ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
@@ -2530,7 +2930,9 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
   ));
   const serverTime = Date.now();
   const authoritative = row
-    ? computeServerLiveState(row.data, nowMs, row.canonicalRevision ?? 0)
+    ? await computeServerLiveStateWithStationActivity(
+        row.data, nowMs, row.canonicalRevision ?? 0, scope, date, serverTime,
+      )
     : null;
   const operationalProjection = authoritative?.operationalProjection
     ? {
@@ -2540,7 +2942,7 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       }
     : null;
   if (row) {
-    broadcast(row.data, "server:e2e-clock", scope, date, {
+    await broadcast(row.data, "server:e2e-clock", scope, date, {
       canonicalRevision: row.canonicalRevision ?? 0,
       serverTime,
       operationalProjection,
@@ -2595,6 +2997,520 @@ router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void>
     })
   );
 });
+
+router.post(
+  "/sync/schedule-move",
+  requireCapability("manage-factory-settings"),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = req.body as Record<string, unknown> | null;
+    const sourceDate = body?.sourceDate;
+    const destinationDate = body?.destinationDate;
+    const sourceRevision = body?.sourceRevision;
+    const destinationRevision = body?.destinationRevision;
+    const expectedEpoch = body?.resetEpoch;
+    const requestedIds = body?.runIds;
+    const senderId = typeof body?.senderId === "string" ? body.senderId.slice(0, 160) : "";
+    const validIds = requestedIds === "all"
+      || (
+        Array.isArray(requestedIds)
+        && requestedIds.length > 0
+        && requestedIds.length <= 100
+        && requestedIds.every((id) => typeof id === "string" && /^[A-Za-z0-9:_-]{1,160}$/.test(id))
+        && new Set(requestedIds).size === requestedIds.length
+      );
+    if (
+      typeof sourceDate !== "string" || !isValidDate(sourceDate)
+      || typeof destinationDate !== "string" || !isValidDate(destinationDate)
+      || sourceDate === destinationDate
+      || !Number.isSafeInteger(sourceRevision) || Number(sourceRevision) < 0
+      || !Number.isSafeInteger(destinationRevision) || Number(destinationRevision) < 0
+      || !Number.isSafeInteger(expectedEpoch) || Number(expectedEpoch) < 0
+      || !validIds
+    ) {
+      res.status(400).json({ error: "Invalid schedule move request" });
+      return;
+    }
+
+    const scope = currentScope();
+    const nowMs = Date.now();
+    const today = facilityDate(nowMs);
+    if (sourceDate < today || destinationDate < today) {
+      res.status(400).json({ error: "Schedule moves only support today and future dates" });
+      return;
+    }
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(nowMs) })
+          .onConflictDoNothing();
+        const [reset] = await tx.select().from(dataResetTable)
+          .where(eq(dataResetTable.scope, scope)).for("update");
+        if ((reset?.epoch ?? 0) !== Number(expectedEpoch)) return { kind: "stale-epoch" as const };
+
+        const [sourceRow] = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)))
+          .for("update");
+        if (!sourceRow) return { kind: "missing-source" as const };
+        const currentSourceRevision = sourceRow.canonicalRevision ?? 0;
+        if (currentSourceRevision !== Number(sourceRevision)) {
+          return {
+            kind: "revision-conflict" as const,
+            sourceRevision: currentSourceRevision,
+            destinationRevision: Number(destinationRevision),
+          };
+        }
+
+        const sourceData = completeSyncData(sourceRow.data);
+        if (
+          !sourceData || typeof sourceData !== "object" || Array.isArray(sourceData)
+          || !isSyncRecord((sourceData as Record<string, unknown>).dayState)
+        ) return { kind: "invalid-source" as const };
+        const sourceDocument = sourceData as Record<string, unknown>;
+        const sourceDay = sourceDocument.dayState as Record<string, unknown>;
+        const rawSourceRuns = Array.isArray(sourceDay.runs) ? sourceDay.runs : [];
+        if (rawSourceRuns.some((run) => !isSyncRecord(run) || typeof run.id !== "string")) {
+          return { kind: "invalid-source" as const };
+        }
+        const sourceRuns = rawSourceRuns as Array<Record<string, unknown> & { id: string }>;
+        const movingIds = requestedIds === "all" ? sourceRuns.map((run) => run.id) : requestedIds as string[];
+        if (
+          movingIds.length === 0
+          || movingIds.some((id) => !sourceRuns.some((run) => run.id === id))
+        ) return { kind: "invalid-selection" as const };
+        const movingRuns = sourceRuns.filter((run) => movingIds.includes(String(run.id)));
+        if (movingRuns.some((run) => run.startedAt != null || run.endedAt != null)) {
+          return { kind: "started-run" as const };
+        }
+
+        let [destinationRow] = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)))
+          .for("update");
+        let createdDestination = false;
+        if (!destinationRow) {
+          const [inserted] = await tx.insert(dailySyncTable).values({
+            scope,
+            date: destinationDate,
+            data: emptySyncData(destinationDate) as any,
+            canonicalRevision: 0,
+            updatedAt: new Date(nowMs),
+          }).onConflictDoNothing().returning({ date: dailySyncTable.date });
+          createdDestination = !!inserted;
+          [destinationRow] = await tx.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)))
+            .for("update");
+        }
+        if (!destinationRow) return { kind: "missing-destination" as const };
+        const currentDestinationRevision = destinationRow.canonicalRevision ?? 0;
+        if (currentDestinationRevision !== Number(destinationRevision)) {
+          if (createdDestination) {
+            await tx.delete(dailySyncTable).where(and(
+              eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
+            ));
+          }
+          return {
+            kind: "revision-conflict" as const,
+            sourceRevision: currentSourceRevision,
+            destinationRevision: currentDestinationRevision,
+          };
+        }
+
+        const destinationData = completeSyncData(destinationRow.data);
+        if (
+          !destinationData || typeof destinationData !== "object" || Array.isArray(destinationData)
+          || !isSyncRecord((destinationData as Record<string, unknown>).dayState)
+        ) return { kind: "invalid-destination" as const };
+        const destinationDocument = destinationData as Record<string, unknown>;
+        const destinationDay = destinationDocument.dayState as Record<string, unknown>;
+        const rawDestinationRuns = Array.isArray(destinationDay.runs) ? destinationDay.runs : [];
+        if (rawDestinationRuns.some((run) => !isSyncRecord(run) || typeof run.id !== "string")) {
+          if (createdDestination) {
+            await tx.delete(dailySyncTable).where(and(
+              eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
+            ));
+          }
+          return { kind: "invalid-destination" as const };
+        }
+        const destinationRuns = rawDestinationRuns as Array<Record<string, unknown> & { id: string }>;
+        const moved = moveEntries(sourceRuns, destinationRuns, movingIds, () => randomUUID());
+        if (moved.idMap.some(({ from, to }) => from !== to)) {
+          if (createdDestination) {
+            await tx.delete(dailySyncTable).where(and(
+              eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
+            ));
+          }
+          return { kind: "run-id-collision" as const };
+        }
+
+        const relocateMap = (
+          left: Record<string, unknown>,
+          right: Record<string, unknown>,
+          key: string,
+          idMap: typeof moved.idMap,
+        ): [Record<string, unknown>, Record<string, unknown>] => {
+          if (
+            !Object.prototype.hasOwnProperty.call(left, key)
+            && !Object.prototype.hasOwnProperty.call(right, key)
+          ) return [left, right];
+          const movedMap = relocateValues(
+            isSyncRecord(left[key]) ? left[key] as Record<string, unknown> : {},
+            isSyncRecord(right[key]) ? right[key] as Record<string, unknown> : {},
+            idMap,
+          );
+          return [{ ...left, [key]: movedMap.source }, { ...right, [key]: movedMap.target }];
+        };
+        let nextSource = { ...sourceDocument };
+        let nextDestination = { ...destinationDocument };
+        const values = relocateValues(
+          isSyncRecord(sourceDocument.runValues) ? sourceDocument.runValues as Record<string, unknown> : {},
+          isSyncRecord(destinationDocument.runValues) ? destinationDocument.runValues as Record<string, unknown> : {},
+          moved.idMap,
+        );
+        const stamps = relocateValues(
+          isSyncRecord(sourceDocument.runValuesUpdatedAt) ? sourceDocument.runValuesUpdatedAt as Record<string, unknown> : {},
+          isSyncRecord(destinationDocument.runValuesUpdatedAt) ? destinationDocument.runValuesUpdatedAt as Record<string, unknown> : {},
+          moved.idMap,
+        );
+        const packaging = relocateValues(
+          isSyncRecord(sourceDocument.packagingProgress) ? sourceDocument.packagingProgress as Record<string, unknown> : {},
+          isSyncRecord(destinationDocument.packagingProgress) ? destinationDocument.packagingProgress as Record<string, unknown> : {},
+          moved.idMap,
+        );
+        nextSource = { ...nextSource, runValues: values.source, runValuesUpdatedAt: stamps.source, packagingProgress: packaging.source };
+        nextDestination = { ...nextDestination, runValues: values.target, runValuesUpdatedAt: stamps.target, packagingProgress: packaging.target };
+        [nextSource, nextDestination] = relocateMap(nextSource, nextDestination, "doughTimerControls", moved.idMap);
+        for (const field of ["autoTrackCoordination", "autoTrackServerState"] as const) {
+          const leftState = isSyncRecord(nextSource[field]) ? nextSource[field] as Record<string, unknown> : {};
+          const rightState = isSyncRecord(nextDestination[field]) ? nextDestination[field] as Record<string, unknown> : {};
+          const nestedKeys = field === "autoTrackCoordination"
+            ? ["runs"] as const
+            : ["netOwnership", "wallClockBookkeeping"] as const;
+          let nextLeftState = leftState;
+          let nextRightState = rightState;
+          for (const nestedKey of nestedKeys) {
+            if (
+              !Object.prototype.hasOwnProperty.call(nextLeftState, nestedKey)
+              && !Object.prototype.hasOwnProperty.call(nextRightState, nestedKey)
+            ) continue;
+            const nested = relocateValues(
+              isSyncRecord(nextLeftState[nestedKey]) ? nextLeftState[nestedKey] as Record<string, unknown> : {},
+              isSyncRecord(nextRightState[nestedKey]) ? nextRightState[nestedKey] as Record<string, unknown> : {},
+              moved.idMap,
+            );
+            nextLeftState = { ...nextLeftState, [nestedKey]: nested.source };
+            nextRightState = { ...nextRightState, [nestedKey]: nested.target };
+          }
+          nextSource[field] = nextLeftState;
+          nextDestination[field] = nextRightState;
+        }
+        const sourceStaged = isSyncRecord(sourceDay.stagedItems)
+          ? sourceDay.stagedItems as Record<string, unknown>
+          : {};
+        const destinationStaged = isSyncRecord(destinationDay.stagedItems)
+          ? destinationDay.stagedItems as Record<string, unknown>
+          : {};
+        const sourceStagedNext = { ...sourceStaged };
+        const destinationStagedNext = { ...destinationStaged };
+        for (const [key, value] of Object.entries(sourceStaged)) {
+          if (movingIds.some((id) => key.startsWith(`${id}::`))) {
+            delete sourceStagedNext[key];
+            destinationStagedNext[key] = value;
+          }
+        }
+        const sourceDayNext = {
+          ...sourceDay,
+          runs: moved.source,
+          stagedItems: sourceStagedNext,
+        };
+        const destinationDayBase = destinationRuns.length > 0 || !createdDestination
+          ? destinationDay
+          : sourceDay;
+        nextSource.dayState = { ...sourceDayNext, date: sourceDate };
+        nextDestination.dayState = {
+          ...destinationDayBase,
+          runs: moved.target,
+          date: destinationDate,
+          stagedItems: destinationStagedNext,
+        };
+
+        const sourceRemoved = moved.source.length === 0;
+        const nextSourceRevision = currentSourceRevision + 1;
+        const nextDestinationRevision = currentDestinationRevision + 1;
+        if (sourceRemoved) {
+          await tx.delete(dailySyncTable).where(and(
+            eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate),
+          ));
+        } else {
+          await tx.update(dailySyncTable).set({
+            data: completeSyncData(nextSource) as any,
+            canonicalRevision: nextSourceRevision,
+            updatedAt: new Date(nowMs),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)));
+        }
+        const canonicalDestination = completeSyncData(nextDestination) as Record<string, unknown>;
+        await tx.update(dailySyncTable).set({
+          data: canonicalDestination as any,
+          canonicalRevision: nextDestinationRevision,
+          updatedAt: new Date(nowMs),
+        }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)));
+        await appendSyncOutboxEvent(tx, {
+          kind: "day-state", scope, date: sourceDate, senderId,
+          canonicalRevision: nextSourceRevision,
+        });
+        await appendSyncOutboxEvent(tx, {
+          kind: "day-state", scope, date: destinationDate, senderId,
+          canonicalRevision: nextDestinationRevision,
+        });
+        return {
+          kind: "moved" as const,
+          sourceRemoved,
+          sourceRevision: nextSourceRevision,
+          destinationRevision: nextDestinationRevision,
+          destinationSnapshotId: syncSnapshotId(canonicalDestination),
+        };
+      });
+
+      if (result.kind === "stale-epoch") {
+        res.status(409).json({ error: "The schedule changed during reset", code: "SYNC_RESET_CHANGED" });
+      } else if (result.kind === "missing-source" || result.kind === "missing-destination") {
+        res.status(404).json({ error: "A scheduled day is no longer available", code: "SCHEDULE_DAY_NOT_FOUND" });
+      } else if (result.kind === "revision-conflict") {
+        res.status(409).json({
+          error: "A schedule changed before the move could be saved",
+          code: "SCHEDULE_REVISION_CONFLICT",
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+        });
+      } else if (result.kind === "invalid-source" || result.kind === "invalid-destination") {
+        res.status(409).json({ error: "A scheduled day could not be safely moved", code: "SCHEDULE_DAY_INVALID" });
+      } else if (result.kind === "invalid-selection") {
+        res.status(409).json({ error: "One or more selected runs are no longer on the source day", code: "SCHEDULE_RUN_SELECTION_CHANGED" });
+      } else if (result.kind === "started-run") {
+        res.status(409).json({ error: "A run that has started cannot be moved", code: "SCHEDULE_RUN_ALREADY_STARTED" });
+      } else if (result.kind === "run-id-collision") {
+        res.status(409).json({ error: "A run ID already exists on the destination date", code: "SCHEDULE_RUN_ID_COLLISION" });
+      } else {
+        res.json({
+          moved: true,
+          sourceRemoved: result.sourceRemoved,
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+          destinationSnapshotId: result.destinationSnapshotId,
+        });
+      }
+    } catch (error) {
+      req.log.error({ err: error }, "Failed to move scheduled runs");
+      res.status(500).json({ error: "Failed to move scheduled runs" });
+    }
+  },
+);
+
+router.get(
+  "/sync/schedule-swap-eligibility",
+  requireCapability("manage-factory-settings"),
+  async (req: Request, res: Response): Promise<void> => {
+    const sourceDate = typeof req.query.sourceDate === "string" ? req.query.sourceDate : "";
+    const destinationDate = typeof req.query.destinationDate === "string" ? req.query.destinationDate : "";
+    if (
+      !isValidDate(sourceDate)
+      || !isValidDate(destinationDate)
+      || sourceDate === destinationDate
+    ) {
+      res.status(400).json({ error: "Invalid schedule dates" });
+      return;
+    }
+    const nowMs = Date.now();
+    const today = facilityDate(nowMs);
+    if (sourceDate < today || destinationDate < today) {
+      res.status(400).json({ error: "Schedule swaps only support today and future dates" });
+      return;
+    }
+    const scope = currentScope();
+    const dates = [sourceDate, destinationDate].sort();
+    const rows = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)));
+    const sourceRow = rows.find((row) => row.date === sourceDate);
+    const destinationRow = rows.find((row) => row.date === destinationDate);
+    let todayAllowed = true;
+    if (sourceDate === today || destinationDate === today) {
+      const todayRow = sourceDate === today ? sourceRow : destinationRow;
+      const todayData = completeSyncData(todayRow?.data) as Record<string, any> | null;
+      const runs = Array.isArray(todayData?.dayState?.runs) ? todayData.dayState.runs : [];
+      todayAllowed = isTodayScheduleSwapAllowed(runs, nowMs, facilityTimeZone());
+    }
+    res.json({
+      today,
+      sourceScheduled: !!sourceRow,
+      destinationScheduled: !!destinationRow,
+      canSwap: !!sourceRow && !!destinationRow && todayAllowed,
+      reason: todayAllowed ? null : "today-started-after-6am",
+    });
+  },
+);
+
+router.post(
+  "/sync/schedule-swap",
+  requireCapability("manage-factory-settings"),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = req.body as Record<string, unknown> | null;
+    const sourceDate = body?.sourceDate;
+    const destinationDate = body?.destinationDate;
+    const sourceRevision = body?.sourceRevision;
+    const destinationRevision = body?.destinationRevision;
+    const expectedEpoch = body?.resetEpoch;
+    const senderId = typeof body?.senderId === "string" ? body.senderId.slice(0, 160) : "";
+    if (
+      typeof sourceDate !== "string" || !isValidDate(sourceDate)
+      || typeof destinationDate !== "string" || !isValidDate(destinationDate)
+      || sourceDate === destinationDate
+      || !Number.isSafeInteger(sourceRevision) || Number(sourceRevision) < 0
+      || !Number.isSafeInteger(destinationRevision) || Number(destinationRevision) < 0
+      || !Number.isSafeInteger(expectedEpoch) || Number(expectedEpoch) < 0
+    ) {
+      res.status(400).json({ error: "Invalid schedule swap request" });
+      return;
+    }
+
+    const scope = currentScope();
+    const nowMs = Date.now();
+    const today = facilityDate(nowMs);
+    if (sourceDate < today || destinationDate < today) {
+      res.status(400).json({ error: "Schedule swaps only support today and future dates" });
+      return;
+    }
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        // Reset lock first, matching the ordering used by canonical sync writes.
+        await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(nowMs) })
+          .onConflictDoNothing();
+        const [reset] = await tx.select().from(dataResetTable)
+          .where(eq(dataResetTable.scope, scope)).for("update");
+        if ((reset?.epoch ?? 0) !== Number(expectedEpoch)) {
+          return { kind: "stale-epoch" as const };
+        }
+
+        const dates = [sourceDate, destinationDate].sort();
+        const rows = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
+          .orderBy(asc(dailySyncTable.date))
+          .for("update");
+        const sourceRow = rows.find((row) => row.date === sourceDate);
+        const destinationRow = rows.find((row) => row.date === destinationDate);
+        if (!sourceRow || !destinationRow) return { kind: "missing-day" as const };
+
+        const currentSourceRevision = sourceRow.canonicalRevision ?? 0;
+        const currentDestinationRevision = destinationRow.canonicalRevision ?? 0;
+        if (
+          currentSourceRevision !== Number(sourceRevision)
+          || currentDestinationRevision !== Number(destinationRevision)
+        ) {
+          return {
+            kind: "revision-conflict" as const,
+            sourceRevision: currentSourceRevision,
+            destinationRevision: currentDestinationRevision,
+          };
+        }
+
+        if (sourceDate === today || destinationDate === today) {
+          const todayRow = sourceDate === today ? sourceRow : destinationRow;
+          const todayData = completeSyncData(todayRow.data) as Record<string, any>;
+          const runs = Array.isArray(todayData?.dayState?.runs) ? todayData.dayState.runs : [];
+          if (!isTodayScheduleSwapAllowed(runs, nowMs, facilityTimeZone())) {
+            return { kind: "today-ineligible" as const };
+          }
+        }
+
+        const sourceData = completeSyncData(sourceRow.data);
+        const destinationData = completeSyncData(destinationRow.data);
+        if (
+          !sourceData || typeof sourceData !== "object" || Array.isArray(sourceData)
+          || !destinationData || typeof destinationData !== "object" || Array.isArray(destinationData)
+        ) {
+          return { kind: "invalid-day" as const };
+        }
+        const swapped = swapDateScopedScheduleState(
+          sourceData as Record<string, unknown>,
+          destinationData as Record<string, unknown>,
+          sourceDate,
+          destinationDate,
+        );
+        const nextSource = completeSyncData(swapped.left) as Record<string, unknown>;
+        const nextDestination = completeSyncData(swapped.right) as Record<string, unknown>;
+        const sourceChanged = syncSnapshotId(sourceData) !== syncSnapshotId(nextSource);
+        const destinationChanged = syncSnapshotId(destinationData) !== syncSnapshotId(nextDestination);
+        const nextSourceRevision = currentSourceRevision + (sourceChanged ? 1 : 0);
+        const nextDestinationRevision = currentDestinationRevision + (destinationChanged ? 1 : 0);
+
+        if (sourceChanged) {
+          await tx.update(dailySyncTable).set({
+            data: nextSource as any,
+            canonicalRevision: nextSourceRevision,
+            updatedAt: new Date(nowMs),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)));
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state", scope, date: sourceDate, senderId,
+            canonicalRevision: nextSourceRevision,
+          });
+        }
+        if (destinationChanged) {
+          await tx.update(dailySyncTable).set({
+            data: nextDestination as any,
+            canonicalRevision: nextDestinationRevision,
+            updatedAt: new Date(nowMs),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)));
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state", scope, date: destinationDate, senderId,
+            canonicalRevision: nextDestinationRevision,
+          });
+        }
+        return {
+          kind: "swapped" as const,
+          sourceRevision: nextSourceRevision,
+          destinationRevision: nextDestinationRevision,
+          sourceSnapshotId: syncSnapshotId(nextSource),
+          destinationSnapshotId: syncSnapshotId(nextDestination),
+        };
+      });
+
+      if (result.kind === "stale-epoch") {
+        res.status(409).json({ error: "The schedule changed during reset", code: "SYNC_RESET_CHANGED" });
+      } else if (result.kind === "missing-day") {
+        res.status(404).json({
+          error: "One of the scheduled days is no longer available",
+          code: "SCHEDULE_DAY_NOT_FOUND",
+        });
+      } else if (result.kind === "revision-conflict") {
+        res.status(409).json({
+          error: "A schedule changed before the swap could be saved",
+          code: "SCHEDULE_REVISION_CONFLICT",
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+        });
+      } else if (result.kind === "today-ineligible") {
+        res.status(409).json({
+          error: "Today's schedule can only be swapped before 7:00 a.m. or before any run starts",
+          code: "TODAY_SWAP_NOT_ELIGIBLE",
+        });
+      } else if (result.kind === "invalid-day") {
+        res.status(409).json({
+          error: "A scheduled day could not be safely swapped",
+          code: "SCHEDULE_DAY_INVALID",
+        });
+      } else {
+        res.json({
+          swapped: true,
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+          sourceSnapshotId: result.sourceSnapshotId,
+          destinationSnapshotId: result.destinationSnapshotId,
+        });
+      }
+    } catch (error) {
+      req.log.error({ err: error }, "Failed to swap scheduled days");
+      res.status(500).json({ error: "Failed to swap scheduled days" });
+    }
+  },
+);
 
 router.get(
   "/sync/health",
@@ -2722,7 +3638,7 @@ router.put(
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (result.wrote && date === clientToday(req)) {
-    broadcast(merged, senderId, scope, date, result);
+    await broadcast(merged, senderId, scope, date, result);
   }
   if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
@@ -2733,15 +3649,24 @@ router.put(
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
   const responseBody = buildSyncWriteEnvelope(merged, {
-    requestedSnapshotId: requestedId,
+    requestedSnapshotId: result.operationalRejected ? undefined : requestedId,
     partialFallback: result.partialFallback,
     ...(merged === null
       ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(date))) }
       : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  if (result.operationalRejected) {
+    res.status(409);
+    res.setHeader("X-Operational-Update-Required", "commands-required");
+    Object.assign(responseBody, {
+      ok: false, operationalUpdateRequired: true, code: "SYNC_OPERATIONAL_COMMAND_REQUIRED",
+      error: "Live operational fields were not applied. Use an updated device's live controls or review saved actions. The returned snapshot includes any accepted setup edits.",
+    });
+    res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  }
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
-    res.json(responseBody);
+    res.json({ ...responseBody, canonicalRevision: result.canonicalRevision, serverTime: result.serverTime });
   },
 );
 
@@ -2993,13 +3918,15 @@ export async function runAutoTrackServerTicks(opts: {
         const [locked] = await tx.select().from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope))).for("update");
         const stored = locked?.data ?? emptySyncData(row.date);
-        const wall = buildWallClockServerClaims(stored, nowMs, claimIdNamespace);
         const netClaims = buildNetSecondServerClaims(stored, nowMs, claimIdNamespace);
         const remainingBudget = maxClaims - builtClaims;
         // Never persist an arm-state that has advanced past a claim omitted by
         // this pass's global budget. A later pass must see that due event.
-        const wallFitsBudget = !wall || wall.claims.length <= Math.max(0, remainingBudget - netClaims.length);
-        const rawClaims = [...netClaims, ...(wallFitsBudget ? (wall?.claims ?? []) : [])]
+        const walls = fitServerWallClockPlans(
+          buildServerWallClockPlans(stored, nowMs, claimIdNamespace),
+          remainingBudget - netClaims.length,
+        );
+        const rawClaims = [...netClaims, ...walls.flatMap((wall) => wall.claims)]
           .slice(0, remainingBudget);
         let data = stored as Record<string, unknown>;
         let acceptedHere = 0;
@@ -3091,7 +4018,11 @@ export async function runAutoTrackServerTicks(opts: {
               });
             }
             acceptedNet.push(claim);
-          } else if (claim.channel === "sauce-barrel" || claim.channel === "sauce-stock") {
+          } else if (
+            /^app[1-4]-stock$/.test(claim.channel)
+            || claim.channel === "sauce-barrel"
+            || claim.channel === "sauce-stock"
+          ) {
             acceptedNet.push(claim);
           }
           acceptedHere++;
@@ -3099,33 +4030,25 @@ export async function runAutoTrackServerTicks(opts: {
         // A no-event bootstrap arm is safe to persist. Eventful arm-state is
         // committed only after every wall event in that state was accepted;
         // stale/rejected/truncated events remain rearmed for the next beat.
-        const allWallAccepted = !!wall && wallFitsBudget
-          && wall.claims.every((claim) => {
-            const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
-            return state?.generation === claim.generation
-              && state?.sequence === claim.sequence
-              && state?.acceptedEventId === claim.eventId;
-          });
-        if (wall && (wall.claims.length === 0 || allWallAccepted)) {
-          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
-            ? data.autoTrackServerState as Record<string, unknown> : {};
-          const book = previous.wallClockBookkeeping && typeof previous.wallClockBookkeeping === "object"
-            ? previous.wallClockBookkeeping as Record<string, unknown> : {};
-          data = { ...data, autoTrackServerState: { ...previous, version: 1, wallClockBookkeeping: { ...book, [wall.runId]: wall.bookkeeping } } };
+        for (const wall of walls) {
+          const allWallAccepted = wall.claims.every((claim) => {
+              const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
+              return state?.generation === claim.generation
+                && state?.sequence === claim.sequence
+                && state?.acceptedEventId === claim.eventId;
+            });
+          if (wall.claims.length === 0 || allWallAccepted) {
+            const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+              ? data.autoTrackServerState as Record<string, unknown> : {};
+            const book = previous.wallClockBookkeeping && typeof previous.wallClockBookkeeping === "object"
+              ? previous.wallClockBookkeeping as Record<string, unknown> : {};
+            data = { ...data, autoTrackServerState: { ...previous, version: 1, wallClockBookkeeping: { ...book, [wall.runId]: wall.bookkeeping } } };
+          }
         }
         if (acceptedNet.length) {
-          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
-            ? data.autoTrackServerState as Record<string, any> : {};
-          const ownership = { ...(previous.netOwnership ?? {}) };
           for (const claim of acceptedNet) {
-            ownership[claim.runId] = {
-              ...(ownership[claim.runId] ?? {}),
-              [claim.channel]: {
-                generation: claim.generation, sequence: claim.sequence, updatedAt: nowMs,
-              },
-            };
+            data = attachServerOwnedAutoTrackClaim(data, claim, nowMs);
           }
-          data = { ...data, autoTrackServerState: { ...previous, version: 1, netOwnership: ownership } };
         }
         if (locked) await tx.update(dailySyncTable).set({
           data: data as any,
@@ -3158,7 +4081,7 @@ export async function runAutoTrackServerTicks(opts: {
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
       if (result.accepted) {
-        broadcast(result.data, "server:tick", scope, row.date, result);
+        await broadcast(result.data, "server:tick", scope, row.date, result);
       }
     } catch (err) {
       backoff.recordFailure(nowMs);

@@ -17,6 +17,7 @@ describe("capability route registration", () => {
       "administration",
       "retained-ai",
       "server-jobs",
+      "background-operation-diagnostics",
     ]);
     expect(new Set(authenticatedCapabilityFamilies.map(({ router }) => router)).size).toBe(
       authenticatedCapabilityFamilies.length,
@@ -32,12 +33,42 @@ describe("capability route registration", () => {
       "/inventory",
       "/brand-profiles",
       "/roles",
+      "/qc/planning",
+      "/background-operations/diagnostics",
     ]));
   });
 
-  it("classifies every protected GET in the assembled route stack", () => {
+  it("checks mounted protected GETs and declared contracts in the assembled route stack", () => {
     expect(() => validateReadAuthorizationInventory(apiRouter)).not.toThrow();
     expect(readAuthorizationInventory).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "GET",
+        path: "/health/diagnostics",
+        capabilities: ["manage-staff"],
+        capabilityMatch: "all",
+        scope: "live-only",
+      }),
+      expect.objectContaining({
+        method: "GET",
+        path: "/import-gold/cleanup-cases",
+        capabilities: ["manage-staff"],
+        capabilityMatch: "all",
+        scope: "scoped",
+      }),
+      expect.objectContaining({
+        method: "GET",
+        path: "/import-gold/approvals",
+        capabilities: ["manage-staff", "manage-qc"],
+        capabilityMatch: "any",
+        scope: "scoped",
+      }),
+      expect.objectContaining({
+        method: "GET",
+        path: "/import-gold/retention",
+        capabilities: ["manage-staff", "manage-qc"],
+        capabilityMatch: "any",
+        scope: "scoped",
+      }),
       expect.objectContaining({
         method: "GET",
         path: "/import-history",
@@ -55,6 +86,34 @@ describe("capability route registration", () => {
     ]));
   });
 
+  it("fails clearly when a declared manager GET is not effectively registered", () => {
+    const diagnosticRead = readAuthorizationInventory.filter(
+      ({ path }) => path === "/background-operations/diagnostics",
+    );
+    expect(diagnosticRead).toHaveLength(1);
+
+    expect(() => validateReadAuthorizationInventory(Router(), {
+      inventory: diagnosticRead,
+    })).toThrow(
+      /declared protected read GET \/background-operations\/diagnostics is not registered in the assembled API router/,
+    );
+  });
+
+  it("fails when a declared protected GET is mounted without its policy middleware", () => {
+    const unprotected = Router();
+    unprotected.get("/background-operations/diagnostics", (_req, res) => {
+      res.sendStatus(200);
+    });
+
+    expect(() => validateReadAuthorizationInventory(unprotected, {
+      inventory: readAuthorizationInventory.filter(
+        ({ path }) => path === "/background-operations/diagnostics",
+      ),
+    })).toThrow(
+      /declared protected read GET \/background-operations\/diagnostics is not registered with its inventory authorization middleware/,
+    );
+  });
+
   it("fails registration for nested and alternate protected read variants", () => {
     const nested = Router();
     nested.get(["/unclassified-a", "/unclassified-b"], requireCapability("manage-staff"), (_req, res) => {
@@ -66,5 +125,27 @@ describe("capability route registration", () => {
     expect(() => validateReadAuthorizationInventory(assembled)).toThrow(
       /protected read GET \/unclassified-a is missing/,
     );
+  });
+
+  it("rejects an exemption as soon as its route is mounted", () => {
+    const mounted = Router();
+    const staleDiagnosticExemption = [{
+      method: "GET" as const,
+      path: "/background-operations/diagnostics",
+      module: "backgroundOperationDiagnostics.ts",
+      reason: "The test deliberately supplies an obsolete exemption.",
+    }];
+    mounted.get(
+      "/background-operations/diagnostics",
+      requireCapability("manage-staff"),
+      (_req, res) => res.sendStatus(200),
+    );
+
+    expect(() => validateReadAuthorizationInventory(mounted, {
+      inventory: readAuthorizationInventory.filter(
+        ({ path }) => path === "/background-operations/diagnostics",
+      ),
+      exemptions: staleDiagnosticExemption,
+    })).toThrow(/read authorization exemption .* is stale; remove it now that the route is mounted/);
   });
 });

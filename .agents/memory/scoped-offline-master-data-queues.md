@@ -1,9 +1,15 @@
 ---
 name: Scoped offline master-data queues
-description: Conflict and scope rules for server-authoritative master data with a browser cache and durable offline outbox.
+description: Scope and conflict rules for memory-read shared records and durable owned offline recovery.
 ---
 
 Offline master-data snapshots, migration markers, and outboxes must be partitioned by the authenticated data scope. Every asynchronous reconcile or flush captures its starting scope and must refuse to mutate local state after a scope switch.
+
+Acknowledged shared directories and completed archives belong in memory, not a durable read cache. Each unsent operation must own its payload and revision rather than consulting a mutable read copy at delivery time. Keep unresolved legacy/undo evidence distinct from normal reads; never infer its account owner.
+
+**Why:** The approved reduced-persistence boundary retains offline recovery, not permanent duplicate business records. A read finishing after a newer edit was acknowledged can be just as stale as a late write response.
+
+**How to apply:** Fence both delivery and read adoption by identity and local mutation generation. Preserve and verify owned unsent payloads before retiring matched legacy copies; retain ambiguous evidence for review. Strip legacy archives from queued daily-sync replay only after preserving unresolved evidence.
 
 **Why:** A shared browser can switch between live and sandbox identities while requests are in flight. Global storage keys or unfenced continuations can display or upload one scope's data in the other.
 
@@ -20,3 +26,52 @@ Legacy local records with no conflict timestamp use reserved revision zero. They
 **Why:** Existing server rows can predate the revision column and therefore carry its zero default. Giving unstamped local data a current timestamp would silently overwrite legitimate server state during migration.
 
 **How to apply:** Reconcile legacy data against the complete server record set, treat equal revisions as acknowledged/idempotent, and retain deletion tombstones in server responses so stale devices cannot resurrect records.
+
+Unowned legacy factory-directory lists and factory commands require explicit
+manager review even when the server row is absent. Equal canonical values may be
+reconciled automatically; a manager's explicit Apply is a new current-session edit.
+
+**Why:** Those legacy records have neither authenticated owner nor live/sandbox
+origin. Absence on the currently selected server does not establish the right to
+upload them there. This boundary is stronger than revision-zero reconciliation
+for legacy records whose owner has already been established.
+
+**How to apply:** Preserve unresolved evidence separately from live read state.
+Never use it for offline bootstrap or assign its queue to the next account.
+Keep genuinely unowned quarantine explicitly unowned until manager review; do
+not give it to whichever staff account happens to hydrate first. Otherwise the
+account that can see the evidence may lack permission to resolve it. Newly
+authorized commands still belong to the reviewing identity and scope.
+
+A persistence migration's inventory must include the previous migration's entire
+supported key set, not just the read caches currently being removed.
+
+**Why:** Adjacent browser-only settings can become inaccessible behind new
+memory/server getters even though their original bytes still exist.
+
+**How to apply:** Exercise legacy upgrades with absent server rows for every
+previously supported setting. Keep original bytes until explicit resolution or
+canonical acknowledgment, including settings outside the new read-cache set.
+
+Do not infer sensitive read authorization from manager-only write authorization.
+Trace staff consumers before narrowing a bootstrap projection.
+
+**Why:** Operational defaults often look valid, so a missing staff-readable
+setting can silently change live production behavior instead of showing an error.
+
+**How to apply:** Keep an explicit non-secret operational read allowlist, preserve
+administrative read and write fences, and verify non-default manager configuration
+through a fresh staff session and a scope change.
+
+Facility settings are independently reconcilable by key; they are not a
+transactional bundle. Uncertainty about one acknowledgment must not authorize
+dropping that edit or indefinitely withholding unrelated settings.
+
+**Why:** A successful HTTP response can still be malformed or contradict the
+submitted revision. Retaining the unresolved intent protects recovery, while
+key-scoped progress avoids turning one conflict into a facility-wide save block.
+
+**How to apply:** Keep acknowledgment validation strict and preserve the
+unresolved command's original conflict identity. Treat a newer same-key intent
+as ordered work, not an independent setting. Authentication, authorization,
+transport and HTTP failures remain broader stop signals.

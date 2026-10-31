@@ -1,0 +1,98 @@
+import { describe, expect, it } from "vitest";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import {
+  fetchImportGoldLocal,
+  importGoldEndpoint,
+  importGoldHealthEndpoint,
+  isImportGoldDevelopmentRuntime,
+  isImportGoldLocalAvailable,
+  isImportGoldLocalConfigured,
+} from "./importGoldEndpoint";
+
+describe("same-host Import Gold endpoint", () => {
+  it("distinguishes disabled, valid configuration and invalid configuration without a live probe", () => {
+    expect(isImportGoldLocalConfigured({})).toBe(false);
+    expect(isImportGoldLocalConfigured({ IMPORT_GOLD_LOCAL_ENABLED: "true" })).toBe(true);
+    expect(isImportGoldLocalConfigured({ IMPORT_GOLD_LOCAL_BASE_URL: "http://localhost:1/v1" })).toBe(true);
+    expect(isImportGoldLocalConfigured({ IMPORT_GOLD_LOCAL_BASE_URL: "http://169.254.169.254/v1" })).toBe(false);
+    expect(isImportGoldLocalConfigured({ IMPORT_GOLD_LOCAL_ENABLED: "true", IMPORT_GOLD_LOCAL_BASE_URL: "" })).toBe(false);
+  });
+  it.each([
+    ["http://localhost:11434/v1", "http://127.0.0.1:11434/v1/chat/completions"],
+    ["http://127.0.0.1:11434/v1/", "http://127.0.0.1:11434/v1/chat/completions"],
+    ["http://[::1]:11434/v1", "http://[::1]:11434/v1/chat/completions"],
+    ["http://2130706433/v1", "http://127.0.0.1/v1/chat/completions"],
+  ])("pins accepted loopback %s without DNS", (base, expected) => {
+    expect(importGoldEndpoint(base).href).toBe(expected);
+  });
+  it("uses the root health route on the same pinned loopback origin", () => {
+    expect(importGoldHealthEndpoint("http://localhost:11434/v1").href)
+      .toBe("http://127.0.0.1:11434/healthz");
+    expect(() => importGoldHealthEndpoint("http://169.254.169.254/v1")).toThrow(/^provider_unavailable$/);
+  });
+  it("enables the development switch only without a deployed-runtime marker", () => {
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "development", REPLIT_ENVIRONMENT: "production" })).toBe(true);
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "production" })).toBe(false);
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "development", REPLIT_DEPLOYMENT_ID: "deployment" })).toBe(false);
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "development", REPLIT_DEPLOYMENT: "1" })).toBe(false);
+  });
+  it("requires the pinned model identity and readiness contract for availability", async () => {
+    const server = createServer((req, res) => {
+      if (req.url !== "/healthz") {
+        res.writeHead(404).end();
+        return;
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ status: "healthy", model: "qwen3.5-9b-q3_k_m", contextLimit: 4096 }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      expect(await isImportGoldLocalAvailable(`http://127.0.0.1:${port}/v1`)).toBe(true);
+      expect(await isImportGoldLocalAvailable(`http://127.0.0.1:${port}/v1`, "other-model")).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it.each([
+    "https://127.0.0.1/v1", "file:///tmp/model", "http://169.254.169.254/",
+    "http://10.0.0.1/v1", "http://127.0.0.2/v1", "http://[::ffff:127.0.0.1]/v1",
+    "http://[::]/v1", "http://localhost.example/v1", "http://localhost./v1",
+    "http://user:password@127.0.0.1/v1", "http://127.0.0.1/v1?token=private",
+    "http://127.0.0.1/v1#private", "not a URL",
+  ])("rejects unsafe or ambiguous configuration without echoing it: %s", (base) => {
+    expect(() => importGoldEndpoint(base)).toThrow(/^provider_unavailable$/);
+  });
+
+  it.each([301, 302, 303, 307, 308])("never follows a %s redirect, including a same-host one", async (status) => {
+    let redirectedRequests = 0;
+    const server = createServer((req, res) => {
+      if (req.url === "/v1/chat/completions") {
+        res.writeHead(status, { location: "/private" }).end();
+      } else {
+        redirectedRequests += 1;
+        res.end("must not reach");
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      await expect(fetchImportGoldLocal(`http://localhost:${port}/v1`, {
+        method: "POST", body: "synthetic", signal: AbortSignal.timeout(2000),
+      })).rejects.toThrow();
+      expect(redirectedRequests).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("honors request cancellation before contacting a provider", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(fetchImportGoldLocal("http://127.0.0.1:1/v1", {
+      method: "POST", body: "synthetic", signal: controller.signal,
+    })).rejects.toHaveProperty("name", "AbortError");
+  });
+});

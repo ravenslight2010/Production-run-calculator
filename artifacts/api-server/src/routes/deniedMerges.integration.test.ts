@@ -10,8 +10,7 @@
 //   - blank / self-referential pairs are dropped; bad bodies 400.
 //
 // The denied-merges router has no auth of its own (auth is applied at the index
-// mount), so we mount just the router with a stub req.log — auth gating is
-// covered by roles.integration.test.ts.
+// mount); write authorization remains on the POST and DELETE routes.
 //
 // @workspace/db binds its pool to process.env.DATABASE_URL at import time, so we
 // must create the throwaway DB and point DATABASE_URL at it BEFORE importing the
@@ -75,7 +74,6 @@ beforeAll(async () => {
   userRolesTable = dbMod.userRolesTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   const { requireAuth } = await import("../middlewares/requireAuth");
-  const { requireCapability } = await import("../middlewares/requireCapability");
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -84,7 +82,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  app.use("/api", requireAuth, requireCapability("manage-profiles"), routerMod.default);
+  app.use("/api", requireAuth, routerMod.default);
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -111,18 +109,24 @@ afterAll(async () => {
 beforeEach(async () => {
   await db.execute(sql`TRUNCATE ${deniedMergesTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
-  await db.insert(usersTable).values({ id: "profile-user", username: "profile-user", passwordHash: "x" });
-  await db.insert(userRolesTable).values({ userId: "profile-user", role: "manager" });
+  await db.insert(usersTable).values([
+    { id: "profile-user", username: "profile-user", passwordHash: "x" },
+    { id: "operator-user", username: "operator-user", passwordHash: "x" },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: "profile-user", role: "manager" },
+    { userId: "operator-user", role: "operator" },
+  ]);
 });
 
 type Pair = { nameA: string; nameB: string };
 
-async function list(category?: string, brand?: string): Promise<Pair[]> {
+async function list(category?: string, brand?: string, userId = "profile-user"): Promise<Pair[]> {
   const qs = new URLSearchParams();
   if (category) qs.set("category", category);
   if (brand) qs.set("brand", brand);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  const res = await fetch(`${baseUrl}/api/denied-merges${suffix}`, { headers: authHeaders() });
+  const res = await fetch(`${baseUrl}/api/denied-merges${suffix}`, { headers: authHeaders(userId) });
   expect(res.status).toBe(200);
   return ((await res.json()) as { denied: Pair[] }).denied;
 }
@@ -135,16 +139,21 @@ async function add(pairs: Pair[], category?: string, brand?: string): Promise<Re
   });
 }
 
-async function remove(pairs: Pair[], category?: string, brand?: string): Promise<Response> {
+async function remove(
+  pairs: Pair[],
+  category?: string,
+  brand?: string,
+  userId = "profile-user",
+): Promise<Response> {
   return fetch(`${baseUrl}/api/denied-merges`, {
     method: "DELETE",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json", ...authHeaders(userId) },
     body: JSON.stringify({ pairs, ...(category ? { category } : {}), ...(brand ? { brand } : {}) }),
   });
 }
 
-function authHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signLegacyTokenForTests("profile-user")}` };
+function authHeaders(userId = "profile-user"): Record<string, string> {
+  return { authorization: `Bearer ${signLegacyTokenForTests(userId)}` };
 }
 
 describe("denied-merges routes", () => {
@@ -194,6 +203,22 @@ describe("denied-merges routes", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("allows signed-in operators to read but not restore ignored matches", async () => {
+    const pair = { nameA: "Thin Crust", nameB: "Thin  Crust" };
+    await add([pair], "dough");
+
+    const read = await fetch(`${baseUrl}/api/denied-merges?category=dough`, {
+      headers: authHeaders("operator-user"),
+    });
+    expect(read.status).toBe(200);
+    expect(((await read.json()) as { denied: Pair[] }).denied)
+      .toEqual([{ nameA: "thin  crust", nameB: "thin crust" }]);
+
+    const removeResponse = await remove([pair], "dough", undefined, "operator-user");
+    expect(removeResponse.status).toBe(403);
+    expect(await list("dough")).toEqual([{ nameA: "thin  crust", nameB: "thin crust" }]);
+  });
 });
 
 describe("denied-merges routes — category/brand scoping", () => {
@@ -221,6 +246,18 @@ describe("denied-merges routes — category/brand scoping", () => {
     await remove([{ nameA: "BBQ", nameB: "Barbecue" }], "flavor", "Tony's");
     expect(await list("flavor", "Tony's")).toEqual([]);
     expect(await list("flavor", "Domino's")).toEqual([{ nameA: "barbecue", nameB: "bbq" }]);
+  });
+
+  it("DELETE only removes the pair within its own merge category", async () => {
+    const pair = { nameA: "Thin Crust", nameB: "Thin  Crust" };
+    await add([pair], "dough");
+    await add([pair], "sauce");
+
+    const response = await remove([pair], "dough");
+
+    expect(response.status).toBe(200);
+    expect(await list("dough")).toEqual([]);
+    expect(await list("sauce")).toEqual([{ nameA: "thin  crust", nameB: "thin crust" }]);
   });
 
   it("rejects an unrecognized category value with 400", async () => {

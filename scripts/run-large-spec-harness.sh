@@ -139,7 +139,8 @@ api_port_from_base() {
 API_HEALTH_URL="$(api_health_url "$API_BASE")"
 
 # cleanup is invoked indirectly by the EXIT trap below.
-# shellcheck disable=SC2317
+# Invoked by traps (or their cleanup callback); covered by signal/cleanup tests.
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   if [ -n "$API_SERVER_PID" ]; then
     echo "Stopping API server (PID $API_SERVER_PID)…"

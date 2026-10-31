@@ -1,0 +1,1691 @@
+{
+  "reviewedAt": "2026-10-23",
+  "environment": "isolated repository; public sources only",
+  "repositoryBaseline": "0cdb38f5ee8d9332768fa9640efda36f747b6a3b",
+  "purpose": "Source identities, not installation approval or a complete executable security audit",
+  "handling": "No candidate code executed; no customer payloads, credentials or authenticated services accessed; public file metadata retained only",
+  "repositories": [
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "lastRepositoryCommit": "2026-10-23T13:57:12Z",
+      "treeTruncated": false
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "lastRepositoryCommit": "2026-10-02T12:34:48Z",
+      "treeTruncated": false
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "lastRepositoryCommit": "2026-08-28T13:36:07Z",
+      "treeTruncated": false
+    },
+    {
+      "repo": "addyosmani/web-quality-skills",
+      "revision": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+      "lastRepositoryCommit": "2026-08-24T21:07:33Z",
+      "treeTruncated": false
+    },
+    {
+      "repo": "huggingface/skills",
+      "revision": "fabc634a893f62ad5c2039830397efa35fa62715",
+      "lastRepositoryCommit": "2026-10-23T09:08:02Z",
+      "treeTruncated": false
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "lastRepositoryCommit": "2026-10-09T18:45:49Z",
+      "treeTruncated": false
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "lastRepositoryCommit": "2026-10-23T09:26:17Z",
+      "treeTruncated": false
+    }
+  ],
+  "files": [
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/LICENSE",
+      "sha256": "4c9fb97c01f065d3113df961e895744276238f69361905181e383503cad57283",
+      "bytes": 10179,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "NOTICE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/NOTICE",
+      "sha256": "3750db04b78aa2946bd15d5b3e3c0c81a8227ac26b81f088a9fb5d150478c70e",
+      "bytes": 828,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/README.md",
+      "sha256": "832b3f2fccdd3b24dbb3bf14dfee4361f61eb4d5f550330eeb013e8b8637259a",
+      "bytes": 37354,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "packages/scanner/LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/packages/scanner/LICENSE",
+      "sha256": "4c9fb97c01f065d3113df961e895744276238f69361905181e383503cad57283",
+      "bytes": 10179,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "packages/scanner/NOTICE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/packages/scanner/NOTICE",
+      "sha256": "3750db04b78aa2946bd15d5b3e3c0c81a8227ac26b81f088a9fb5d150478c70e",
+      "bytes": 828,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "scripts/dev/vendor/smol-toml/LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/scripts/dev/vendor/smol-toml/LICENSE",
+      "sha256": "fa5659948374d4f555594f47f6da073b40dc503e921aeeece30df4362b3051a5",
+      "bytes": 1499,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/cypress-debugger/LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/cypress-debugger/LICENSE",
+      "sha256": "4c9fb97c01f065d3113df961e895744276238f69361905181e383503cad57283",
+      "bytes": 10179,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/cypress-debugger/NOTICE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/cypress-debugger/NOTICE",
+      "sha256": "43b3b23be4c424142bba5e01c4c2784a43600bf96431106e6cec4c75a7a09d4c",
+      "bytes": 246,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/LICENSE",
+      "sha256": "4c9fb97c01f065d3113df961e895744276238f69361905181e383503cad57283",
+      "bytes": 10179,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/NOTICE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/NOTICE",
+      "sha256": "43b3b23be4c424142bba5e01c4c2784a43600bf96431106e6cec4c75a7a09d4c",
+      "bytes": 246,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/SKILL.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/SKILL.md",
+      "sha256": "1678a427c878ba43e5b7da0e7be90c3602163e580f6dfe59b837df4c56634958",
+      "bytes": 21644,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/applying-fixes.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/applying-fixes.md",
+      "sha256": "7f5454eb36609a72729dec70e99ffdb3ad7ffcd6e8c22b7f3daf9f6f48252a15",
+      "bytes": 24923,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/fix-replacements.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/fix-replacements.md",
+      "sha256": "d0f9ab0fd68e750a72362cbd6dfa568b7f222f159910b2805215d84685333d01",
+      "bytes": 7778,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/grep-patterns.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/grep-patterns.md",
+      "sha256": "680753eafbe790d4f2ddfb97eb364c2b30771270cb5e0ca3db840e800c1fa497",
+      "bytes": 22583,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/pattern-reference.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/pattern-reference.md",
+      "sha256": "f3b700584676d4b21d00d5299ac72383ca21d5429e5145e8259d61c25d8f40e9",
+      "bytes": 96343,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/1.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/1.md",
+      "sha256": "b09c4d985caa76d5d461c85602bd305f20a935bfed48c3d73013bf32650ae4e7",
+      "bytes": 2989,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/10.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/10.md",
+      "sha256": "772dcb4d1796fed263f981b01b38bdbd850a7e982647949e64c011686ab092c2",
+      "bytes": 8158,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/11.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/11.md",
+      "sha256": "d1fd696b06fafba4dbd93bd88d4ca66a955a5108f98b639c01e069a1cceba1ea",
+      "bytes": 7582,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/12.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/12.md",
+      "sha256": "c7bae4a25032dcf9593fe53e895262c4ac0a70651fbcb1bbff9baecfcf2b6aec",
+      "bytes": 1659,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/13.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/13.md",
+      "sha256": "8da69e2dc6ad0db548880d03be9ccc1091d9870c1aa3c8af1d37d8e5fec1382f",
+      "bytes": 2018,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/14.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/14.md",
+      "sha256": "4ce9597a346acbad2b4a8af05a0cdc9d1550a961c1394798204f419d9a371d3d",
+      "bytes": 2380,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/15.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/15.md",
+      "sha256": "065876550a42f85c104ce714f5f24697deba528ac156f34686e43e14b43e74a9",
+      "bytes": 2291,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/16.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/16.md",
+      "sha256": "5b8c2708591d8a0852b3db3a3c42e001d9237ea89771925cc39ed4aae17ee468",
+      "bytes": 3032,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/17.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/17.md",
+      "sha256": "8abd6868121aa642feeaac4586df89e86ad2784f06d847b44c11ffcf3e39cc0b",
+      "bytes": 2083,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/18.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/18.md",
+      "sha256": "6ca34cdcc34fe8ca01dc1a22c98203f4ee8b69db6c851b86ae76141c48479f92",
+      "bytes": 1795,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/19.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/19.md",
+      "sha256": "0d7273493948d2a7982c2207b97fa2c54e0a271c59991890b7264c60bfb4eb63",
+      "bytes": 2814,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/2.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/2.md",
+      "sha256": "8cd6b08712957f877d3c7709d0ffd8e6c7202d605c4b9c67d0fe8a26f8557e7c",
+      "bytes": 3840,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/20.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/20.md",
+      "sha256": "0db183a2a56f1f5f80f22f065aa5c83ccd423682b8dde5b27e8dfe7fc2084f09",
+      "bytes": 2358,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/21.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/21.md",
+      "sha256": "edbf6ad785758af889fac45bdc44075017d9ee95e1da39bb4a73773f1a9191d0",
+      "bytes": 1786,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/22.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/22.md",
+      "sha256": "e3fca422e1c2e29eb44c9236f978dc47e7e929df361568551da90636c869277d",
+      "bytes": 3420,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/23.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/23.md",
+      "sha256": "a30b6b3fda67c9afae9df35052bcbbfcaf2bdc32fe36a4a49a924149765da6cc",
+      "bytes": 2902,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/3.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/3.md",
+      "sha256": "9552ea6b63eee29bc032cefe25e97e1c12d267db24818f63a55390dd62e8e318",
+      "bytes": 6633,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/3b.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/3b.md",
+      "sha256": "84f5089d932fd7095531f85346a6ed2d2d724f95a70cb26c6966b6954d13ad00",
+      "bytes": 2142,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/4.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/4.md",
+      "sha256": "0318ba1e9bf7b0a254ad417157d98f01dda8e1de2d66c2077bd4d6d6612582bb",
+      "bytes": 23481,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/5.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/5.md",
+      "sha256": "5863e4d38e97d5ef26dee43ee8d6d680864ef7f9cf09788ce98a77a416535073",
+      "bytes": 2478,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/6.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/6.md",
+      "sha256": "0fda27a2a457375b5499f0f7b389b982dbe9dda5ad3862f0dfcce579d963d0b1",
+      "bytes": 1556,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/7.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/7.md",
+      "sha256": "8ef3d84f88b4d887401eb39251152a0164f261b3d0bf20c1a2f7405fcdcb80b2",
+      "bytes": 2008,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/8.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/8.md",
+      "sha256": "0bfab4eb5f7a5d1e83c492b738aefc91ed0a43cfb774a8f597c4e0b9e6013df8",
+      "bytes": 5323,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/patterns/9.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/patterns/9.md",
+      "sha256": "ce565f127bedf1cfd67a4043795443f484e546eb83e8469f557bae73e05c6a6f",
+      "bytes": 1352,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/reporting.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/reporting.md",
+      "sha256": "e986c4dc4669adfecabc4ca0b0edcbb7b9ad945b474bada21f8eca05dbfc9069",
+      "bytes": 13254,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/review-scope.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/review-scope.md",
+      "sha256": "4713d1a36288aeb36c9824b69c07b72d504a6d903644e20cf952269797c132d6",
+      "bytes": 5900,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/rtl-jest-dom-fixes.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/rtl-jest-dom-fixes.md",
+      "sha256": "e8a8964ce0eadfe1e4112f1ac90fd48e853e6d93e57095393def30209bc2dd4a",
+      "bytes": 2965,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/runtime-probes.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/runtime-probes.md",
+      "sha256": "bd96cdf8d5696db16949a87d96ed8d4964d0bc23da71d576c8c34ddd79b11576",
+      "bytes": 13155,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/scanner-workflow.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/scanner-workflow.md",
+      "sha256": "71f847e9891bea1c8b0448fdc0ce279c3996137de97fb60dc67241c7ef43fbb2",
+      "bytes": 11773,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/semantic-review.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/semantic-review.md",
+      "sha256": "d59d85e0a3542449232379d03190d14f992a6c2c803a7977177773e7564f8286",
+      "bytes": 30347,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/upstream-rule-sources.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/upstream-rule-sources.md",
+      "sha256": "1e64d5cf669ce83a9cb429e3ffad0ccaf7149580a9b462714a4827e54e359a44",
+      "bytes": 14831,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/v3-adapter.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/v3-adapter.md",
+      "sha256": "7ad7067d153d6257caaa0ce79c703843102cd6dd73bff6c7f8c7f20a9b228bc8",
+      "bytes": 3539,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/references/verification-rules.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/references/verification-rules.md",
+      "sha256": "6b28942215e39b8cda59d4a5052ab1061940c2681c7f6ca6617153296568dcae",
+      "bytes": 6149,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/check.py",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/check.py",
+      "sha256": "bc2001e7e62475cbb59fc36f2d736bb57ef83893a25ff2b206e680a862a081e4",
+      "bytes": 5652,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/pom-ownership-candidates.py",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/pom-ownership-candidates.py",
+      "sha256": "82f04115053c7c96407fbada48fc2b9e4acfdf1d365f2f667a3ad73dcc69ccf5",
+      "bytes": 5926,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/scan.sh",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/scan.sh",
+      "sha256": "497afefa6f658c69fbb7009a5109ef7a96da9198c7a80f561bb8827aa8ba78f7",
+      "bytes": 5090,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/scanner/LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/scanner/LICENSE",
+      "sha256": "4c9fb97c01f065d3113df961e895744276238f69361905181e383503cad57283",
+      "bytes": 10179,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/scanner/NOTICE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/scanner/NOTICE",
+      "sha256": "3750db04b78aa2946bd15d5b3e3c0c81a8227ac26b81f088a9fb5d150478c70e",
+      "bytes": 828,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/scanner/manifest.json",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/scanner/manifest.json",
+      "sha256": "75e6ed5a2fd2afa70d529fb621ba5696deaccbeafc74325a0accf3fa0424724f",
+      "bytes": 29000,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/scanner/vendor/typescript/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/scanner/vendor/typescript/LICENSE.txt",
+      "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+      "bytes": 9197,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/e2e-reviewer/scripts/scanner/vendor/typescript/ThirdPartyNoticeText.txt",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/e2e-reviewer/scripts/scanner/vendor/typescript/ThirdPartyNoticeText.txt",
+      "sha256": "1af3c68039c57e539422da82a4faada506ce6d0ea6f90e0b699d02dbcdb7a90c",
+      "bytes": 37824,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/LICENSE",
+      "sha256": "4c9fb97c01f065d3113df961e895744276238f69361905181e383503cad57283",
+      "bytes": 10179,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/NOTICE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/NOTICE",
+      "sha256": "43b3b23be4c424142bba5e01c4c2784a43600bf96431106e6cec4c75a7a09d4c",
+      "bytes": 246,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/SKILL.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/SKILL.md",
+      "sha256": "df77411080963f7991a8ba8390fb0638998aadcf9c66cc8bb6d963bb43aa5bff",
+      "bytes": 11621,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/references/artifact-extraction.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/references/artifact-extraction.md",
+      "sha256": "48e8f09a76ff6419e8624cdca39b10c32a02037a86d776b2e737a5f1324ca09f",
+      "bytes": 5831,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/references/ci-artifact-download.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/references/ci-artifact-download.md",
+      "sha256": "c55f5d329ba1d0e7d6623695bce13147261388f52e87973cf61398692d174130",
+      "bytes": 3807,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/references/classification-procedure.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/references/classification-procedure.md",
+      "sha256": "075525b005a81bff6a8372327b079dac28c9ae569fbd21690a5a505b27f9ef0d",
+      "bytes": 9443,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/references/fix-verification.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/references/fix-verification.md",
+      "sha256": "ae1bae66ad4e0591703b50e4d4ce8c0579e253e7ca248fcb84d8a4eeed0ad102",
+      "bytes": 4590,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/references/report-acquisition.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/references/report-acquisition.md",
+      "sha256": "913695383d49012bd044b5c9329c3f74cb4e8d7193abb7f114fb4625f2da661d",
+      "bytes": 7150,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/references/safety-procedures.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/references/safety-procedures.md",
+      "sha256": "ca0b52980af6f0055891fb39abc3c438f7bf6067d7c2934db4de41245de1f0ec",
+      "bytes": 7696,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/references/trace-media-analysis.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/references/trace-media-analysis.md",
+      "sha256": "b2d602fec2a52d9acd2d034a24970b20dd27e7648a510cfed1a79895f80d97c5",
+      "bytes": 10461,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/scripts/download-playwright-report.py",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/scripts/download-playwright-report.py",
+      "sha256": "b7ef4c67634bcdbba9269289abc5b35fa522487290f836ae5db5cd29250dba1a",
+      "bytes": 31514,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/scripts/publish-json-report.py",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/scripts/publish-json-report.py",
+      "sha256": "9929bd593d700b42312067ffe002db0a335931f52e8fdb5472da6eb652427f70",
+      "bytes": 13438,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/scripts/read-playwright-artifact.py",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/scripts/read-playwright-artifact.py",
+      "sha256": "34da95cd3ae250de7ac11abb38c883f0d7efd8946e4cd2099b45632ebb12a6d5",
+      "bytes": 57229,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/scripts/residual_credentials.py",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/scripts/residual_credentials.py",
+      "sha256": "85ca99aee9675100b04063fb3f348711a0eb02512d228b3f2c12d16c796e3441",
+      "bytes": 41160,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-debugger/scripts/run-artifact-reader.sh",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-debugger/scripts/run-artifact-reader.sh",
+      "sha256": "0035ffef5ee73ff98cc90196b11174b68a9ca7119bf7941ba1624124b6829107",
+      "bytes": 6664,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-test-generator/LICENSE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-test-generator/LICENSE",
+      "sha256": "4c9fb97c01f065d3113df961e895744276238f69361905181e383503cad57283",
+      "bytes": 10179,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-test-generator/NOTICE",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-test-generator/NOTICE",
+      "sha256": "43b3b23be4c424142bba5e01c4c2784a43600bf96431106e6cec4c75a7a09d4c",
+      "bytes": 246,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-test-generator/SKILL.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-test-generator/SKILL.md",
+      "sha256": "44547a5e9303a80e70a41cb718d893ebd3873f8896ba43e2a93d313df567d35f",
+      "bytes": 6962,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-test-generator/setup-guide.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-test-generator/setup-guide.md",
+      "sha256": "6384b5fb5dba67b1dd7fdce6342d262d0e8f4f8759454d6a925b96cf9a6299ae",
+      "bytes": 5027,
+      "status": "PASS"
+    },
+    {
+      "repo": "voidmatcha/e2e-skills",
+      "revision": "1e77cba3b9fdcfb27ab160073f5151678c3781e2",
+      "path": "skills/playwright-test-generator/thin-rules.md",
+      "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/1e77cba3b9fdcfb27ab160073f5151678c3781e2/skills/playwright-test-generator/thin-rules.md",
+      "sha256": "4dff3e824f42681e99b0673b6ed22be99885863d1605bacf7246b57ccec6a798",
+      "bytes": 2129,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/LICENSE",
+      "sha256": "b65e575eb4f04a13c187d64e958321298e2ab84d67aa8428819f362056ba292c",
+      "bytes": 1065,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/README.md",
+      "sha256": "8922feb4326c0603ff6e56246bf1bf436aa1dd9f50f22212ad1605749e105830",
+      "bytes": 4507,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/CHANGELOG.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/CHANGELOG.md",
+      "sha256": "751ad110037c85d400018c9894716a04fa46357ff55c22b1169b280752e19e88",
+      "bytes": 5684,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/SKILL.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/SKILL.md",
+      "sha256": "ad65e776f45e761bafc609d3f506c77c1032225aa65e0c4c02f241b8071e5855",
+      "bytes": 3231,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/_contributing.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/_contributing.md",
+      "sha256": "191e039e7d94764e6073410b513b559f9a594e0fdf0252a30c2a2986df2ab3bc",
+      "bytes": 4113,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/_sections.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/_sections.md",
+      "sha256": "c9e992612b422c7122de0b7542ebc2450db283edaab08cfe86c6d657fcccccd5",
+      "bytes": 1682,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/_template.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/_template.md",
+      "sha256": "6299954250f212caabe339d752c3e5313a8e07d1a182a4e4b425baee91df1bd2",
+      "bytes": 1040,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/advanced-full-text-search.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/advanced-full-text-search.md",
+      "sha256": "40c2606bbb4c4dce31308f201b24cc7f58c7df05b1d9c6856fe2b888d3b7cf28",
+      "bytes": 1468,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/advanced-jsonb-indexing.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/advanced-jsonb-indexing.md",
+      "sha256": "24cacf6a8bc35901dd566d24502ce8e57f810a5c196b897e61d52726e521d106",
+      "bytes": 1444,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/conn-idle-timeout.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-idle-timeout.md",
+      "sha256": "630588902c00fcec59a5988cc5d042f76dcf2c923a535abfd8c47dca205eaed5",
+      "bytes": 1282,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/conn-limits.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-limits.md",
+      "sha256": "11b2a67a7c7679cbbc5d807bbb17e69c98484a581d0c8b929c03408f412b81b2",
+      "bytes": 1325,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/conn-pooling.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-pooling.md",
+      "sha256": "88cf086bf98ba865d2e9d0579974e1366b14157619d6a93e7da77be91084e4a5",
+      "bytes": 1382,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/conn-prepared-statements.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-prepared-statements.md",
+      "sha256": "174e9332fe3dda5c99b2b00159fb1915ae36c00bab3a7882c14e73e4344e946e",
+      "bytes": 1529,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/data-batch-inserts.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-batch-inserts.md",
+      "sha256": "531933b82d6a622d0fae29e0ea80be6fe5d78655adf2804c271ea84a1930de37",
+      "bytes": 1287,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/data-n-plus-one.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-n-plus-one.md",
+      "sha256": "21a44905e5b16a42741892ec34bb1bfef124d049b140a76934a9acd0f46f5fc2",
+      "bytes": 1361,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/data-pagination.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-pagination.md",
+      "sha256": "73c9fa10a3d439bedea0e11b640bd25bf30dd50f0d9006cf85baf7c3151543fa",
+      "bytes": 1358,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/data-upsert.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-upsert.md",
+      "sha256": "2612af83b20a2701dde30ef1f8d7efd26b7e9eef84717226b8f038a2d2150ff7",
+      "bytes": 1390,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/lock-advisory.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-advisory.md",
+      "sha256": "c88d259dbf81c3771438f59a165f7eab8acd09999dd370bdf807521c73f35aab",
+      "bytes": 1531,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/lock-deadlock-prevention.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-deadlock-prevention.md",
+      "sha256": "09aee46f51d7178c8e55fe056cd5a94a64ba2c122fe418e6900cd99f297b2347",
+      "bytes": 1855,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/lock-short-transactions.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-short-transactions.md",
+      "sha256": "5aa7f61095916986d39644b446cdbcd2bacca7ef698a3bb50b3f82dd60207602",
+      "bytes": 1350,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/lock-skip-locked.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-skip-locked.md",
+      "sha256": "6c45077f430f29cd9cd8f448c94d578e827e7bd023fcdaf717a756acb116fa4b",
+      "bytes": 1353,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/monitor-explain-analyze.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/monitor-explain-analyze.md",
+      "sha256": "4cb67ffbf8e57f2e5b380b0beb4242528b513723ce314a2c2ffcf083bd4203d7",
+      "bytes": 1441,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/monitor-pg-stat-statements.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/monitor-pg-stat-statements.md",
+      "sha256": "89dca99d4e894fcbdcac136be7ad9fbc03d1342904f065c1b198dc9cf495f098",
+      "bytes": 1418,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/monitor-vacuum-analyze.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/monitor-vacuum-analyze.md",
+      "sha256": "2892272011710eb49b3f185ec12f15ce9ce4c365792c672f6e2a9c90da426a1a",
+      "bytes": 1506,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/query-composite-indexes.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-composite-indexes.md",
+      "sha256": "73e42424e671f0266e74fdb220db3196790f69fb43e2b19c7b9483eb4971b554",
+      "bytes": 1454,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/query-covering-indexes.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-covering-indexes.md",
+      "sha256": "daf2a7f0477fb7357b62b5fb5b185b1995a77a186347e45cb780e25e7a7589b6",
+      "bytes": 1287,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/query-index-types.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-index-types.md",
+      "sha256": "472a74f22c2df203bd0154999b3a5a0187cca2ab3d9a3978e305bb7c32f1a282",
+      "bytes": 1521,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/query-missing-indexes.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-missing-indexes.md",
+      "sha256": "91ad8b0ff4365704b4830a7f077c6f140f7140fd5d3ce5cd0b92b160cf9e25f1",
+      "bytes": 1218,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/query-partial-indexes.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-partial-indexes.md",
+      "sha256": "6448982bc8558c6555284958edc331b29239c6a0130e6b4501dd6d4da607a6dd",
+      "bytes": 1347,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/schema-constraints.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-constraints.md",
+      "sha256": "90e8efda3e9e81095e642911ad4aae2809d160f29414338fa997253238f510f8",
+      "bytes": 1880,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/schema-data-types.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-data-types.md",
+      "sha256": "e01b58c14c7f3f65d8ead580b9a4fcf70b83baaab0f9a5f83c569c9fd113e8c8",
+      "bytes": 1453,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/schema-foreign-key-indexes.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-foreign-key-indexes.md",
+      "sha256": "7587713d12a65a212365459b3d39e4717d8a79e4073b10bd62f1054d8192c0dd",
+      "bytes": 1679,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/schema-lowercase-identifiers.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-lowercase-identifiers.md",
+      "sha256": "4bc80f70865f2390872591f326c8a6be6456a0aeb5a7e5a2475d7cd9d43059ab",
+      "bytes": 1728,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/schema-partitioning.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-partitioning.md",
+      "sha256": "541e13fbeaf4bb1485c9059d4c9417dbdb766cf16f4237cd63a04ada7ec45b90",
+      "bytes": 1548,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/schema-primary-keys.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-primary-keys.md",
+      "sha256": "3c8beabef82066f9a0838b926da0885117fd2d9a263aaf84cb5ca9e5f0d400e9",
+      "bytes": 1821,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/security-privileges.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/security-privileges.md",
+      "sha256": "095909274a4fb43df785d7144cf674eeb40284d2d45628f14af4108737b93663",
+      "bytes": 1566,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/security-rls-basics.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/security-rls-basics.md",
+      "sha256": "e04dd1a3a382aafdaaa73fe9f7976352acdde6e90c2a2470d281b94d4f44b096",
+      "bytes": 1372,
+      "status": "PASS"
+    },
+    {
+      "repo": "supabase/agent-skills",
+      "revision": "c9be0e931b7930f7d02126d04774d904c381e7d7",
+      "path": "skills/supabase-postgres-best-practices/references/security-rls-performance.md",
+      "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/security-rls-performance.md",
+      "sha256": "2e1faeca7d5746e246b1c78f9492fe2a9cfa41c4d7fa1e23c402d58fa18ea014",
+      "bytes": 2103,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/README.md",
+      "sha256": "7c02f64b08fc6c4eef03c01d64f3e2ed478193ccfcbd14edba379abe23304651",
+      "bytes": 7838,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/AGENTS.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/AGENTS.md",
+      "sha256": "89e3ddd58fcf99a53a50e25dfd21b8cde1be5f10b7df6bacd3dfa6796932f516",
+      "bytes": 22627,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/README.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/README.md",
+      "sha256": "85915a43a6f0b4efe525e3cf6398dd866166da2025837c4460468a24a940da94",
+      "bytes": 2140,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/SKILL.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/SKILL.md",
+      "sha256": "e38e0eaa609316b10423a9a138ed95e35099accd3f735585295c8a8f165c28a3",
+      "bytes": 2886,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/metadata.json",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/metadata.json",
+      "sha256": "49262ed5cb4186f31ee980cf8d990be0170c51efed4908d0464a1cff9905bd05",
+      "bytes": 530,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/_sections.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/_sections.md",
+      "sha256": "a174213b87e6911e2b766995a2cbaf8d1534057076e82fb79fe3f0ecb38047df",
+      "bytes": 829,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/_template.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/_template.md",
+      "sha256": "587f7d16b0660eb61fee4a4d3d7df2b3077d6835de170602c7d6e60bee559131",
+      "bytes": 329,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/architecture-avoid-boolean-props.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/architecture-avoid-boolean-props.md",
+      "sha256": "007555ebb020f4d552582a2c4db194db71a1fd33094012e5187bcfa4f8c392d5",
+      "bytes": 2267,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/architecture-compound-components.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/architecture-compound-components.md",
+      "sha256": "f246af13dc269b521cf20eb8ad99a0cb645beac381c8c9b117262c34612c8457",
+      "bytes": 2600,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/patterns-children-over-render-props.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/patterns-children-over-render-props.md",
+      "sha256": "7c45a0d21b3c4126a32cba916ee31adeae195386ad1dbbe6634aedb7457aa0ad",
+      "bytes": 1886,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/patterns-explicit-variants.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/patterns-explicit-variants.md",
+      "sha256": "8c19e596e61807549d01ce8c6954c6358199f97a8511c0c02c625ec0efda8c0e",
+      "bytes": 2395,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/react19-no-forwardref.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/react19-no-forwardref.md",
+      "sha256": "881830adb7534c4b2d70db426556646ad9837f5478f744f35641f635ada22227",
+      "bytes": 953,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/state-context-interface.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/state-context-interface.md",
+      "sha256": "09e73afbf9285fa416679cc864a287b9e8b821d0969272ab784295386d8c9bc3",
+      "bytes": 4974,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/state-decouple-implementation.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/state-decouple-implementation.md",
+      "sha256": "76a8c1eb29a70d8996ab3f71260345af2f7bc89deab815a421d6c87c6591a9c3",
+      "bytes": 2699,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/composition-patterns/rules/state-lift-state.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/composition-patterns/rules/state-lift-state.md",
+      "sha256": "74c54038a6c554c748fe31cec673b80861b5d920b7553cf78cdf10d18b4b759b",
+      "bytes": 3224,
+      "status": "PASS"
+    },
+    {
+      "repo": "vercel-labs/agent-skills",
+      "revision": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "path": "skills/react-best-practices/SKILL.md",
+      "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/063bee94c3f4df8453406c830b0a7df0f2860278/skills/react-best-practices/SKILL.md",
+      "sha256": "71ed7794962fa6e803ee83030517b5b93a9f70fbfeb431ec4535c5480a8d8355",
+      "bytes": 7251,
+      "status": "PASS"
+    },
+    {
+      "repo": "addyosmani/web-quality-skills",
+      "revision": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/LICENSE",
+      "sha256": "c122223ac43e86421958e18623979942c21b642951e2e3736dcb63eff13587c3",
+      "bytes": 1068,
+      "status": "PASS"
+    },
+    {
+      "repo": "addyosmani/web-quality-skills",
+      "revision": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/README.md",
+      "sha256": "0cef8773a21f03db19fc08ab21e56261a459525273e90e4a6cef746d8e3ee768",
+      "bytes": 11430,
+      "status": "PASS"
+    },
+    {
+      "repo": "addyosmani/web-quality-skills",
+      "revision": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+      "path": "skills/accessibility/SKILL.md",
+      "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/skills/accessibility/SKILL.md",
+      "sha256": "267fb2a0707d6142f2871f22688203a42ba21291a2aa200fb740936e41362b5d",
+      "bytes": 14358,
+      "status": "PASS"
+    },
+    {
+      "repo": "addyosmani/web-quality-skills",
+      "revision": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+      "path": "skills/accessibility/references/A11Y-PATTERNS.md",
+      "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/skills/accessibility/references/A11Y-PATTERNS.md",
+      "sha256": "f10e238dd4dd3c4f51134c2056bc02d3dd4f8fb6ccc9145c2c1ba7aab4d58140",
+      "bytes": 6036,
+      "status": "PASS"
+    },
+    {
+      "repo": "addyosmani/web-quality-skills",
+      "revision": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+      "path": "skills/accessibility/references/WCAG.md",
+      "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/skills/accessibility/references/WCAG.md",
+      "sha256": "16683e025e3833d931c9d880645d98a448827f97e10189b6c8f12c832e7a2361",
+      "bytes": 9079,
+      "status": "PASS"
+    },
+    {
+      "repo": "addyosmani/web-quality-skills",
+      "revision": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+      "path": "skills/performance/SKILL.md",
+      "url": "https://raw.githubusercontent.com/addyosmani/web-quality-skills/afa8da942115f2961fdbfa80807ea0b232ff6c00/skills/performance/SKILL.md",
+      "sha256": "b0c220185d88c61f7770eb127d8facf86c86d2dd1fd82b86e15a4965a0137265",
+      "bytes": 13811,
+      "status": "PASS"
+    },
+    {
+      "repo": "huggingface/skills",
+      "revision": "fabc634a893f62ad5c2039830397efa35fa62715",
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/huggingface/skills/fabc634a893f62ad5c2039830397efa35fa62715/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357,
+      "status": "PASS"
+    },
+    {
+      "repo": "huggingface/skills",
+      "revision": "fabc634a893f62ad5c2039830397efa35fa62715",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/huggingface/skills/fabc634a893f62ad5c2039830397efa35fa62715/README.md",
+      "sha256": "485a1e3f38cf8b7ff3a56c3219b62599b4ffa54957b91d210d3536444ca2de23",
+      "bytes": 11929,
+      "status": "PASS"
+    },
+    {
+      "repo": "huggingface/skills",
+      "revision": "fabc634a893f62ad5c2039830397efa35fa62715",
+      "path": "skills/huggingface-community-evals/SKILL.md",
+      "url": "https://raw.githubusercontent.com/huggingface/skills/fabc634a893f62ad5c2039830397efa35fa62715/skills/huggingface-community-evals/SKILL.md",
+      "sha256": "a97f1c703f55b72427453a76af858237e6392a447fcafa9eeb85f7ac67f0155d",
+      "bytes": 6552,
+      "status": "PASS"
+    },
+    {
+      "repo": "huggingface/skills",
+      "revision": "fabc634a893f62ad5c2039830397efa35fa62715",
+      "path": "skills/huggingface-local-models/SKILL.md",
+      "url": "https://raw.githubusercontent.com/huggingface/skills/fabc634a893f62ad5c2039830397efa35fa62715/skills/huggingface-local-models/SKILL.md",
+      "sha256": "814640db1d5f2f274aec09d66b3589ed5a0fdcfaf536afd508b1d757dcae1534",
+      "bytes": 3780,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/README.md",
+      "sha256": "2fb9c4cc026366ea6e21c60cb23c908a4d27c62071819cc06beffaac102d0694",
+      "bytes": 5552,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/academy-guide/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/academy-guide/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/algorithmic-art/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/algorithmic-art/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/brand-guidelines/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/brand-guidelines/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/canvas-design/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/canvas-design/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/claude-api/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/claude-api/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/discernment-nudge/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/discernment-nudge/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/docx/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/docx/LICENSE.txt",
+      "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+      "bytes": 1467,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/frontend-design/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/frontend-design/LICENSE.txt",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "bytes": 10174,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/internal-comms/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/internal-comms/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/mcp-builder/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/mcp-builder/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/pdf/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/pdf/LICENSE.txt",
+      "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+      "bytes": 1467,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/pptx/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/pptx/LICENSE.txt",
+      "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+      "bytes": 1467,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/skill-creator/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/skill-creator/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/slack-gif-creator/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/slack-gif-creator/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/theme-factory/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/theme-factory/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/web-artifacts-builder/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/web-artifacts-builder/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/webapp-testing/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+      "bytes": 11345,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/webapp-testing/SKILL.md",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing/SKILL.md",
+      "sha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+      "bytes": 3913,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/xlsx/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/xlsx/LICENSE.txt",
+      "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+      "bytes": 1467,
+      "status": "PASS"
+    },
+    {
+      "repo": "anthropics/skills",
+      "revision": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "path": "skills/xlsx/SKILL.md",
+      "url": "https://raw.githubusercontent.com/anthropics/skills/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/xlsx/SKILL.md",
+      "sha256": "6712b39718fe815054abca9c3ee72f989613e6f771c8a5c58f30a65a6c905622",
+      "bytes": 8598,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/LICENSE",
+      "sha256": "7abe19ec9bb73b36141b999b861d24ad855e808bafe0f81e84cce28556f6c297",
+      "bytes": 20131,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/README.md",
+      "sha256": "40f12a2b5ad363b74bba2b885609ce3cbc2de49fc47dec95c4bbd98d418c8bca",
+      "bytes": 10531,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/differential-review/skills/differential-review/SKILL.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/differential-review/skills/differential-review/SKILL.md",
+      "sha256": "f9af6a8193fc1a9f8ca3c54bb8d19095a5f20c9472ca6d014488bbde50b67da0",
+      "bytes": 7439,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/.claude-plugin/plugin.json",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/.claude-plugin/plugin.json",
+      "sha256": "6a9290ee5fc8e5786ce14cfb5084b2e02374986bb764886eabe9448655fcf722",
+      "bytes": 724,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/README.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/README.md",
+      "sha256": "c26a21449cec04fbbe1c21d43027f84f4f681de3e2aba24a9c851bf80ab7904b",
+      "bytes": 6407,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/agents/arithmetic-scanner.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/agents/arithmetic-scanner.md",
+      "sha256": "9083b95023653649d84a8a3a5e97f8016dabef7d07bc8ea46a1217872ea66145",
+      "bytes": 11046,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/agents/dimension-annotator.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/agents/dimension-annotator.md",
+      "sha256": "29ab595a4d4361062f542bffdf89d613eebe9a800f566fcc17788d3b7e2c049c",
+      "bytes": 8808,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/agents/dimension-discoverer.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/agents/dimension-discoverer.md",
+      "sha256": "520971dca1b7a9fbc3f6595732a4ab8af0f473452487c14f5ebfa97c9b3a2863",
+      "bytes": 7947,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/agents/dimension-propagator.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/agents/dimension-propagator.md",
+      "sha256": "4f4fe60e30e143ba94b2d388b8e20ee1f1730bff2c7fa285818ed3651bbf1457",
+      "bytes": 9878,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/agents/dimension-validator.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/agents/dimension-validator.md",
+      "sha256": "1235c0bc3377ff8efd272026ada7787a5cd1dca3bb38dc3d1f5f40b38a88046b",
+      "bytes": 12918,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/.calcifier/recipe.py",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/.calcifier/recipe.py",
+      "sha256": "1cf1f7483f4789066b5b3c126a0590aecee87884cf9b6d8430d6e139c3832766",
+      "bytes": 15418,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/SKILL.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/SKILL.md",
+      "sha256": "e3a091ca6acd079a00044a74929153bd569731b08c24b4bbaba59203c734a67c",
+      "bytes": 9895,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/annotate.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/annotate.md",
+      "sha256": "c7d1a0987d4da875067ee8523c1a0f40984eae4c6e6b344df59d2bbf3b7f0cd9",
+      "bytes": 11953,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/bug-patterns.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/bug-patterns.md",
+      "sha256": "36818df67fc45815ce288412fac6d0bdd93da5e856d7cf8dcbe56b1d255dd526",
+      "bytes": 11930,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/common-dimensions.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/common-dimensions.md",
+      "sha256": "5743496a380719fc601b592abbe357c0d2d95273ae38b019ff6da28cac77ee2d",
+      "bytes": 7524,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/dimension-algebra.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/dimension-algebra.md",
+      "sha256": "e60adc2108c89cb698626a8c62fe3ed65480e434c00b44a2bc9f2e43deb2bfd7",
+      "bytes": 6500,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/step1.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/step1.md",
+      "sha256": "a8efef39c615993eb99f3d8739f640f283ef05ef9c092ef235b5082a455736d6",
+      "bytes": 5232,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/step2.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/step2.md",
+      "sha256": "4b56acee23259c5528b28c035e61ce5d2db7720003a49d4c1bf0a84d18da8460",
+      "bytes": 3682,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/step3.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/step3.md",
+      "sha256": "e6a43d2fc5f7a7adf0df560627add775d2b3f3b3da6044d31212fc4d8948ff77",
+      "bytes": 4027,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/dimensional-analysis/skills/dimensional-analysis/references/step4.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/dimensional-analysis/skills/dimensional-analysis/references/step4.md",
+      "sha256": "5512f35bc4c458e0ea311b29397a92dc5ec4b788f9ddd4adbe7ef31c14a30f09",
+      "bytes": 6697,
+      "status": "PASS"
+    },
+    {
+      "repo": "trailofbits/skills",
+      "revision": "196a9073ab10d35bacf111f945e02c00b2c6883a",
+      "path": "plugins/property-based-testing/skills/property-based-testing/SKILL.md",
+      "url": "https://raw.githubusercontent.com/trailofbits/skills/196a9073ab10d35bacf111f945e02c00b2c6883a/plugins/property-based-testing/skills/property-based-testing/SKILL.md",
+      "sha256": "9448cacb65c6237a7c22dc59602667177ecae405524079ae9ff92240590b995a",
+      "bytes": 4306,
+      "status": "PASS"
+    }
+  ]
+}

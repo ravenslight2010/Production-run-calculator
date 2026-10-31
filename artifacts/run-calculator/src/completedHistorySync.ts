@@ -1,5 +1,7 @@
 import { HISTORY_KEY, type FormValues, type HistoryDay, type RunMeta } from "./types";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 import { browserRecordStore } from "./adapters/browserRecordStore";
+import { LEGACY_SYNC_HISTORY_REVIEW_PREFIX, retireMatchingLegacyArray, stableRecordJson } from "./sharedRecordMigration";
 
 export const COMPLETED_HISTORY_OUTBOX_KEY = "run-calc-completed-history-outbox";
 export const COMPLETED_HISTORY_OUTBOX_EVENT = "run-calculator:completed-history-outbox";
@@ -8,8 +10,16 @@ export const APPLICATOR_EVIDENCE_OUTBOX_KEY = "run-calc-applicator-evidence-outb
 export const APPLICATOR_EVIDENCE_CACHE_KEY = "run-calc-applicator-evidence-cache";
 export const APPLICATOR_EVIDENCE_CONFLICT_KEY = "run-calc-applicator-evidence-conflicts";
 export const APPLICATOR_EVIDENCE_EVENT = "run-calculator:applicator-evidence";
-type HistoryScope = "live" | "sandbox";
+type HistoryScope = string;
 let activeScope: HistoryScope | null = null;
+let identityGeneration = 0;
+let historyMemory: HistoryDay[] = [];
+let historyStatus: "loading" | "ready" | "unavailable" = "loading";
+export const completedHistoryStatus = () => historyStatus;
+export const COMPLETED_HISTORY_CONFLICT_KEY = "run-calc-completed-history-conflicts";
+export function setCompletedHistoryIdentity(userId: string | null, scope: "live" | "sandbox" = "live"): void {
+  setCompletedHistoryScope(userId ? `${scope}:${encodeURIComponent(userId)}` : null);
+}
 let retryTimer: number | undefined;
 let retryDelayMs = 5_000;
 let evidenceRetryTimer: number | undefined;
@@ -126,25 +136,20 @@ function readOutbox(scope: HistoryScope | null = activeScope): Completion[] {
       && typeof item.date === "string" && !!item.snapshot) : null,
   }).read();
 }
-function writeOutbox(value: Completion[], scope: HistoryScope | null = activeScope): void {
+function writeOutbox(value: Completion[], scope: HistoryScope | null = activeScope): boolean {
   const key = scopedKey(COMPLETED_HISTORY_OUTBOX_KEY, scope);
-  if (!key) return;
-  browserRecordStore.record<Completion[]>(key, () => [], { decode: () => null }).write(value);
+  if (!key) return false;
+  const saved = browserRecordStore.record<Completion[]>(key, () => [], { decode: () => null }).write(value);
   if (typeof window !== "undefined") window.dispatchEvent(new Event(COMPLETED_HISTORY_OUTBOX_EVENT));
+  return saved;
 }
 
 function readScopedCache(scope: HistoryScope | null = activeScope): HistoryDay[] {
-  const key = scopedKey(COMPLETED_HISTORY_CACHE_KEY, scope);
-  if (!key) return [];
-  return browserRecordStore.record(key, () => [], {
-    decode: (value) => Array.isArray(value) ? value as HistoryDay[] : null,
-  }).read();
+  return scope === activeScope ? historyMemory : [];
 }
 
 function writeScopedCache(days: HistoryDay[], scope: HistoryScope | null = activeScope): void {
-  const key = scopedKey(COMPLETED_HISTORY_CACHE_KEY, scope);
-  if (!key) return;
-  browserRecordStore.record<HistoryDay[]>(key, () => [], { decode: () => null }).write(days);
+  if (scope === activeScope) historyMemory = days;
 }
 
 function evidenceKey(base: string, scope: HistoryScope | null = activeScope): string | null {
@@ -197,7 +202,11 @@ function writeEvidenceConflicts(value: ApplicatorEvidenceConflict[], scope: Hist
 }
 
 export function setCompletedHistoryScope(scope: HistoryScope | null): void {
+  if (scope === activeScope) return;
   activeScope = scope;
+  identityGeneration++;
+  historyMemory = [];
+  historyStatus = "loading";
   if (retryTimer !== undefined && typeof window !== "undefined") window.clearTimeout(retryTimer);
   if (evidenceRetryTimer !== undefined && typeof window !== "undefined") window.clearTimeout(evidenceRetryTimer);
   retryTimer = undefined;
@@ -219,9 +228,9 @@ export function queueCompletedRun(date: string, run: RunMeta, values: FormValues
     dayState: { date, runs: [run], currentIndex: 0 },
     runValues: { [run.id]: values },
   };
-  writeOutbox([...outbox, {
+  if (!writeOutbox([...outbox, {
     operationId, runId: run.id, date, completedAt: new Date(run.endedAt).toISOString(), snapshot,
-  }], scope);
+  }], scope)) throw new Error("Completion recovery could not be saved on this device. Keep the active run and retry.");
   void flushCompletedHistoryOutbox();
 }
 
@@ -240,7 +249,9 @@ export function queueApplicatorBatchFinalization(input: ApplicatorFinalization):
 }
 
 async function drainApplicatorEvidenceOutbox(scope: HistoryScope): Promise<void> {
+  const epoch = identityGeneration;
   while (true) {
+    if (scope !== activeScope || epoch !== identityGeneration) return;
     const item = readEvidenceOutbox(scope)[0];
     if (!item) break;
     let response: Response;
@@ -257,6 +268,7 @@ async function drainApplicatorEvidenceOutbox(scope: HistoryScope): Promise<void>
       error?: string;
       canonical?: ApplicatorBatchEvidence;
     } | null;
+    if (scope !== activeScope || epoch !== identityGeneration) return;
     if (response.ok && body?.acknowledged) {
       if (body.canonical && typeof body.canonical.operationId === "string") {
         const evidence = readEvidence(scope).filter((candidate) => candidate.operationId !== body.canonical!.operationId);
@@ -375,26 +387,33 @@ export function startRunAndQueueCompetingCompletions(args: {
 }
 
 async function drainCompletedHistoryOutbox(scope: HistoryScope): Promise<void> {
+  const epoch = identityGeneration;
   for (const item of readOutbox(scope)) {
+    if (scope !== activeScope || epoch !== identityGeneration) return;
     let response: Response;
     try {
       response = await fetch("/api/completed-history", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item),
       });
-    } catch { return; }
+    } catch { scheduleRetry(scope); return; }
+    if (scope !== activeScope || epoch !== identityGeneration) return;
     if (response.status === 409) {
       const body = await response.json().catch(() => null) as {
         canonical?: { date: string; runId: string; snapshot: unknown };
       } | null;
-      // The immutable server winner is authoritative. Cache it locally and
-      // retire this impossible upload; auth/transient failures remain pending.
-      if (!body?.canonical) return;
+      if (scope !== activeScope || epoch !== identityGeneration) return;
+      // Preserve the submitted immutable conflict for explicit review, while
+      // displaying the canonical winner. Never silently discard evidence.
+      if (!body?.canonical || body.canonical.date !== item.date
+        || body.canonical.runId !== item.runId || !body.canonical.snapshot) return;
       const canonical = completedHistoryDays([body.canonical]);
       const merged = mergeCanonicalCompletedHistory(readScopedCache(scope), canonical);
       writeScopedCache(merged, scope);
-      if (activeScope === scope) {
-        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch {}
-      }
+      const key = scopedKey(COMPLETED_HISTORY_CONFLICT_KEY, scope)!;
+      const conflicts = browserRecordStore.record<unknown[]>(key, () => [], {
+        decode: (value) => Array.isArray(value) ? value : null,
+      });
+      if (!conflicts.write([...conflicts.read(), { submitted: item, canonical: body.canonical }])) return;
       writeOutbox(readOutbox(scope).filter((candidate) => candidate.operationId !== item.operationId), scope);
       continue;
     }
@@ -403,7 +422,9 @@ async function drainCompletedHistoryOutbox(scope: HistoryScope): Promise<void> {
       return;
     }
     const body = await response.json().catch(() => null);
-    if (!body?.acknowledged) return;
+    if (scope !== activeScope || epoch !== identityGeneration) return;
+    if (body?.acknowledged !== true) return;
+    writeScopedCache(mergeCanonicalCompletedHistory(readScopedCache(scope), completedHistoryDays([item])), scope);
     writeOutbox(readOutbox(scope).filter((candidate) => candidate.operationId !== item.operationId), scope);
   }
   retryDelayMs = 5_000;
@@ -439,8 +460,15 @@ export function loadCompletedHistoryForActiveScope(): HistoryDay[] {
     runId: item.runId,
     snapshot: item.snapshot,
   })));
-  return mergeCanonicalCompletedHistory(readScopedCache(), pending);
+  const canonical = readScopedCache();
+  return mergeCanonicalCompletedHistory(pending, canonical).map((day) => ({
+    ...day,
+    pendingRunIds: (pending.find((candidate) => candidate.date === day.date)?.runs ?? [])
+      .filter((run) => !canonical.find((candidate) => candidate.date === day.date)?.runs.some((candidate) => candidate.id === run.id))
+      .map((run) => run.id),
+  }));
 }
+export function loadCanonicalCompletedHistory(): HistoryDay[] { return readScopedCache(); }
 
 export function completedHistoryDays(records: Array<{ date: string; runId: string; snapshot: unknown }>): HistoryDay[] {
   const days = new Map<string, HistoryDay>();
@@ -471,11 +499,38 @@ export function mergeCanonicalCompletedHistory(local: HistoryDay[], canonical: H
 export async function hydrateCompletedHistory(local: HistoryDay[], save: (days: HistoryDay[]) => void): Promise<void> {
   void local;
   const scope = activeScope;
+  const epoch = identityGeneration;
   if (!scope) return;
   try {
-    const response = await fetch("/api/completed-history");
-    if (!response.ok) return;
-    const body = await response.json() as { history?: Array<{ date: string; runId: string; snapshot: unknown }> };
+    const records: Array<{ date: string; runId: string; snapshot: unknown }> = [];
+    let cursor: string | undefined;
+    const visitedCursors = new Set<string>();
+    // Bounded requests, no archive truncation: follow every explicit page.
+    do {
+      if (scope !== activeScope || epoch !== identityGeneration) return;
+      if (cursor && visitedCursors.has(cursor)) throw new Error("History cursor repeated");
+      if (cursor) visitedCursors.add(cursor);
+      const params = new URLSearchParams({ limit: "100" });
+      if (cursor) params.set("cursor", cursor);
+      const response = await fetchWithTimeout(`/api/completed-history?${params}`, { cache: "no-store" }, 30_000);
+      if (!response.ok) throw new Error(`Completed history unavailable (${response.status})`);
+      const body = await response.json() as { history?: typeof records; nextCursor?: string };
+      if (!Array.isArray(body?.history) || body.history.some((row) => {
+        if (!row || typeof row.date !== "string" || typeof row.runId !== "string"
+          || !row.runId || !row.snapshot || typeof row.snapshot !== "object") return true;
+        const snapshot = row.snapshot as { dayState?: { runs?: RunMeta[] }; runValues?: unknown };
+        return !Array.isArray(snapshot.dayState?.runs)
+          || !snapshot.dayState.runs.some((run) => run?.id === row.runId)
+          || !snapshot.runValues || typeof snapshot.runValues !== "object"
+          || Array.isArray(snapshot.runValues);
+      }) || (body.nextCursor !== undefined && (typeof body.nextCursor !== "string" || !body.nextCursor))) {
+        throw new Error("Invalid completed history response");
+      }
+      records.push(...body.history);
+      if (body.nextCursor && body.nextCursor === cursor) throw new Error("History cursor did not advance");
+      cursor = body.nextCursor;
+    } while (cursor);
+    if (scope !== activeScope || epoch !== identityGeneration) return;
     let evidence: ApplicatorBatchEvidence[] | undefined;
     try {
       evidence = await fetchAllApplicatorEvidence();
@@ -483,19 +538,45 @@ export async function hydrateCompletedHistory(local: HistoryDay[], save: (days: 
       applicatorEvidenceHydrationError = error instanceof Error ? error.message : "Applicator evidence history could not be loaded";
     }
     if (evidence) {
+      if (scope !== activeScope || epoch !== identityGeneration) return;
       applicatorEvidenceHydrationError = null;
       writeEvidence(evidence, scope);
     }
-    const pending = completedHistoryDays(readOutbox(scope).map((item) => ({
-      date: item.date, runId: item.runId, snapshot: item.snapshot,
-    })));
     const merged = mergeCanonicalCompletedHistory(
-      mergeCanonicalCompletedHistory(readScopedCache(scope), pending),
-      completedHistoryDays(body.history ?? []),
+      readScopedCache(scope),
+      completedHistoryDays(records),
     );
     writeScopedCache(merged, scope);
-    if (activeScope === scope) save(merged);
+    if (activeScope === scope && epoch === identityGeneration) {
+      const canonicalDays = completedHistoryDays(records);
+      // Unknown-owner copies may be retired only if every original fact agrees
+      // with immutable canonical evidence; differing or missing runs stay.
+      for (const key of [
+        HISTORY_KEY, `${COMPLETED_HISTORY_CACHE_KEY}.${scope.split(":")[0]}`,
+        `${LEGACY_SYNC_HISTORY_REVIEW_PREFIX}${encodeURIComponent(scope)}`,
+      ]) {
+        retireMatchingLegacyArray(key, (value) => {
+          if (!value || typeof value !== "object") return false;
+          const day = value as HistoryDay;
+          if (Object.keys(day).some((key) => !["date", "runs", "runValues"].includes(key))) return false;
+          if (!Array.isArray(day.runs) || day.runs.some((run) => !run || typeof run.id !== "string")) return false;
+          if (!day.runValues || typeof day.runValues !== "object") return false;
+          if (Object.keys(day.runValues).some((id) => !day.runs?.some((run) => run.id === id))) return false;
+          const canonical = canonicalDays.find((candidate) => candidate.date === day.date);
+          return !!canonical && Array.isArray(day.runs) && day.runs.length > 0
+            && day.runs.every((run) => canonical.runs.some((candidate) =>
+              stableRecordJson(candidate) === stableRecordJson(run)
+              && stableRecordJson(canonical.runValues?.[run.id]) === stableRecordJson(day.runValues?.[run.id])));
+        });
+      }
+      historyStatus = "ready";
+      save(loadCompletedHistoryForActiveScope());
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(COMPLETED_HISTORY_OUTBOX_EVENT));
+    }
   } catch (error) {
+    if (scope !== activeScope || epoch !== identityGeneration) return;
+    historyStatus = "unavailable";
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(COMPLETED_HISTORY_OUTBOX_EVENT));
     applicatorEvidenceHydrationError = error instanceof Error ? error.message : "Applicator evidence history could not be loaded";
     if (typeof window !== "undefined") window.dispatchEvent(new Event(APPLICATOR_EVIDENCE_EVENT));
   }

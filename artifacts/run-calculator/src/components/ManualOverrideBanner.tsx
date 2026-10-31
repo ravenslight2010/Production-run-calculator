@@ -41,26 +41,33 @@ export function ManualOverrideBanner({
   station = "Dough",
   minsLeft,
   onResume,
+  busy = false,
+  disabled = false,
+  error,
 }: {
   show: boolean;
   /** The station whose counters are being held in manual mode. */
   station?: "Dough" | "Packaging";
   minsLeft: number;
   onResume: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+  error?: string;
 }) {
-  if (!show) return null;
+  if (!show && !error && !busy) return null;
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] text-left" data-testid="manual-override-banner">
+    <div className="flex flex-wrap gap-y-2 items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] text-left" data-testid="manual-override-banner">
       <span className="text-amber-400 font-semibold">
-        {station} station — manual override active. Resume auto tracking now or it resumes in ~{fmtMins(minsLeft)}.
+        {error ? <span role="alert">{error}</span> : busy ? "Waiting for the server to confirm Resume…" : <>{station} station — manual override active. Resume auto tracking now or it resumes in ~{fmtMins(minsLeft)}.</>}
       </span>
       <button
         type="button"
         onClick={onResume}
+        disabled={busy || disabled}
         className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0"
         data-testid="btn-resume-now"
       >
-        Resume auto tracking
+        {busy ? "Confirming…" : "Resume auto tracking"}
       </button>
     </div>
   );

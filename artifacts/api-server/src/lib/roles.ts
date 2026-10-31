@@ -10,8 +10,7 @@ import { getSandboxCopiedAt, isSandboxCopyStale } from "./sandbox";
 // ---------------------------------------------------------------------------
 // Access control is data-driven: a role is a NAME plus a set of capabilities.
 // Routes gate on a single capability (see requireCapability middleware) and the
-// clients show/hide controls by the same capability. These six are the complete
-// set of gated powers in the app.
+// clients show/hide controls by the same capability.
 export const CAPABILITIES = [
   "manage-staff",
   "manage-inventory",
@@ -53,7 +52,7 @@ export const ROLE_SEEDS: readonly RoleSeed[] = [
   { name: "operator", capabilities: [], builtin: true },
   {
     name: "supervisor",
-    capabilities: ["review-incidents", "edit-production-rules"],
+    capabilities: ["review-incidents", "edit-production-rules", "approve-password-resets"],
     builtin: false,
   },
   { name: "qc-operator", capabilities: ["use-ai-tools", "record-qc"], builtin: false },
@@ -109,6 +108,8 @@ export type RoleDefinition = {
   capabilities: Capability[];
   builtin: boolean;
 };
+
+type RoleMutationTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 function toRoleDefinition(row: {
   name: string;
@@ -226,7 +227,7 @@ export type StaffMember = {
 // The sandbox account is always a manager but must never count as the
 // "already have an admin" signal — otherwise the first real user can never
 // become manager on a fresh database.
-async function manageStaffHolders(
+export async function listEnabledStaffManagerIds(
   executor: Pick<typeof db, "select"> = db,
 ): Promise<string[]> {
   const rows = await executor
@@ -234,15 +235,19 @@ async function manageStaffHolders(
     .from(usersTable)
     .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
     .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
-    .where(sql`${usersTable.sandbox} = false AND ${rolesTable.capabilities} ? 'manage-staff'`);
+    .where(sql`${usersTable.sandbox} = false AND ${usersTable.disabled} = false AND ${rolesTable.capabilities} ? 'manage-staff'`);
   return rows.map((row) => row.id);
 }
 
-// Arbitrary fixed key for a Postgres transaction-scoped advisory lock guarding
-// the manager-bootstrap decision (see resolveBootstrapRole below). Any two
-// distinct 32-bit ints work as a pg_advisory_xact_lock(a, b) pair; the values
-// carry no meaning beyond being a stable, collision-free constant.
-const BOOTSTRAP_LOCK_KEY: [number, number] = [0x5354_4646, 0x424f_4f54]; // "STFF" "BOOT"
+// All operations that can change the set of enabled, live staff managers use
+// this transaction-scoped lock so their holder checks cannot race.
+export async function lockStaffAdminMutation(
+  executor: Pick<typeof db, "execute">,
+): Promise<void> {
+  await executor.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended('staff-admin-mutation', 0))`,
+  );
+}
 
 // Whether this newly-created account is the designated first administrator.
 // STAFF_SIGNUP_CODE is a shared onboarding secret handed to every ordinary new
@@ -277,9 +282,9 @@ function isDesignatedInitialManager(username: string, suppliedAccessCode: string
   return timingSafeEqual(supplied, expected);
 }
 
-// Decide + assign a user's role inside one Postgres-transaction-scoped
-// advisory lock, so the "is anyone already a manager?" read and the role
-// INSERT are atomic across concurrent requests. Without this lock, two
+// Decide + assign a user's role inside the shared staff-admin advisory lock,
+// so the "is anyone already a manager?" read and the role INSERT are atomic
+// across concurrent requests. Without this lock, two
 // sign-ups racing on a fresh database can both read zero manage-staff holders
 // and both be granted "manager" — a takeover race an attacker can trigger
 // deliberately by firing concurrent sign-ups at a brand-new deployment.
@@ -294,11 +299,9 @@ async function resolveBootstrapRole(
   suppliedAccessCode: string,
 ): Promise<Role> {
   return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(${BOOTSTRAP_LOCK_KEY[0]}, ${BOOTSTRAP_LOCK_KEY[1]})`,
-    );
+    await lockStaffAdminMutation(tx);
     const role: Role =
-      (await manageStaffHolders()).length === 0 &&
+      (await listEnabledStaffManagerIds(tx)).length === 0 &&
       isDesignatedInitialManager(username, suppliedAccessCode)
         ? "manager"
         : "operator";
@@ -552,9 +555,9 @@ export async function setUserRole(
   // Last-admin guard: if this change would leave nobody with manage-staff,
   // refuse. Compute the holder set after the hypothetical change.
   if (!def.capabilities.includes("manage-staff")) {
-    const holders = await manageStaffHolders(executor);
+    const holders = await listEnabledStaffManagerIds(executor);
     const remaining = holders.filter((id) => id !== targetUserId);
-    if (remaining.length === 0) {
+    if (holders.includes(targetUserId) && remaining.length === 0) {
       return {
         ok: false,
         status: 400,
@@ -635,27 +638,31 @@ export async function canManagePasswordResetFor(
 export async function deleteUser(
   targetUserId: string,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  const [user] = await db
-    .select({ id: usersTable.id })
-    .from(usersTable)
-    .where(eq(usersTable.id, targetUserId));
-  if (!user) {
-    return { ok: false, status: 404, error: "User not found" };
-  }
+  const result = await db.transaction(async (tx) => {
+    await lockStaffAdminMutation(tx);
+    const [user] = await tx
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.id, targetUserId))
+      .for("update");
+    if (!user) {
+      return { ok: false as const, status: 404, error: "User not found" };
+    }
 
-  const holders = await manageStaffHolders();
-  if (holders.includes(targetUserId)) {
-    const remaining = holders.filter((id) => id !== targetUserId);
-    if (remaining.length === 0) {
+    const holders = await listEnabledStaffManagerIds(tx);
+    if (holders.includes(targetUserId) && holders.length === 1) {
       return {
-        ok: false,
+        ok: false as const,
         status: 400,
         error: "Cannot remove the last staff manager — assign someone else first.",
       };
     }
-  }
 
-  await db.delete(usersTable).where(eq(usersTable.id, targetUserId));
+    await tx.delete(usersTable).where(eq(usersTable.id, targetUserId));
+    return { ok: true as const };
+  });
+  if (!result.ok) return result;
+
   // Revoke any still-valid stateless session token for this user immediately, so
   // their browser/app is cut off on its very next request rather than lingering
   // until the token's natural expiry.
@@ -708,84 +715,116 @@ export async function createRole(
 }
 
 // Edit a role's capabilities and, optionally, rename it. Guards: role must
-// exist; the actor cannot grant capabilities they lack; the manager role must
-// keep manage-staff; the change must never strand the team without a
-// manage-staff holder. Rename guards: built-in roles can't be renamed, the new
-// name must be non-empty and not collide with another role. Because user_roles
-// stores the role NAME (free text, no FK), a rename rewrites both the roles row
-// and every staff assignment in one transaction so no one is left pointing at a
-// name that no longer exists.
+// exist; the actor cannot grant capabilities they lack or remove capabilities
+// they don't hold; the manager role must keep manage-staff; the change must
+// never strand the team without a manage-staff holder. Rename guards: built-in
+// roles can't be renamed, the new name must be non-empty and not collide with
+// another role. Because user_roles stores the role NAME (free text, no FK), a
+// rename rewrites both the roles row and every staff assignment in one
+// transaction so no one is left pointing at a name that no longer exists.
 export async function updateRoleCapabilities(
   name: string,
   capabilities: unknown,
   actorCapabilities: Capability[],
   newName?: string,
+  options?: {
+    expectedRole: RoleDefinition;
+    onUpdated: (
+      tx: RoleMutationTransaction,
+      before: RoleDefinition,
+      after: RoleDefinition,
+    ) => Promise<void>;
+  },
 ): Promise<{ ok: true; row: RoleDefinition } | { ok: false; status: number; error: string }> {
-  const def = await getRole(name);
-  if (!def) {
-    return { ok: false, status: 404, error: "Role not found" };
-  }
-  const caps = sanitizeCapabilities(capabilities);
-  const missing = caps.filter((c) => !actorCapabilities.includes(c));
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      status: 403,
-      error: `You can't grant capabilities you don't have: ${missing.join(", ")}`,
-    };
-  }
+  return db.transaction(async (tx) => {
+    await lockStaffAdminMutation(tx);
+    const def = await getRole(name, tx);
+    if (!def) {
+      return { ok: false, status: 404, error: "Role not found" };
+    }
+    if (options && (
+      options.expectedRole.name !== def.name
+      || options.expectedRole.builtin !== def.builtin
+      || [...options.expectedRole.capabilities].sort().join(",") !== [...def.capabilities].sort().join(",")
+    )) {
+      return {
+        ok: false, status: 409,
+        error: "This role changed after you opened it. Your draft has not been saved. Review the latest role before trying again.",
+      };
+    }
+    const caps = sanitizeCapabilities(capabilities);
+    const missing = caps.filter((c) => !actorCapabilities.includes(c));
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        status: 403,
+        error: `You can't grant capabilities you don't have: ${missing.join(", ")}`,
+      };
+    }
 
-  // The built-in manager role must always retain manage-staff so the admin
-  // surface can never be locked away.
-  if (name === "manager" && !caps.includes("manage-staff")) {
-    return {
-      ok: false,
-      status: 400,
-      error: "The manager role must keep the Manage staff & roles capability.",
-    };
-  }
-
-  // Last-admin guard: if removing manage-staff from this role would leave the
-  // team with no manage-staff holder, refuse.
-  if (def.capabilities.includes("manage-staff") && !caps.includes("manage-staff")) {
-    const [assignments, holders] = await Promise.all([
-      listAssignments(),
-      manageStaffHolders(),
-    ]);
-    const usersOnThisRole = new Set(
-      assignments.filter((a) => a.role === name).map((a) => a.userId),
+    const unauthorizedRemovals = def.capabilities.filter(
+      (capability) => !caps.includes(capability) && !actorCapabilities.includes(capability),
     );
-    const remaining = holders.filter((id) => !usersOnThisRole.has(id));
-    if (remaining.length === 0) {
+    if (unauthorizedRemovals.length > 0) {
+      return {
+        ok: false,
+        status: 403,
+        error: `You can't remove capabilities you don't have: ${unauthorizedRemovals.join(", ")}`,
+      };
+    }
+
+    // The built-in manager role must always retain manage-staff so the admin
+    // surface can never be locked away.
+    if (name === "manager" && !caps.includes("manage-staff")) {
       return {
         ok: false,
         status: 400,
-        error: "Cannot remove the last staff manager — keep manage-staff on a role someone holds.",
+        error: "The manager role must keep the Manage staff & roles capability.",
       };
     }
-  }
 
-  // Resolve an optional rename. Only act when a new name is supplied that
-  // actually differs from the current one.
-  const trimmedNew = newName?.trim();
-  const isRename = trimmedNew !== undefined && trimmedNew !== "" && trimmedNew !== name;
-  if (newName !== undefined && (trimmedNew ?? "") === "") {
-    return { ok: false, status: 400, error: "Role name is required" };
-  }
-  if (isRename) {
-    if (def.builtin) {
-      return { ok: false, status: 400, error: "Built-in roles can't be renamed." };
+    // Last-admin guard: only an active live holder on this role can be the
+    // final enabled manager removed by this edit.
+    if (def.capabilities.includes("manage-staff") && !caps.includes("manage-staff")) {
+      const [assignments, holders] = await Promise.all([
+        tx
+          .select({ userId: userRolesTable.userId })
+          .from(userRolesTable)
+          .where(eq(userRolesTable.role, name)),
+        listEnabledStaffManagerIds(tx),
+      ]);
+      const usersOnThisRole = new Set(assignments.map((assignment) => assignment.userId));
+      const remaining = holders.filter((id) => !usersOnThisRole.has(id));
+      const removesActiveManager = holders.some((id) => usersOnThisRole.has(id));
+      if (removesActiveManager && remaining.length === 0) {
+        return {
+          ok: false,
+          status: 400,
+          error: "Cannot remove the last staff manager — keep manage-staff on a role someone holds.",
+        };
+      }
     }
-    const clash = await getRole(trimmedNew!);
-    if (clash) {
-      return { ok: false, status: 409, error: "A role with that name already exists" };
-    }
-  }
 
-  if (isRename) {
-    // Rewrite the role row and every staff assignment together so a partial
-    // failure can't strand users on the old name.
-    await db.transaction(async (tx) => {
+    // Resolve an optional rename. Only act when a new name is supplied that
+    // actually differs from the current name.
+    const trimmedNew = newName?.trim();
+    const isRename = trimmedNew !== undefined && trimmedNew !== "" && trimmedNew !== name;
+    if (newName !== undefined && (trimmedNew ?? "") === "") {
+      return { ok: false, status: 400, error: "Role name is required" };
+    }
+    if (isRename) {
+      if (def.builtin) {
+        return { ok: false, status: 400, error: "Built-in roles can't be renamed." };
+      }
+      const clash = await getRole(trimmedNew!, tx);
+      if (clash) {
+        return { ok: false, status: 409, error: "A role with that name already exists" };
+      }
+    }
+
+    if (isRename) {
+      // Rewrite the role row and every staff assignment together so a partial
+      // failure can't strand users on the old name.
       await tx
         .update(rolesTable)
         .set({ name: trimmedNew!, capabilities: caps, updatedAt: new Date() })
@@ -794,17 +833,19 @@ export async function updateRoleCapabilities(
         .update(userRolesTable)
         .set({ role: trimmedNew!, updatedAt: new Date() })
         .where(eq(userRolesTable.role, name));
-    });
-    const updated = await getRole(trimmedNew!);
-    return { ok: true, row: updated! };
-  }
+      const updated = await getRole(trimmedNew!, tx);
+      if (updated && options) await options.onUpdated(tx, def, updated);
+      return { ok: true, row: updated! };
+    }
 
-  await db
-    .update(rolesTable)
-    .set({ capabilities: caps, updatedAt: new Date() })
-    .where(eq(rolesTable.name, name));
-  const updated = await getRole(name);
-  return { ok: true, row: updated! };
+    await tx
+      .update(rolesTable)
+      .set({ capabilities: caps, updatedAt: new Date() })
+      .where(eq(rolesTable.name, name));
+    const updated = await getRole(name, tx);
+    if (updated && options) await options.onUpdated(tx, def, updated);
+    return { ok: true, row: updated! };
+  });
 }
 
 // Delete a role. Guards: built-in roles can't be deleted; a role currently
@@ -812,26 +853,29 @@ export async function updateRoleCapabilities(
 export async function deleteRole(
   name: string,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  const def = await getRole(name);
-  if (!def) {
-    return { ok: false, status: 404, error: "Role not found" };
-  }
-  if (def.builtin) {
-    return { ok: false, status: 400, error: "Built-in roles can't be deleted." };
-  }
-  const [assigned] = await db
-    .select({ id: userRolesTable.userId })
-    .from(userRolesTable)
-    .where(eq(userRolesTable.role, name))
-    .limit(1);
-  if (assigned) {
-    return {
-      ok: false,
-      status: 400,
-      error: "This role is assigned to staff — reassign them before deleting it.",
-    };
-  }
-  await db.delete(rolesTable).where(eq(rolesTable.name, name));
-  return { ok: true };
+  return db.transaction(async (tx) => {
+    await lockStaffAdminMutation(tx);
+    const def = await getRole(name, tx);
+    if (!def) {
+      return { ok: false, status: 404, error: "Role not found" };
+    }
+    if (def.builtin) {
+      return { ok: false, status: 400, error: "Built-in roles can't be deleted." };
+    }
+    const [assigned] = await tx
+      .select({ id: userRolesTable.userId })
+      .from(userRolesTable)
+      .where(eq(userRolesTable.role, name))
+      .limit(1);
+    if (assigned) {
+      return {
+        ok: false,
+        status: 400,
+        error: "This role is assigned to staff — reassign them before deleting it.",
+      };
+    }
+    await tx.delete(rolesTable).where(eq(rolesTable.name, name));
+    return { ok: true };
+  });
 }
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   PENDING_DUPLICATE_REVIEW_SCAN,

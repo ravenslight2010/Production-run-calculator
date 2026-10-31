@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Catalog-capture COVERAGE guard (Task audit: "capture ingredient names from
 // spec imports into the shared suggestion list").
 //

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   LIVE_CALC_STALE_MS,
@@ -91,6 +92,12 @@ describe("shouldUseServerCalc (freshness-window adoption)", () => {
     expect(shouldUseServerCalc({
       online: true, syncConnected: true, receipt: fresh, nowMs: 100_000,
     })).toBe(true);
+  });
+
+  it("rejects a receipt from the future rather than treating it as indefinitely fresh", () => {
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: fresh.capturedAt - 1,
+    })).toBe(false);
   });
 
   it("honors an explicit windowMs override", () => {

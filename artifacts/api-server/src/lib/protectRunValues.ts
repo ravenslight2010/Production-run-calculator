@@ -2,6 +2,7 @@ import {
   FACTORY_SPEED_ADJUSTMENT_BASELINE,
   FACTORY_TIMING_DEFAULTS,
 } from "@workspace/factory-constants";
+import { fenceOperationalSnapshot } from "./operationalSnapshotAuthority";
 
 // Per-run + run-list protective merge AND payload sanitization for the shared
 // day-state sync row.
@@ -292,24 +293,28 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   app1StockLbs: 0,
   app1StockAnchorNetSec: 0,
   app1StockCorrectionGeneration: 0,
+  app1StockConsumedLbs: 0,
   app2BatchesMade: 0,
   app2BatchAnchorNetSec: 0,
   app2BatchCorrectionGeneration: 0,
   app2StockLbs: 0,
   app2StockAnchorNetSec: 0,
   app2StockCorrectionGeneration: 0,
+  app2StockConsumedLbs: 0,
   app3BatchesMade: 0,
   app3BatchAnchorNetSec: 0,
   app3BatchCorrectionGeneration: 0,
   app3StockLbs: 0,
   app3StockAnchorNetSec: 0,
   app3StockCorrectionGeneration: 0,
+  app3StockConsumedLbs: 0,
   app4BatchesMade: 0,
   app4BatchAnchorNetSec: 0,
   app4BatchCorrectionGeneration: 0,
   app4StockLbs: 0,
   app4StockAnchorNetSec: 0,
   app4StockCorrectionGeneration: 0,
+  app4StockConsumedLbs: 0,
   applicatorStockInitialized: false,
   pep1StockLbs: 0,
   pep1StockAnchorNetSec: 0,
@@ -431,10 +436,10 @@ function isBlankRunValue(v: unknown): boolean {
     "app4BatchesMade",
     "app4BatchAnchorNetSec",
     "app4BatchCorrectionGeneration",
-    "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
-    "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
-    "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
-    "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+    "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration", "app1StockConsumedLbs",
+    "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration", "app2StockConsumedLbs",
+    "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration", "app3StockConsumedLbs",
+    "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration", "app4StockConsumedLbs",
     "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
     "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
     "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
@@ -523,10 +528,11 @@ function withMergedStamps(
   return out;
 }
 
-function preserveAndInvalidateAutoTrackCoordination(
+export function preserveAndInvalidateAutoTrackCoordination(
   protectedPayload: unknown,
   existingCoordination: unknown,
   existingPayload: Record<string, unknown>,
+  mutationRevision?: number,
 ): unknown {
   if (!isPlainObject(protectedPayload)) return protectedPayload;
   const mergeControls = () => {
@@ -605,7 +611,7 @@ function preserveAndInvalidateAutoTrackCoordination(
     for (const channel of changedChannels) {
       if (!Object.prototype.hasOwnProperty.call(runCoordination, channel)) continue;
       runCoordination[channel] = {
-        generation: `manual:${stamp}`,
+        generation: `manual:${mutationRevision ?? stamp}`,
         sequence: 0,
         // Sauce and applicator coordination use pause-aware net-production
         // seconds, not epoch milliseconds. Zero tells clients to rebuild the
@@ -649,9 +655,18 @@ export function protectRunValues(
     allowRunListReplacement?: boolean;
     acceptCurrentBaseRunValueEdits?: boolean;
     nowMs?: number;
+    enforceOperationalAuthority?: boolean;
   } = {},
 ): unknown {
   if (!isPlainObject(incomingInput)) return incomingInput;
+  if (options.enforceOperationalAuthority) {
+    return fenceOperationalSnapshot(
+      protectRunValues(fenceOperationalSnapshot(incomingInput, existing), existing, {
+        ...options, enforceOperationalAuthority: false,
+      }),
+      existing,
+    );
+  }
   const nowMs = Number.isFinite(options.nowMs) ? Number(options.nowMs) : Date.now();
   let incoming = capFutureRunValueStamps(incomingInput, nowMs);
   if (options.acceptCurrentBaseRunValueEdits && !isPlainObject(existing)) {
@@ -1235,10 +1250,10 @@ function overlayPackagingIntoRunValues(
 const APPLICATOR_STOCK_VALUE_FIELDS = [
   "sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration", "sauceStockInitialized",
   "applicatorStockInitialized",
-  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
-  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
-  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
-  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration", "app1StockConsumedLbs",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration", "app2StockConsumedLbs",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration", "app3StockConsumedLbs",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration", "app4StockConsumedLbs",
   "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
   "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
   "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
@@ -1446,7 +1461,14 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
           const resumeAt = asNumber(raw.resumeAt);
           const updatedAt = asNumber(raw.updatedAt);
           if (!generation || updatedAt <= 0 || pausedAt < 0 || resumeAt < 0) continue;
-          controls[runId] = { generation, pausedAt, resumeAt, updatedAt };
+          const controlRevision = Number.isSafeInteger(raw.controlRevision)
+            && Number(raw.controlRevision) >= 0
+            ? Number(raw.controlRevision)
+            : undefined;
+          controls[runId] = {
+            generation, pausedAt, resumeAt, updatedAt,
+            ...(controlRevision === undefined ? {} : { controlRevision }),
+          };
         }
         out[key] = controls;
       }

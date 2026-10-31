@@ -82,7 +82,6 @@ import {
   STOP_REASONS_KEY,
   SUPERVISOR_PIN_KEY,
   DEFAULT_STOP_REASONS,
-  DEFAULT_SUPERVISOR_PIN,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
@@ -154,7 +153,9 @@ import {
   runLabel,
 } from "../../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../../scheduledDays";
-import { calculateDayTimeline, estimatedRunDurationSec } from "../../dayTimeline";
+import { calculateDayTimeline } from "../../dayTimeline";
+import { buildProgressAwareTimelineRuns } from "../../timelineProgress";
+import { RunEstimateBasis } from "../RunEstimateBasis";
 import { fetchWithTimeout } from "../../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../../frontlineRows";
 import {
@@ -266,6 +267,7 @@ import { COMPLETED_HISTORY_OUTBOX_EVENT, flushCompletedHistoryOutbox, hydrateCom
 import { applyResetWipe, applyRolloverEpoch, getStoredResetEpoch } from "../../adapters/browserResetPersistence";
 import {
   loadRunValues,
+  subscribeRunValuesWrites,
 } from "../../adapters/browserRunPersistence";
 import {
   acceptRemoteRunValueOnSync,
@@ -803,25 +805,30 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   } = hx;
 
   const { isManager } = useMe();
-  const { calc, liveFreezerMin } = useLiveRun();
+  const { calc, liveFreezerMin, nowTime } = useLiveRun();
   const dayTimeline = useMemo(() => calculateDayTimeline({
     date: dayState.date ?? todayStr(),
     productionStartTime,
-    runs: dayState.runs.map((run: RunMeta) => ({
-      run,
-      durationSec: estimatedRunDurationSec(runValuesById.get(run.id)),
-    })),
+    runs: buildProgressAwareTimelineRuns(dayState.runs, run => run.id === currentRun?.id ? v : runValuesById.get(run.id), nowTime.getTime(), true),
     breaks: dayState.breaks,
-    currentRunId: currentRun?.startedAt && !currentRun.endedAt ? currentRun.id : undefined,
-    currentRemainingSec: calc.totalTimeSec,
-    nowMs: Date.now(),
-  }), [calc.totalTimeSec, currentRun?.endedAt, currentRun?.id, currentRun?.startedAt, dayState, productionStartTime, runValuesById]);
+    nowMs: nowTime.getTime(),
+    isToday: true,
+  }), [nowTime, currentRun?.id, v, dayState, productionStartTime, runValuesById]);
   const dayTimelineById = useMemo(
     () => new Map(dayTimeline.runs.map(item => [item.runId, item])),
     [dayTimeline.runs],
   );
   const pendingHistoryUploads = pendingCompletedHistoryCount();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
+  const [, refreshIngredientDetail] = useState(0);
+  useEffect(() => {
+    if (!ingredientDetailRunId) return;
+    return subscribeRunValuesWrites((runId) => {
+      if (runId === ingredientDetailRunId) {
+        refreshIngredientDetail((revision) => revision + 1);
+      }
+    });
+  }, [ingredientDetailRunId]);
   useAutomaticUpdateReloadBlocker(
     "ingredient-detail-dialog",
     Boolean(ingredientDetailRunId),
@@ -832,24 +839,28 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                   <div className="px-5 py-3 border-b border-border/30 flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-bold">Day timeline</div>
-                      <div className="text-xs text-muted-foreground">Estimated schedule; actual run and pause timestamps take precedence.</div>
+                      <div className="text-xs text-muted-foreground">Projected finish means packaging clear; recorded run ends remain actual, even while draining. Upcoming runs are sequential, including transit. Planned breaks add 30 min each; pending breaks never pause production automatically.</div>
                     </div>
                     <div className="text-right">
                       <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Projected finish</div>
-                      <div className="text-sm font-bold tabular-nums">{dayTimeline.projectedFinishMs ? fmtClock(dayTimeline.projectedFinishMs) : "—"}</div>
+                      <div className="text-sm font-bold tabular-nums">{dayTimeline.projectedFinishMs ? fmtClock(dayTimeline.projectedFinishMs) : "Incomplete"}</div>
                     </div>
                   </div>
                   <div className="px-5 py-3 space-y-2">
+                    {dayTimeline.incomplete && <p className="text-xs text-amber-400">Partial projection only — missing inputs or pending/unassigned breaks prevent a dependable day finish.</p>}
                     {dayTimeline.runs.map((item, index) => {
                       const run = dayState.runs.find((candidate: RunMeta) => candidate.id === item.runId);
                       if (!run) return null;
                       return (
-                        <div key={item.runId} className="flex items-center justify-between gap-3 text-xs">
+                        <div key={item.runId} className="text-xs">
+                        <div className="flex items-center justify-between gap-3">
                           <span className="truncate"><span className="font-semibold">Run {index + 1}</span> · {runLabel(run)}</span>
                           <span className="shrink-0 tabular-nums text-muted-foreground">
                             {item.startMs ? fmtClock(item.startMs) : "—"} → {item.finishMs ? fmtClock(item.finishMs) : "—"}
                             {item.status === "current" && <span className="ml-1 text-primary">(live)</span>}
                           </span>
+                        </div>
+                          <RunEstimateBasis estimate={item.estimate} />
                         </div>
                       );
                     })}
@@ -858,7 +869,7 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                         <span>Break {item.slot} · 30 min</span>
                         <span className="tabular-nums">
                           {item.status === "unassigned" ? (item.reason === "missing-run" ? "Unassigned run" : "Needs a valid time")
-                            : item.status === "pending" ? "Pending at pause boundary"
+                            : item.status === "pending" ? (item.reason === "unknown-duration" ? "Pending estimate" : "Pending at pause boundary")
                             : `${fmtClock(item.startMs!)} → ${fmtClock(item.finishMs!)}`}
                         </span>
                       </div>
@@ -1553,17 +1564,18 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                             const histPpm = totalHistNetSec > 0 && totalHistPizzas > 0 ? Math.round(totalHistPizzas / (totalHistNetSec / 60)) : 0;
                             return (
                             <div key={day.date} className="rounded-lg border border-border/30 bg-card/30 overflow-hidden">
-                              <button
-                                type="button"
+                              <div
                                 className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-accent/20 transition-colors"
-                                onClick={() => setExpandedHistoryDay(expandedHistoryDay === day.date ? null : day.date)}
                               >
-                                <div className="flex items-center gap-2 flex-wrap">
+                                <button type="button" className="flex flex-1 items-center gap-2 flex-wrap text-left"
+                                  aria-expanded={expandedHistoryDay === day.date}
+                                  onClick={() => setExpandedHistoryDay(expandedHistoryDay === day.date ? null : day.date)}>
                                   <span className="font-semibold">{day.date}</span>
                                   <span className="text-xs text-muted-foreground">{day.runs.length} run{day.runs.length !== 1 ? "s" : ""} · {finishedRuns.length} finished</span>
                                   {totalHistCases > 0 && <span className="text-xs font-semibold text-foreground/70">{fmtComma(totalHistCases)} cases</span>}
                                   {histPpm > 0 && <span className="text-xs font-semibold text-primary/70">{histPpm} PPM</span>}
-                                </div>
+                                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expandedHistoryDay === day.date ? "rotate-180" : ""}`} />
+                                </button>
                                 <div className="flex items-center gap-2">
                                   <button
                                     type="button"
@@ -1572,13 +1584,13 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                   >
                                     <Download className="w-3 h-3" /> CSV
                                   </button>
-                                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expandedHistoryDay === day.date ? "rotate-180" : ""}`} />
                                 </div>
-                              </button>
+                              </div>
                               {expandedHistoryDay === day.date && (
                                 <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
                                   {day.runs.map((run: any) => (
                                     <div key={run.id} className="space-y-2">
+                                      {day.pendingRunIds?.includes(run.id) && <p className="text-sm text-amber-600">Pending local completion — not server-acknowledged</p>}
                                       {SummaryCard({
                                         run,
                                         readOnly: true,
@@ -1616,13 +1628,14 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
         const hasStarted = Boolean(todayRun.startedAt || todayRun.endedAt);
         // A pending current run follows the active form. Once it has started,
         // Ingredient Detail must use its durable snapshot instead: the active
-        // form may be overlaid with a newer shared recipe. Non-selected runs
-        // stay reactive to canonical writes through runValuesById.
+        // form may be overlaid with a newer shared recipe. For a non-selected
+        // run, read its durable snapshot when detail is rendered: the summary
+        // map may not yet reflect a just-acknowledged recipe write.
         detailVals = isCurrentRun
           ? hasStarted
             ? loadRunValues(todayRun.id)
             : v
-          : (runValuesById.get(todayRun.id) ?? loadRunValues(todayRun.id));
+          : loadRunValues(todayRun.id);
       } else {
         for (const day of history) {
           if (day.runValues?.[ingredientDetailRunId]) {

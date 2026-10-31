@@ -1,0 +1,30 @@
+**/node_modules
+**/dist
+**/.expo
+**/.turbo
+.git
+.gitignore
+.local
+.agents
+.env
+.env.*
+**/*.log
+**/test-results
+**/playwright-report
+release-evidence
+release-evidence-full
+screenshots
+.cache
+.config/
+tmp/
+docker-compose.yml
+docker-compose.local-ai.yml
+# The smoke runner executes on the host and is not an application build input.
+scripts/src/run-docker-caddy-browser-smoke.mjs
+# Fresh builds never restore or package historical production audit/evidence.
+attached_assets
+/docs/evidence
+**/.env
+**/.env.*
+**/publish-source-record.json
+**/self-host-source-record.json

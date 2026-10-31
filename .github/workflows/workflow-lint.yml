@@ -12,6 +12,7 @@ on:
       - package.json
       - pnpm-lock.yaml
       - scripts/package.json
+      - scripts/src/check-docker-runtime.sh
       - scripts/src/check-ci-binary-provenance.sh
       - scripts/src/check-workflows.sh
       - scripts/src/check-workflows.test.sh

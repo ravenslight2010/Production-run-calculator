@@ -9,7 +9,9 @@
 
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { Client } from "pg";
+import { attachVisualEvidence } from "./captureVisualEvidence";
 import {
+  AuthorizedBrowserFixtures,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -168,7 +170,7 @@ function localDate(): string {
 }
 
 async function seedRunningSwitchoverRun(
-  request: APIRequestContext,
+  _request: APIRequestContext,
   token: string,
   runId: string,
   nextRunId: string,
@@ -249,33 +251,15 @@ async function seedRunningSwitchoverRun(
     await db.end().catch(() => {});
   }
 
-  // Seed the fixture through the sync API so the server publishes the
-  // canonical baseline/projection to the new browser session. Directly
-  // inserting daily_sync bypasses that handoff and can leave the UI
-  // provisional even though the row is visible in PostgreSQL.
-  const headers = { Cookie: `rc_auth=${token}` };
-  const epochResponse = await request.get(`${API_BASE}/api/sync/reset-epoch`, {
-    headers,
+  // Started/counter facts are server-owned. Initialize this disposable
+  // canonical snapshot through the existing isolated-fixture boundary, not
+  // an ordinary client PUT that must continue rejecting operational facts.
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
+    token,
+    senderId: uniqueTestId("warehouse-switchover-seed"),
+    date,
+    payload,
   });
-  expect(
-    epochResponse.ok(),
-    `Warehouse switchover reset epoch failed (${epochResponse.status()})`,
-  ).toBe(true);
-  const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
-  const seedResponse = await request.put(
-    `${API_BASE}/api/sync/today?today=${date}&epoch=${epoch}`,
-    {
-      headers,
-      data: {
-        senderId: uniqueTestId("warehouse-switchover-seed"),
-        payload,
-      },
-    },
-  );
-  expect(
-    seedResponse.ok(),
-    `Warehouse switchover sync seed failed (${seedResponse.status()})`,
-  ).toBe(true);
 
   return { date, runId, nextRunId };
 }
@@ -379,9 +363,11 @@ const managerUsername = uniqueTestId("warehouse_manager");
 const staffUsername = uniqueTestId("warehouse_staff");
 let managerToken = "";
 let staffToken = "";
+let authorizedFixtures: AuthorizedBrowserFixtures;
 
-test.beforeAll(async ({ request }) => {
+test.beforeAll(async ({ request, playwright }) => {
   await requireIsolatedTestDatabase("warehouse coverage browser check");
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
@@ -396,13 +382,18 @@ test.beforeAll(async ({ request }) => {
 
 
 test.afterAll(async () => {
-  if (!process.env.DATABASE_URL) return;
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
-    await db.connect();
-    await cleanupTestUsers(db, testUsernames);
+    await authorizedFixtures?.cleanup();
   } finally {
-    await db.end().catch(() => {});
+    if (process.env.DATABASE_URL) {
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      try {
+        await db.connect();
+        await cleanupTestUsers(db, testUsernames);
+      } finally {
+        await db.end().catch(() => {});
+      }
+    }
   }
 });
 
@@ -415,6 +406,137 @@ test.afterEach(async () => {
   } finally {
     await db.end().catch(() => {});
   }
+});
+
+test("operator staging check persists for a canonical per-run material across reload", async ({
+  page,
+}, testInfo) => {
+  const runId = uniqueTestId("warehouse_staging_run");
+  const brand = `Warehouse E2E ${uniqueTestId("brand")}`;
+  const material = `Warehouse E2E Topping ${uniqueTestId("material")}`;
+  const date = await page.evaluate(() => {
+    const now = new Date();
+    return [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+  });
+  const seededAt = Date.now();
+  const payload = {
+    dayState: {
+      date,
+      runs: [{
+        id: runId,
+        brand,
+        flavor: "Staging",
+        startedAt: seededAt,
+        metaUpdatedAt: seededAt,
+      }],
+      currentIndex: 0,
+      currentRunId: runId,
+      resetAt: 0,
+      substitutions: [],
+      substitutionLog: [],
+      stagedItems: {},
+    },
+    runValues: {
+      [runId]: {
+        casesNeeded: 1,
+        pizzasPerCase: 10,
+        app1Type: material,
+        app1OzPerPizza: 1,
+      },
+    },
+    runValuesUpdatedAt: { [runId]: seededAt },
+  };
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
+    token: managerToken,
+    senderId: uniqueTestId("warehouse-staging-seed"),
+    date,
+    payload,
+  });
+
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openAuthenticated(page, staffToken);
+  await expect(page.getByTestId("tab-warehouse")).toBeVisible();
+  await page.getByTestId("tab-warehouse").click();
+
+  const details = page.getByTestId("warehouse-run-details");
+  await expect(details).toBeVisible();
+  await details.locator("summary").click();
+  const stageButton = page.getByTestId(`stage-${runId}-${material}__lbs`);
+  await expect(stageButton).toBeVisible();
+  await expect(stageButton).toHaveAttribute("aria-pressed", "false");
+  await stageButton.click();
+  await expect(stageButton).toHaveAttribute("aria-pressed", "true");
+  await attachVisualEvidence(page, testInfo, "operator-warehouse-staging-before-reload");
+
+  const readSavedStage = async (): Promise<string | null> => {
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    try {
+      await db.connect();
+      const result = await db.query<{ staged: string | null }>(
+        `SELECT data->'dayState'->'stagedItems'->>$1 AS staged
+         FROM daily_sync WHERE date = $2 AND scope = 'live'`,
+        [`${runId}::${material}__lbs`, date],
+      );
+      return result.rows[0]?.staged ?? null;
+    } finally {
+      await db.end().catch(() => {});
+    }
+  };
+  await expect.poll(readSavedStage, { timeout: 20_000 }).toBe("true");
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page.getByTestId("tab-warehouse").click();
+  await expect(details).toBeVisible();
+  await details.locator("summary").click();
+  const reloadedStageButton = page.getByTestId(`stage-${runId}-${material}__lbs`);
+  await expect(reloadedStageButton).toHaveAttribute("aria-pressed", "true");
+  await attachVisualEvidence(page, testInfo, "operator-warehouse-staging-after-reload");
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.getByTestId("tab-warehouse").click();
+    await expect(details).toBeVisible();
+    await details.locator("summary").click();
+    const responsiveStageButton = page.getByTestId(`stage-${runId}-${material}__lbs`);
+    await expect(responsiveStageButton).toHaveAttribute("aria-pressed", "true");
+    await responsiveStageButton.scrollIntoViewIfNeeded();
+    await expect(responsiveStageButton).toBeInViewport();
+    await attachVisualEvidence(
+      page,
+      testInfo,
+      `operator-warehouse-staging-${viewport.width}x${viewport.height}`,
+    );
+  }
+
+  await reloadedStageButton.click();
+  await expect(reloadedStageButton).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(readSavedStage, { timeout: 20_000 }).toBeNull();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page.getByTestId("tab-warehouse").click();
+  await expect(details).toBeVisible();
+  await details.locator("summary").click();
+  await expect(page.getByTestId(`stage-${runId}-${material}__lbs`))
+    .toHaveAttribute("aria-pressed", "false");
+  expect(browserErrors).toEqual([]);
 });
 
 test("shows capped offsite transfer guidance and hides it when onsite stock covers demand", async ({
@@ -446,6 +568,9 @@ test("shows capped offsite transfer guidance and hides it when onsite stock cove
     await page.screenshot({
       path: testInfo.outputPath("warehouse-coverage-offsite-guidance.png"),
       fullPage: true,
+    });
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-coverage-offsite-viewport.png"),
     });
 
     // Add enough stock through the authenticated restock API. This exercises
@@ -618,11 +743,42 @@ test("keeps capped offsite transfer guidance readable on a phone", async ({
     expect(layout.scrollWidth).toBe(layout.clientWidth);
     expect(layout.scrollHeight).toBe(layout.clientHeight);
     expect(layout.right).toBeLessThanOrEqual(390);
+
+    const warehouseLabel = page.getByTestId("tab-warehouse").locator("span");
+    const warehouseLabelBounds = await warehouseLabel.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { height: rect.height, left: rect.left, right: rect.right };
+    });
+    expect(warehouseLabelBounds.height).toBeLessThanOrEqual(16);
+    expect(warehouseLabelBounds.left).toBeGreaterThanOrEqual(0);
+    expect(warehouseLabelBounds.right).toBeLessThanOrEqual(390);
+
+    const applySubstitution = page.getByRole("button", {
+      name: "Apply substitution",
+      exact: true,
+    });
+    await applySubstitution.scrollIntoViewIfNeeded();
+    const applyButtonClearsNav = await applySubstitution.evaluate((button) => {
+      const nav = document.querySelector(".station-nav");
+      if (!nav) return false;
+      const buttonRect = button.getBoundingClientRect();
+      const navRect = nav.getBoundingClientRect();
+      return buttonRect.top >= 0
+        && buttonRect.bottom <= navRect.top
+        && navRect.bottom <= window.innerHeight;
+    });
+    expect(applyButtonClearsNav).toBe(true);
     expect(browserErrors).toEqual([]);
 
     await page.screenshot({
       path: testInfo.outputPath("warehouse-coverage-phone-guidance.png"),
       fullPage: true,
+    });
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-coverage-phone-viewport.png"),
+    });
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-coverage-phone-substitution-form-viewport.png"),
     });
   } finally {
     await db.end().catch(() => {});
@@ -678,6 +834,9 @@ test("keeps capped offsite transfer guidance readable on a tablet", async ({
     await page.screenshot({
       path: testInfo.outputPath("warehouse-coverage-tablet-guidance.png"),
       fullPage: true,
+    });
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-coverage-tablet-viewport.png"),
     });
 
     await page.reload({ waitUntil: "domcontentloaded" });

@@ -6,6 +6,7 @@ import {
   AUTO_TRACK_SCHEDULE_EVENT,
   publishDoughTimerControl,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
+  readDoughTimerControlProjection,
 } from "../autoTrackCoordinationClient";
 import {
   buildCaseClaimMutations,
@@ -16,6 +17,7 @@ import {
   computeApplicatorStockCadenceSeconds,
   computeApplicatorStockCapacityLbs,
   depleteApplicatorStock,
+  computeFrontlineSupplyFromStockLbs,
   capSauceStock,
   computeSauceStockStepSeconds,
   depleteSauceStock,
@@ -98,10 +100,10 @@ interface AutoTrackValues {
   app3BatchesMade: number; app3BatchAnchorNetSec: number; app3BatchCorrectionGeneration: number;
   app4Type: string; app4OzPerPizza: number; app4BatchLbs: number; app4CheeseRecipe: Array<{ lbs: number }>;
   app4BatchesMade: number; app4BatchAnchorNetSec: number; app4BatchCorrectionGeneration: number;
-  app1StockLbs: number; app1StockAnchorNetSec: number; app1StockCorrectionGeneration: number;
-  app2StockLbs: number; app2StockAnchorNetSec: number; app2StockCorrectionGeneration: number;
-  app3StockLbs: number; app3StockAnchorNetSec: number; app3StockCorrectionGeneration: number;
-  app4StockLbs: number; app4StockAnchorNetSec: number; app4StockCorrectionGeneration: number;
+  app1StockLbs: number; app1StockAnchorNetSec: number; app1StockCorrectionGeneration: number; app1StockConsumedLbs: number;
+  app2StockLbs: number; app2StockAnchorNetSec: number; app2StockCorrectionGeneration: number; app2StockConsumedLbs: number;
+  app3StockLbs: number; app3StockAnchorNetSec: number; app3StockCorrectionGeneration: number; app3StockConsumedLbs: number;
+  app4StockLbs: number; app4StockAnchorNetSec: number; app4StockCorrectionGeneration: number; app4StockConsumedLbs: number;
   pep1Type: string; pep1OzPerPizza: number; pep1TypeB: string; pep1OzPerPizzaB: number;
   pep2Type: string; pep2OzPerPizza: number; pep2TypeB: string; pep2OzPerPizzaB: number;
   pep1Combined: boolean; applicatorStockInitialized: boolean;
@@ -135,10 +137,10 @@ export type AutoTrackMutation = {
     | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
     | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
     | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration"
-    | "app1StockLbs" | "app1StockAnchorNetSec" | "app1StockCorrectionGeneration"
-    | "app2StockLbs" | "app2StockAnchorNetSec" | "app2StockCorrectionGeneration"
-    | "app3StockLbs" | "app3StockAnchorNetSec" | "app3StockCorrectionGeneration"
-    | "app4StockLbs" | "app4StockAnchorNetSec" | "app4StockCorrectionGeneration"
+    | "app1StockLbs" | "app1StockAnchorNetSec" | "app1StockCorrectionGeneration" | "app1StockConsumedLbs"
+    | "app2StockLbs" | "app2StockAnchorNetSec" | "app2StockCorrectionGeneration" | "app2StockConsumedLbs"
+    | "app3StockLbs" | "app3StockAnchorNetSec" | "app3StockCorrectionGeneration" | "app3StockConsumedLbs"
+    | "app4StockLbs" | "app4StockAnchorNetSec" | "app4StockCorrectionGeneration" | "app4StockConsumedLbs"
     | "pep1StockLbs" | "pep1StockAnchorNetSec" | "pep1StockCorrectionGeneration"
     | "pep1bStockLbs" | "pep1bStockAnchorNetSec" | "pep1bStockCorrectionGeneration"
     | "pep2StockLbs" | "pep2StockAnchorNetSec" | "pep2StockCorrectionGeneration"
@@ -194,6 +196,7 @@ interface AutoTrackParams {
   packagingAutoTrackActive?: boolean;
 
   nowTime: Date;
+  serverClockOffsetMs?: number;
 
   elapsedBatchSec: number;
 
@@ -380,6 +383,7 @@ export function useAutoTrack({
   packagingDrainElapsedSec = 0,
   packagingAutoTrackActive = true,
   nowTime,
+  serverClockOffsetMs = 0,
   elapsedBatchSec,
   calc,
   v,
@@ -419,6 +423,9 @@ export function useAutoTrack({
   const [isDoughTimerPaused, setIsDoughTimerPaused] = useState(false);
   const internalAutoSuppressRef = useRef<number>(0);
   const internalDoughAutoSuppressRef = useRef<number>(0);
+  const serverClockOffsetRef = useRef(serverClockOffsetMs);
+  serverClockOffsetRef.current = serverClockOffsetMs;
+  const canonicalNow = useCallback(() => Date.now() + serverClockOffsetRef.current, []);
   // Prefer caller's ref so that suppression latches written by UI consumers
   // (e.g. Home's autoSuppressUntilRef) are seen by this hook's write loop.
   const autoSuppressUntilRef = externalAutoSuppressRef ?? internalAutoSuppressRef;
@@ -533,7 +540,7 @@ export function useAutoTrack({
   const coordinationIdentityRef = useRef(coordinationIdentity);
   coordinationIdentityRef.current = coordinationIdentity;
   const serverOwnsChannel = (channel: AutoTrackChannel): boolean => {
-    const ageMs = Date.now() - serverScheduleAtRef.current;
+    const ageMs = canonicalNow() - serverScheduleAtRef.current;
     return serverOwnedChannelsRef.current[channel] === true
       && ageMs >= 0
       && ageMs <= 30_000;
@@ -604,10 +611,10 @@ useEffect(() => {
       ) return;
       const scheduleAt = typeof schedule.atMs === "number" && Number.isFinite(schedule.atMs)
         ? schedule.atMs
-        : Date.now();
+        : canonicalNow();
       // Ignore reordered frames and timestamps too far ahead of this client.
       // Either could otherwise extend a not-due lease indefinitely.
-      if (scheduleAt < serverScheduleAtRef.current || scheduleAt > Date.now() + 5_000) return;
+      if (scheduleAt < serverScheduleAtRef.current || scheduleAt > canonicalNow() + 5_000) return;
       const owned: Partial<Record<AutoTrackChannel, boolean>> = {};
       for (const entry of schedule.entries) {
         // A schedule is ownership only when it is canonical and explicitly
@@ -806,6 +813,10 @@ useEffect(() => {
         if (typeof made === "number") form.setValue(`${slot}BatchesMade` as keyof FormValues, made as never, { shouldDirty: true });
         if (typeof anchor === "number") form.setValue(`${slot}BatchAnchorNetSec` as keyof FormValues, anchor as never, { shouldDirty: true });
         if (typeof generation === "number") form.setValue(`${slot}BatchCorrectionGeneration` as keyof FormValues, generation as never, { shouldDirty: true });
+        const consumed = values[`${slot}StockConsumedLbs` as keyof FormValues];
+        if (typeof consumed === "number") {
+          form.setValue(`${slot}StockConsumedLbs` as keyof FormValues, consumed as never, { shouldDirty: true });
+        }
       });
       for (const register of APPLICATOR_STOCK_REGISTERS) {
         const fields = applicatorStockFields(register);
@@ -818,12 +829,13 @@ useEffect(() => {
       }
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
-    if (authoritativeServerAutoTrack) {
-      // Do not queue a browser claim or apply its optimistic mutation. The
-      // server tick engine applies the canonical row under lock and SSE/sync
-      // adoption updates every display. This also defines the offline policy:
-      // counters stay at their last canonical value instead of accumulating a
-      // replayable local delta that could duplicate work after reconnect.
+    if (
+      authoritativeServerAutoTrack
+      && (typeof navigator === "undefined" || !navigator.onLine)
+    ) {
+      // When disconnected, do not queue or optimistically apply a mutation that
+      // the server could not fence. Online, the fresh per-channel schedule
+      // decides whether the server or this client owns the next write.
       return;
     }
     if (!claimAutoTrackEvent) {
@@ -986,47 +998,29 @@ useEffect(() => {
   // Does not affect the cases/skids counter or the global auto-track toggle.
   const pauseDoughTimers = useCallback((durationMs?: number) => {
     const nowMs = Date.now();
-    doughTimerPausedRef.current = nowMs;
-    doughTimerResumeAtRef.current =
+    const resumeAt =
       typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0
         ? nowMs + durationMs
         : 0;
-    setIsDoughTimerPaused(true);
-    publishDoughTimerControl({
+    if (!publishDoughTimerControl({
       runId, generation: coordinationIdentityRef.current, pausedAt: nowMs,
-      resumeAt: doughTimerResumeAtRef.current, updatedAt: nowMs,
-    });
-  }, [runId]);
+      resumeAt, updatedAt: nowMs,
+    }, serverClockOffsetRef.current)) return;
+    doughTimerPausedRef.current = nowMs;
+    doughTimerResumeAtRef.current = resumeAt;
+    setIsDoughTimerPaused(true);
+  }, [runId, canonicalNow]);
 
   // Resume dough-timer countdowns through the same re-arm path as automatic
   // resume so either action starts from a full, clean interval.
   const resumeDoughTimers = useCallback(() => {
     const nowMs = Date.now();
-    rearmDoughTimers(nowMs);
-    publishDoughTimerControl({
+    if (!publishDoughTimerControl({
       runId, generation: coordinationIdentityRef.current,
       pausedAt: 0, resumeAt: 0, updatedAt: nowMs,
-    });
-  }, [rearmDoughTimers, runId]);
-
-  useEffect(() => {
-    const adopt = (event: Event) => {
-      const controls = (event as CustomEvent<Record<string, {
-        generation?: string; pausedAt?: number; resumeAt?: number;
-      }>>).detail;
-      const control = controls?.[runId];
-      if (!control || control.generation !== coordinationIdentityRef.current) return;
-      if ((control.pausedAt ?? 0) > 0) {
-        doughTimerPausedRef.current = control.pausedAt!;
-        doughTimerResumeAtRef.current = Math.max(0, control.resumeAt ?? 0);
-        setIsDoughTimerPaused(true);
-      } else {
-        rearmDoughTimers(Date.now());
-      }
-    };
-    window.addEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
-    return () => window.removeEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
-  }, [rearmDoughTimers, runId]);
+    }, serverClockOffsetRef.current)) return;
+    rearmDoughTimers(nowMs);
+  }, [rearmDoughTimers, runId, canonicalNow]);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
@@ -1237,6 +1231,45 @@ useEffect(() => {
       resumeRearmPendingRef.current = false;
     }
   }, [nowTime, rearmCaseTimer, rearmDoughTimers, runStatus]);
+
+  // Restore controls after lifecycle/timing resets, before any timer writes.
+  useEffect(() => {
+    const adopt = (event: Event) => {
+      const controls = (event as CustomEvent<Record<string, {
+        generation?: string; pausedAt?: number; resumeAt?: number;
+      }>>).detail;
+      const control = controls?.[runId];
+      if (!control) {
+        if (doughTimerPausedRef.current > 0) rearmDoughTimers(Date.now());
+        return;
+      }
+      if (control.generation !== coordinationIdentityRef.current) return;
+      if (!Number.isFinite(control.pausedAt ?? 0) || !Number.isFinite(control.resumeAt ?? 0)) return;
+      const pausedAt = control.pausedAt ?? 0;
+      const resumeAt = control.resumeAt ?? 0;
+      const timedPauseExpired = pausedAt > 0
+        && resumeAt > 0
+        && resumeAt <= Date.now() + serverClockOffsetRef.current;
+      if (pausedAt > 0 && !timedPauseExpired) {
+        doughTimerPausedRef.current = control.pausedAt! - serverClockOffsetRef.current;
+        doughTimerResumeAtRef.current = (control.resumeAt ?? 0) > 0
+          ? control.resumeAt! - serverClockOffsetRef.current : 0;
+        setIsDoughTimerPaused(true);
+      } else if (doughTimerPausedRef.current > 0) {
+        rearmDoughTimers(Date.now());
+      } else {
+        // A delayed canonical frame can repeat an already-expired timed hold.
+        // Never revive it just because the displayed projection clock lags.
+        setIsDoughTimerPaused(false);
+      }
+    };
+    window.addEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
+    const initial = readDoughTimerControlProjection();
+    if (initial) adopt(new CustomEvent(DOUGH_TIMER_CONTROL_ADOPT_EVENT, { detail: initial }));
+    return () => window.removeEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
+  }, [rearmDoughTimers, runId, runGeneration, runStatus, serverClockOffsetMs,
+    autoTrackWakeAcknowledgement, calc.ppm, calc.perTray, calc.perBatch,
+    machine?.spinSec, machine?.hopperSec, v.pizzasPerCase]);
 
   // This barrier is declared before the tick-write effect below. React runs
   // effects in declaration order, so releasing a successful foreground sync
@@ -1466,7 +1499,6 @@ useEffect(() => {
       endedAt != null ||
       calc.pressDone ||
       nextRunPrepActive ||
-      Date.now() < autoSuppressUntilRef.current ||
       serverOwnsChannel("sauce-stock") ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
@@ -1542,10 +1574,13 @@ useEffect(() => {
       });
       const channel = `${slot}-batch` as AutoTrackChannel;
       dueRefForChannel(channel).current = info.validForClaim && info.cadence > 0
-        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + info.cadence
+        ? Math.max(
+          Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + info.cadence,
+          elapsedBatchSec,
+        )
         : 0;
     });
-  }, [calc.ppm, productionNeedsAvailable, v]);
+  }, [calc.ppm, elapsedBatchSec, productionNeedsAvailable, v]);
 
   useEffect(() => {
     if (
@@ -1557,7 +1592,6 @@ useEffect(() => {
       runStatus !== "running" ||
       endedAt != null ||
       calc.pressDone ||
-      Date.now() < autoSuppressUntilRef.current ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
     const values = v as FormValues;
@@ -1580,17 +1614,40 @@ useEffect(() => {
       const made = Math.max(0, Number(values[madeField]) || 0);
       const anchor = Math.max(0, Number(values[anchorField]) || 0);
       const correctionGeneration = Math.max(0, Number(values[correctionField]) || 0);
-      const dueAt = dueRefForChannel(channel).current || anchor + info.cadence;
+      const dueAt = Math.max(dueRefForChannel(channel).current || anchor + info.cadence, elapsedBatchSec);
       if (
         elapsedBatchSec < dueAt
-        || made >= Math.ceil(info.required)
         || serverOwnsChannel(channel)
+      ) continue;
+      if (values.applicatorStockInitialized !== true) continue;
+      const stockField = `${slot}StockLbs` as keyof FormValues;
+      const consumedField = `${slot}StockConsumedLbs` as keyof FormValues;
+      const onHand = Math.max(0, Number(values[stockField]) || 0);
+      const capacity = Math.min(
+        computeApplicatorStockCapacityLbs(values as unknown as Record<string, unknown>, slot),
+        info.effectiveBatchLbs * 2,
+      );
+      const supply = computeFrontlineSupplyFromStockLbs({
+        demandLbs: info.required * info.effectiveBatchLbs,
+        consumedLbs: Number(values[consumedField]) || 0,
+        onLineLbs: onHand,
+        configuredEffectiveWeight: info.effectiveBatchLbs,
+      });
+      const producedLbs = Math.min(
+        info.effectiveBatchLbs,
+        (supply?.stillToMake ?? 0) * info.effectiveBatchLbs,
+      );
+      if (
+        !supply?.stillToMake
+        || producedLbs <= 0
+        || capacity - onHand + 0.0001 < producedLbs
       ) continue;
       dueRefForChannel(channel).current = dueAt;
       commitAutomatic(channel, dueAt, dueAt + info.cadence, [
-        { field: madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(info.required), made + 1) },
+        { field: madeField as AutoTrackMutation["field"], from: made, to: made + 1 },
         { field: anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
         { field: correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+        { field: stockField as AutoTrackMutation["field"], from: onHand, to: capApplicatorStock(onHand + producedLbs, capacity) },
       ]);
     }
   }, [
@@ -1647,7 +1704,6 @@ useEffect(() => {
       runStatus !== "running" ||
       endedAt != null ||
       calc.pressDone ||
-      Date.now() < autoSuppressUntilRef.current ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
     const values = v as unknown as Record<string, unknown>;
@@ -1672,11 +1728,20 @@ useEffect(() => {
         ozPerPizza: Number(values[ozField]) || 0,
         ppm: calc.ppm,
       }), capacity);
+      const consumedField = register.startsWith("app")
+        ? `${register}StockConsumedLbs` as keyof FormValues
+        : null;
+      const consumed = consumedField ? Math.max(0, Number(values[consumedField]) || 0) : 0;
       dueRefForChannel(channel).current = dueAt;
       commitAutomatic(channel, dueAt, dueAt + cadence, [
         { field: fields.stock as AutoTrackMutation["field"], from: onHand, to: nextOnHand },
         { field: fields.anchor as AutoTrackMutation["field"], from: anchor, to: dueAt },
         { field: fields.correctionGeneration as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+        ...(consumedField ? [{
+          field: consumedField as AutoTrackMutation["field"],
+          from: consumed,
+          to: consumed + Math.max(0, onHand - nextOnHand),
+        }] : []),
       ]);
     }
   }, [
@@ -1718,11 +1783,9 @@ useEffect(() => {
     // advances so the window expiring never causes a catch-up jump that wipes
     // the operator's manual edit.
     const caseSuppressed = Date.now() < autoSuppressUntilRef.current;
-    // Keep legacy packaging/manual suppression behavior for Dough while
-    // allowing a Dough-only correction to leave case tracking untouched.
-    const doughSuppressed =
-      Date.now() < doughAutoSuppressUntilRef.current
-      || Date.now() < autoSuppressUntilRef.current;
+    // The shared legacy ref is Packaging's hold, not a factory-wide pause.
+    // Dough corrections have their own run-scoped suppression deadline.
+    const doughSuppressed = Date.now() < doughAutoSuppressUntilRef.current;
     // ── Cases (and skids, derived from the same total): tick once per case. ──
     if (
       caseTrackingActive
@@ -1818,10 +1881,10 @@ useEffect(() => {
       && nowMs >= doughTimerResumeAtRef.current
     ) {
       rearmDoughTimers(nowMs);
-      publishDoughTimerControl({
+      if (!authoritativeServerAutoTrack) publishDoughTimerControl({
         runId, generation: coordinationIdentityRef.current,
         pausedAt: 0, resumeAt: 0, updatedAt: nowMs,
-      });
+      }, serverClockOffsetRef.current);
       return;
     }
     if (doughTimerPausedRef.current > 0) return;

@@ -1,14 +1,19 @@
 /** Durable, per-command browser work queue for operational commands. */
+import type { PendingSyncIntent } from "./syncPendingIntent";
 import { todayStr } from "./utils";
 import { getStoredResetEpoch } from "./adapters/browserResetPersistence";
 import {
   isManualSectionRejectionCode,
   MANUAL_SECTION_FIELDS,
   manualSectionForField,
+  type ManualSection,
   type ManualSectionRejectionCode,
+  isOperationalControl,
+  type OperationalControl,
 } from "@workspace/sync-contract";
 import { clearManualSectionLocks, restoreManualSectionValues } from "./manualSectionLocks";
 import { emitManualSectionError, manualSectionRejectionMessage } from "./manualSectionErrors";
+import { setDoughTimerControlOwner } from "./autoTrackCoordinationClient";
 
 export const OPERATIONAL_INTENT_OUTBOX_EVENT = "run-calculator:operational-intent-outbox";
 const KEY = "run-calculator:operational-intent-outbox:v1";
@@ -26,6 +31,7 @@ const LOCK_RENEW_MS = 10_000;
 let activeFlush: Promise<void> | undefined;
 let retryTimer: number | undefined;
 let activeOwner: string | undefined;
+let identityGeneration = 0;
 let adoptCanonical: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void | Promise<void>) | undefined;
 const activeManualSections = new Map<string, { owner: string; runId: string; section: string; values: Record<string, number> }>();
 const manualRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -36,12 +42,42 @@ const manualRetryKey = (owner: string, id: string) => `${owner}:${id}`;
 const manualSectionChains = new Map<string, Promise<unknown>>();
 const manualSectionCanonical = new Map<string, Record<string, number>>();
 const MANUAL_SECTION_PENDING_KEY = "run-calculator:manual-section-pending:v1";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isManualSection(value: string): value is ManualSection {
+  return Object.prototype.hasOwnProperty.call(MANUAL_SECTION_FIELDS, value);
+}
+
+function parseManualSectionCanonical(
+  data: unknown,
+  runId: string,
+  section: string,
+): { data: Record<string, unknown>; sectionValues: Record<string, number> } | undefined {
+  if (!isRecord(data) || !isRecord(data.runValues) || !isManualSection(section)) return undefined;
+  const runValues = data.runValues[runId];
+  if (!isRecord(runValues)) return undefined;
+
+  const restored = restoreManualSectionValues(section, runValues);
+  const sectionValues: Record<string, number> = {};
+  for (const field of MANUAL_SECTION_FIELDS[section]) {
+    const value = restored[field];
+    if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+    sectionValues[field] = value;
+  }
+  return { data, sectionValues };
+}
+
 export type PendingManualSection = {
   id: string; runId: string; section: string; date: string; resetEpoch: number;
   values: Record<string, number>; baseValues: Record<string, number>;
   observedGeneration: string; baseRevision?: number; owner?: string;
   deliveryState?: "retry-exhausted" | "auth-required" | "rejected";
   failure?: "authentication" | "permission" | ManualSectionRejectionCode;
+  operation?: "resume-packaging";
+  correctionGeneration?: number;
 };
 type OperationalIntentStorageFailure = "corrupt" | "unavailable" | "write";
 const storageHealth = {
@@ -65,7 +101,9 @@ export type PreEndLifecycle = {
 };
 export type OperationalIntent = {
   version: 1; id: string; date: string; runId: string; observedGeneration: string;
-  resetEpoch: number; effectiveAt: number; action: "pause" | "resume" | "lifecycle" | "correction";
+   resetEpoch: number; effectiveAt: number; action: "pause" | "resume" | "lifecycle" | "correction" | "control";
+  control?: OperationalControl;
+  pauseId?: string;
   commandCategory: "lifecycle" | "correction";
   deviceId: string;
   baseRevision: number;
@@ -75,6 +113,8 @@ export type OperationalIntent = {
   inventoryLines?: Array<{ itemKey: string; qty: number }>;
   preLifecycle?: PreEndLifecycle;
   preEndLifecycle?: PreEndLifecycle;
+  /** Read-only migration evidence, never a server correction command. */
+  localSnapshotReview?: PendingSyncIntent;
   deferredOffline?: boolean;
   state: OperationalIntentState;
   owner?: string;
@@ -113,6 +153,7 @@ export function operationalIntentStorageHealth(): OperationalIntentStorageHealth
 export function setOperationalIntentIdentity(identity: { scope: "live" | "sandbox"; userId: string } | null): void {
   const nextOwner = identity ? `${identity.scope}:${identity.userId}` : undefined;
   if (activeOwner !== nextOwner) {
+    identityGeneration++;
     for (const timer of manualRetryTimers.values()) clearTimeout(timer);
     manualRetryTimers.clear();
     activeManualSections.clear();
@@ -121,6 +162,7 @@ export function setOperationalIntentIdentity(identity: { scope: "live" | "sandbo
     clearManualSectionLocks();
   }
   activeOwner = nextOwner;
+  setDoughTimerControlOwner(nextOwner);
   if (typeof window !== "undefined" && activeOwner && !(setOperationalIntentIdentity as any)._onlineHook) {
     window.addEventListener("online", () => { void retryPendingManualSections(); });
     (setOperationalIntentIdentity as any)._onlineHook = true;
@@ -128,6 +170,13 @@ export function setOperationalIntentIdentity(identity: { scope: "live" | "sandbo
   if (activeOwner) void retryPendingManualSections();
   scheduleNextFlush();
   if (typeof window !== "undefined") notify();
+}
+
+/** Captures a session boundary, including sign-out/sign-in to the same account. */
+export function captureOperationalIdentityFence(identity?: { scope: "live" | "sandbox"; userId: string }): () => boolean {
+  const generation = identityGeneration;
+  const owner = identity ? `${identity.scope}:${identity.userId}` : activeOwner;
+  return () => owner !== undefined && owner === activeOwner && generation === identityGeneration;
 }
 
 /** Registered by Home; avoids coupling this storage module to React/sync. */
@@ -174,13 +223,50 @@ function valid(item: unknown): item is OperationalIntent {
   const x = item as Partial<OperationalIntent>;
   return !!x && x.version === 1 && typeof x.id === "string" && typeof x.date === "string" && typeof x.runId === "string"
     && typeof x.observedGeneration === "string" && Number.isFinite(x.resetEpoch) && Number.isFinite(x.effectiveAt)
-    && ["pause", "resume", "lifecycle", "correction"].includes(String(x.action))
+    && ["pause", "resume", "lifecycle", "correction", "control"].includes(String(x.action))
+    && (x.action !== "control" || isOperationalControl(x.control))
     && (x.lifecycle !== "end" || (Array.isArray(x.inventoryLines) && x.inventoryLines.length <= 200))
     && (x.preLifecycle === undefined || validPreEndLifecycle(x.preLifecycle))
+    && (x.localSnapshotReview === undefined || (x.state === "review-required"
+      && x.localSnapshotReview.scope === x.owner && x.localSnapshotReview.date === x.date))
     && (x.lifecycle !== "end" || x.preEndLifecycle === undefined || validPreEndLifecycle(x.preEndLifecycle))
     && ["pending", "sending", "accepted", "superseded", "rebased", "conflicted", "review-required", "blocked", "permanently-rejected"].includes(String(x.state));
 }
 function notify(): void { window.dispatchEvent(new Event(OPERATIONAL_INTENT_OUTBOX_EVENT)); }
+
+/** Keep older snapshot evidence in the existing, non-replayable review history. */
+export function retainOperationalSnapshotReview(source: PendingSyncIntent, reset = false): boolean {
+  if (!activeOwner || source.scope !== activeOwner) return false;
+  const id = `snapshot-review:${activeOwner}:${source.id}`;
+  const record: OperationalIntent = {
+    version: 1, id, date: source.date, runId: "__saved_snapshot__",
+    observedGeneration: "snapshot-review", resetEpoch: source.epoch,
+    effectiveAt: Date.now(), occurredAt: Date.now(), action: "correction",
+    commandCategory: "correction", deviceId: getOperationalDeviceId(), baseRevision: 0,
+    owner: activeOwner, state: "review-required", values: {},
+    localSnapshotReview: { ...source, operationalReviewRequired: undefined },
+    guidance: reset
+      ? "A reset superseded this saved snapshot. Nothing was replayed; review it before making a fresh change."
+      : "Older saved operational changes were not applied or replayed. Compare this request with confirmed state before using live controls.",
+  };
+  try {
+    const key = `${TERMINAL_PREFIX}${id}`;
+    const existing = localStorage.getItem(key);
+    if (existing) {
+      const previous = JSON.parse(existing);
+      return valid(previous) && previous.owner === activeOwner
+        && JSON.stringify({ ...previous.localSnapshotReview, operationalReviewRequired: undefined })
+          === JSON.stringify(record.localSnapshotReview);
+    }
+    localStorage.setItem(key, JSON.stringify(record));
+    notify();
+    return true;
+  } catch {
+    noteStorageFailure("write");
+    notify();
+    return false;
+  }
+}
 function readKeys(prefix: string): OperationalIntent[] {
   const records: OperationalIntent[] = [];
   let length = 0;
@@ -285,8 +371,10 @@ function storedDeliveryMatches(item: OperationalIntent): boolean {
   }
 }
 function currentDeliveryMatches(item: OperationalIntent): boolean {
-  return !!activeOwner && item.owner === activeOwner && storedDeliveryMatches(item);
+  return !!activeOwner && item.owner === activeOwner && storedDeliveryMatches(item)
+    && (item.deliveryToken ? deliveryIdentityFences.get(item.deliveryToken)?.() !== false : true);
 }
+const deliveryIdentityFences = new Map<string, () => boolean>();
 function terminalize(
   item: OperationalIntent,
   state: Extract<OperationalIntentState, "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected">,
@@ -322,7 +410,10 @@ function canonicalInventoryLines(lines: Array<{ itemKey: string; qty: number }> 
     totals.set(line.itemKey, (totals.get(line.itemKey) ?? 0) + line.qty);
   }
   if (totals.size > 200) throw new Error("Run completion has too many inventory lines");
-  const output = [...totals].map(([itemKey, qty]) => ({ itemKey, qty })).sort((a, b) => a.itemKey.localeCompare(b.itemKey));
+  // The server's durable command contract uses UTF-16 lexical ordering.
+  // Locale collation differs for case, punctuation and accented names.
+  const output = [...totals].map(([itemKey, qty]) => ({ itemKey, qty }))
+    .sort((a, b) => a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0);
   if (output.some((line) => line.qty > 1_000_000)) throw new Error("Run completion inventory quantity is out of range");
   return output;
 }
@@ -396,11 +487,15 @@ async function submitManualSectionNow(input: {
   id?: string;
   resetEpoch?: number;
   owner?: string;
+  operation?: "resume-packaging";
+  correctionGeneration?: number;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
 }): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const id = input.id ?? `online:${crypto.randomUUID()}`;
   const immutableResetEpoch = input.resetEpoch ?? getStoredResetEpoch();
   const capturedOwner = input.owner ?? activeOwner;
+  const capturedGeneration = identityGeneration;
+  const identityIsCurrent = () => capturedOwner === activeOwner && capturedGeneration === identityGeneration;
   if (!capturedOwner || (input.owner && input.owner !== activeOwner)) return "identity-mismatch";
   const pendingRecord = { ...input, id, date: input.date ?? todayStr(), resetEpoch: immutableResetEpoch, owner: capturedOwner };
   let keepManualFence = false;
@@ -415,7 +510,7 @@ async function submitManualSectionNow(input: {
       if (!key?.startsWith(ownerPrefix) || key.endsWith(`:${id}`)) continue;
       try {
         const prior = JSON.parse(localStorage.getItem(key) ?? "null");
-        if (["retry-exhausted", "rejected"].includes(prior?.deliveryState)
+        if (!input.operation && ["retry-exhausted", "rejected"].includes(prior?.deliveryState)
           && prior.runId === input.runId && prior.section === input.section && prior.id !== id) {
           localStorage.removeItem(key);
         }
@@ -444,50 +539,101 @@ async function submitManualSectionNow(input: {
         baseValues: input.baseValues, observedGeneration: input.observedGeneration,
         baseRevision: input.baseRevision ?? 0, resetEpoch: immutableResetEpoch,
         deviceId: getOperationalDeviceId(),
+        ...(input.operation ? { operation: input.operation, correctionGeneration: input.correctionGeneration } : {}),
       }),
     });
-    if (capturedOwner !== activeOwner) return "identity-mismatch";
-    let body: { data?: unknown; outcome?: string; code?: unknown; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {};
-    try { body = await response.json(); } catch {}
-    if (capturedOwner !== activeOwner) return "identity-mismatch";
-    if (response.ok && body.data) {
-      if (capturedOwner !== activeOwner) return "identity-mismatch";
-      const canonicalServerTime = Number.isFinite(body.serverTime) ? body.serverTime : undefined;
-      const canonicalValues = (body.data as any)?.runValues?.[input.runId] ?? {};
-      const canonicalSectionValues = restoreManualSectionValues(
-        input.section as any,
-        canonicalValues,
-      ) as Record<string, number>;
-      if (Object.values(canonicalSectionValues).some((value) => Number.isFinite(Number(value)))) {
-        manualSectionCanonical.set(`${capturedOwner}:${input.runId}:${input.section}`, canonicalSectionValues);
+    if (!identityIsCurrent()) return "identity-mismatch";
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = await response.json();
+      if (isRecord(parsed)) body = parsed;
+    } catch {}
+    if (!identityIsCurrent()) return "identity-mismatch";
+    if (response.ok) {
+      if (!identityIsCurrent()) return "identity-mismatch";
+      const canonical = parseManualSectionCanonical(body.data, input.runId, input.section);
+      if (!canonical || body.outcome !== "accepted"
+        || !Number.isSafeInteger(body.canonicalRevision) || Number(body.canonicalRevision) < 0
+        || typeof body.serverTime !== "number" || !Number.isFinite(body.serverTime)) {
+        throw new Error("Correction response has no confirmed canonical receipt");
       }
-      const intent = {
-        version: 1 as const, id, date: pendingRecord.date, runId: input.runId, observedGeneration: input.observedGeneration,
-        resetEpoch: immutableResetEpoch, effectiveAt: Date.now(), action: "correction" as const,
-        commandCategory: "correction" as const, deviceId: getOperationalDeviceId(), baseRevision: input.baseRevision ?? 0,
-        occurredAt: Date.now(), values: restoreManualSectionValues(input.section as any, canonicalValues) as Record<string, number>, state: "accepted" as const,
-        ...(Number.isSafeInteger(body.canonicalRevision) ? { canonicalRevision: body.canonicalRevision } : {}),
-        ...(canonicalServerTime !== undefined ? { serverTime: canonicalServerTime, serverTimeOffsetMs: canonicalServerTime - Date.now() } : {}),
-        ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
-      };
-      if (adoptCanonical) {
-        await adoptCanonical(body.data, intent, "accepted");
+      if (input.operation && (!canonical || body.outcome !== "accepted"
+        || !isRecord(canonical.data.packagingProgress)
+        || !isRecord(canonical.data.packagingProgress[input.runId]))) {
+        throw new Error("Packaging Resume did not include canonical progress");
       }
-      if (capturedOwner !== activeOwner) return "identity-mismatch";
+      if (input.operation && canonical) {
+        const progress = (canonical.data.packagingProgress as Record<string, Record<string, unknown>>)[input.runId];
+        if (!Number.isSafeInteger(progress.correctionGeneration)
+          || typeof progress.correctionGeneration !== "number"
+          || progress.correctionGeneration < (input.correctionGeneration ?? 1)
+          || typeof progress.manualOverrideUntil !== "number"
+          || !Number.isFinite(progress.manualOverrideUntil)
+          || typeof body.serverTime !== "number"
+          || !Number.isFinite(body.serverTime)
+          || progress.skidsCompleted !== canonical.sectionValues.skidsCompleted
+          || progress.casesOnCurrentSkid !== canonical.sectionValues.casesOnCurrentSkid
+          || typeof progress.updatedAt !== "number" || !Number.isFinite(progress.updatedAt)
+          || (progress.correctionGeneration === input.correctionGeneration
+            && progress.manualOverrideUntil > body.serverTime)) {
+          throw new Error("Packaging Resume was not canonically acknowledged");
+        }
+      }
+      if (canonical) {
+        const canonicalServerTime = typeof body.serverTime === "number" && Number.isFinite(body.serverTime)
+          ? body.serverTime
+          : undefined;
+        manualSectionCanonical.set(
+          `${capturedOwner}:${input.runId}:${input.section}`,
+          canonical.sectionValues,
+        );
+        const intent = {
+          version: 1 as const, id, date: pendingRecord.date, runId: input.runId, observedGeneration: input.observedGeneration,
+          resetEpoch: immutableResetEpoch, effectiveAt: Date.now(), action: "correction" as const,
+          commandCategory: "correction" as const, deviceId: getOperationalDeviceId(), baseRevision: input.baseRevision ?? 0,
+          occurredAt: Date.now(), values: input.operation ? undefined : canonical.sectionValues, state: "accepted" as const,
+          ...(typeof body.canonicalRevision === "number" && Number.isSafeInteger(body.canonicalRevision)
+            ? { canonicalRevision: body.canonicalRevision }
+            : {}),
+          ...(canonicalServerTime !== undefined ? { serverTime: canonicalServerTime, serverTimeOffsetMs: canonicalServerTime - Date.now() } : {}),
+          ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
+        };
+        if (adoptCanonical) {
+          await adoptCanonical(canonical.data, intent, "accepted");
+        }
+      }
+      if (!identityIsCurrent()) return "identity-mismatch";
     }
     if (response.ok) {
       const retryKey = manualRetryKey(capturedOwner, id);
       const retry = manualRetryTimers.get(retryKey); if (retry) clearTimeout(retry);
       manualRetryTimers.delete(retryKey);
-      if (capturedOwner !== activeOwner) return "identity-mismatch";
+      if (!identityIsCurrent()) return "identity-mismatch";
       localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`);
       return "accepted";
     }
-    if (capturedOwner !== activeOwner) return "identity-mismatch";
+    if (!identityIsCurrent()) return "identity-mismatch";
     if (response.status === 400 || response.status === 409 || response.status === 422) {
-      // Keep rejected values fenced from ordinary snapshot sync until a new
-      // correction replaces this terminal record. Do not adopt server data or
-      // overwrite the form: operators need their attempted entry to correct.
+      // The retained record preserves the attempted entry for review. The
+      // working form must show confirmed totals, not a rejected optimistic
+      // baseline that could be mistaken for production already accepted.
+      const canonical = response.status === 409
+        ? parseManualSectionCanonical(body.data, input.runId, input.section) : null;
+      if (canonical && Number.isSafeInteger(body.canonicalRevision)
+        && Number(body.canonicalRevision) >= 0 && Number.isFinite(body.serverTime)
+        && typeof body.snapshotId === "string" && /^[a-f0-9]{64}$/.test(body.snapshotId)) {
+        if (adoptCanonical) await adoptCanonical(canonical.data, {
+          version: 1, id, date: pendingRecord.date, runId: input.runId,
+          observedGeneration: input.observedGeneration, resetEpoch: immutableResetEpoch,
+          effectiveAt: Date.now(), occurredAt: Date.now(), action: "correction",
+          commandCategory: "correction", deviceId: getOperationalDeviceId(),
+          baseRevision: input.baseRevision ?? 0, values: canonical.sectionValues,
+          state: "conflicted", canonicalRevision: Number(body.canonicalRevision),
+          serverTime: Number(body.serverTime), serverTimeOffsetMs: Number(body.serverTime) - Date.now(),
+          snapshotId: body.snapshotId,
+        }, "conflicted");
+        if (!identityIsCurrent()) return "identity-mismatch";
+      }
       const code: ManualSectionRejectionCode | undefined =
         isManualSectionRejectionCode(body.code) ? body.code : undefined;
       localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`, JSON.stringify({
@@ -532,7 +678,7 @@ async function submitManualSectionNow(input: {
     });
     return "offline";
   } catch {
-    if (capturedOwner !== activeOwner) return "identity-mismatch";
+    if (!identityIsCurrent()) return "identity-mismatch";
     try {
       if (capturedOwner === activeOwner) localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`, JSON.stringify(pendingRecord));
     } catch {}
@@ -562,6 +708,8 @@ export function submitManualSection(input: {
   id?: string;
   resetEpoch?: number;
   owner?: string;
+  operation?: "resume-packaging";
+  correctionGeneration?: number;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
 }): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const sectionFields = MANUAL_SECTION_FIELDS[
@@ -584,6 +732,7 @@ export function submitManualSection(input: {
       : Number(baseValues[field]) || 0,
   ]));
   const owner = input.owner ?? activeOwner;
+  const enqueuedGeneration = identityGeneration;
   const completeInput = { ...input, values, baseValues, owner };
   const key = owner ? `${owner}:${input.runId}:${input.section}` : `${input.runId}:${input.section}`;
   const previous = manualSectionChains.get(key) ?? Promise.resolve();
@@ -594,8 +743,8 @@ export function submitManualSection(input: {
   const submit = async (): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> => {
     // Bind the account at enqueue time. A queued section edit must never be
     // rebound to whichever account is active when an earlier request settles.
-    if (!owner || owner !== activeOwner) return "identity-mismatch";
-    const base = manualSectionCanonical.get(key) ?? baseValues;
+    if (!owner || owner !== activeOwner || enqueuedGeneration !== identityGeneration) return "identity-mismatch";
+    const base = input.operation ? baseValues : manualSectionCanonical.get(key) ?? baseValues;
     const nextValues = sectionFields.reduce<Record<string, number>>((result, field) => {
       result[field] = (Number(base[field]) || 0) + (Number(delta[field]) || 0);
       return result;
@@ -628,6 +777,26 @@ export function submitManualSection(input: {
     }
   });
   return run;
+}
+
+/** Resume must not replace a correction whose canonical acknowledgement is
+ * missing, including a rejected/offline correction restored after reload. */
+export function hasPendingManualSection(runId: string, section: string): boolean {
+  if (!activeOwner) return true;
+  if ([...activeManualSections.values()].some((entry) =>
+    entry.owner === activeOwner && entry.runId === runId && entry.section === section)) return true;
+  try {
+    const prefix = `${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`;
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const record = JSON.parse(localStorage.getItem(key) ?? "null");
+      if (record?.runId === runId && record?.section === section) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
 }
 function scheduleManualRetry(record: PendingManualSection & { attempts?: number }, wait?: number): void {
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
@@ -698,7 +867,7 @@ export async function retryPendingManualSection(id: string): Promise<boolean> {
     const item = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection | null;
     if (!item || item.id !== id || item.owner !== activeOwner || ["retry-exhausted", "rejected"].includes(item.deliveryState ?? "")) return false;
     const result = await submitManualSection({ ...item, deliveryState: undefined, failure: undefined } as any);
-    return result === "accepted" || result === "conflicted";
+    return result === "accepted" || (!item.operation && result === "conflicted");
   } catch {
     return false;
   }
@@ -707,7 +876,7 @@ export function retryOperationalIntent(id: string): boolean {
   const terminalKey = `${TERMINAL_PREFIX}${id}`;
   try {
     const item = JSON.parse(localStorage.getItem(`${PENDING_PREFIX}${id}`) ?? localStorage.getItem(terminalKey) ?? "null");
-    if (!valid(item) || item.state === "sending" || ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(item.state)) return false;
+    if (!valid(item) || item.state === "sending" || ["accepted", "superseded", "rebased", "conflicted", "review-required", "permanently-rejected"].includes(item.state)) return false;
     if (item.owner && item.owner !== activeOwner) return false;
     if (item.failure === "rate-limited" && (item.nextRetryAt ?? 0) > Date.now()) return false;
     if (!persistPending({ ...item, owner: activeOwner, resetEpoch: getStoredResetEpoch(), state: "pending", deliveryToken: undefined, nextRetryAt: 0, failure: undefined, guidance: undefined })) return false;
@@ -727,8 +896,14 @@ export function operationalIntentBlocksLifecycle(runId: string, intents = readOp
   return intents.some((intent) =>
     intent.runId === runId
     && ["pending", "sending", "blocked", "permanently-rejected", "conflicted", "review-required"].includes(intent.state)
-    && ["pause", "resume", "lifecycle"].includes(intent.action),
+    && (["pause", "resume", "lifecycle"].includes(intent.action)
+      || (intent.action === "control" && ["pending", "sending", "blocked"].includes(intent.state))),
   );
+}
+
+/** Pending controls are evidence, never a reason to suppress a canonical pause or total. */
+export function operationalIntentBlocksLifecycleAdoption(runId: string, intents = readOperationalIntentOutbox()): boolean {
+  return operationalIntentBlocksLifecycle(runId, intents.filter((intent) => intent.action !== "control"));
 }
 export function fencePendingOperationalValues<T extends object>(
   runValues: T,
@@ -876,6 +1051,7 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
       return;
     }
     const ownerAtStart = activeOwner;
+    const generationAtStart = identityGeneration;
     const lock = acquireLock();
     if (!lock) return;
     let deliveryController: AbortController | undefined;
@@ -884,7 +1060,7 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
     }, LOCK_RENEW_MS);
     try {
       for (const original of readOperationalIntentOutbox().filter((x) => ["pending", "sending"].includes(x.state)).sort((a, b) => a.effectiveAt - b.effectiveAt || a.id.localeCompare(b.id))) {
-        if (activeOwner !== ownerAtStart) return;
+        if (activeOwner !== ownerAtStart || generationAtStart !== identityGeneration) return;
         if (original.state === "pending" && (original.nextRetryAt ?? 0) > Date.now()) continue;
         const item = {
           ...original,
@@ -893,6 +1069,8 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
           lastAttemptAt: Date.now(),
         };
         persistPending(item); notify();
+        deliveryIdentityFences.set(item.deliveryToken, () =>
+          ownerAtStart === activeOwner && generationAtStart === identityGeneration);
         if (item.resetEpoch < getStoredResetEpoch()) {
           terminalize(item, "blocked", {
             failure: "validation",
@@ -929,6 +1107,16 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
            // classified below before any response data can be adopted.
            const canonicalConflict = res.status === 409 && body.outcome === "conflicted";
            if ((res.ok || canonicalConflict) && ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(body.outcome ?? "")) {
+             if (!isRecord(body.data) || !isRecord(body.data.dayState)
+               || body.data.dayState.date !== item.date
+               || !Array.isArray(body.data.dayState.runs)
+               || !isRecord(body.data.runValues)
+               || !Number.isSafeInteger(body.canonicalRevision) || Number(body.canonicalRevision) < 0
+               || typeof body.serverTime !== "number" || !Number.isFinite(body.serverTime)
+               || typeof body.snapshotId !== "string" || !/^[a-f0-9]{64}$/.test(body.snapshotId)) {
+               temporary(item, "server", "The server did not confirm canonical state. Your action is retained for exact retry.");
+               break;
+             }
             const outcome = body.outcome as "accepted" | "superseded" | "rebased" | "conflicted" | "review-required";
              const receipt: OperationalIntentCanonicalReceipt = {
                ...(Number.isSafeInteger(body.cursor) ? { cursor: body.cursor } : {}),
@@ -971,6 +1159,7 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
         } catch { temporary(item, "network", "No network connection. This action is saved locally and will retry with backoff."); }
         finally {
           window.clearTimeout(deliveryTimeout);
+          deliveryIdentityFences.delete(item.deliveryToken);
           deliveryController = undefined;
         }
       }
@@ -994,4 +1183,46 @@ export async function flushOperationalIntentOutbox(senderId = getOperationalDevi
     }
   })().finally(() => { activeFlush = undefined; });
   return activeFlush;
+}
+
+/** Only an obsolete control operation may be retired here, never a correction
+ * or an uncertain Resume for the still-current generation. */
+export function retireObsoletePackagingResume(
+  runId: string, observedGeneration: string, correctionGeneration: number,
+): void {
+  const pending = readPendingManualSection(runId, "packaging");
+  if (!pending || pending.operation !== "resume-packaging"
+    || (pending.observedGeneration === observedGeneration
+      && pending.correctionGeneration === correctionGeneration)) return;
+  const key = manualRetryKey(activeOwner!, pending.id);
+  const timer = manualRetryTimers.get(key);
+  if (timer) clearTimeout(timer);
+  manualRetryTimers.delete(key);
+  localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:${pending.id}`);
+}
+
+/** Read-only review evidence, including rejected requests. Never replays it. */
+export function readManualSectionRecoveries(): PendingManualSection[] {
+  if (!activeOwner) return [];
+  const records: PendingManualSection[] = [];
+  const prefix = `${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`;
+  try {
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      try {
+        const record = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection | null;
+        if (record && typeof record.id === "string" && typeof record.runId === "string"
+          && typeof record.date === "string" && typeof record.section === "string"
+          && Object.prototype.hasOwnProperty.call(MANUAL_SECTION_FIELDS, record.section)
+          && record.values && typeof record.values === "object" && !Array.isArray(record.values)
+          && (!record.owner || record.owner === activeOwner)) records.push(record);
+      } catch { storageHealth.corruptRecords++; }
+    }
+  } catch { storageHealth.unavailableReads++; }
+  return records;
+}
+
+export function readPendingManualSection(runId: string, section: string): PendingManualSection | undefined {
+  return readManualSectionRecoveries().find((record) => record.runId === runId && record.section === section);
 }

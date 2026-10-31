@@ -14,12 +14,15 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // preserves the original, scope-unaware behavior exactly.
 export type Scope = "live" | "sandbox";
 
-type RequestContext = { scope: Scope; actorId: string };
+type AuthExecutionContext = { sessionTokenHash: string; issuedAt: number };
+type RequestContext = { scope: Scope; actorId: string; auth?: AuthExecutionContext };
 const als = new AsyncLocalStorage<RequestContext>();
 
-export function runWithScope<T>(scope: Scope, fn: () => T, actorId = "system"): T {
-  return als.run({ scope, actorId }, fn);
+export function runWithScope<T>(scope: Scope, fn: () => T, actorId = "system", auth?: AuthExecutionContext): T {
+  return als.run({ scope, actorId, auth }, fn);
 }
+/** Authorization-only context. Never include it in operation evidence. */
+export const currentAuthExecutionContext = () => als.getStore()?.auth;
 
 export function currentScope(): Scope {
   return als.getStore()?.scope ?? "live";

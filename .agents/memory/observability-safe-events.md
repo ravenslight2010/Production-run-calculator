@@ -24,3 +24,17 @@ Public health diagnostics that need to distinguish groups derived from predictab
 **Why:** Scope and time-bucket candidates are low-entropy and can be recovered from an unkeyed digest by enumeration, even when the raw values are omitted.
 
 **How to apply:** When diagnostics need a within-process grouping reference, use a keyed digest with an ephemeral key and keep the payload bounded. Do not expose a plain hash of guessable scope, date, or bucket values.
+
+Database phase attribution must be prospective. Keep checkout and post-checkout
+client-observed time distinct; neither establishes PostgreSQL execution time.
+Missing boundaries, legacy combined timings and ambiguous multi-checkout scopes
+must remain unknown rather than being retrospectively split.
+
+**Why:** Published incidents combined connection waits, round trips and delayed
+JavaScript callbacks. Subtraction or overlapping event-loop windows alone could
+incorrectly blame a provider, a query or a pool setting.
+
+**How to apply:** Preserve versioned phase semantics and explicit unknowns in
+offline summaries. Treat timeout overruns and overlapping histogram windows as
+observations, not causal proof. Local instrumentation approval never implies
+approval to publish or collect a production observation.

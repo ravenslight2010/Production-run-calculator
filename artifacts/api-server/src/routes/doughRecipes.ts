@@ -1,12 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, doughRecipesTable, type DoughRecipeRow } from "@workspace/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, doughRecipesTable, qcWorkflowEventsTable, type DoughRecipeRow } from "@workspace/db";
 import { SaveDoughRecipesBody, DeleteDoughRecipesBody } from "@workspace/api-zod";
 import { normalizeNamedRecipe, type NamedRecipe } from "@workspace/named-recipes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { buildRecipeQcCapture, lockRecipeQcFamily } from "../lib/recipeQcReview";
 import { writeAuditEvent } from "./auditLogs";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
@@ -26,6 +27,7 @@ const DOUGH_RECIPE_AUDIT_FIELDS = [
   "notes",
   "components",
   "enabled",
+  "isPremadeCrust",
   "brand",
   "flavors",
   "doughballWeightOz",
@@ -53,6 +55,7 @@ function comparable(item: NamedRecipe): string {
     notes: item.notes,
     components: item.components,
     enabled: item.enabled,
+    isPremadeCrust: item.isPremadeCrust,
     brand: item.brand,
     flavors: item.flavors,
     doughballWeightOz: item.doughballWeightOz,
@@ -69,6 +72,7 @@ function toApiItem(row: DoughRecipeRow): NamedRecipe {
     notes: row.notes,
     components: row.components ?? [],
     enabled: row.enabled,
+    isPremadeCrust: row.isPremadeCrust,
     brand: row.brand ?? "",
     flavors: row.flavors ?? [],
   };
@@ -87,6 +91,7 @@ function toDbValues(item: NamedRecipe) {
     notes: item.notes ?? "",
     components: item.components,
     enabled: item.enabled,
+    isPremadeCrust: item.isPremadeCrust ?? false,
     brand: item.brand ?? "",
     flavors: item.flavors ?? [],
     doughballWeightOz: item.doughballWeightOz ?? 0,
@@ -151,10 +156,9 @@ router.post(
       // re-point local references only after this endpoint succeeds — a
       // partial commit would strand references to half-renamed names).
       const correlationId = requestCorrelationId(req);
+      let qcChangedCount = 0;
       await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${"dough-recipes:" + currentScope()}))`,
-        );
+        await lockRecipeQcFamily(tx, currentScope(), "dough");
         const existingRows = await tx
           .select()
           .from(doughRecipesTable)
@@ -179,16 +183,22 @@ router.post(
 
         for (const recipe of byId.values()) {
           const existing = existingById.get(recipe.id);
-          const values = toDbValues(recipe);
+          // Older clients omit new fields. Omission is not a request to clear
+          // a manager's explicit classification.
+          const canonicalRecipe: NamedRecipe = {
+            ...recipe,
+            isPremadeCrust: recipe.isPremadeCrust ?? existing?.isPremadeCrust ?? false,
+          };
+          const values = toDbValues(canonicalRecipe);
           values.updatedAt = nextRevision(existing?.updatedAt);
           const fieldNames = existing
-            ? changedRecipeFields(recipe, existing)
+            ? changedRecipeFields(canonicalRecipe, existing)
             : [...DOUGH_RECIPE_AUDIT_FIELDS];
           if (
             existing &&
             recipe.updatedAt &&
             new Date(recipe.updatedAt).getTime() === existing.updatedAt.getTime() &&
-            comparable(recipe) === comparable(toApiItem(existing))
+            comparable(canonicalRecipe) === comparable(toApiItem(existing))
           ) {
             continue;
           }
@@ -202,6 +212,7 @@ router.post(
                 notes: values.notes,
                 components: values.components,
                 enabled: values.enabled,
+                isPremadeCrust: values.isPremadeCrust,
                 brand: values.brand,
                 flavors: values.flavors,
                 doughballWeightOz: values.doughballWeightOz,
@@ -210,6 +221,18 @@ router.post(
                 updatedAt: values.updatedAt,
               },
             });
+          const capture = buildRecipeQcCapture("dough", recipe.id, existing ? toApiItem(existing) : undefined, canonicalRecipe);
+          if (capture) {
+            await tx.insert(qcWorkflowEventsTable).values({
+              scope: currentScope(),
+              operationId: capture.operationId,
+              recordId: capture.recordId,
+              eventType: "recipe-committed",
+              actorId: req.userId!,
+              payload: capture.payload,
+            });
+            qcChangedCount += 1;
+          }
           if (!existing || fieldNames.length > 0) {
             await writeAuditEvent(tx, {
               action: existing ? "dough_recipe_updated" : "dough_recipe_created",
@@ -222,7 +245,12 @@ router.post(
       invalidateMasterDataBootstrapCache();
       broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");
       const items = await listAll();
-      res.json({ items });
+      res.json({
+        items,
+        ...(qcChangedCount
+          ? { recipeQcReview: { status: "applied-awaiting-review", changedCount: qcChangedCount } }
+          : {}),
+      });
     } catch (err) {
       if (err instanceof RecipeRevisionConflict) {
         res.status(409).json({
@@ -257,6 +285,7 @@ router.delete(
       if (ids.length > 0) {
         const correlationId = requestCorrelationId(req);
         await db.transaction(async (tx) => {
+          await lockRecipeQcFamily(tx, currentScope(), "dough");
           const deletedRows = await tx
             .delete(doughRecipesTable)
             .where(

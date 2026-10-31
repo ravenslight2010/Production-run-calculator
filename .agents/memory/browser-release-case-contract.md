@@ -3,10 +3,10 @@ name: Browser release case contract
 description: Keep the browser release count synchronized with the cases included by the authoritative Chromium release config.
 ---
 
-The full browser release evidence contract must exactly match the Chromium cases selected by the authoritative release config. Device-tagged checks need an explicit per-case decision: dedicated physical-device journeys stay in their device lane, while a retained skipped sentinel may remain in the Chromium contract.
+The full browser release evidence contract must match reviewed Chromium identities and projects, not just a discovery count. Coverage changes need an explicit owner decision before updating the contract; an increased discovery count is a review input, not permission to raise a budget.
 
 Focused diagnostic journeys should use a separate isolated Playwright config rather than filtering the release config: the release reporter still enforces the full case count, and its web build expects an approved publish identity.
 
-**Why:** Treating the unfiltered discovery count as the release count makes a complete run look incomplete and prevents the duration reporter from retaining revision-bound evidence.
+**Why:** Accidental discovery mixed dedicated TLS/container/opt-in/engine harnesses with intended app regressions. The owner chose a split that preserves existing coverage and puts additions in their appropriate lanes, not a blanket increase or deletion to reach the old count.
 
-**How to apply:** Encode device-case exclusions in the authoritative release config, then require Playwright discovery, the duration reporter, release checker, and retained report to agree. Update the declared count whenever included coverage changes. For focused checks, keep real auth and the disposable database but use a standalone config with local development servers.
+**How to apply:** Reconcile exact additions, renames, exclusions and duplicate/retired coverage against owner approval and the release guide. Preserve the three previously reviewed PWA release sentinels even when other PWA cases remain dedicated. Keep device and standalone authority lanes isolated. Require real-config discovery and runtime reporting to agree, but never treat collection as runtime or published evidence. Dedicated configs alone do not imply exclusion: ordinary default app regressions can also have focused viewport/engine lanes.

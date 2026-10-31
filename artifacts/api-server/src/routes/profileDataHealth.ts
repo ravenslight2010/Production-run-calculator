@@ -12,9 +12,12 @@ import {
   sauceRecipesTable,
   specImportAliasesTable,
   mergeAliasesTable,
+  importHistoryTable,
+  importOperationsTable,
 } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { executeReadQueries } from "../lib/queryReads";
 import {
   buildMasterDataHealthReport,
   masterDataRepairFingerprint,
@@ -98,6 +101,16 @@ export type DataHealthRepair =
   };
 
 export type DataHealthWorkspace = {
+  importCoverage: {
+    scanned: number;
+    truncated: boolean;
+    limitation: string;
+    detectors: MasterDataHealthReport["coverage"];
+    sources: Array<{
+      importType: string; status: string; lastSuccessfulAt: number | null;
+      recognizedSource: boolean; recovery: string; observedRecords: number;
+    }>;
+  };
   findings: DataHealthFinding[];
   safeRepairs: DataHealthRepair[];
   summary: Record<string, number>;
@@ -197,16 +210,19 @@ function fieldConfig(kind: RecipeKind) {
  * identify what the name should be, but a valid conflicting link is left for a
  * manager to review rather than being silently overwritten.
  */
-export async function profileDataHealthReport(executor: HealthExecutor): Promise<ProfileDataHealthReport> {
+export async function profileDataHealthReport(
+  executor: HealthExecutor,
+  sequentialQueries = false,
+): Promise<ProfileDataHealthReport> {
   const scope = currentScope();
-  const [profiles, doughRecipes, sauceRecipes, sheets] = await Promise.all([
-    executor.select().from(brandProfilesTable).where(eq(brandProfilesTable.scope, scope)),
-    executor.select().from(doughRecipesTable).where(eq(doughRecipesTable.scope, scope)),
-    executor.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, scope)),
-    executor.select().from(savedSpecSheetsTable)
+  const [profiles, doughRecipes, sauceRecipes, sheets] = await executeReadQueries([
+    () => executor.select().from(brandProfilesTable).where(eq(brandProfilesTable.scope, scope)),
+    () => executor.select().from(doughRecipesTable).where(eq(doughRecipesTable.scope, scope)),
+    () => executor.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, scope)),
+    () => executor.select().from(savedSpecSheetsTable)
       .where(eq(savedSpecSheetsTable.scope, scope))
       .orderBy(desc(savedSpecSheetsTable.createdAt)),
-  ]);
+  ] as const, sequentialQueries ? "sequential" : "parallel");
 
   const parsedByProfile = new Map<string, JsonRecord>();
   for (const sheet of sheets) {
@@ -333,14 +349,17 @@ function previewValue(value: unknown): string {
   return text || "empty";
 }
 
-export async function dataHealthWorkspace(executor: HealthExecutor): Promise<DataHealthWorkspace> {
+export async function dataHealthWorkspace(
+  executor: HealthExecutor,
+  sequentialQueries = false,
+): Promise<DataHealthWorkspace> {
   const scope = currentScope();
-  const [report, master, aiRetention, sourceReconciliation] = await Promise.all([
-    profileDataHealthReport(executor),
-    buildMasterDataHealthReport(executor, scope),
-    buildAiRetentionReport(executor),
-    sourceLibraryReconciliationStatus(executor, scope),
-  ]);
+  const [report, master, aiRetention, sourceReconciliation] = await executeReadQueries([
+    () => profileDataHealthReport(executor, sequentialQueries),
+    () => buildMasterDataHealthReport(executor, scope, new Date(), sequentialQueries),
+    () => buildAiRetentionReport(executor, new Date(), sequentialQueries),
+    () => sourceLibraryReconciliationStatus(executor, scope, sequentialQueries),
+  ] as const, sequentialQueries ? "sequential" : "parallel");
   const marker = await findRepairResult(executor, "profile-name-link-stub-purge-v1");
   const result = record(marker?.result);
   const removed = record(result.removedStubs);
@@ -476,6 +495,38 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
   }).from(dataHealthRepairBatchesTable)
     .where(eq(dataHealthRepairBatchesTable.scope, scope))
     .orderBy(desc(dataHealthRepairBatchesTable.appliedAt)).limit(10);
+  const history = await executor.select({
+    importType: importHistoryTable.importType,
+    sourceKey: importHistoryTable.sourceKey,
+    status: importHistoryTable.status,
+    operationId: importHistoryTable.operationId,
+    operationStatus: importOperationsTable.status,
+    createdAt: importHistoryTable.createdAt,
+  }).from(importHistoryTable).leftJoin(importOperationsTable, and(
+    eq(importHistoryTable.operationId, importOperationsTable.id),
+    eq(importOperationsTable.scope, scope),
+  )).where(eq(importHistoryTable.scope, scope))
+    .orderBy(desc(importHistoryTable.createdAt), desc(importHistoryTable.id)).limit(201);
+  const observed = history.slice(0, 200);
+  const importCoverage = {
+    scanned: observed.length,
+    truncated: history.length > 200,
+    limitation: "Recent history is coverage evidence, not proof that every product requires every source. Missing evidence is not a confirmed defect. Local guide/schedule records do not provide atomic Apply or Undo guarantees. Findings reuse the existing bounded profile, master-data and source reconcilers; reads never repair.",
+    detectors: master.coverage,
+    sources: ["spec", "premix", "cheese", "shipping", "sauce", "dough", "schedule"].map((importType) => {
+      const entries = observed.filter((row) => row.importType === importType);
+      const last = entries.find((row) => row.status === "complete" &&
+        (!row.operationId || row.operationStatus === "applied"));
+      return {
+        importType,
+        status: last ? "observed" : "missing-evidence",
+        lastSuccessfulAt: last?.createdAt.getTime() ?? null,
+        recognizedSource: !!last?.sourceKey,
+        recovery: ["spec", "premix", "cheese"].includes(importType) ? "atomic-guarded-undo" : "local-or-sync-only",
+        observedRecords: entries.length,
+      };
+    }),
+  };
   return {
     findings,
     safeRepairs: [
@@ -488,6 +539,7 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
     cleanupHistory,
     aiRetention,
     sourceReconciliation,
+    importCoverage,
     repairBatches: batches.map((batch) => {
       const value = record(batch.summary);
       return { ...batch, summary: {
@@ -529,8 +581,8 @@ export function createProfileDataHealthService(database: typeof db = db): Profil
     const scope = currentScope();
     const requested = new Set(findingIds);
     return database.transaction(async (tx) => {
-      const before = await profileDataHealthReport(tx);
-      const master = await buildMasterDataHealthReport(tx, scope);
+      const before = await profileDataHealthReport(tx, true);
+      const master = await buildMasterDataHealthReport(tx, scope, new Date(), true);
       const supportedIds = new Set([
         ...before.safeRepairs.map((repair) => repair.id),
         ...master.repairs.flatMap((repair) => repair.action === "delete-alias"
@@ -672,7 +724,7 @@ export function createProfileDataHealthService(database: typeof db = db): Profil
       }
        return {
          before,
-         after: await profileDataHealthReport(tx),
+         after: await profileDataHealthReport(tx, true),
          applied,
          batchId,
          outcome: { applied: applied.length, skipped, failed: 0, repairedRuns },

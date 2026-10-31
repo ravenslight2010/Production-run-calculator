@@ -14,6 +14,7 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_PLAN_JSON_BASE64,
   SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256,
 } from "./sourceLibraryReconciliationPlan.generated";
+import { executeReadQueries } from "./queryReads";
 import type { db } from "@workspace/db";
 
 export const SOURCE_LIBRARY_RECONCILIATION_REPORT =
@@ -144,7 +145,7 @@ export type SourceLibraryReconciliationFinding = {
   sourceRoute: "dough" | "sauce" | "cheeseRecipes" | "mixes" | "import" | "setupProfiles" | "audit";
 };
 
-export type SourceLibraryReconciliationStatus = {
+export type LegacySourceLibraryReconciliationStatus = {
   report: {
     path: string;
     sha256: string;
@@ -178,6 +179,9 @@ export type SourceLibraryReconciliationStatus = {
   };
   findings: SourceLibraryReconciliationFinding[];
 };
+
+export type SourceLibraryReconciliationStatus = LegacySourceLibraryReconciliationStatus |
+  import("../selfHostFresh/contract").FreshSourceReconciliationStatus;
 
 type ReconciliationExecutor = Pick<typeof db, "select">;
 
@@ -447,7 +451,8 @@ function rowsOf(value: unknown): JsonRecord[] {
 export async function sourceLibraryReconciliationStatus(
   executor: ReconciliationExecutor,
   scope: string,
-): Promise<SourceLibraryReconciliationStatus> {
+  sequentialQueries = false,
+): Promise<LegacySourceLibraryReconciliationStatus> {
   const [
     dough,
     sauce,
@@ -458,32 +463,32 @@ export async function sourceLibraryReconciliationStatus(
     aliases,
     marker,
     rerunMarker,
-  ] = await Promise.all([
-    executor.select().from(doughRecipesTable).where(eq(doughRecipesTable.scope, scope)),
-    executor.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, scope)),
-    executor.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.scope, scope)),
-    executor.select().from(mixesTable).where(eq(mixesTable.scope, scope)),
-    executor.select().from(brandProfilesTable).where(eq(brandProfilesTable.scope, scope)),
-    executor.select().from(dailySyncTable).where(eq(dailySyncTable.scope, scope)),
-    executor.select().from(specImportAliasesTable).where(and(
+  ] = await executeReadQueries([
+    () => executor.select().from(doughRecipesTable).where(eq(doughRecipesTable.scope, scope)),
+    () => executor.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, scope)),
+    () => executor.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.scope, scope)),
+    () => executor.select().from(mixesTable).where(eq(mixesTable.scope, scope)),
+    () => executor.select().from(brandProfilesTable).where(eq(brandProfilesTable.scope, scope)),
+    () => executor.select().from(dailySyncTable).where(eq(dailySyncTable.scope, scope)),
+    () => executor.select().from(specImportAliasesTable).where(and(
       eq(specImportAliasesTable.scope, scope),
       eq(specImportAliasesTable.kind, "appType"),
     )),
-    executor.select({
+    () => executor.select({
       id: dataHealsTable.id,
       appliedAt: dataHealsTable.appliedAt,
       result: dataHealsTable.result,
     }).from(dataHealsTable).where(
       eq(dataHealsTable.id, SOURCE_LIBRARY_RECONCILIATION_HEAL_ID),
     ).limit(1),
-    executor.select({
+    () => executor.select({
       id: dataHealsTable.id,
       appliedAt: dataHealsTable.appliedAt,
       result: dataHealsTable.result,
     }).from(dataHealsTable).where(
       eq(dataHealsTable.id, SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID),
     ).limit(1),
-  ]);
+  ] as const, sequentialQueries ? "sequential" : "parallel");
   const rowsByTable = {
     dough_recipes: rows(dough),
     sauce_recipes: rows(sauce),

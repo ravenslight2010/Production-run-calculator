@@ -1,9 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { db, factoryKvTable } from "@workspace/db";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 import { broadcastMasterDataChanged } from "./sync";
+import { OPERATIONAL_FACTORY_READ_KEYS } from "@workspace/factory-constants";
 
 // Factory-wide key-value store. Only managers with the manage-factory-settings
 // capability may read or write (GET and PUT are both gated). The value shape is
@@ -15,6 +16,23 @@ import { broadcastMasterDataChanged } from "./sync";
 // client timestamps so a waking offline browser cannot overwrite a newer save.
 
 const router: IRouter = Router();
+
+// Authentication and scope middleware are applied by the parent router.
+// Staff can read this allowlist, not administrative settings or write access.
+router.get("/factory-data/operational", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const rows = await db.select().from(factoryKvTable).where(and(
+      eq(factoryKvTable.scope, currentScope()),
+      inArray(factoryKvTable.key, [...OPERATIONAL_FACTORY_READ_KEYS]),
+    ));
+    const data: Record<string, { value: unknown; updatedAt: string }> = {};
+    for (const row of rows) data[row.key] = { value: row.value, updatedAt: row.updatedAt.toISOString() };
+    res.json({ data });
+  } catch {
+    res.status(503).json({ error: "Operational directory unavailable. Retry online." });
+  }
+});
 
 router.get(
   "/factory-data",

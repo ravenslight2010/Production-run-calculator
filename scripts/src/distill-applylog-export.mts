@@ -16,6 +16,16 @@ const MAX_RESPONSE_BYTES = 250 * 1024 * 1024;
 const MAX_PAGE_BYTES = 24 * 1024 * 1024;
 const MAX_LINE_BYTES = 1024 * 1024;
 
+export function assertApplyLogExportPlatformSupported(
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === "win32") {
+    throw new Error(
+      "Private Apply-log export is not supported on Windows: POSIX mode 0600 is not a Windows ACL. Windows approval covers metadata-only appends; use a supported Linux environment for private exports.",
+    );
+  }
+}
+
 type ExportOptions = {
   apiBase: string;
   cookieFile: string;
@@ -104,6 +114,7 @@ export async function exportApplyLog(
     contract?: Awaited<ReturnType<typeof loadProductionContract>>;
   } = {},
 ): Promise<{ exported: number; skipped: number }> {
+  assertApplyLogExportPlatformSupported();
   const cookie = readCookieHeader(options.cookieFile, options.repoRoot);
   const apiBase = validateApiBase(options.apiBase);
   const contract = dependencies.contract ?? await loadProductionContract(options.repoRoot);

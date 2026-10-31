@@ -22,6 +22,7 @@
 export const HOME_TAB_CTX_DEP_FIELDS = [
   // ── Production / run state ──
   "activeCasts", "activeStopId", "activeTab", "allergenWarnings", "allMixRecipeOptions",
+  "freezerSurplusConfirmations", "freezerSurplusConfirmationsLoaded", "freezerSurplusConfirmationsError",
   "batchWeightsLoaded", "blankRunIds", "blockingViolations", "brandFlavors", "brands",
   "canApproveResets", "canEditRules", "canManageInventory", "canManageStaff",
   "caseUpdateAccepted", "caseUpdatePrompt", "castSupported", "changeHistory",

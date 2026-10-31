@@ -6,7 +6,7 @@ import { getUserSecurityState } from "../lib/userValidity";
 import { isSandboxUser, sandboxAllowed } from "../lib/sandbox";
 import { runWithScope, type Scope } from "../lib/requestScope";
 import { logger } from "../lib/logger";
-import { checkAndTouchSession } from "../lib/authSessions";
+import { checkAndTouchSession, hashSessionToken } from "../lib/authSessions";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -179,5 +179,5 @@ export async function requireAuth(
   // downstream (the store propagates across the handler's awaits).
   const scope: Scope = sandbox ? "sandbox" : "live";
   req.scope = scope;
-  runWithScope(scope, () => next(), verified.sub);
+  runWithScope(scope, () => next(), verified.sub, { sessionTokenHash: hashSessionToken(token!), issuedAt: verified.iat });
 }

@@ -2,10 +2,11 @@ import { computeAppSlotInfo, getAutoTrackTiming } from "./autoTrackEngine";
 import {
   APPLICATOR_STOCK_REGISTERS,
   applicatorStockFields,
+  computeApplicatorStockCapacityLbs,
   computeApplicatorStockCadenceSeconds,
 } from "./applicatorStock";
 import { computeSauceStockStepSeconds } from "./sauceStock";
-import { computeSauceRunRequirement } from "./stagedSupply";
+import { computeFrontlineSupplyFromStockLbs, computeSauceRunRequirement, legacyFrontlineConsumption } from "./stagedSupply";
 import { computeWallClockDueRefs } from "./wallClockEngine";
 import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./index";
 
@@ -207,9 +208,8 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
       });
     }
   }
-  // Keep the legacy cumulative-made register on its existing observation
-  // channel. It is historical production evidence, not the stock ticker; the
-  // separate stock claims below never mutate these fields.
+  // App batch claims fill current on-line stock; the historical made register
+  // remains separate from consumption and current supply.
   if (live && !input.calc.pressDone) {
     for (const slot of ["app1", "app2", "app3", "app4"] as const) {
       const info = computeAppSlotInfo({
@@ -221,13 +221,40 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
         pizzasPerCase: number(input.v.pizzasPerCase),
         ppm: input.calc.ppm,
       });
-      const made = Math.max(0, number(input.progress?.[`${slot}BatchesMade`]));
-      if (!info.validForClaim || info.cadence <= 0 || made >= Math.ceil(info.required)) continue;
+      const fields = applicatorStockFields(slot);
+      const stock = Math.max(0, number(input.progress?.[fields.stock]));
+      const consumedField = `${slot}StockConsumedLbs`;
+      const consumed = Math.max(0, number(input.progress?.[consumedField]
+        ?? legacyFrontlineConsumption(input.progress ?? {})[consumedField]));
+      const capacity = Math.min(
+        computeApplicatorStockCapacityLbs(input.v as unknown as Record<string, unknown>, slot),
+        info.effectiveBatchLbs * 2,
+      );
+      const supply = computeFrontlineSupplyFromStockLbs({
+        demandLbs: info.required * info.effectiveBatchLbs,
+        consumedLbs: consumed,
+        onLineLbs: stock,
+        configuredEffectiveWeight: info.effectiveBatchLbs,
+      });
+      const productionLbs = Math.min(
+        info.effectiveBatchLbs,
+        (supply?.stillToMake ?? 0) * info.effectiveBatchLbs,
+      );
+      if (
+        !info.validForClaim
+        || input.progress?.applicatorStockInitialized !== true
+        || info.cadence <= 0
+        || !supply?.stillToMake
+        || capacity - stock + 0.0001 < productionLbs
+      ) continue;
       const channel = `${slot}-batch` as AutoTrackScheduleChannel;
-      const dueAt = Math.max(0, number(input.progress?.[`${slot}BatchAnchorNetSec`])) + info.cadence;
+      const dueAt = Math.max(
+        elapsedSec,
+        Math.max(0, number(input.progress?.[`${slot}BatchAnchorNetSec`])) + info.cadence,
+      );
       const state = input.coordination?.[channel];
       const owned = netCanonical(channel);
-      const canonicalDue = owned ? number(state?.nextDueAt) : dueAt;
+      const canonicalDue = owned ? Math.max(number(state?.nextDueAt), dueAt) : dueAt;
       entries.push({
         channel,
         dueAt: canonicalDue,
@@ -237,7 +264,8 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
       });
     }
   }
-  if (live && !input.calc.pressDone && input.progress?.applicatorStockInitialized === true) {
+  if (live && !input.calc.pressDone && number(input.v.pizzasPerCase) > 0
+    && number(input.v.casesNeeded) > 0 && input.progress?.applicatorStockInitialized === true) {
     for (const register of APPLICATOR_STOCK_REGISTERS) {
       const fields = applicatorStockFields(register);
       const onHand = Math.max(0, number(input.progress?.[fields.stock]));
@@ -251,7 +279,7 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
       const channel = `${register}-stock` as AutoTrackScheduleChannel;
       const state = input.coordination?.[channel];
       const owned = netCanonical(channel);
-      const canonicalDue = owned ? number(state?.nextDueAt) : dueAt;
+      const canonicalDue = owned ? Math.max(number(state?.nextDueAt), dueAt) : dueAt;
       entries.push({
         channel,
         dueAt: canonicalDue,

@@ -68,7 +68,7 @@ const expectedSource: SourceRecord = {
   schemaVersion: 1,
   kind: "prepared-build-source",
   appBuildId: "app-build:11111111-1111-4111-8111-111111111111",
-  sourcePolicy: "production-source-v3",
+  sourcePolicy: "production-source-v4",
   sourceFingerprintSha256: "a".repeat(64),
   gitRevision: null,
   gitBinding: "unavailable",

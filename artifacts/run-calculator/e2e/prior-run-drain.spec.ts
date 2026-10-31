@@ -1,6 +1,6 @@
 /**
- * E2E: the Packaging prior-run drain remains attached to the ended run after
- * End Run advances the active run and the operator changes tabs.
+  * E2E: the Packaging prior-run drain remains attached to the ended run after
+  * the next run starts and the operator changes tabs.
  *
  * This is intentionally a single-browser journey. Cross-device convergence is
  * covered by the dedicated multi-device suites; this test only proves the
@@ -8,6 +8,7 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -94,7 +95,9 @@ async function readStoredCounters(
 ): Promise<StoredCounters> {
   return page.evaluate((id) => {
     const raw = localStorage.getItem(`run-calc-run-${id}`);
-    const values = raw ? JSON.parse(raw) as Partial<RunValues> : {};
+    const legacy = raw ? JSON.parse(raw) as Partial<RunValues> : {};
+    const packaging = JSON.parse(localStorage.getItem("run-calc-packaging-progress") ?? "{}")[id];
+    const values = { ...legacy, ...packaging };
     return {
       casesOnCurrentSkid: Number(values.casesOnCurrentSkid) || 0,
       skidsCompleted: Number(values.skidsCompleted) || 0,
@@ -171,13 +174,15 @@ test("keeps the prior-run drain selected through next-run and tab changes", asyn
   const runBValues = {
     ...runAValues,
     casesNeeded: 100,
-    freezerTime: 0,
-    approxLineSpeed: 0,
-    crustsPerCycle: 0,
-    cycleSpeed: 0,
+    // Keep the active successor's tracker valid, but its 20-minute tunnel
+    // prevents it from producing packaged cases during this short journey.
+    freezerTime: 20,
+    approxLineSpeed: 60,
+    crustsPerCycle: 1,
+    cycleSpeed: 60,
   };
 
-  await authorizedFixtures.seedTodaySync({
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
     token: account.token,
     senderId: `prior-drain-${suffix}`,
     date,
@@ -189,8 +194,11 @@ test("keeps the prior-run drain selected through next-run and tab changes", asyn
             id: runA,
             brand: `Prior Run ${suffix}`,
             flavor: "Ended",
-            startedAt: now - 25 * 60_000,
-            endedAt: undefined,
+            // Keep a wide active drain window after the browser has loaded.
+            // The 60 PPM fixture then produces observable per-second exits
+            // without racing the 20-minute eligibility cutoff.
+            startedAt: now - 40 * 60_000,
+            endedAt: now - (20 * 60_000 - 90_000),
             metaUpdatedAt: now,
             seeded: false,
           },
@@ -204,7 +212,7 @@ test("keeps the prior-run drain selected through next-run and tab changes", asyn
             seeded: false,
           },
         ],
-        currentIndex: 0,
+        currentIndex: 1,
         resetAt: 0,
         substitutions: [],
         substitutionLog: [],
@@ -230,21 +238,33 @@ test("keeps the prior-run drain selected through next-run and tab changes", asyn
 
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
+  const failedResponses: string[] = [];
+  const manualSectionRequestBodies: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname !== "/api/sync/manual-section") return;
+    manualSectionRequestBodies.push(request.postData() ?? "");
+  });
+  page.on("response", (response) => {
+    if (response.status() < 400) return;
+    void response.text().then((body) => {
+      failedResponses.push(`${response.status()} ${response.url()}: ${body}`);
+    }).catch(() => {
+      failedResponses.push(`${response.status()} ${response.url()}: <body unavailable>`);
+    });
+  });
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
 
   await openAsManager(page, account.token, pageErrors, consoleErrors);
+  await selectCanonicalFixtureRun(page, runB);
   await page.getByTestId("tab-run").click();
   await expect(page.getByTestId("input-casesNeeded")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "STOP RUN", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByTestId("button-start-run")).toBeVisible();
 
-  // Make the end-run transition real: A is running, Stop advances selection to
-  // B, and Start begins B through the same controls an operator uses.
-  await page.getByRole("button", { name: "STOP RUN", exact: true }).click();
+  // The previous run is already ended and selected run B is pending. Start B
+  // through the same control an operator uses, then verify A drains separately.
   await expect(page.getByTestId("button-start-run")).toBeVisible();
   await expect.poll(() => readCurrentRunId(page)).toBe(runB);
 
@@ -270,13 +290,43 @@ test("keeps the prior-run drain selected through next-run and tab changes", asyn
   });
 
   // The drain effect is automatic and writes the ended run's local values.
-  // With A's 60 PPM fixture, at least one case exits during this wait.
-  await expect
-    .poll(() => readStoredCaseTotal(page, runA, runAValues.casesPerSkid), {
-      timeout: 15_000,
-      intervals: [250, 500, 1_000],
-    })
-    .toBeGreaterThan(0);
+  // With A's 60 PPM fixture, cases exit during this bounded real-time wait.
+  try {
+    await expect
+      .poll(() => readStoredCaseTotal(page, runA, runAValues.casesPerSkid), {
+        timeout: 15_000,
+        intervals: [250, 500, 1_000],
+      })
+      .toBeGreaterThan(0);
+  } catch (error) {
+    const diagnostic = await page.evaluate((id) => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        currentIndex?: number;
+        runs?: Array<{ id?: string; startedAt?: number; endedAt?: number }>;
+      };
+      const values = JSON.parse(
+        localStorage.getItem(`run-calc-run-${id}`) ?? "null",
+      );
+      const progress = JSON.parse(
+        localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+      )[id] ?? null;
+      return {
+        now: Date.now(),
+        hidden: document.hidden,
+        currentRun: day.runs?.[day.currentIndex ?? 0]?.id,
+        priorRun: day.runs?.find((run) => run.id === id) ?? null,
+        values,
+        progress,
+      };
+    }, runA);
+    const drainPanel = await drainHeading.locator("xpath=../../..").innerText();
+    throw new Error([
+      `Prior-run automatic drain stayed at zero: ${String(error)}`,
+      `Diagnostic: ${JSON.stringify(diagnostic)}`,
+      `Drain panel: ${drainPanel}`,
+      `Page errors: ${pageErrors.join("\n")}`,
+    ].join("\n"));
+  }
   const automaticCounters = await readStoredCounters(page, runA);
   const automaticTotal =
     automaticCounters.skidsCompleted * runAValues.casesPerSkid
@@ -316,5 +366,11 @@ test("keeps the prior-run drain selected through next-run and tab changes", asyn
   });
 
   expect(pageErrors).toEqual([]);
-  expect(consoleErrors).toEqual([]);
+  expect(
+    consoleErrors,
+    [
+      `HTTP error responses: ${failedResponses.join("\n")}`,
+      `Manual-section requests: ${manualSectionRequestBodies.join("\n")}`,
+    ].join("\n"),
+  ).toEqual([]);
 });

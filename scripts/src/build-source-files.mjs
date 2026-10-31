@@ -1,10 +1,20 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "./source-library-pool-approval-assets.mjs";
 
-export const SOURCE_POLICY = "production-source-v3";
+export const SOURCE_POLICY = "production-source-v4";
+export const SELF_HOST_FRESH_SOURCE_POLICY = "self-host-fresh-source-v1";
+function assertPolicy(policy) {
+  if (![SOURCE_POLICY, SELF_HOST_FRESH_SOURCE_POLICY].includes(policy))
+    throw new Error("Unsupported build-source policy.");
+}
+const FRESH_TOP_FILES = new Set(["Dockerfile", ".dockerignore", "Dockerfile.self-host", "Dockerfile.self-host.dockerignore", "docker-compose.self-host.yml"]);
+const FRESH_REQUIRED = [...FRESH_TOP_FILES, "docker", "scripts/self-host"];
+const NON_PRODUCTION_SOURCE_FILES = new Set([
+  "scripts/src/run-docker-caddy-browser-smoke.mjs",
+]);
 const SOURCE_LIBRARY_RECONCILIATION_ASSETS = new Set([
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
@@ -21,12 +31,17 @@ const SKIP_DIRS = new Set(["node_modules", "dist", "coverage", ".git", "__tests_
 const SKIP_FILES = new Set(["publish-source-record.json", "build-info.json",
   "build-source-part.json"]);
 
-export function isSourceInput(relative) {
-  if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return true;
+export function isSourceInput(relative, policy = SOURCE_POLICY) {
+  assertPolicy(policy);
+  const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY;
+  if (NON_PRODUCTION_SOURCE_FILES.has(relative)) return false;
+  if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return !fresh;
   const parts = relative.split("/");
   if (parts.some((p) => SKIP_DIRS.has(p) || p.startsWith(".env")) ||
       SKIP_FILES.has(parts.at(-1)) || /\.(?:test|spec)\.[^.]+$/.test(relative) ||
       /\.(?:log|tsbuildinfo)$/.test(relative)) return false;
+  if (fresh && (FRESH_TOP_FILES.has(relative) || relative.startsWith("docker/") ||
+      relative.startsWith("scripts/self-host/"))) return true;
   if (parts.length === 1) return TOP_FILES.has(relative) || /^tsconfig.*\.json$/.test(relative);
   if (parts[0] === "lib" || relative.startsWith("scripts/src/")) return true;
   if (parts[0] !== "artifacts" || !["api-server", "run-calculator"].includes(parts[1])) return false;
@@ -35,9 +50,15 @@ export function isSourceInput(relative) {
       ["package.json", "artifact.toml"].includes(parts[2])));
 }
 
-export function fingerprintSource(root) {
+export function fingerprintSource(root, policy = SOURCE_POLICY) {
+  assertPolicy(policy);
+  const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY;
   const sourceRoot = path.resolve(root);
-  for (const entry of REQUIRED) {
+  const required = fresh
+    ? [...REQUIRED.filter((entry) => entry !== "attached_assets/source-library/audits" &&
+        !SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(entry)), ...FRESH_REQUIRED]
+    : REQUIRED;
+  for (const entry of required) {
     let stat;
     try {
       let ancestor = sourceRoot;
@@ -49,7 +70,7 @@ export function fingerprintSource(root) {
     }
     catch { throw new Error("Required build-source inputs are missing."); }
     if (stat.isSymbolicLink()) throw new Error("Build-source symlinks are not allowed.");
-    if (entry.includes(".") ? !stat.isFile() : !stat.isDirectory())
+    if ((entry.includes(".") || (fresh && FRESH_TOP_FILES.has(entry))) ? !stat.isFile() : !stat.isDirectory())
       throw new Error("Required build-source input has an invalid type.");
   }
   const files = [];
@@ -63,7 +84,7 @@ export function fingerprintSource(root) {
         if (SKIP_DIRS.has(name) || name.startsWith(".env")) continue;
         walk(relative ? `${relative}/${name}` : name);
       }
-    } else if (isSourceInput(relative)) {
+    } else if (isSourceInput(relative, policy)) {
       if (!stat.isFile() || stat.size > 8 * 1024 * 1024)
         throw new Error("Invalid or oversized build-source input.");
       totalBytes += stat.size;
@@ -73,24 +94,25 @@ export function fingerprintSource(root) {
     }
   }
   for (const name of readdirSync(sourceRoot).sort()) {
-    if (TOP_FILES.has(name) || /^tsconfig.*\.json$/.test(name)) walk(name);
+    if (TOP_FILES.has(name) || (fresh && FRESH_TOP_FILES.has(name)) || /^tsconfig.*\.json$/.test(name)) walk(name);
   }
-  for (const base of ["lib", "scripts/src", "artifacts/api-server", "artifacts/run-calculator",
-    "attached_assets/source-library/audits"]) {
+  const bases = ["lib", "scripts/src", "artifacts/api-server", "artifacts/run-calculator",
+    ...(fresh ? ["docker", "scripts/self-host"] : ["attached_assets/source-library/audits"])];
+  for (const base of bases) {
     const names = readdirSync(path.join(sourceRoot, base)).sort();
     for (const name of names) {
       if (SKIP_DIRS.has(name) || name.startsWith(".env")) continue;
       // Only descend into directories used by these builds.
       if (base.startsWith("artifacts/") &&
-          !["src", "public", "scripts"].includes(name) && !isSourceInput(`${base}/${name}`)) continue;
+          !["src", "public", "scripts"].includes(name) && !isSourceInput(`${base}/${name}`, policy)) continue;
       walk(`${base}/${name}`);
     }
   }
   // These exact reviewed runtime assets are allowed through the otherwise
   // excluded docs/evidence tree. Never walk unrelated retained evidence.
-  for (const asset of SOURCE_LIBRARY_POOL_APPROVAL_ASSETS) walk(asset);
+  if (!fresh) for (const asset of SOURCE_LIBRARY_POOL_APPROVAL_ASSETS) walk(asset);
   files.sort();
-  const hash = createHash("sha256").update(`${SOURCE_POLICY}\0`);
+  const hash = createHash("sha256").update(`${policy}\0`);
   const gitFilesSha256 = new Map();
   for (const file of files) {
     const bytes = readFileSync(path.join(sourceRoot, file));
@@ -102,15 +124,23 @@ export function fingerprintSource(root) {
       sha256: createHash("sha256").update(bytes).digest("hex"),
     });
   }
-  return { sourcePolicy: SOURCE_POLICY, sourceFingerprintSha256: hash.digest("hex"), files, gitFilesSha256 };
+  return { sourcePolicy: policy, sourceFingerprintSha256: hash.digest("hex"), files, gitFilesSha256 };
 }
 
 export function verifiedGitRevision(root, snapshot) {
   try {
+    assertPolicy(snapshot.sourcePolicy);
     const run = (args) => execFileSync("git", args, {
       cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000,
     }).trim();
-    if (path.resolve(run(["rev-parse", "--show-toplevel"])) !== path.resolve(root)) return null;
+    const gitRoot = path.resolve(run(["rev-parse", "--show-toplevel"]));
+    const sourceRoot = path.resolve(root);
+    // Git for Windows may expand an 8.3 spelling used by the temporary/source
+    // directory. Accept only an exact native realpath match, never any parent,
+    // string-prefix match, case-folding guess or unchecked repository label.
+    // Keep the existing strict spelling comparison on other platforms.
+    if (gitRoot !== sourceRoot && (process.platform !== "win32" ||
+        realpathSync.native(gitRoot) !== realpathSync.native(sourceRoot))) return null;
     const sha = run(["rev-parse", "HEAD"]);
     if (!/^[a-f0-9]{40}$/.test(sha)) return null;
     // Compare captured bytes/modes to one immutable commit tree, not a mutable
@@ -123,7 +153,7 @@ export function verifiedGitRevision(root, snapshot) {
       if (tab < 0) continue;
       const file = entry.slice(tab + 1);
       const [mode, type, objectId] = entry.slice(0, tab).split(" ");
-      if (type === "blob" && isSourceInput(file)) committed.set(file, { mode, objectId });
+      if (type === "blob" && isSourceInput(file, snapshot.sourcePolicy)) committed.set(file, { mode, objectId });
     }
     if (committed.size !== snapshot.gitFilesSha256.size ||
         snapshot.files.some((file) => {

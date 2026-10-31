@@ -4,6 +4,7 @@ import { Router, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import {
   db,
+  deferUntilDatabaseCommit,
   cheeseRecipesTable,
   doughRecipesTable,
   ingredientsTable,
@@ -29,10 +30,12 @@ const cache = new Map<
     serialized: string;
     gzipped: Buffer;
     etag: string;
+    epoch: string;
   }
 >();
 
 export function invalidateMasterDataBootstrapCache(scope: string = currentScope()): void {
+  if (deferUntilDatabaseCommit(() => invalidateMasterDataBootstrapCache(scope))) return;
   cache.delete(scope);
 }
 
@@ -89,10 +92,11 @@ function setRepresentationHeaders(
 router.get("/master-data/bootstrap", async (req: Request, res: Response) => {
   const scope = currentScope();
   const now = Date.now();
+  const epoch = String(res.getHeader("X-Master-Data-Epoch") ?? "0");
   const cached = cache.get(scope);
 
   try {
-    let entry = cached && cached.expiresAt > now ? cached : undefined;
+    let entry = cached && cached.expiresAt > now && cached.epoch === epoch ? cached : undefined;
     if (!entry) {
       const [ingredients, doughRecipes, sauceRecipes, cheeseRecipes, mixes] =
         await Promise.all([
@@ -120,6 +124,7 @@ router.get("/master-data/bootstrap", async (req: Request, res: Response) => {
         .update(serialized)
         .digest("base64url");
       entry = {
+        epoch,
         expiresAt: now + CACHE_TTL_MS,
         serialized,
         gzipped: gzipSync(serialized),

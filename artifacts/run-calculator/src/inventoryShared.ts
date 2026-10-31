@@ -295,7 +295,7 @@ export const aggregateRunDemand = (valsList: FormValues[]): RunLine[] =>
 // Build the per-key location-stock map computeTransferNeeds expects from the
 // inventory items' byLocation breakdown.
 export function buildStockByKey(items: InventoryItem[]): Record<string, LocationStock[]> {
-  const out: Record<string, LocationStock[]> = {};
+  const out = Object.create(null) as Record<string, LocationStock[]>;
   for (const it of items) out[it.key] = it.byLocation;
   return out;
 }
@@ -1211,13 +1211,12 @@ export const updateRoleRequest = (
   name: string,
   capabilities: Capability[],
   newName?: string,
+  expectedRole?: RoleDefinition,
 ) =>
   api<RoleDefinition>(`/roles/${encodeURIComponent(name)}`, {
     method: "PUT",
     body: JSON.stringify(
-      newName !== undefined && newName !== name
-        ? { capabilities, name: newName }
-        : { capabilities },
+      { capabilities, expectedRole, ...(newName !== undefined && newName !== name ? { name: newName } : {}) },
     ),
   });
 export const deleteRoleRequest = (name: string) =>

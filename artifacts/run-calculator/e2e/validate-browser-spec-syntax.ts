@@ -18,7 +18,12 @@ export function browserSpecSyntaxErrors(
     ts.ScriptKind.TS,
   );
 
-  return sourceFile.parseDiagnostics.map((diagnostic) => {
+  // createSourceFile supplies parser diagnostics at runtime, but the public
+  // SourceFile declaration omits this compiler-internal property.
+  const parseDiagnostics = (
+    sourceFile as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }
+  ).parseDiagnostics;
+  return parseDiagnostics.map((diagnostic) => {
     const position = diagnostic.start == null
       ? ""
       : `:${sourceFile.getLineAndCharacterOfPosition(diagnostic.start).line + 1}:${

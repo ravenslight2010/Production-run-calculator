@@ -48,6 +48,7 @@ describe("applicator stock", () => {
       app1StockLbs: 80,
       app1StockAnchorNetSec: 0,
       app1StockCorrectionGeneration: 0,
+      app1StockConsumedLbs: 0,
       app2StockLbs: 100,
       app3StockLbs: 64,
       app4StockLbs: 0,

@@ -8,10 +8,15 @@ import {
   type FreezerSurplusLedger,
 } from "@workspace/freezer-pull";
 import {
+  correctFreezerSurplusDecision,
+  fetchFreezerSurplusConfirmations,
+  fetchFreezerSurplusDecision,
   fetchFreezerSurplusAdjustments,
   getFreezerSurplusRemainingMs,
+  type FreezerSurplusConfirmation,
   type FreezerSurplusAdjustment,
   type FreezerSurplusAdjustmentInput,
+  type FreezerSurplusDecision,
 } from "../freezerSurplus";
 import { useMe } from "../useRole";
 
@@ -22,6 +27,8 @@ export function FreezerSurplusPanel({
   busy,
   error,
   completedRun,
+  confirmations = [],
+  confirmationsLoaded = true,
   freezerTimeMin,
   nowMs,
   pendingRuns,
@@ -29,6 +36,7 @@ export function FreezerSurplusPanel({
   onConfirm,
   onAllocate,
   onAdjust,
+  onDecisionCorrected,
 }: {
   mode: "packaging" | "warehouse";
   ledger: FreezerSurplusLedger;
@@ -36,26 +44,45 @@ export function FreezerSurplusPanel({
   busy: boolean;
   error: string | null;
   completedRun?: RunMeta | null;
+  confirmations?: FreezerSurplusConfirmation[];
+  confirmationsLoaded?: boolean;
   freezerTimeMin?: number;
   nowMs?: number;
   pendingRuns?: RunMeta[];
   getOriginalTarget: (run: RunMeta) => number;
-  onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
+  onConfirm: (
+    run: RunMeta,
+    cases: number,
+    date?: string,
+  ) => Promise<FreezerSurplusConfirmation | void>;
   onAllocate: (run: RunMeta, allocations: Array<{ lotId: string; cases: number }>) => Promise<void>;
   onAdjust?: (
     lotId: string,
     input: FreezerSurplusAdjustmentInput,
   ) => Promise<FreezerSurplusAdjustment>;
+  onDecisionCorrected?: () => Promise<void>;
 }) {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
-  const [cases, setCases] = useState("");
-  const [productionDate, setProductionDate] = useState(todayStr());
+  const [confirmationDrafts, setConfirmationDrafts] = useState<
+    Record<string, { cases: string; productionDate: string }>
+  >({});
+  const [confirmationState, setConfirmationState] = useState<
+    Record<string, { message?: string; error?: string }>
+  >({});
+  const [locallyConfirmedRunIds, setLocallyConfirmedRunIds] = useState<string[]>([]);
+  const pendingConfirmation = useRef(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
   const [localMessage, setLocalMessage] = useState<string | null>(null);
-  const [confirmedRunId, setConfirmedRunId] = useState<string | null>(null);
   const [adjustments, setAdjustments] = useState<FreezerSurplusAdjustment[]>([]);
+  const [savedConfirmations, setSavedConfirmations] = useState<FreezerSurplusConfirmation[]>([]);
+  const [decision, setDecision] = useState<FreezerSurplusDecision | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [decisionCases, setDecisionCases] = useState("");
+  const [decisionDate, setDecisionDate] = useState(todayStr());
+  const [decisionReason, setDecisionReason] = useState("");
+  const decisionEvent = useRef<{ fingerprint: string; eventId: string } | null>(null);
   const [adjustmentsError, setAdjustmentsError] = useState<string | null>(null);
   const [adjustmentType, setAdjustmentType] =
     useState<FreezerSurplusAdjustment["eventType"]>("damage");
@@ -68,8 +95,19 @@ export function FreezerSurplusPanel({
   const runs = pendingRuns ?? [];
 
   useEffect(() => {
-    if (mode !== "warehouse" || !canManageInventory) return;
+    if (mode !== "warehouse" || !canManageInventory) {
+      setSavedConfirmations([]);
+      setDecision(null);
+      return;
+    }
+    setSavedConfirmations([]);
+    setDecision(null);
     let active = true;
+    void fetchFreezerSurplusConfirmations().then((items) => {
+      if (active) setSavedConfirmations(items);
+    }).catch((cause: unknown) => {
+      if (active) setDecisionError(cause instanceof Error ? cause.message : "Couldn't load saved surplus decisions.");
+    });
     void fetchFreezerSurplusAdjustments()
       .then((events) => {
         if (active) {
@@ -89,30 +127,130 @@ export function FreezerSurplusPanel({
     };
   }, [canManageInventory, mode]);
 
+  async function openDecision(runId: string) {
+    setDecisionError(null);
+    try {
+      const loadedDecision = await fetchFreezerSurplusDecision(runId);
+      setDecision(loadedDecision);
+      setDecisionCases(String(loadedDecision.current.cases));
+      setDecisionDate(loadedDecision.current.productionDate ?? todayStr());
+      setDecisionReason("");
+      decisionEvent.current = null;
+    } catch (cause) {
+      setDecisionError(cause instanceof Error ? cause.message : "Couldn't load this saved surplus decision.");
+    }
+  }
+
+  async function saveDecisionCorrection() {
+    if (!decision || !canManageInventory) return;
+    const cases = Number(decisionCases);
+    const reason = decisionReason.trim();
+    if (!Number.isSafeInteger(cases) || cases < 0 || cases > 1_000_000 || !reason ||
+        (cases > 0 && !decisionDate)) {
+      setDecisionError("Enter a whole-case count, a date for positive stock, and a reason.");
+      return;
+    }
+    const input = {
+      runId: decision.current.runId,
+      previousRevision: decision.revision,
+      cases,
+      ...(cases > 0 ? { productionDate: decisionDate } : {}),
+      reason,
+    };
+    const fingerprint = JSON.stringify(input);
+    const eventId = decisionEvent.current?.fingerprint === fingerprint
+      ? decisionEvent.current.eventId
+      : crypto.randomUUID();
+    decisionEvent.current = { fingerprint, eventId };
+    setDecisionError(null);
+    try {
+      const saved = await correctFreezerSurplusDecision({ ...input, eventId });
+      setDecision(saved);
+      setDecisionCases(String(saved.current.cases));
+      setDecisionDate(saved.current.productionDate ?? todayStr());
+      setDecisionReason("");
+      decisionEvent.current = null;
+      setSavedConfirmations((items) => items.map((item) =>
+        item.runId === saved.current.runId ? saved.current : item,
+      ));
+      try {
+        await onDecisionCorrected?.();
+      } catch {
+        setDecisionError("Correction saved. Refresh the warehouse stock list to show the updated balance.");
+      }
+    } catch (cause) {
+      setDecisionError(cause instanceof Error ? cause.message : "The correction was not accepted. Retry the same request.");
+    }
+  }
+
   useEffect(() => {
     if (ledger.lots.length > 0 && !ledger.lots.some((lot) => lot.id === adjustmentLotId)) {
       setAdjustmentLotId(ledger.lots[0].id);
     }
   }, [adjustmentLotId, ledger.lots]);
 
-  async function confirmLot() {
+  function updateConfirmationDraft(
+    runId: string,
+    patch: Partial<{ cases: string; productionDate: string }>,
+  ) {
+    setConfirmationDrafts((current) => ({
+      ...current,
+      [runId]: {
+        cases: current[runId]?.cases ?? "",
+        productionDate: current[runId]?.productionDate ?? todayStr(),
+        ...patch,
+      },
+    }));
+    setConfirmationState((current) => ({ ...current, [runId]: {} }));
+  }
+
+  async function confirmOutcome(run: RunMeta, rawCases: string, date: string) {
     if (!canManageInventory) return;
-    const count = Number(cases);
-    if (!completedRun || !Number.isSafeInteger(count) || count <= 0) {
-      setLocalMessage("Enter a positive whole number of excess cases.");
+    const count = Number(rawCases);
+    if (rawCases.trim() === "" || !Number.isSafeInteger(count) || count < 0 || count > 1_000_000) {
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: { error: "Enter a whole number from 0 to 1,000,000 cases." },
+      }));
       return;
     }
-    if (!productionDate) {
-      setLocalMessage("Choose the production date for this freezer lot.");
+    if (count > 0 && !date) {
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: { error: "Choose the production date for this freezer lot." },
+      }));
       return;
     }
+    if (pendingConfirmation.current) return;
+    pendingConfirmation.current = true;
+    setConfirmationState((current) => ({ ...current, [run.id]: {} }));
     try {
-      await onConfirm(completedRun, count, productionDate);
-      setCases("");
-      setConfirmedRunId(completedRun.id);
-      setLocalMessage(`Added ${count} cases as a new freezer lot dated ${productionDate}.`);
-    } catch {
-      // The parent exposes the server's actionable error.
+      const confirmation = await onConfirm(run, count, count > 0 ? date : undefined);
+      if (!confirmation || confirmation.runId !== run.id || confirmation.cases !== count) {
+        throw new Error("The server response did not match this run. Refresh the page before retrying.");
+      }
+      setLocallyConfirmedRunIds((current) =>
+        current.includes(run.id) ? current : [...current, run.id],
+      );
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: {
+          message: count === 0
+            ? "No extra cases recorded for this completed run."
+            : `Added ${count} cases as a new freezer lot dated ${date}.`,
+        },
+      }));
+    } catch (cause) {
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: {
+          error: cause instanceof Error
+            ? cause.message
+            : "Couldn't save this run's surplus outcome. Check your connection and try again.",
+        },
+      }));
+    } finally {
+      pendingConfirmation.current = false;
     }
   }
 
@@ -193,9 +331,22 @@ export function FreezerSurplusPanel({
       freezerTimeMin: freezerTimeMin ?? 0,
       nowMs: nowMs ?? 0,
     });
-    if (confirmedRunId === completedRun.id || remainingMs <= 0) return null;
+    if (!confirmationsLoaded || (
+      locallyConfirmedRunIds.includes(completedRun.id) ||
+      confirmations.some((confirmation) => confirmation.runId === completedRun.id) ||
+      remainingMs <= 0
+    )) return null;
+    const draft = confirmationDrafts[completedRun.id] ?? {
+      cases: "",
+      productionDate: todayStr(),
+    };
+    const runConfirmationState = confirmationState[completedRun.id];
     return (
-      <section className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="freezer-surplus-confirm">
+      <section
+        className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4"
+        data-testid="freezer-surplus-confirm"
+        data-run-id={completedRun.id}
+      >
         <div className="flex items-start gap-3">
           <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
@@ -212,11 +363,14 @@ export function FreezerSurplusPanel({
                 Excess cases
                 <input
                   type="number"
-                  min="1"
+                  min="0"
+                  max="1000000"
                   step="1"
                   inputMode="numeric"
-                  value={cases}
-                  onChange={(event) => setCases(event.target.value)}
+                  value={draft.cases}
+                  onChange={(event) =>
+                    updateConfirmationDraft(completedRun.id, { cases: event.target.value })
+                  }
                   className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                   aria-label="Excess finished cases"
                 />
@@ -225,19 +379,31 @@ export function FreezerSurplusPanel({
                 Production date
                 <input
                   type="date"
-                  value={productionDate}
-                  onChange={(event) => setProductionDate(event.target.value)}
+                  value={draft.productionDate}
+                  onChange={(event) =>
+                    updateConfirmationDraft(completedRun.id, { productionDate: event.target.value })
+                  }
                   className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                   aria-label="Freezer lot production date"
                 />
               </label>
               <button
                 type="button"
-                onClick={() => void confirmLot()}
+                onClick={() =>
+                  void confirmOutcome(completedRun, draft.cases, draft.productionDate)
+                }
                 disabled={busy}
                 className="self-end rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {busy ? "Saving…" : "Confirm surplus"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmOutcome(completedRun, "0", draft.productionDate)}
+                disabled={busy}
+                className="rounded-md border border-primary/40 px-3 py-2 text-sm font-semibold text-foreground disabled:opacity-50"
+              >
+                No extra cases
               </button>
             </div>
             ) : (
@@ -251,8 +417,16 @@ export function FreezerSurplusPanel({
                 </p>
               </div>
             )}
-            {localMessage && <p className="mt-2 text-xs font-medium text-primary" role="status">{localMessage}</p>}
-            {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
+            {runConfirmationState?.message && (
+              <p className="mt-2 text-xs font-medium text-primary" role="status">
+                {runConfirmationState.message}
+              </p>
+            )}
+            {(runConfirmationState?.error || error) && (
+              <p className="mt-2 text-xs font-semibold text-destructive" role="alert">
+                {runConfirmationState?.error || error}
+              </p>
+            )}
           </div>
         </div>
       </section>
@@ -355,6 +529,80 @@ export function FreezerSurplusPanel({
               );
             })}
           </div>
+          {canManageInventory && (
+            <section className="mt-4 rounded-lg border border-primary/30 bg-background/60 p-3">
+              <h3 className="text-sm font-semibold">Correct a saved surplus decision</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Corrections require a reason. Allocated, used or unavailable stock cannot be removed, and dates cannot change after allocation or adjustment.
+              </p>
+              {savedConfirmations.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">No saved run decisions are available to correct.</p>
+              ) : (
+                <label className="mt-2 block text-xs font-semibold text-muted-foreground">
+                  Saved run decision
+                  <select
+                    value={decision?.current.runId ?? ""}
+                    onChange={(event) => event.target.value && void openDecision(event.target.value)}
+                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    aria-label="Saved surplus decision to correct"
+                  >
+                    <option value="">Choose a run…</option>
+                    {savedConfirmations.map((confirmation) => (
+                      <option key={confirmation.runId} value={confirmation.runId}>
+                        {confirmation.runDate} · {confirmation.brand}{confirmation.flavor ? ` — ${confirmation.flavor}` : ""} · {confirmation.cases} cases
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {decision && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Original: {decision.original.cases} cases{decision.original.productionDate ? ` dated ${decision.original.productionDate}` : ""}. Current: {decision.current.cases} cases{decision.current.productionDate ? ` dated ${decision.current.productionDate}` : ""}.
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[8rem_10rem_1fr]">
+                    <label className="text-xs font-semibold text-muted-foreground">
+                      Corrected cases
+                      <input type="number" min="0" max="1000000" step="1" inputMode="numeric"
+                        value={decisionCases} onChange={(event) => {
+                          setDecisionCases(event.target.value); decisionEvent.current = null;
+                        }}
+                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground" />
+                    </label>
+                    <label className="text-xs font-semibold text-muted-foreground">
+                      Production date
+                      <input type="date" disabled={Number(decisionCases) === 0} value={decisionDate}
+                        onChange={(event) => {
+                          setDecisionDate(event.target.value); decisionEvent.current = null;
+                        }}
+                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground disabled:opacity-50" />
+                    </label>
+                    <label className="text-xs font-semibold text-muted-foreground">
+                      Required reason
+                      <input maxLength={1000} value={decisionReason} onChange={(event) => {
+                        setDecisionReason(event.target.value); decisionEvent.current = null;
+                      }}
+                        placeholder="Explain the correction"
+                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground" />
+                    </label>
+                  </div>
+                  <button type="button" disabled={busy || !decisionReason.trim()}
+                    onClick={() => void saveDecisionCorrection()}
+                    className="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">
+                    Save correction
+                  </button>
+                  {decision.corrections.length > 0 && (
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {decision.corrections.slice(0, 10).map((entry) => (
+                        <li key={entry.eventId}>{entry.cases} cases · {entry.reason} · {entry.actorId} · {new Date(entry.createdAt).toLocaleString()}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {decisionError && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{decisionError}</p>}
+            </section>
+          )}
           {canManageInventory && onAdjust && (
             <section
               className="mt-4 rounded-lg border border-amber-500/30 bg-background/70 p-3"

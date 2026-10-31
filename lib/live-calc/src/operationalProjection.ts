@@ -13,6 +13,24 @@ export const OPERATIONAL_PROJECTION_VERSION = 1 as const;
 /** Outer line stages default (press->tunnel, tunnel->packaging), in minutes. */
 export const PRE_POST_TUNNEL_DEFAULT_MIN = 2.5 as const;
 
+export const STATION_ACTIVITY_IDS = [
+  "dough",
+  "sauce",
+  "press",
+  "frontline",
+  "freezeTunnel",
+  "packaging",
+  "warehouse",
+] as const;
+
+export type StationActivityId = (typeof STATION_ACTIVITY_IDS)[number];
+export type StationActivitySource = "automatic" | "manual" | "confirmed";
+export type StationActivityEvidence = {
+  runId: string;
+  eventAtServerMs: number;
+  source: StationActivitySource;
+};
+
 export type OperationalProjection = {
   version: typeof OPERATIONAL_PROJECTION_VERSION;
   runId: string;
@@ -21,6 +39,8 @@ export type OperationalProjection = {
   capturedAtServerMs: number;
   calculationRevision: number;
   effectiveElapsedSec: number;
+  /** Server-accepted station events, transported separately from persisted sync data. */
+  stationActivity?: Partial<Record<StationActivityId, StationActivityEvidence>> | null;
   /** Day-state-owned 3-stage line model (press/frontline, tunnel, packaging). */
   linePhases: LinePhases;
   timers: {
@@ -83,8 +103,13 @@ export function buildOperationalProjection(args: {
   schedule: AutoTrackSchedule;
   nowMs: number;
   calculationRevision?: number;
+  stationActivity?: Partial<Record<StationActivityId, StationActivityEvidence>> | null;
 }): OperationalProjection {
-  const run = args.payload.dayState.runs[args.payload.dayState.currentIndex ?? 0];
+  const run = args.payload.dayState.runs.find((entry) => entry.id === args.serverCalc.runId);
+  if (!run || args.schedule.runId !== run.id
+    || args.schedule.generation !== `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`) {
+    throw new Error("Operational projection requires matching run, calculation, and schedule identities");
+  }
   const raw = args.payload.runValues?.[args.serverCalc.runId] ?? {};
   const progress = args.payload.packagingProgress?.[args.serverCalc.runId] ?? {};
   const v = applyTemporaryOverrides({ ...raw, ...progress }) as Record<string, unknown>;
@@ -138,8 +163,10 @@ export function buildOperationalProjection(args: {
     pauseStopsTunnel: openPause?.stopTunnel !== false,
     lastPauseStopsTunnel: lastClosedPause?.stopTunnel !== false,
     runStatus: runStatus(run),
-    preTunnelMin: number(v.preTunnelMin) > 0 ? number(v.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN,
-    postTunnelMin: number(v.postTunnelMin) > 0 ? number(v.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN,
+    pressOvenMin: typeof v.pressOvenMin === "number" ? v.pressOvenMin : undefined,
+    frontlineMin: typeof v.frontlineMin === "number" ? v.frontlineMin : undefined,
+    preTunnelMin: typeof v.preTunnelMin === "number" ? v.preTunnelMin : PRE_POST_TUNNEL_DEFAULT_MIN,
+    postTunnelMin: typeof v.postTunnelMin === "number" ? v.postTunnelMin : PRE_POST_TUNNEL_DEFAULT_MIN,
     freezerTime: Math.max(0, number(v.freezerTime)),
     nowMs: args.nowMs,
     endedAt: run.endedAt,
@@ -153,6 +180,7 @@ export function buildOperationalProjection(args: {
     capturedAtServerMs: args.nowMs,
     calculationRevision: args.calculationRevision ?? 0,
     effectiveElapsedSec,
+    stationActivity: args.stationActivity ?? null,
     linePhases,
     timers: {
       nextBatchInSec,

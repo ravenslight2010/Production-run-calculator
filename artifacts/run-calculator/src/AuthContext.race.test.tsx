@@ -92,6 +92,7 @@ function IdentityProbe() {
   return (
     <>
       <output data-testid="identity">{me?.userId ?? "signed-out"}</output>
+      <output data-testid="capabilities">{me?.capabilities.join(",") ?? "none"}</output>
       <output data-testid="fresh-session">{consumed}</output>
       <button type="button" onClick={() => void signIn("manager", "password")}>
         Sign in
@@ -157,6 +158,30 @@ afterEach(() => {
 });
 
 describe("AuthProvider session transition", () => {
+  it("refreshes capabilities for an open client", async () => {
+    vi.useFakeTimers();
+    mocks.fetchMe
+      .mockResolvedValueOnce(manager)
+      .mockResolvedValueOnce({
+        ...manager,
+        capabilities: [...manager.capabilities, "manage-factory-settings"],
+      });
+
+    try {
+      renderAuth();
+      await vi.waitFor(() => expect(screen.getByTestId("identity").textContent).toBe("manager-1"));
+      expect(screen.getByTestId("capabilities").textContent).not.toContain("manage-factory-settings");
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() =>
+        expect(screen.getByTestId("capabilities").textContent).toContain("manage-factory-settings"),
+      );
+      expect(mocks.fetchMe).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a sign-in identity when the cold /me probe and a stale 401 settle late", async () => {
     const initialProbe = deferred<StaffMember>();
     mocks.fetchMe.mockReturnValueOnce(initialProbe.promise);

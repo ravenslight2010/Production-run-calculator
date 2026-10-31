@@ -166,7 +166,11 @@ async function main() {
   console.log(JSON.stringify(receipt));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// An imported CLI's import.meta.url becomes the entry bundle URL after esbuild.
+// Never execute its command-line workflow when bundled into the API server.
+if (process.argv[1] &&
+    path.basename(fileURLToPath(import.meta.url)) === "verify-published-build.mjs" &&
+    path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
     const safeReasons = new Set([
       "Invalid version-check arguments.",

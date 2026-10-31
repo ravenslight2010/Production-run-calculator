@@ -15,6 +15,19 @@ release-evidence
 release-evidence-full
 screenshots
 .cache
+.config/
+tmp/
 Dockerfile
 docker-compose.yml
 docker-compose.local-ai.yml
+# The smoke runner executes on the host and is not an application build input.
+scripts/src/run-docker-caddy-browser-smoke.mjs
+# Uploaded workbooks, archives, screenshots, and unrelated retained evidence
+# are not Docker build inputs. Keep the reviewed audit bundle required by the
+# source-identity and API build checks.
+attached_assets/**
+!attached_assets/
+!attached_assets/source-library/
+!attached_assets/source-library/audits/
+!attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json
+!attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256

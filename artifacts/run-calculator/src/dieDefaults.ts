@@ -23,6 +23,8 @@ export interface DieLineDefaults {
   // other die line-setting fields.
   preTunnelMin?: number;
   postTunnelMin?: number;
+  pressOvenMin?: number;
+  frontlineMin?: number;
 }
 
 const SEVEN: DieLineDefaults = {
@@ -68,6 +70,8 @@ const UNTOUCHED: Required<DieLineDefaults> = {
   casesPerLayer: 0,
   preTunnelMin: 0,
   postTunnelMin: 0,
+  pressOvenMin: 0,
+  frontlineMin: 0,
 };
 
 /** Manager overrides keyed by case-folded die name (see dieLineDefaultsServer). */
@@ -199,6 +203,7 @@ export function resolveDieLineDefaults(
   const out: Partial<DieLineDefaults> = {};
   for (const key of Object.keys(defaults) as (keyof DieLineDefaults)[]) {
     if (defaults[key] === undefined) continue;
+    if ((key === "pressOvenMin" || key === "frontlineMin") && current[key] != null) continue;
     const cur = Number(current[key] ?? UNTOUCHED[key]);
     const untouched =
       !Number.isFinite(cur) ||
@@ -242,6 +247,7 @@ export function resolveDieLineDefaultsOnSwitch(
   const out: Partial<DieLineDefaults> = {};
   for (const key of Object.keys(defaults) as (keyof DieLineDefaults)[]) {
     if (defaults[key] === undefined) continue;
+    if ((key === "pressOvenMin" || key === "frontlineMin") && current[key] != null) continue;
     const cur = Number(current[key] ?? UNTOUCHED[key]);
     const replaceable =
       !Number.isFinite(cur) ||

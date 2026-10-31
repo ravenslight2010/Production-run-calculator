@@ -37,6 +37,7 @@ import {
   computePackagingDrainElapsedSec,
   computeEndedRunElapsedSec,
   lineHasPackagingDrain,
+  linePhaseRows,
   type LinePhases,
 } from "../linePhases";
 import { pauseStopsTunnel } from "../pausePolicy";
@@ -53,6 +54,7 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   classifyOperationalDisplay,
+  LIVE_CALC_STALE_MS,
   shouldUseServerCalc,
   type OperationalDisplayState,
   type OperationalSnapshotReceipt,
@@ -118,6 +120,9 @@ export interface LiveRunContextValue {
   /** Local ticking values remain projections until this run has a server receipt. */
   operationalDisplayState: OperationalDisplayState;
   operationalSnapshotReceipt: OperationalSnapshotReceipt | null;
+  /** Fresh, selected-run activity evidence from the server projection only. */
+  stationActivity: OperationalProjection["stationActivity"] | null;
+  stationActivityNowMs: number;
 }
 
 // Module-level calcRef is kept as a compatibility export for existing callers.
@@ -160,7 +165,7 @@ export interface LiveRunProviderProps {
     claim: AutoTrackEventClaim,
     outcome: AutoTrackEventResult["outcome"],
   ) => void;
-  onAutoTrackProgressChange?: (enabled: boolean) => void;
+  onAutoTrackProgressChange?: (enabled: boolean) => boolean | void;
   operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
   operationalServerCalc?: Calc | null;
   operationalProjection?: OperationalProjection | null;
@@ -226,7 +231,19 @@ export function LiveRunProvider({
     receipt: operationalSnapshotReceipt,
   });
   const confirmedProjection =
-    operationalDisplayState === "confirmed" && operationalProjection?.runId === currentRunId
+    operationalDisplayState === "confirmed"
+      && operationalProjection?.runId === currentRunId
+      && operationalProjection.lifecycleGeneration === `${currentRunId}:${currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0}`
+      && operationalProjection.facts.runStatus === runStatus
+      && shouldUseServerCalc({
+        online: operationalOnline,
+        syncConnected: operationalSyncConnected,
+        receipt: operationalSnapshotReceipt,
+        nowMs: nowTime.getTime() + serverClockOffsetMs,
+      })
+      && Number.isFinite(operationalProjection.capturedAtServerMs)
+      && nowTime.getTime() + serverClockOffsetMs >= operationalProjection.capturedAtServerMs
+      && nowTime.getTime() + serverClockOffsetMs - operationalProjection.capturedAtServerMs <= LIVE_CALC_STALE_MS
       ? operationalProjection
       : null;
   // This is a display-only rebase between server frames. It never writes a
@@ -247,7 +264,7 @@ export function LiveRunProvider({
     }
     if (!currentRun?.startedAt) return 0;
     if (currentRun.endedAt) return Number(ve.freezerTime);
-    const refTime = currentRun.pausedAt ?? nowTime.getTime();
+    const refTime = currentRun.pausedAt ?? operationalNowMs;
     const elapsed = (refTime - currentRun.startedAt) / 60000;
     return Math.min(elapsed, Number(ve.freezerTime));
   })();
@@ -259,6 +276,7 @@ export function LiveRunProvider({
   // computeCalc — never a blank UI.
   const adoptServerCalc =
     operationalServerCalc != null &&
+    (!operationalProjection || confirmedProjection != null) &&
     currentRunId === currentRun?.id &&
     operationalSnapshotReceipt?.runId === currentRunId &&
     shouldUseServerCalc({
@@ -267,6 +285,14 @@ export function LiveRunProvider({
       receipt: operationalSnapshotReceipt,
       nowMs: nowTime.getTime() + serverClockOffsetMs,
     });
+  const stationActivityProjectionFresh = !!(
+    adoptServerCalc
+    && confirmedProjection
+    && confirmedProjection.runId === currentRunId
+    && Number.isFinite(confirmedProjection.capturedAtServerMs)
+    && operationalNowMs >= confirmedProjection.capturedAtServerMs
+    && operationalNowMs - confirmedProjection.capturedAtServerMs <= LIVE_CALC_STALE_MS
+  );
   const calc = useMemo((): Calc => {
     if (adoptServerCalc) {
       // Server-authority calc: the streamed server calc is fresh and tied to
@@ -280,7 +306,7 @@ export function LiveRunProvider({
       v,
       ve,
       currentRun,
-      nowTimeMs: nowTime.getTime(),
+      nowTimeMs: operationalNowMs,
       doughSubTab,
       defaultPepTypes: DEFAULT_PEP_TYPES,
     });
@@ -288,7 +314,7 @@ export function LiveRunProvider({
       recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
     }
     return result;
-  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, adoptServerCalc, operationalServerCalc]);
+  }, [v, ve, liveFreezerMin, currentRun, operationalNowMs, doughSubTab, adoptServerCalc, operationalServerCalc]);
 
   const currentRunDowntimeMs = useMemo(
     () =>
@@ -309,7 +335,7 @@ export function LiveRunProvider({
         })),
       })
     : currentRun?.startedAt
-      ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
+      ? Math.max(0, ((currentRun.pausedAt ?? operationalNowMs) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
       : 0;
   const elapsedBatchSec = confirmedProjection
     ? confirmedProjection.effectiveElapsedSec + (
@@ -320,7 +346,7 @@ export function LiveRunProvider({
     : localElapsedBatchSec;
 
   const serverLinePhases = confirmedProjection?.linePhases ?? null;
-  // Slice 5: the 3-stage line-phase model is server-owned. While a confirmed
+  // The four-section line-phase model is server-owned. While a confirmed
   // projection exists for the current run AND its lifecycle stamp matches the
   // local run status (a just-paused/ended run falls back locally for at most
   // one tick until the server delivers the new lifecycle frame), adopt the
@@ -349,24 +375,35 @@ export function LiveRunProvider({
       pauseStopsTunnel: pauseStopsTunnel(openPause),
       lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
       runStatus,
-      preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
-      postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
+      pressOvenMin: ve.pressOvenMin,
+      frontlineMin: ve.frontlineMin,
+      preTunnelMin: ve.preTunnelMin,
+      postTunnelMin: ve.postTunnelMin,
       freezerTime: Number(ve.freezerTime),
       nowMs: operationalNowMs,
       endedAt: currentRun?.endedAt,
     });
-    if (
-      !serverLinePhases ||
-      !confirmedProjection ||
-      confirmedProjection.facts.runStatus !== runStatus
-    ) {
+    if (!serverLinePhases || !confirmedProjection || confirmedProjection.facts.runStatus !== runStatus) {
       return local;
     }
     const deltaMs = Math.max(0, operationalNowMs - confirmedProjection.capturedAtServerMs);
-    const wouldTransition = [serverLinePhases.stage1, serverLinePhases.stage2, serverLinePhases.stage3]
+    const wouldTransition = linePhaseRows(serverLinePhases)
       .some((phase) => phase.remainMs > 0 && phase.remainMs - deltaMs <= 0);
     if (wouldTransition) return local;
     return {
+      ...(serverLinePhases.sections ? {
+        sections: {
+          pressOven: { ...serverLinePhases.sections.pressOven, remainMs: Math.max(0, serverLinePhases.sections.pressOven.remainMs - deltaMs) },
+          frontline: { ...serverLinePhases.sections.frontline, remainMs: Math.max(0, serverLinePhases.sections.frontline.remainMs - deltaMs) },
+          freezeTunnel: { ...serverLinePhases.sections.freezeTunnel, remainMs: Math.max(0, serverLinePhases.sections.freezeTunnel.remainMs - deltaMs) },
+          packaging: { ...serverLinePhases.sections.packaging, remainMs: Math.max(0, serverLinePhases.sections.packaging.remainMs - deltaMs) },
+        },
+      } : {
+        // Older servers still own the original numbered stages. Derive only
+        // the additive physical sections from the same confirmed elapsed clock
+        // so the new UI does not revert to a combined Press/Oven/Frontline row.
+        sections: local.sections,
+      }),
       stage1: { ...serverLinePhases.stage1, remainMs: Math.max(0, serverLinePhases.stage1.remainMs - deltaMs) },
       stage2: { ...serverLinePhases.stage2, remainMs: Math.max(0, serverLinePhases.stage2.remainMs - deltaMs) },
       stage3: { ...serverLinePhases.stage3, remainMs: Math.max(0, serverLinePhases.stage3.remainMs - deltaMs) },
@@ -382,6 +419,8 @@ export function LiveRunProvider({
     runStatus,
     ve.freezerTime,
     ve.preTunnelMin,
+    ve.pressOvenMin,
+    ve.frontlineMin,
     ve.postTunnelMin,
   ]);
   const packagingDrainActive =
@@ -407,7 +446,7 @@ export function LiveRunProvider({
         ? operationalServerCalc
         : calc);
   const packagingAutoTrackActive =
-    runStatus !== "running" || linePhases.stage3.state === "active";
+    runStatus !== "running" || (linePhases.sections?.packaging ?? linePhases.stage3).state === "active";
   const packagingDrainElapsedSec = computePackagingDrainElapsedSec({
     elapsedBatchSec,
     pausedAt: currentRun?.pausedAt,
@@ -423,10 +462,12 @@ export function LiveRunProvider({
       return pauseStopsTunnel(openPause);
     })(),
     runStatus,
-    preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
-    postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
+    pressOvenMin: ve.pressOvenMin,
+    frontlineMin: ve.frontlineMin,
+    preTunnelMin: ve.preTunnelMin,
+    postTunnelMin: ve.postTunnelMin,
     freezerTime: Number(ve.freezerTime),
-    nowMs: nowTime.getTime(),
+    nowMs: operationalNowMs,
   });
 
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
@@ -527,6 +568,7 @@ export function LiveRunProvider({
       packagingDrainElapsedSec,
       packagingAutoTrackActive,
       nowTime,
+      serverClockOffsetMs,
       elapsedBatchSec,
       calc,
       v: ve,
@@ -552,8 +594,8 @@ export function LiveRunProvider({
   const setAutoTrackProgress = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
     (next) => {
       const enabled = typeof next === "function" ? next(autoTrackProgress) : next;
+      if (onAutoTrackProgressChange?.(enabled) === false) return;
       setLocalAutoTrackProgress(enabled);
-      onAutoTrackProgressChange?.(enabled);
     },
     [autoTrackProgress, onAutoTrackProgressChange, setLocalAutoTrackProgress],
   );
@@ -719,6 +761,10 @@ export function LiveRunProvider({
       packagingDrainActive,
       operationalDisplayState,
       operationalSnapshotReceipt,
+      stationActivity: stationActivityProjectionFresh
+        ? confirmedProjection?.stationActivity ?? null
+        : null,
+      stationActivityNowMs: operationalNowMs,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
@@ -737,6 +783,9 @@ export function LiveRunProvider({
       packagingDrainActive,
       operationalDisplayState,
       operationalSnapshotReceipt,
+      stationActivityProjectionFresh,
+      confirmedProjection,
+      operationalNowMs,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     ],
   );

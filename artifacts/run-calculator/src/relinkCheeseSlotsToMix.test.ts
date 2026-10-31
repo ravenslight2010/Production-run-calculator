@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // @vitest-environment jsdom
 //
 // relinkCheeseSlotsToMixInProfiles — after a manager moves a misfiled blend

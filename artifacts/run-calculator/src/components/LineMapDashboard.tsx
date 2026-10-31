@@ -1,9 +1,14 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useLiveRun } from "../contexts/LiveRunContext";
-import { fmtCountdownParts, fmtNum } from "../utils";
-import { deriveFrontlineNeedRows } from "../frontlineRows";
+import { fmtCountdownParts, fmtNum, todayStr } from "../utils";
+import {
+  deriveFrontlineIngredientNeeds,
+  deriveFrontlineNeedRows,
+} from "../frontlineRows";
 import type { HomeTab } from "../hooks/useHomeNavigation";
+import type { ScheduledDay, ScheduledRun } from "../scheduledDays";
+import { resolveLineTiming, type PhaseInfo, type StationActivityEvidence } from "@workspace/live-calc";
 import {
   Layers, Droplets, Flame, Boxes, Snowflake, Package, Warehouse,
   ArrowRight, Play, Pause, Square, Clock, AlertTriangle,
@@ -21,17 +26,100 @@ const ZONE_COLORS = {
 } as const;
 
 type ZoneId = keyof typeof ZONE_COLORS;
+type ScheduledRunPreview = { date: string; run: ScheduledRun };
 
+function isValidScheduleDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
+function findNextScheduledRun(
+  days: ScheduledDay[] | undefined,
+  today: string,
+): ScheduledRunPreview | null {
+  if (!Array.isArray(days)) return null;
+
+  const orderedDays = [...days]
+    .filter((day) => isValidScheduleDate(day.date) && day.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  for (const day of orderedDays) {
+    const run = day.runs.find(
+      (candidate) => candidate.brand.trim() || candidate.flavor.trim(),
+    );
+    if (run) return { date: day.date, run };
+  }
+
+  return null;
+}
+
+function formatScheduleDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(year, month - 1, day, 12));
+}
+
+function scheduledRunLabel(run: ScheduledRun): string {
+  return [run.brand.trim(), run.flavor.trim()].filter(Boolean).join(" – ");
+}
+
+function currentProductLabel(
+  currentRun: { brand?: string; flavor?: string } | null | undefined,
+): string {
+  if (!currentRun) return "";
+  return [currentRun.brand?.trim(), currentRun.flavor?.trim()]
+    .filter(Boolean)
+    .join(" – ");
+}
 interface ZoneStatus {
   id: ZoneId;
   label: string;
   icon: React.ReactNode;
   navTab: HomeTab;
   status: "active" | "idle" | "stopped" | "upstream";
-  metrics: { label: string; value: string }[];
+  reason?: string;
+  metrics: {
+    label: string;
+    value: string;
+    details?: { label: string; value: string }[];
+  }[];
   sub?: string;
+  activityAge?: string;
+  confirmActivity?: boolean;
 }
 type RunLifecycleStatus = "pending" | "running" | "paused" | "ended";
+
+function formatStationActivityAge(
+  evidence: StationActivityEvidence | undefined,
+  runId: string | undefined,
+  serverNowMs: number,
+): string {
+  if (
+    !evidence
+    || !runId
+    || evidence.runId !== runId
+    || !Number.isFinite(evidence.eventAtServerMs)
+    || evidence.eventAtServerMs <= 0
+    || !Number.isFinite(serverNowMs)
+    || serverNowMs < evidence.eventAtServerMs
+  ) return "Time since last confirmed activity: unknown";
+  const totalSeconds = Math.floor((serverNowMs - evidence.eventAtServerMs) / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const age = hours > 0
+    ? `${hours}h ${minutes}m`
+    : minutes > 0
+      ? `${minutes}m ${seconds}s`
+      : `${seconds}s`;
+  return `Time since last confirmed activity: ${age}`;
+}
 
 function deriveStationStatus(
   runStatus: RunLifecycleStatus,
@@ -45,6 +133,18 @@ function deriveStationStatus(
   return isActive ? "active" : "idle";
 }
 
+function deriveStationReason(
+  status: ZoneStatus["status"],
+  runStatus: RunLifecycleStatus,
+  hasRun: boolean,
+): string | undefined {
+  if (status === "upstream") return "Run is waiting to start";
+  if (status !== "idle") return undefined;
+  if (!hasRun) return "No active run selected";
+  if (runStatus === "paused") return "Line is paused";
+  if (runStatus === "running") return "No current station activity";
+  return undefined;
+}
 function statusBadge(status: ZoneStatus["status"]) {
   const map = {
     active:  { cls: "bg-emerald-500", label: "Running" },
@@ -62,15 +162,25 @@ function statusBadge(status: ZoneStatus["status"]) {
 }
 
 export default function LineMapDashboard() {
-  const { v, ve, currentRun, dayState, runStatus, activePackagingRows, activeWarehouseRows } = useHomeTabCtx();
+  const {
+    v, ve, currentRun, dayState, runStatus, activePackagingRows,
+    activeWarehouseRows, scheduledDays, navigate, confirmStationActivity, isOnline,
+  } = useHomeTabCtx();
   const {
     calc, nowTime, elapsedBatchSec,
     liveFreezerMin, casesPct, casesFreezerPct, casesPctWithFreezer,
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
     autoTrackProgress, autoTrackSuggestion,
+    stationActivity, stationActivityNowMs,
+    linePhases,
   } = useLiveRun();
+  const liveSections = linePhases?.sections;
 
-  const navigate = useHomeTabCtx().navigate ?? (() => {});
+  const goToTab = navigate ?? (() => {});
+  const productLabel = currentProductLabel(currentRun);
+  const nextScheduledRun = !currentRun
+    ? findNextScheduledRun(scheduledDays, todayStr())
+    : null;
 
   const zones = useMemo<ZoneStatus[]>(() => {
     const isRunning = runStatus === "running";
@@ -100,20 +210,34 @@ export default function LineMapDashboard() {
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Press/Oven (derived from calc — cases left / completed)
-    const pressStatus = deriveStationStatus(runStatus, hasRun, isRunning && calc.pressCasesLeft > 0);
+    const timing = resolveLineTiming(ve);
+    const sections = liveSections;
+    const sectionStatus = (phase: PhaseInfo | undefined, fallback: ZoneStatus["status"]): ZoneStatus["status"] => {
+      if (!phase) return fallback;
+      if (phase.state === "paused") return "stopped";
+      if (phase.state !== "empty") return "active";
+      return runStatus === "ended" ? "stopped" : runStatus === "pending" ? "upstream" : "idle";
+    };
+    const pressStatus = sectionStatus(sections?.pressOven, deriveStationStatus(runStatus, hasRun, isRunning && calc.pressCasesLeft > 0));
     const pressMetrics = [
       calc.pressCasesLeft > 0 ? { label: "Cases left", value: String(calc.pressCasesLeft) } : null,
       calc.casesCompleted > 0 ? { label: "Cases done", value: `${fmtNum(calc.casesCompleted)} / ${fmtNum(v.casesNeeded)}` } : null,
-      calc.ppm > 0 ? { label: "Line speed", value: `${fmtNum(calc.ppm)} ppm` } : null,
+      calc.ppm > 0 ? { label: "Pair rate", value: `${fmtNum(calc.ppm / 2)} pairs/min` } : null,
+      calc.ppm > 0 ? { label: "Pizza rate", value: `${fmtNum(calc.ppm)} pizzas/min` } : null,
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Frontline (apps + pep)
     const frontlineStatus = (() => {
-      return deriveStationStatus(runStatus, hasRun, isRunning && pressStatus === "active");
+      return sectionStatus(sections?.frontline, deriveStationStatus(runStatus, hasRun, isRunning && pressStatus === "active"));
     })();
     const hasConfiguredPep = [v.pep1Type, v.pep1TypeB, v.pep2Type, v.pep2TypeB]
       .some((type) => typeof type === "string" && type.trim().length > 0);
-    const frontlineRows = v.sauceOzPerPizza > 0 || v.app1OzPerPizza > 0 || v.app2OzPerPizza > 0 || hasConfiguredPep
+    const frontlineRows = v.sauceOzPerPizza > 0
+      || v.app1OzPerPizza > 0
+      || v.app2OzPerPizza > 0
+      || v.app3OzPerPizza > 0
+      || v.app4OzPerPizza > 0
+      || hasConfiguredPep
       ? deriveFrontlineNeedRows(v, {
           productionNeedsAvailable: true,
           sauceLbs: calc.sauceEffBarrel * (v.sauceBarrelsMade || 1),
@@ -128,22 +252,27 @@ export default function LineMapDashboard() {
           pep2LbsB: calc.pep2LbsB, pep2BatchesB: calc.pep2BatchesB,
         })
       : [];
-    const frontlineMetrics = frontlineRows.slice(0, 3).map(r => ({
-      label: r.label,
-      value: `${fmtNum(r.amount)} ${r.unit}`,
+    const frontlineIngredientNeeds = deriveFrontlineIngredientNeeds(v, frontlineRows);
+    const frontlineMetrics = frontlineRows.map((row) => ({
+      label: row.label,
+      value: `${fmtNum(row.amount)} ${row.unit}`,
+      details: frontlineIngredientNeeds[row.key]?.map((ingredient) => ({
+        label: ingredient.ingredient,
+        value: `${fmtNum(ingredient.amountLbs)} lbs`,
+      })),
     }));
 
     // Freeze Tunnel (derived from calc — cases in freezer)
-    const tunnelStatus = deriveStationStatus(runStatus, hasRun, isRunning && calc.casesInFreezer > 0);
+    const tunnelStatus = sectionStatus(sections?.freezeTunnel, deriveStationStatus(runStatus, hasRun, isRunning && calc.casesInFreezer > 0));
     const tunnelMetrics = [
       calc.casesInFreezer > 0 ? { label: "Cases in tunnel", value: String(calc.casesInFreezer) } : null,
       casesFreezerPct > 0 ? { label: "Fill level", value: `${Math.round(casesFreezerPct * 100)}%` } : null,
-      ve.freezerTime > 0 ? { label: "Transit time", value: `${fmtNum(ve.freezerTime)} min` } : null,
+      ve.freezerTime > 0 ? { label: "Tunnel transit", value: `${fmtNum(timing.tunnelMin)} min` } : null,
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Packaging (derived from calc — cases completed vs needed)
     const packActive = calc.casesCompleted > 0 && calc.casesCompleted < v.casesNeeded;
-    const packStatus = deriveStationStatus(runStatus, hasRun, isRunning && packActive);
+    const packStatus = sectionStatus(sections?.packaging, deriveStationStatus(runStatus, hasRun, isRunning && packActive));
     const packMetrics = [
       autoTrackSuggestion ? { label: "Skids", value: `${autoTrackSuggestion.skids} full` } : null,
       autoTrackSuggestion ? { label: "Current skid", value: `${autoTrackSuggestion.casesOnSkid} / ${v.casesPerSkid}` } : null,
@@ -155,16 +284,31 @@ export default function LineMapDashboard() {
       { label: "Target", value: fmtNum(v.casesNeeded) },
     ];
 
-    return [
+    const stationZones: ZoneStatus[] = [
       { id: "dough" as ZoneId, label: "Dough", icon: <Layers className="w-5 h-5" />, navTab: "dough", status: doughStatus, metrics: doughMetrics, sub: "Mix · Form · Stage" },
       { id: "sauce" as ZoneId, label: "Sauce", icon: <Droplets className="w-5 h-5" />, navTab: "sauce", status: sauceStatus, metrics: sauceMetrics, sub: "Mix · Barrel" },
-      { id: "press" as ZoneId, label: "Press / Oven", icon: <Flame className="w-5 h-5" />, navTab: "run", status: pressStatus, metrics: pressMetrics, sub: `Pre-tunnel ${fmtNum(v.preTunnelMin || 2.5)} min` },
-      { id: "frontline" as ZoneId, label: "Frontline", icon: <Boxes className="w-5 h-5" />, navTab: "frontline", status: frontlineStatus, metrics: frontlineMetrics, sub: "App 1-4 · Pep 1-2" },
+      { id: "press" as ZoneId, label: "Press / Oven", icon: <Flame className="w-5 h-5" />, navTab: "run", status: pressStatus, metrics: pressMetrics, sub: `Pairs · ${fmtNum(timing.pressOvenMin)} min · ${sections?.pressOven.state ?? pressStatus}` },
+      { id: "frontline" as ZoneId, label: "Frontline", icon: <Boxes className="w-5 h-5" />, navTab: "frontline", status: frontlineStatus, metrics: frontlineMetrics, sub: `Single pizzas · ${fmtNum(timing.frontlineMin)} min · ${fmtNum(calc.ppm)} pizzas/min · ${sections?.frontline.state ?? frontlineStatus}` },
       { id: "freezeTunnel" as ZoneId, label: "Freeze Tunnel", icon: <Snowflake className="w-5 h-5" />, navTab: "run", status: tunnelStatus, metrics: tunnelMetrics, sub: `Total ${fmtNum(ve.freezerTime)} min` },
       { id: "packaging" as ZoneId, label: "Packaging", icon: <Package className="w-5 h-5" />, navTab: "packaging", status: packStatus, metrics: packMetrics, sub: `Post-tunnel ${fmtNum(v.postTunnelMin || 2.5)} min` },
       { id: "warehouse" as ZoneId, label: "Warehouse", icon: <Warehouse className="w-5 h-5" />, navTab: "warehouse", status: deriveStationStatus(runStatus, hasRun, false), metrics: whMetrics, sub: "Cooler · Freezer" },
     ];
-  }, [calc, currentRun, dayState, runStatus, v, ve, autoTrackSuggestion, casesFreezerPct]);
+    return stationZones.map((zone) => ({
+      ...zone,
+      reason: deriveStationReason(zone.status, runStatus, hasRun),
+      activityAge: formatStationActivityAge(
+        stationActivity?.[zone.id],
+        typeof currentRun?.id === "string" ? currentRun.id : undefined,
+        stationActivityNowMs,
+      ),
+      confirmActivity: hasRun && isRunning
+        && (zone.id === "freezeTunnel" || zone.id === "warehouse"),
+    }));
+  }, [
+    calc, currentRun, dayState, runStatus, v, ve, autoTrackSuggestion, casesFreezerPct,
+    stationActivity, stationActivityNowMs,
+    liveSections,
+  ]);
 
   // Overall line status
   const overallStatus = (() => {
@@ -178,9 +322,19 @@ export default function LineMapDashboard() {
   return (
     <div className="w-full space-y-4 p-2 sm:p-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Production Line Map</h2>
-        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${overallStatus.cls}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold">Production Line Map</h2>
+          {productLabel && (
+            <p
+              className="truncate text-sm font-medium text-muted-foreground"
+              data-testid="line-map-current-product"
+            >
+              {productLabel}
+            </p>
+          )}
+        </div>
+        <span className={`shrink-0 px-3 py-1 rounded-full text-xs font-bold uppercase ${overallStatus.cls}`}>
           {overallStatus.label}
         </span>
       </div>
@@ -205,8 +359,14 @@ export default function LineMapDashboard() {
       <div className="relative">
         {/* Top row: Dough → Sauce → Press/Oven → Frontline */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-0">
-          {zones.slice(0, 4).map((zone, i) => (
-            <ZoneCard key={zone.id} zone={zone} onClick={() => navigate(zone.navTab)} />
+          {zones.slice(0, 4).map((zone) => (
+            <ZoneCard
+              key={zone.id}
+              zone={zone}
+              onClick={() => goToTab(zone.navTab)}
+              canConfirm={!!isOnline}
+              onConfirmActivity={confirmStationActivity}
+            />
           ))}
         </div>
 
@@ -220,7 +380,13 @@ export default function LineMapDashboard() {
         {/* Bottom row: Warehouse ← Packaging ← Freeze Tunnel */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {zones.slice(4).map((zone) => (
-            <ZoneCard key={zone.id} zone={zone} onClick={() => navigate(zone.navTab)} />
+            <ZoneCard
+              key={zone.id}
+              zone={zone}
+              onClick={() => goToTab(zone.navTab)}
+              canConfirm={!!isOnline}
+              onConfirmActivity={confirmStationActivity}
+            />
           ))}
         </div>
       </div>
@@ -230,7 +396,7 @@ export default function LineMapDashboard() {
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg border bg-card p-2">
             <div className="text-xs text-muted-foreground">Line Speed</div>
-            <div className="text-sm font-bold tabular-nums">{calc.ppm > 0 ? `${fmtNum(calc.ppm)} ppm` : "—"}</div>
+            <div className="text-sm font-bold tabular-nums">{calc.ppm > 0 ? `${fmtNum(calc.ppm)} pizzas/min · ${fmtNum(calc.ppm / 2)} pairs/min` : "—"}</div>
           </div>
           <div className="rounded-lg border bg-card p-2">
             <div className="text-xs text-muted-foreground">Freeze Transit</div>
@@ -247,6 +413,15 @@ export default function LineMapDashboard() {
         <div className="text-center py-8 text-muted-foreground">
           <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p className="text-sm">Start a run to see the line map</p>
+          {nextScheduledRun && (
+            <p
+              className="mt-2 text-sm font-medium text-foreground"
+              data-testid="line-map-next-scheduled-run"
+            >
+              Next scheduled run: {scheduledRunLabel(nextScheduledRun.run)} ·{" "}
+              {formatScheduleDate(nextScheduledRun.date)}
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -254,38 +429,133 @@ export default function LineMapDashboard() {
 }
 
 // ── Zone card sub-component ───────────────────────────────────────────────
-function ZoneCard({ zone, onClick }: { zone: ZoneStatus; onClick: () => void }) {
+function ZoneCard({
+  zone,
+  onClick,
+  canConfirm,
+  onConfirmActivity,
+}: {
+  zone: ZoneStatus;
+  onClick: () => void;
+  canConfirm: boolean;
+  onConfirmActivity?: (station: "freezeTunnel" | "warehouse") => Promise<void>;
+}) {
   const colors = ZONE_COLORS[zone.id];
+  const [confirming, setConfirming] = useState(false);
+  const [confirmationError, setConfirmationError] = useState<string | null>(null);
+  const confirm = async () => {
+    if (!onConfirmActivity || (zone.id !== "freezeTunnel" && zone.id !== "warehouse")) return;
+    setConfirmationError(null);
+    setConfirming(true);
+    try {
+      await onConfirmActivity(zone.id);
+    } catch (error) {
+      setConfirmationError(error instanceof Error ? error.message : "Activity could not be confirmed.");
+    } finally {
+      setConfirming(false);
+    }
+  };
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`
-        rounded-xl border-2 ${colors.border} ${colors.bg}
-        p-3 text-left transition-all hover:scale-[1.02] hover:shadow-md
-        active:scale-[0.98] cursor-pointer
-      `}
+    <div
+      data-testid={`station-card-${zone.id}`}
+      className={`overflow-hidden rounded-xl border-2 ${colors.border} ${colors.bg}`}
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className={`flex items-center gap-1.5 ${colors.icon}`}>
-          {zone.icon}
-          <span className="text-sm font-bold truncate">{zone.label}</span>
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full p-3 text-left transition-all hover:scale-[1.02] hover:shadow-md active:scale-[0.98] cursor-pointer"
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className={`flex items-center gap-1.5 ${colors.icon}`}>
+            {zone.icon}
+            <span className="text-sm font-bold truncate">{zone.label}</span>
+          </div>
+          {statusBadge(zone.status)}
         </div>
-        {statusBadge(zone.status)}
-      </div>
-      {zone.sub && (
-        <p className="text-[10px] text-muted-foreground mb-1.5 truncate">{zone.sub}</p>
-      )}
-      {zone.metrics.length > 0 && (
-        <div className="space-y-0.5">
-          {zone.metrics.map((m) => (
-            <div key={m.label} className="flex justify-between text-xs">
-              <span className="text-muted-foreground truncate">{m.label}</span>
-              <span className="font-medium tabular-nums ml-1">{m.value}</span>
-            </div>
-          ))}
+        {zone.sub && (
+          <p className="text-[10px] text-muted-foreground mb-1.5 truncate">{zone.sub}</p>
+        )}
+        {zone.reason && (
+          <p
+            className="text-[11px] text-muted-foreground mb-1.5"
+            data-testid={`status-reason-${zone.id}`}
+          >
+            {zone.reason}
+          </p>
+        )}
+        {zone.reason === "No current station activity" && (
+          <p
+            className="text-[11px] text-muted-foreground mb-1.5"
+            data-testid={`station-activity-age-${zone.id}`}
+          >
+            {zone.activityAge}
+          </p>
+        )}
+        {zone.metrics.length > 0 && (
+          <div className={zone.id === "frontline" ? "space-y-1" : "space-y-0.5"}>
+            {zone.metrics.map((m) => (
+              <div key={m.label}>
+                <div
+                  className={`flex justify-between text-xs ${zone.id === "frontline" ? "items-start gap-x-2" : ""}`}
+                >
+                  <span className={
+                    zone.id === "frontline"
+                      ? "min-w-0 whitespace-normal break-words text-muted-foreground"
+                      : "text-muted-foreground truncate"
+                  }>
+                    {m.label}
+                  </span>
+                  <span className={
+                    zone.id === "frontline"
+                      ? "shrink-0 text-right font-medium tabular-nums"
+                      : "font-medium tabular-nums ml-1"
+                  }>
+                    {m.value}
+                  </span>
+                </div>
+                {zone.id === "frontline" && m.details?.length ? (
+                  <ul
+                    className="ml-2 mt-0.5 space-y-0.5 border-l border-current/20 pl-2 text-[11px]"
+                    data-testid={`frontline-components-${m.label.match(/^App ([1-4])/)?.[1] ?? "unknown"}`}
+                  >
+                    {m.details.map((detail, index) => (
+                      <li
+                        key={`${detail.label}-${index}`}
+                        className="flex justify-between gap-x-2"
+                      >
+                        <span className="min-w-0 whitespace-normal break-words text-muted-foreground">
+                          {detail.label}
+                        </span>
+                        <span className="shrink-0 font-medium tabular-nums">
+                          {detail.value}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </button>
+      {zone.confirmActivity && (
+        <div className="px-3 pb-3">
+          <button
+            type="button"
+            onClick={() => void confirm()}
+            disabled={!canConfirm || confirming}
+            aria-label={`Confirm activity at ${zone.label}`}
+            className="min-h-9 rounded-md border bg-background px-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {confirming ? "Saving…" : "Confirm activity"}
+          </button>
+          {confirmationError && (
+            <p role="alert" className="mt-1 text-[11px] text-destructive">
+              {confirmationError}
+            </p>
+          )}
         </div>
       )}
-    </button>
+    </div>
   );
 }

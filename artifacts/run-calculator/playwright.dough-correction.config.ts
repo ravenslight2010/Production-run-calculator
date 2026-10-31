@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolveChromiumExecutable } from "./e2e/chromium";
+import { releaseBrowserWebServers } from "./playwright.release-servers";
 
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
@@ -10,6 +11,7 @@ const baseURL =
  * account and today's disposable sync-row cleanup.
  */
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "dough-correction-resume.spec.ts",
   timeout: 90_000,

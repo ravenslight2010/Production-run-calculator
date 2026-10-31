@@ -1,3 +1,4 @@
+import { SourceReconciliationStatus } from "./SourceReconciliationStatus";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, ExternalLink, History, Loader2, RefreshCw, ShieldCheck, Undo2 } from "lucide-react";
@@ -143,16 +144,6 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
         : category === "stale-profile-link" ? "stale profile link"
           : category === "stale-pending-run-link" ? "stale pending-run link"
             : category === "protected-stub" ? "protected stub" : "unexpected stub";
-  const sourceStatusLabel = workspace?.sourceReconciliation.status === "not-verified"
-    ? "Not verified"
-    : workspace?.sourceReconciliation.status === "clean"
-      ? "Clean"
-      : workspace?.sourceReconciliation.status === "warning" ? "Review needed" : "Verification error";
-  const sourceStatusClass = workspace?.sourceReconciliation.status === "clean"
-    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-    : workspace?.sourceReconciliation.status === "warning"
-      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-      : "bg-destructive/10 text-destructive";
 
   return (
     <Card data-testid="data-health-workspace">
@@ -177,6 +168,33 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
+        {workspace?.importCoverage && (
+          <section className="space-y-2 rounded-md border border-border p-3" aria-label="Cross-import health" data-testid="cross-import-health">
+            <h3 className="text-sm font-semibold">Cross-import health</h3>
+            <p className="text-xs text-muted-foreground">{workspace.importCoverage.limitation}</p>
+            <p className="text-xs">
+              {workspace.importCoverage.scanned} recent history records inspected
+              {workspace.importCoverage.truncated ? " · History coverage is truncated at 200 records." : "."}
+              {(workspace.importCoverage.detectors.findingsTruncated || workspace.importCoverage.detectors.payloadsTruncated ||
+                Object.values(workspace.importCoverage.detectors.tables ?? {}).some((table) => table.truncated)) &&
+                " Detector coverage is incomplete; absence of findings does not establish health."}
+            </p>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {workspace.importCoverage.sources.map((source) => (
+                <li key={source.importType} className="rounded border border-border p-2 text-xs">
+                  <span className="font-semibold capitalize">{source.importType}</span>
+                  <p>{source.status === "observed"
+                    ? `Successful history observed · ${source.lastSuccessfulAt ? new Date(source.lastSuccessfulAt).toLocaleString() : "date unavailable"}`
+                    : "Missing source evidence — not a confirmed defect"}</p>
+                  <p className="text-muted-foreground">{source.recovery === "atomic-guarded-undo" ? "Atomic Apply / guarded Undo" : "Local or per-day sync / no atomic Undo"}
+                    {" · "}{source.recognizedSource ? "Recognized source key" : "No successful source key observed"}</p>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">Required name-link, orphan-recipe and alias findings are in the existing list below. Valid direct ingredients and shared recipes are not missing-import defects.</p>
+            {onNavigate && <Button type="button" size="sm" variant="outline" onClick={() => onNavigate("import")}>Open import review and history</Button>}
+          </section>
+        )}
         <div data-testid="sync-health-sentinel" className="rounded border border-border/70 bg-muted/20 p-2.5 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -369,40 +387,7 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
               )}
               {retentionMutation.isError && <p className="text-destructive">Cleanup did not run. No partial result was accepted.</p>}
             </div>
-            <div
-              data-testid="source-reconciliation-status"
-              role="status"
-              aria-live="polite"
-              className="rounded border border-border/70 bg-muted/20 p-2.5 text-xs"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-medium">Authoritative source reconciliation</p>
-                  <p className="text-muted-foreground">
-                    Report {workspace.sourceReconciliation.report.sha256.slice(0, 12)} · captured {new Date(workspace.sourceReconciliation.report.snapshot.capturedAt).toLocaleDateString()}
-                  </p>
-                </div>
-                <span className={`rounded px-2 py-1 text-[10px] font-semibold ${sourceStatusClass}`}>
-                  {sourceStatusLabel} · {workspace.sourceReconciliation.freshness}
-                </span>
-              </div>
-              <p className="mt-1 break-all text-[11px] text-muted-foreground">
-                {workspace.sourceReconciliation.report.path} · verified {new Date(workspace.sourceReconciliation.checkedAt).toLocaleString()}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
-                <span className="rounded bg-muted px-1.5 py-0.5">{workspace.sourceReconciliation.report.automaticProposals} approved proposals</span>
-                <span className="rounded bg-muted px-1.5 py-0.5">{workspace.sourceReconciliation.report.stubs} protected-stub candidates</span>
-                <span className="rounded bg-muted px-1.5 py-0.5">{workspace.sourceReconciliation.summary.protectedHistoryReferences} protected history links</span>
-                {workspace.sourceReconciliation.summary.omittedFindings > 0 && (
-                  <span className="rounded bg-muted px-1.5 py-0.5">
-                    {workspace.sourceReconciliation.summary.omittedFindings} additional findings summarized
-                  </span>
-                )}
-              </div>
-              {!workspace.sourceReconciliation.heal.markerValid && (
-                <p className="mt-2 text-[11px] text-destructive">The approved source heal marker is missing or invalid. Findings are review-only until the release verification is restored.</p>
-              )}
-            </div>
+            <SourceReconciliationStatus status={workspace.sourceReconciliation} />
             <div className="flex flex-wrap gap-2">
               <select aria-label="Filter data health category" className={selectClass} value={category} onChange={(event) => setCategory(event.target.value)}>
                 <option value="all">All categories</option>

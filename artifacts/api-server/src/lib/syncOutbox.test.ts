@@ -31,6 +31,7 @@ vi.mock("./backgroundOperations", async (importOriginal) => {
 });
 vi.mock("./logger", () => ({ logger: { info: vi.fn(), warn: vi.fn() } }));
 import { clearSyncOutboxProcessCursorsForTests, startSyncOutboxListener, syncOutboxFailureReason } from "./syncOutbox";
+import { startDatabasePhaseCheckout } from "./databasePhaseTelemetry";
 
 describe("durable outbox wake scheduling", () => {
   beforeEach(() => {
@@ -106,6 +107,73 @@ describe("durable outbox wake scheduling", () => {
     } finally {
       stop();
     }
+  });
+
+  it("keeps a failed delivery pending and advances only after the same event succeeds", async () => {
+    const { logger } = await import("./logger");
+    vi.mocked(logger.info).mockClear();
+    const scope = "private-scope";
+    const row = {
+      scope, cursor: 1, kind: "configuration", date: null, sender_id: "private-sender",
+      payload: { origin: "peer", family: "profiles" }, created_at: new Date(),
+    };
+    mocks.query.mockImplementation(async (sql: string) => {
+      startDatabasePhaseCheckout(900)();
+      if (sql.startsWith("SELECT scope, cursor FROM")) return { rows: [{ scope, cursor: 0 }] };
+      if (sql.startsWith("SELECT scope FROM")) return { rows: [{ scope }] };
+      if (sql.startsWith("SELECT cursor FROM")) return { rows: [{ cursor: 1 }] };
+      return { rows: [row] };
+    });
+    const deliveryError = new Error("private delivery failure");
+    const deliver = vi.fn().mockRejectedValueOnce(deliveryError).mockResolvedValue(undefined);
+    const gap = vi.fn();
+    const stop = startSyncOutboxListener(deliver, gap);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(deliver).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(deliver).toHaveBeenCalledTimes(2);
+      expect(deliver.mock.calls[0]![0].cursor).toBe(1);
+      expect(deliver.mock.calls[1]![0].cursor).toBe(1);
+      await vi.advanceTimersByTimeAsync(5001);
+      expect(deliver).toHaveBeenCalledTimes(2);
+      expect(gap).not.toHaveBeenCalled();
+      const phases = vi.mocked(logger.info).mock.calls.map(([fields]) => fields)
+        .filter((fields) => fields !== null && typeof fields === "object" &&
+          "event" in fields && fields.event === "background_database_phase");
+      expect(phases).toHaveLength(3);
+      expect(phases).toEqual(expect.arrayContaining([
+        expect.objectContaining({ databasePhase: expect.objectContaining({
+          stage: "outbox_events_read", outcome: "success", coverage: "complete",
+        }) }),
+      ]));
+      // The read succeeded even though the delivery failed. Never attribute
+      // handler failure to SQL, and never log scope, sender or event payloads.
+      expect(JSON.stringify(phases)).not.toMatch(/private|profiles/);
+    } finally { stop(); }
+  });
+
+  it("does not skip a retention gap when canonical reconciliation fails", async () => {
+    const scope = "private-scope";
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith("SELECT scope, cursor FROM")) return { rows: [{ scope, cursor: 0 }] };
+      if (sql.startsWith("SELECT scope FROM")) return { rows: [{ scope }] };
+      if (sql.startsWith("SELECT cursor FROM")) return { rows: [{ cursor: 3 }] };
+      return { rows: [] };
+    });
+    const gap = vi.fn().mockRejectedValueOnce(new Error("reconcile failed")).mockResolvedValue(undefined);
+    const deliver = vi.fn();
+    const stop = startSyncOutboxListener(deliver, gap);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(gap).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(gap).toHaveBeenCalledTimes(2);
+      expect(gap.mock.calls).toEqual([[scope, 3], [scope, 3]]);
+      await vi.advanceTimersByTimeAsync(5001);
+      expect(gap).toHaveBeenCalledTimes(2);
+      expect(deliver).not.toHaveBeenCalled();
+    } finally { stop(); }
   });
 
   it("classifies only fixed reasons, including nested database errors", () => {

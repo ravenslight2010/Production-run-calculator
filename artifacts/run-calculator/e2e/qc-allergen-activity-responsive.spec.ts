@@ -34,6 +34,90 @@ function facilityToday(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date());
 }
 
+const RESPONSIVE_VIEWPORTS = [
+  { name: "phone-320", width: 320, height: 740 },
+  { name: "phone-375", width: 375, height: 812 },
+  { name: "phone-390", width: 390, height: 844 },
+  { name: "phone-430", width: 430, height: 932 },
+  { name: "tablet-portrait", width: 768, height: 1024 },
+  { name: "tablet-landscape", width: 1024, height: 768 },
+  { name: "phone-short-landscape", width: 568, height: 320 },
+  { name: "desktop", width: 1440, height: 900 },
+] as const;
+
+async function assertActivityReportLayout(
+  page: Page,
+  viewport: { name: string; width: number; height: number },
+): Promise<{ cardWidth: number; headingFontSize: number }> {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  const geometry = await page.evaluate(() => {
+    const report = document.querySelector<HTMLElement>(
+      '[data-testid="qc-allergen-activity-report"]',
+    );
+    const card = report?.querySelector<HTMLElement>('[data-testid^="card-allergen-activity-"]');
+    const heading = card?.querySelector<HTMLElement>("h3");
+    if (!report || !card || !heading) return null;
+    const reportRect = report.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const visibleControls = Array.from(
+      report.querySelectorAll<HTMLElement>("button, input, select, textarea, a[href]"),
+    ).flatMap((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      if (
+        style.display === "none"
+        || style.visibility === "hidden"
+        || Number(style.opacity) === 0
+        || rect.width <= 0
+        || rect.height <= 0
+      ) return [];
+      return rect.left < -1 || rect.right > window.innerWidth + 1
+        ? [{
+            label: element.getAttribute("aria-label")
+              || element.textContent?.trim().slice(0, 50)
+              || element.tagName,
+            left: rect.left,
+            right: rect.right,
+          }]
+        : [];
+    });
+    return {
+      reportLeft: reportRect.left,
+      reportRight: reportRect.right,
+      reportWidth: report.clientWidth,
+      reportScrollWidth: report.scrollWidth,
+      cardLeft: cardRect.left,
+      cardRight: cardRect.right,
+      cardWidth: card.clientWidth,
+      cardScrollWidth: card.scrollWidth,
+      headingClientWidth: heading.clientWidth,
+      headingScrollWidth: heading.scrollWidth,
+      headingClientHeight: heading.clientHeight,
+      headingScrollHeight: heading.scrollHeight,
+      headingTextOverflow: getComputedStyle(heading).textOverflow,
+      headingFontSize: Number.parseFloat(getComputedStyle(heading).fontSize),
+      viewportWidth: window.innerWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      bodyScrollWidth: document.body.scrollWidth,
+      visibleControls,
+    };
+  });
+  expect(geometry, `daily report should render at ${viewport.name}`).not.toBeNull();
+  expect(geometry!.reportLeft, `${viewport.name} report left edge`).toBeGreaterThanOrEqual(-1);
+  expect(geometry!.reportRight, `${viewport.name} report right edge`).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry!.reportScrollWidth, `${viewport.name} report contents`).toBeLessThanOrEqual(geometry!.reportWidth + 1);
+  expect(geometry!.cardLeft, `${viewport.name} activity card left edge`).toBeGreaterThanOrEqual(-1);
+  expect(geometry!.cardRight, `${viewport.name} activity card right edge`).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry!.cardScrollWidth, `${viewport.name} activity card contents`).toBeLessThanOrEqual(geometry!.cardWidth + 1);
+  expect(geometry!.headingTextOverflow, `${viewport.name} run label must not be ellipsized`).not.toBe("ellipsis");
+  expect(geometry!.headingScrollWidth, `${viewport.name} run label width`).toBeLessThanOrEqual(geometry!.headingClientWidth + 1);
+  expect(geometry!.headingScrollHeight, `${viewport.name} run label height`).toBeLessThanOrEqual(geometry!.headingClientHeight + 1);
+  expect(geometry!.documentScrollWidth, `${viewport.name} document width`).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry!.bodyScrollWidth, `${viewport.name} body width`).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry!.visibleControls, `${viewport.name} report controls`).toEqual([]);
+  return { cardWidth: geometry!.cardWidth, headingFontSize: geometry!.headingFontSize };
+}
+
 test("renders the daily allergen report from recorded current-day sources", async ({
   browser,
   playwright,
@@ -45,7 +129,9 @@ test("renders the daily allergen report from recorded current-day sources", asyn
   const fixtureDbUrl = requireDedicatedTestDatabase("QC allergen activity responsive browser test");
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, apiBase, SIGNUP_CODE);
   const username = uniqueTestId("qc-activity-operator");
-  const runId = uniqueTestId("qc-activity-run");
+  const runId = `${uniqueTestId("qc-activity-run")}-long-report-reference-${"run-".repeat(6)}`;
+  const longBrand = "Responsive Fixture — Extra-long family-size product name for phone and tablet review";
+  const longFlavor = "Cheese — Limited seasonal format";
   const date = facilityToday();
   const operationId = uniqueTestId("qc-activity-review-operation");
   const recordId = uniqueTestId("qc-activity-review-record");
@@ -79,7 +165,7 @@ test("renders the daily allergen report from recorded current-day sources", asyn
       payload: {
         dayState: {
           date,
-          runs: [{ id: runId, brand: "Responsive Fixture", flavor: "Cheese", casesNeeded: 1, seeded: false }],
+          runs: [{ id: runId, brand: longBrand, flavor: longFlavor, casesNeeded: 1, seeded: false }],
           currentIndex: 0,
           resetAt: 0,
           substitutions: [],
@@ -165,6 +251,58 @@ test("renders the daily allergen report from recorded current-day sources", asyn
     await expect(report).toContainText("Recorded activity only.");
     await expect(report).toContainText("does not establish cleaning between runs");
     await expect(page.getByRole("button", { name: "Back to run QC" })).toBeVisible();
+    const backToQc = page.getByRole("button", { name: "Back to run QC" });
+    await expect(page.getByTestId(`card-allergen-activity-${runId}`).locator("h3"))
+      .toContainText(longBrand);
+    const operatorViewportMetrics: Record<string, { cardWidth: number; headingFontSize: number }> = {};
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      operatorViewportMetrics[viewport.name] = await assertActivityReportLayout(page, viewport);
+      await expect(backToQc, viewport.name).toBeVisible();
+      await backToQc.scrollIntoViewIfNeeded();
+      const backButtonBounds = await backToQc.boundingBox();
+      expect(backButtonBounds?.x, `${viewport.name} return action left edge`).toBeGreaterThanOrEqual(-1);
+      expect(backButtonBounds && backButtonBounds.x + backButtonBounds.width, `${viewport.name} return action right edge`)
+        .toBeLessThanOrEqual(viewport.width + 1);
+      expect(backButtonBounds?.y, `${viewport.name} return action top edge`).toBeGreaterThanOrEqual(-1);
+      expect(backButtonBounds && backButtonBounds.y + backButtonBounds.height, `${viewport.name} return action bottom edge`)
+        .toBeLessThanOrEqual(viewport.height + 1);
+      await expect(backToQc).toBeEnabled();
+      expect(await backToQc.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+        return hit === element || Boolean(hit && element.contains(hit));
+      }), `${viewport.name} return action is not covered`).toBe(true);
+      await backToQc.focus();
+      await expect(backToQc).toBeFocused();
+    }
+    expect(operatorViewportMetrics["tablet-landscape"]!.cardWidth)
+      .toBeGreaterThan(operatorViewportMetrics["phone-320"]!.cardWidth);
+    expect(operatorViewportMetrics["tablet-landscape"]!.headingFontSize)
+      .toBeGreaterThanOrEqual(operatorViewportMetrics["phone-320"]!.headingFontSize);
+    await page.setViewportSize({ width: 320, height: 740 });
+    const operatorLargeTextStyle = await page.addStyleTag({
+      content: "html { font-size: 200% !important; }",
+    });
+    const largeTextMetrics = await assertActivityReportLayout(page, {
+      name: "phone-320-large-text",
+      width: 320,
+      height: 740,
+    });
+    expect(largeTextMetrics.headingFontSize, "large-text report heading should remain readable")
+      .toBeGreaterThanOrEqual(24);
+    const operatorPhoneEvidence = await report.screenshot({
+      animations: "disabled",
+      mask: [page.getByText(runId, { exact: true })],
+    });
+    await testInfo.attach("operator-daily-allergen-report-phone-320-large-text", {
+      body: operatorPhoneEvidence,
+      contentType: "image/png",
+    });
+    await operatorLargeTextStyle.evaluate((element) => element.remove());
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await backToQc.click();
+    await expect(report).toBeHidden();
+    await expect(page.getByTestId("qc-workflow-tab")).toBeVisible();
 
     managerContext = await browser.newContext({
       viewport: test.info().project.use.viewport as { width: number; height: number } | undefined,
@@ -191,10 +329,45 @@ test("renders the daily allergen report from recorded current-day sources", asyn
     await expect(managerReviewCard).toContainText("[redacted]");
     await expect(managerReviewCard).not.toContainText("Responsive fixture review");
     await expect(managerReviewCard).not.toContainText("Corrected private fixture note");
-    const screenshot = await managerPage.screenshot({ fullPage: true, animations: "disabled" });
+    const managerViewportMetrics: Record<string, { cardWidth: number; headingFontSize: number }> = {};
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      managerViewportMetrics[viewport.name] = await assertActivityReportLayout(managerPage, viewport);
+      await managerReviewCard.scrollIntoViewIfNeeded();
+      await expect(managerReviewCard, `${viewport.name} manager audit content`).toBeVisible();
+    }
+    expect(managerViewportMetrics["tablet-landscape"]!.cardWidth)
+      .toBeGreaterThan(managerViewportMetrics["phone-320"]!.cardWidth);
+    expect(managerViewportMetrics["tablet-landscape"]!.headingFontSize)
+      .toBeGreaterThanOrEqual(managerViewportMetrics["phone-320"]!.headingFontSize);
+    await managerPage.setViewportSize({ width: 1440, height: 900 });
+    const screenshot = await managerPage.screenshot({
+      fullPage: true,
+      animations: "disabled",
+      mask: [
+        managerReviewCard,
+        managerPage.getByTestId("text-qc-run-id"),
+      ],
+    });
     await testInfo.attach("manager-daily-allergen-audit-details", {
       body: screenshot,
       contentType: "image/png",
+    });
+    await testInfo.attach("qc-responsive-evidence-manifest", {
+      body: JSON.stringify({
+        capturedAt: new Date().toISOString(),
+        environment: "isolated browser run with disposable database and synthetic fixtures",
+        revision: "unknown in the local isolated browser harness",
+        browserProject: testInfo.project.name,
+        viewports: RESPONSIVE_VIEWPORTS.map(({ name, width, height }) => ({
+          name,
+          width,
+          height,
+        })),
+        largeText: "simulated with a 200% root font size at 320px CSS viewport width",
+        screenshots: "account/run identifiers and manager audit records masked or omitted",
+        evidenceScope: "rendered layout only; not physical-device or production verification",
+      }, null, 2),
+      contentType: "application/json",
     });
     const expectedForbiddenPaths = new Set([
       "/api/inventory/consume-day-start",

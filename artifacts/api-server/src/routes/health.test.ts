@@ -15,6 +15,7 @@ import {
   clearCacheMaintenanceDiagnosticsForTests,
   recordCacheMaintenance,
 } from "../lib/observability";
+import * as observability from "../lib/observability";
 import {
   beginStartup,
   markStartupFailed,
@@ -25,6 +26,7 @@ import {
   clearBackgroundOperationDiagnosticsForTests,
   runBackgroundOperation,
 } from "../lib/backgroundOperations";
+import * as backgroundOperations from "../lib/backgroundOperations";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(async () => ({
@@ -42,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   buildInfo: vi.fn(),
   scheduledQueueDiagnostics: vi.fn(),
   syncOutboxLagDiagnostics: vi.fn(),
+  scope: "live",
 }));
 
 vi.mock("../lib/buildInfo", () => ({ getBuildInfo: mocks.buildInfo }));
@@ -64,8 +67,30 @@ vi.mock("../lib/syncOutbox", () => ({
   getSyncOutboxLagDiagnostics: mocks.syncOutboxLagDiagnostics,
 }));
 
+// Exercise the route's real authorization chain without needing a shared DB.
+vi.mock("../middlewares/requireAuth", () => ({
+  requireAuth: (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const identity = req.header("x-test-identity");
+    if (!identity) { res.status(401).json({ error: "Unauthorized" }); return; }
+    req.userId = identity;
+    next();
+  },
+}));
+vi.mock("../lib/roles", () => ({
+  getOrCreateUserRole: async (userId: string) => ({ role: userId }),
+  getRole: async (role: string) => ({ capabilities: role === "manager" ? ["manage-staff"] : [] }),
+}));
+vi.mock("../lib/requestScope", () => ({
+  currentScope: () => mocks.scope,
+}));
+
 let server: Server;
 let baseUrl: string;
+function diagnosticProbe(init?: RequestInit): Promise<globalThis.Response> {
+  return fetch(`${baseUrl}/health/diagnostics`, {
+    ...init, headers: { "x-test-identity": "manager", ...init?.headers },
+  });
+}
 const providerEnvKeys = [
   "AI_INTEGRATIONS_GEMINI_API_KEY",
   "GOOGLE_API_KEY",
@@ -107,6 +132,7 @@ beforeEach(async () => {
   await clearCacheMaintenanceDiagnosticsForTests();
   await clearBackgroundOperationDiagnosticsForTests();
   resetStartupHealthForTests();
+  mocks.scope = "live";
   mocks.execute.mockClear();
   mocks.info.mockClear();
   mocks.buildInfo.mockReturnValue(null);
@@ -146,7 +172,7 @@ describe("public GET /build-info", () => {
     const info = {
       schemaVersion: 1, kind: "app-build-info",
       appBuildId: "app-build:00000000-0000-0000-0000-000000000000",
-      sourcePolicy: "production-source-v3", sourceFingerprintSha256: "a".repeat(64),
+      sourcePolicy: "production-source-v4", sourceFingerprintSha256: "a".repeat(64),
       gitRevision: null, gitBinding: "unavailable", buildMode: "release",
       completedAt: new Date().toISOString(), platformDeploymentId: null,
       platformBuildId: null, platformIdentitySource: "unavailable",
@@ -157,6 +183,81 @@ describe("public GET /build-info", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual(info);
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("public probe disclosure allowlist", () => {
+  it.each(["/readyz", "/healthz", "/"])("restricts %s in every readiness state", async (path) => {
+    for (const state of ["healthy", "starting", "failed", "database-unavailable", "audit-unavailable", "optional-failure"] as const) {
+      resetStartupHealthForTests();
+      if (state === "starting") beginStartup();
+      if (state === "failed") {
+        beginStartup();
+        markStartupFailed("database_schema", "STARTUP_DATABASE_UNAVAILABLE");
+      }
+      if (state === "database-unavailable") mocks.execute.mockRejectedValueOnce(new Error("private database detail"));
+      if (state === "audit-unavailable") mocks.execute
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ has_trigger: false, has_guard_function: false, has_redact_function: false, has_delete_function: false }] });
+      const spy = state === "optional-failure"
+        ? vi.spyOn(backgroundOperations, "getBackgroundOperationDiagnostics").mockRejectedValueOnce(new Error("private diagnostic detail"))
+        : undefined;
+      try {
+        const response = await fetch(`${baseUrl}${path}`);
+        const body = await response.json() as { status: string; checks: Record<string, string> };
+        expect(response.status).toBe(["healthy", "optional-failure"].includes(state) ? 200 : 503);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(Object.keys(body).sort()).toEqual(["checks", "status"]);
+        expect(Object.keys(body.checks).sort()).toEqual([
+          "auditProtection", "backgroundWorkers", "database", "dependencies", "process", "startup",
+        ]);
+        expect(Object.values(body.checks).every((value) => ["ok", "warning", "error", "pending"].includes(String(value)))).toBe(true);
+        expect(JSON.stringify(body)).not.toMatch(/private|diagnostics|capabilities|timestamp|correlationId|stage|duration/i);
+      } finally {
+        spy?.mockRestore();
+      }
+    }
+  });
+
+  it("rejects unauthenticated and staff diagnostics before doing any diagnostic work", async () => {
+    for (const [identity, expectedStatus] of [[null, 401], ["staff", 403]] as const) {
+      const response = await fetch(`${baseUrl}/health/diagnostics`, {
+        headers: identity ? { "x-test-identity": identity } : {},
+      });
+      expect(response.status).toBe(expectedStatus);
+      expect(await response.json()).toHaveProperty("error");
+    }
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects sandbox managers from process-wide diagnostics", async () => {
+    mocks.scope = "sandbox";
+    const response = await diagnosticProbe();
+    expect(response.status).toBe(403);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps strict local-model probe failures optional on public and authorized paths", async () => {
+    const originalFetch = globalThis.fetch;
+    const previousStrict = process.env.LOCAL_AI_STRICT_READINESS;
+    setProviderEnv({ LOCAL_AI_BASE_URL: "http://127.0.0.1:11434/v1" });
+    process.env.LOCAL_AI_STRICT_READINESS = "true";
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (String(input).endsWith("/v1/models")) return Promise.reject(new Error("private provider failure"));
+      return originalFetch(input, init);
+    });
+    try {
+      for (const response of [await fetch(`${baseUrl}/readyz`), await diagnosticProbe()]) {
+        expect(response.status).toBe(200);
+        const body = await response.json() as { checks: { dependencies: string } };
+        expect(body.checks.dependencies).toBe("error");
+        expect(JSON.stringify(body)).not.toContain("private provider failure");
+      }
+    } finally {
+      spy.mockRestore();
+      if (previousStrict === undefined) delete process.env.LOCAL_AI_STRICT_READINESS;
+      else process.env.LOCAL_AI_STRICT_READINESS = previousStrict;
+    }
   });
 });
 
@@ -205,7 +306,7 @@ describe("GET /readyz optional AI capability", () => {
   }) => {
     setProviderEnv(env);
 
-    const response = await fetch(`${baseUrl}/readyz`);
+    const response = await diagnosticProbe();
     const body = (await response.json()) as {
       checks: Record<string, string>;
       capabilities: { ai: { status: string; detail?: string } };
@@ -220,6 +321,165 @@ describe("GET /readyz optional AI capability", () => {
     }
     expect(JSON.stringify(body)).not.toContain("test-");
     expect(JSON.stringify(mocks.info.mock.calls)).not.toContain("test-");
+  });
+
+  it("keeps core readiness healthy when the optional import-gold evaluator is enabled but unavailable", async () => {
+    const previousEnabled = process.env.IMPORT_GOLD_LOCAL_ENABLED;
+    const previousBaseUrl = process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+    try {
+      setProviderEnv({});
+      process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+      process.env.IMPORT_GOLD_LOCAL_BASE_URL = "http://127.0.0.1:1/v1";
+      const response = await diagnosticProbe();
+      const body = await response.json() as {
+        status: string;
+        checks: { database: string; dependencies: string };
+        capabilities: { ai: { status: string } };
+      };
+      expect(response.status).toBe(200);
+      expect(body.status).toBe("ok");
+      expect(body.checks.database).toBe("ok");
+      expect(body.checks.dependencies).toBe("warning");
+      expect(body.capabilities.ai.status).toBe("not_configured");
+    } finally {
+      if (previousEnabled === undefined) delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
+      else process.env.IMPORT_GOLD_LOCAL_ENABLED = previousEnabled;
+      if (previousBaseUrl === undefined) delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+      else process.env.IMPORT_GOLD_LOCAL_BASE_URL = previousBaseUrl;
+    }
+  });
+});
+
+describe("GET /readyz contention behavior", () => {
+  it.each([
+    { nodeEnv: "production", enabled: "1" },
+    { nodeEnv: "development", enabled: "1" },
+    { nodeEnv: "test", enabled: "0" },
+  ])("keeps disposable instrumentation disabled for $nodeEnv with flag $enabled", async ({
+    nodeEnv,
+    enabled,
+  }) => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousInstrumentation = process.env.API_LOAD_READINESS_INSTRUMENTATION;
+    try {
+      process.env.NODE_ENV = nodeEnv;
+      process.env.API_LOAD_READINESS_INSTRUMENTATION = enabled;
+      const response = await fetch(`${baseUrl}/readyz`);
+      expect(response.status).toBe(200);
+      expect([...response.headers.keys()].some((key) => key.startsWith("x-test-readiness-")))
+        .toBe(false);
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousInstrumentation === undefined) delete process.env.API_LOAD_READINESS_INSTRUMENTATION;
+      else process.env.API_LOAD_READINESS_INSTRUMENTATION = previousInstrumentation;
+    }
+  });
+
+  it("coalesces shared reads while keeping core checks independent and surviving client cancellation", async () => {
+    let releaseDiagnostics!: () => void;
+    const diagnosticsGate = new Promise<void>((resolve) => {
+      releaseDiagnostics = resolve;
+    });
+    const readCacheDiagnostics = observability.getCacheMaintenanceDiagnostics;
+    const readBackgroundDiagnostics = backgroundOperations.getBackgroundOperationDiagnostics;
+    const cacheDiagnosticsSpy = vi
+      .spyOn(observability, "getCacheMaintenanceDiagnostics")
+      .mockImplementation(async (...args) => {
+        await diagnosticsGate;
+        return readCacheDiagnostics(...args);
+      });
+    const backgroundDiagnosticsSpy = vi
+      .spyOn(backgroundOperations, "getBackgroundOperationDiagnostics")
+      .mockImplementation(async (...args) => {
+        await diagnosticsGate;
+        return readBackgroundDiagnostics(...args);
+      });
+
+    try {
+      const cancelledProbe = new AbortController();
+      const responses = [
+        diagnosticProbe({ signal: cancelledProbe.signal }),
+        ...Array.from({ length: 7 }, () => diagnosticProbe()),
+      ];
+      await vi.waitFor(() => {
+        expect(mocks.execute).toHaveBeenCalledTimes(16);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(cacheDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      cancelledProbe.abort();
+      await expect(responses[0]).rejects.toHaveProperty("name", "AbortError");
+      releaseDiagnostics();
+
+      const settled = await Promise.all(responses.slice(1));
+      expect(settled.map((response) => response.status)).toEqual(Array(7).fill(200));
+      expect(cacheDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      expect(mocks.execute).toHaveBeenCalledTimes(16);
+    } finally {
+      releaseDiagnostics();
+      cacheDiagnosticsSpy.mockRestore();
+      backgroundDiagnosticsSpy.mockRestore();
+    }
+  });
+
+  it("clears a rejected shared diagnostic read so the next probe can recover", async () => {
+    let releaseDiagnostics!: () => void;
+    const diagnosticsGate = new Promise<void>((resolve) => {
+      releaseDiagnostics = resolve;
+    });
+    const backgroundDiagnosticsSpy = vi
+      .spyOn(backgroundOperations, "getBackgroundOperationDiagnostics")
+      .mockImplementationOnce(async () => {
+        await diagnosticsGate;
+        throw new Error("synthetic diagnostic failure");
+      });
+
+    try {
+      const responses = Array.from({ length: 4 }, () => diagnosticProbe());
+      await vi.waitFor(() => {
+        expect(mocks.execute).toHaveBeenCalledTimes(8);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      releaseDiagnostics();
+
+      const failedResponses = await Promise.all(responses);
+      expect(failedResponses.map((response) => response.status)).toEqual(Array(4).fill(200));
+      for (const response of failedResponses) {
+        const body = await response.json() as { checks: Record<string, string> };
+        expect(body.checks.backgroundWorkers).toBe("warning");
+        expect(JSON.stringify(body)).not.toContain("synthetic diagnostic failure");
+      }
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+
+      backgroundDiagnosticsSpy.mockRestore();
+      const recoveredResponse = await diagnosticProbe();
+      expect(recoveredResponse.status).toBe(200);
+      expect(mocks.execute).toHaveBeenCalledTimes(10);
+    } finally {
+      releaseDiagnostics();
+      backgroundDiagnosticsSpy.mockRestore();
+    }
+  });
+
+  it("logs bounded timings for database and optional diagnostic stages", async () => {
+    const response = await fetch(`${baseUrl}/readyz`);
+
+    expect(response.status).toBe(200);
+    const healthLog = [...mocks.info.mock.calls]
+      .reverse()
+      .map(([fields]) => fields as Record<string, unknown>)
+      .find((fields) => fields.event === "health_check");
+    expect(healthLog).toMatchObject({
+      durationMs: expect.any(Number),
+      stageDurationsMs: {
+        databaseCheck: expect.any(Number),
+        optionalDiagnostics: expect.any(Number),
+      },
+    });
+    expect(JSON.stringify(healthLog)).not.toMatch(/password|secret|payload|sql|query/i);
   });
 });
 
@@ -238,7 +498,7 @@ describe("GET /healthz cache maintenance diagnostics", () => {
       );
     }
 
-    const response = await fetch(`${baseUrl}/healthz`);
+    const response = await diagnosticProbe();
     const body = (await response.json()) as {
       status: string;
       diagnostics: {
@@ -276,7 +536,7 @@ describe("GET /healthz background operation diagnostics", () => {
       lastObservedAt: "2031-06-15T12:00:00.000Z",
     });
 
-    const response = await fetch(`${baseUrl}/readyz`);
+    const response = await diagnosticProbe();
     const body = (await response.json()) as {
       status: string;
       checks: Record<string, string>;
@@ -303,7 +563,7 @@ describe("GET /healthz background operation diagnostics", () => {
       }, { delay: async () => {} })).rejects.toBeTruthy();
     }
 
-    let response = await fetch(`${baseUrl}/readyz`);
+    let response = await diagnosticProbe();
     let body = (await response.json()) as {
       status: string;
       checks: Record<string, string>;
@@ -320,7 +580,7 @@ describe("GET /healthz background operation diagnostics", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1);
     await runBackgroundOperation("daily-rollover", async () => "ok");
-    response = await fetch(`${baseUrl}/readyz`);
+    response = await diagnosticProbe();
     body = await response.json() as typeof body;
     expect(response.status).toBe(200);
     expect(body.checks.backgroundWorkers).toBe("ok");
@@ -374,7 +634,7 @@ describe("GET /healthz background operation diagnostics", () => {
       lastSampleAt: "2026-10-08T12:00:00.000Z",
     });
 
-    const response = await fetch(`${baseUrl}/readyz`);
+    const response = await diagnosticProbe();
     const body = (await response.json()) as {
       status: string;
       checks: Record<string, string>;
@@ -438,7 +698,7 @@ describe("GET /healthz background operation diagnostics", () => {
       lastSampleAt: "2026-10-08T12:00:00.000Z",
     });
 
-    const response = await fetch(`${baseUrl}/readyz`);
+    const response = await diagnosticProbe();
     const body = await response.json() as {
       checks: Record<string, string>;
       diagnostics: { scheduledEvaluationQueue: Record<string, unknown> };
@@ -471,7 +731,7 @@ describe("core readiness gates", () => {
       Object.assign(new Error(rawDatabaseError), { code: "ECONNREFUSED" }),
     );
 
-    const response = await fetch(`${baseUrl}/readyz`);
+    const response = await diagnosticProbe();
     const body = (await response.json()) as {
       status: string;
       checks: Record<string, string>;
@@ -504,7 +764,7 @@ describe("audit append-only protection readiness", () => {
         }],
       });
 
-    const response = await fetch(`${baseUrl}/readyz`);
+    const response = await diagnosticProbe();
     const body = (await response.json()) as {
       checks: Record<string, string>;
       diagnostics: {
@@ -568,7 +828,7 @@ describe("startup probes", () => {
 
   it("returns a bounded 503 while startup is in progress or failed", async () => {
     beginStartup(2_000);
-    let response = await fetch(`${baseUrl}/readyz`);
+    let response = await diagnosticProbe();
     let body = (await response.json()) as {
       status: string;
       checks: Record<string, string>;
@@ -597,7 +857,7 @@ describe("startup probes", () => {
     expect(body.correlationId).toBeTruthy();
 
     markStartupFailed("data_heals", "data_heals_failed", 2_500);
-    response = await fetch(`${baseUrl}/healthz`);
+    response = await diagnosticProbe();
     body = (await response.json()) as typeof body;
     expect(response.status).toBe(503);
     expect(body).toMatchObject({

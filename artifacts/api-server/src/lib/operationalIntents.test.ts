@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { applyOperationalIntent, parseOperationalIntent } from "./operationalIntents";
 
 const run = { id: "run-1", startedAt: 100, metaUpdatedAt: 100 };
@@ -6,6 +6,30 @@ const base = () => ({ dayState: { runs: [{ ...run }] }, runValues: { "run-1": { 
 const pause = { version: 1, id: "offline:one", date: "2026-01-01", runId: "run-1", observedGeneration: "run-1:100", resetEpoch: 0, effectiveAt: 200, action: "pause" } as const;
 
 describe("operational intents", () => {
+  it("reports only an allowlisted validation stage, never a rejected payload", () => {
+    const invalid = vi.fn();
+    expect(parseOperationalIntent({ privatePayload: "must-not-be-retained" }, 300, invalid)).toBeNull();
+    expect(invalid).toHaveBeenCalledWith("identity");
+    expect(JSON.stringify(invalid.mock.calls)).not.toContain("must-not-be-retained");
+  });
+  it.each([
+    [{ ...pause, effectiveAt: 200_000_000 }, "effective-time"],
+    [{ ...pause, baseRevision: -1 }, "revision"],
+    [{ ...pause, action: "lifecycle", lifecycle: "end", inventoryLines: [
+      { itemKey: "z", qty: 1 }, { itemKey: "a", qty: 1 },
+    ] }, "inventory-order"],
+  ])("preserves bounded diagnostics across merged validation paths", (input, stage) => {
+    const invalid = vi.fn();
+    expect(parseOperationalIntent(input, 300, invalid)).toBeNull();
+    expect(invalid).toHaveBeenCalledExactlyOnceWith(stage);
+  });
+  it("does not let a fast-clock resume target a different canonical pause", () => {
+    const paused = applyOperationalIntent(base(), pause, 300).data;
+    expect(applyOperationalIntent(paused, { ...pause, id: "old-resume", action: "resume",
+      pauseId: "offline:older-pause", effectiveAt: 99_999_999 }, 500).outcome).toBe("conflicted");
+    expect(applyOperationalIntent(paused, { ...pause, id: "paired-resume", action: "resume",
+      pauseId: `offline:${pause.id}`, effectiveAt: 400 }, 500).outcome).toBe("rebased");
+  });
   it("applies an offline pause once and retains its outcome for restart replay", () => {
     const first = applyOperationalIntent(base(), pause, 300);
     expect(first.outcome).toBe("accepted");
@@ -113,7 +137,8 @@ describe("operational intents", () => {
   });
   it("rebases a paired offline resume by excluding paused time, but reviews a claimed interval", () => {
     const paused = applyOperationalIntent(base(), pause, 200).data;
-    const resume = { ...pause, id: "offline:resume", action: "resume", effectiveAt: 260 } as const;
+    const resume = { ...pause, id: "offline:resume", action: "resume",
+      pauseId: `offline:${pause.id}`, effectiveAt: 260 } as const;
     const resumed = applyOperationalIntent(paused, resume, 300);
     expect(resumed.outcome).toBe("rebased");
     expect(resumed.data.dayState.runs[0].startedAt).toBe(200);

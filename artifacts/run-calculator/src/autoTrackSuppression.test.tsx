@@ -59,6 +59,25 @@ function makeV(overrides: Partial<Record<string, number>> = {}) {
 }
 
 describe("auto-track suppression for case/skid counters", () => {
+  it("keeps Packaging held while unrelated Dough supply advances", () => {
+    const t0 = Date.now();
+    const { form, values } = makeForm({
+      skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 5, batchesReady: 2,
+    });
+    const v = makeV();
+    const hold = { current: t0 + 60_000 };
+    const { result, rerender } = renderHook(({ nowTime }: { nowTime: Date }) => useAutoTrack({
+      runId: "packaging-held-dough-running", runStatus: "running", nowTime,
+      elapsedBatchSec: 1800, calc: baseCalc, v, form, externalAutoSuppressRef: hold,
+    }), { initialProps: { nowTime: new Date(t0) } });
+    const batchDue = result.current.tickDueRefs.batch.current;
+    expect(batchDue).toBeGreaterThan(t0);
+    rerender({ nowTime: new Date(batchDue) });
+    expect(values.batchesReady).toBeLessThan(2);
+    expect(values.skidsCompleted).toBe(0);
+    expect(values.casesOnCurrentSkid).toBe(0);
+  });
+
   it("does not write casesOnCurrentSkid/skidsCompleted while the suppress window is active", () => {
     // Use real-clock suppression: armed to expire ~1 minute from now.
     const t0 = Date.now();

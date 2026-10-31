@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+# Fresh self-host profile only; not a Replit production image or upgrade migrator.
+ARG NODE_IMAGE=node:24.21.0-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+FROM ${NODE_IMAGE} AS fresh-builder
+RUN snapshot=20260824T000000Z \
+  && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
+  && printf '%s\n' \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm-updates main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${snapshot} bookworm-security main" \
+    > /etc/apt/sources.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends git python3 build-essential \
+  && printf '%s\n' 'Pinned Debian builder package versions:' \
+  && dpkg-query -W build-essential git g++ g++-12 gcc gcc-12 make python3 python3-minimal python3.11 python3.11-minimal \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+# The dedicated ignore file excludes ALL uploaded/historical audit/evidence data.
+# Copy source once so the complete pinned workspace graph is available to pnpm.
+COPY . .
+RUN set -eu; \
+  test "$(node --version)" = "v$(tr -d '\r\n' < .nvmrc)"; \
+  pnpm_version="$(node -e 'const m=/^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(require("./package.json").packageManager??"");if(!m)throw Error("Unpinned pnpm");console.log(m[1])')"; \
+  npm install -g "pnpm@${pnpm_version}"; \
+  test "$(pnpm --version)" = "$pnpm_version"; \
+  pnpm install --frozen-lockfile
+RUN node scripts/self-host/build.mjs
+
+FROM fresh-builder AS fresh-runtime-deps
+RUN CI=true pnpm --filter @workspace/api-server deploy --legacy --prod /app/api-runtime \
+  && CI=true pnpm --filter @workspace/db deploy --legacy /app/migration
+
+FROM ${NODE_IMAGE} AS self-host-migrate
+ENV NODE_ENV=production
+LABEL org.runcalc.build-profile="self-host-fresh" org.runcalc.migration-scope="fresh-install-only"
+WORKDIR /app
+COPY --chown=node:node --from=fresh-runtime-deps /app/migration ./migration
+USER node
+# Only the guarded first initialization invokes this one-shot target. Never run
+# schema push on ordinary restart or use it as an automatic upgrade strategy.
+CMD ["sh", "-c", "cd /app/migration && node node_modules/drizzle-kit/bin.cjs push --force --config ./drizzle.config.ts && node ./migrations/apply-audit-log-protection.mjs"]
+
+FROM ${NODE_IMAGE} AS self-host-api
+ENV NODE_ENV=production
+LABEL org.runcalc.build-profile="self-host-fresh"
+WORKDIR /app
+COPY --chown=node:node --from=fresh-builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
+COPY --chown=node:node --from=fresh-builder /app/artifacts/run-calculator/dist/public ./artifacts/run-calculator/dist/public
+COPY --chown=node:node --from=fresh-runtime-deps /app/api-runtime/node_modules ./node_modules
+USER node
+CMD ["node", "artifacts/api-server/dist/index.mjs"]
+
+FROM caddy:2-alpine AS self-host-web
+LABEL org.runcalc.build-profile="self-host-fresh"
+USER root
+RUN chown 1001:1001 /data /config
+COPY docker/Caddyfile.self-host /etc/caddy/Caddyfile
+COPY --from=fresh-builder /app/artifacts/run-calculator/dist/public /srv
+USER 1001:1001

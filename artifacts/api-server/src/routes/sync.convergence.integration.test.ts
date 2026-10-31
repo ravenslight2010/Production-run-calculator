@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { rebaseStaleSyncIntent } from "@workspace/sync-contract/stale-base-recovery";
+import { MANUAL_SECTION_FIELDS } from "@workspace/sync-contract";
 import {
   stopIsolatedSyncProcess,
   stopIsolatedSyncProcesses,
@@ -572,7 +573,7 @@ class SimulatedClient {
   }
 
   private async request(
-    method: "GET" | "PUT",
+    method: "GET" | "PUT" | "POST",
     url: string,
     body?: unknown,
   ): Promise<Response> {
@@ -596,6 +597,45 @@ class SimulatedClient {
     } catch {
       return false;
     }
+  }
+
+  /** Real commands, not simulated snapshot ownership of operational fields. */
+  async mutateOperational(lifecycle: "start" | "end" | number): Promise<void> {
+    expect(await this.pull()).toBe(true);
+    const state = this.state!;
+    const run = (state.dayState as { runs: Array<Record<string, unknown>> }).runs[0];
+    const identity = {
+      id: `soak:${this.id}:${++this.logicalNow}`,
+      runId: "run-main",
+      observedGeneration: `run-main:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
+      baseRevision: state.canonicalRevision,
+      deviceId: this.id,
+    };
+    let response: Response;
+    if (typeof lifecycle === "number") {
+      const values = (state.runValues as Record<string, Record<string, unknown>>)["run-main"];
+      const baseValues = Object.fromEntries(MANUAL_SECTION_FIELDS.packaging.map((field) => [field, values[field] ?? 0]));
+      response = await this.request("POST", `/api/sync/manual-section?today=${TODAY}&epoch=${this._epoch}`, {
+        ...identity, date: TODAY, resetEpoch: this._epoch, section: "packaging",
+        baseValues, values: { ...baseValues, skidsCompleted: 1, casesOnCurrentSkid: lifecycle },
+      });
+    } else {
+      response = await this.request("POST", `/api/sync/operational-intents?today=${TODAY}&epoch=${this._epoch}`, {
+        deviceId: this.id,
+        intent: {
+          ...identity, version: 1, date: TODAY, resetEpoch: this._epoch,
+          effectiveAt: Date.now(), action: "lifecycle", lifecycle,
+          ...(lifecycle === "end" ? { inventoryLines: [] } : {}),
+        },
+      });
+    }
+    const receipt = await response.json() as SyncResponse & { outcome?: string; code?: string; error?: string };
+    expect(response.status, `${receipt.outcome ?? ""}: ${receipt.code ?? receipt.error ?? ""}`).toBe(200);
+    expect(receipt.outcome).toBe("accepted");
+    expect(receipt.data).toBeDefined();
+    this.state = clone(receipt.data!);
+    this.canonicalState = clone(receipt.data!);
+    this.snapshotId = receipt.snapshotId!;
   }
 
   async push(
@@ -632,8 +672,9 @@ class SimulatedClient {
           baseSnapshot,
           payload,
           body.data,
-          { snapshotId: this.snapshotId, serverTime: body.serverTime ?? this.logicalNow },
+          { snapshotId: this.snapshotId, serverTime: body.serverTime ?? this.logicalNow, enforceOperationalAuthority: true },
         );
+        expect(recovery.reviewRequiredChanges).toBe(0);
         if (recovery.reappliedChanges === 0) return body;
         this.metrics.retries++;
         this.metrics.recoveredWrites++;
@@ -746,8 +787,6 @@ const fixture = (): SyncPayload => ({
       id: "run-main",
       brand: "Acme",
       flavor: "Pepperoni",
-      startedAt: 1_000,
-      metaUpdatedAt: 1_000,
     }],
   },
   runValues: {
@@ -755,21 +794,10 @@ const fixture = (): SyncPayload => ({
       casesNeeded: 240,
       pizzasPerCase: 12,
       casesPerSkid: 48,
-      skidsCompleted: 1,
-      casesOnCurrentSkid: 12,
       doughRecipe: [{ ingredient: "Flour", lbs: 42 }],
     },
   },
   runValuesUpdatedAt: { "run-main": 1_000 },
-  packagingProgress: {
-    "run-main": {
-      skidsCompleted: 1,
-      casesOnCurrentSkid: 12,
-      correctionGeneration: 0,
-      updatedAt: 1_000,
-      manualOverrideUntil: 0,
-    },
-  },
   recipes: {
     dough: { "Acme Standard": { ingredient: "Flour", lbs: 42 } },
     frontline: { "Acme Sauce": { ingredient: "Sauce", lbs: 8 } },
@@ -1587,25 +1615,16 @@ describe("multi-client sync convergence soak", () => {
     await seed.pull();
     seed.state = fixture();
     await seed.push();
+    await seed.mutateOperational("start");
+    await seed.mutateOperational(12);
     for (const client of clients.slice(1)) await client.pull();
 
     // Repeated deterministic edits with a sleeping peer. Each wake adopts the
     // canonical response before its queued stale write can be replayed.
     clients[1].setOnline(false);
     for (let i = 0; i < 12; i++) {
-      clients[0].edit((state) => {
-        const values = state.runValues as Record<string, Record<string, unknown>>;
-        values["run-main"].casesOnCurrentSkid = 13 + i;
-        const progress = (state.packagingProgress as Record<string, Record<string, unknown>>)["run-main"];
-        progress.casesOnCurrentSkid = 13 + i;
-        progress.updatedAt = 10_001 + i;
-        if (i === 11) {
-          const runs = state.dayState as { runs: Array<Record<string, unknown>> };
-          runs.runs[0].endedAt = 20_000;
-          runs.runs[0].metaUpdatedAt = 20_000;
-        }
-      });
-      await clients[0].push();
+      await clients[0].mutateOperational(13 + i);
+      if (i === 11) await clients[0].mutateOperational("end");
       clients[1].edit((state) => {
         const values = state.runValues as Record<string, Record<string, unknown>>;
         values["run-main"].casesNeeded = 240 + i;
@@ -1631,8 +1650,10 @@ describe("multi-client sync convergence soak", () => {
         skidsCompleted: 1,
       },
     });
+    const endedRun = (clients[0].state!.dayState as { runs: Array<Record<string, unknown>> }).runs[0];
+    expect(endedRun.endedAt).toEqual(expect.any(Number));
     expect(stalePut?.data?.dayState).toMatchObject({
-      runs: [{ id: "run-main", endedAt: 20_000, metaUpdatedAt: 20_000 }],
+      runs: [{ id: "run-main", endedAt: endedRun.endedAt, metaUpdatedAt: endedRun.metaUpdatedAt }],
     });
     expect(await clients[0].pull()).toBe(true);
     expect(await clients[1].pull()).toBe(true);

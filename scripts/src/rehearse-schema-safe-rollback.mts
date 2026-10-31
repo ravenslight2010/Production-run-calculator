@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -279,6 +279,12 @@ async function main(): Promise<void> {
   console.log(`Preparing current revision ${currentRevision}`);
   git(["worktree", "add", "--detach", "--force", currentContext, currentRevision]);
   currentWorktreeAdded = true;
+  const reviewedReport = join(rootDir, "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json");
+  if (existsSync(reviewedReport)) {
+    for (const context of [parentContext, currentContext]) {
+      command(process.execPath, [join(rootDir, "scripts/src/restore-restricted-ci-inputs.mjs"), "--copy-report", context], "inherit");
+    }
+  }
   docker(["network", "create", network], "inherit");
   docker(["volume", "create", volume], "inherit");
   docker(["build", "--network", buildNetwork, "--target", "api", "--tag", parentTag, parentContext], "inherit");

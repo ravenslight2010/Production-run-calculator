@@ -36,6 +36,9 @@ export const doughRecipesTable = pgTable(
     notes: text("notes").notNull().default(""),
     components: jsonb("components").notNull().default([]).$type<NamedRecipeComponentRow[]>(),
     enabled: boolean("enabled").notNull().default(true),
+    // Explicit manager classification for purchased crust recipes that do not
+    // need an in-house dough formula. Never infer this from the recipe name.
+    isPremadeCrust: boolean("is_premade_crust").notNull().default(false),
     brand: text("brand").notNull().default(""),
     flavors: jsonb("flavors").notNull().default([]).$type<string[]>(),
     // Target weight of one doughball in OUNCES (spec sheet "target ball

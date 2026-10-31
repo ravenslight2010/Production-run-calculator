@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseOperationalIntent } from "../../api-server/src/lib/operationalIntents";
+import { todayStr } from "./utils";
 import {
   flushOperationalIntentOutbox,
   fencePendingEndSnapshots,
   capturePreEndLifecycle,
+  operationalIntentBlocksLifecycle,
+  operationalIntentBlocksLifecycleAdoption,
+  retainOperationalSnapshotReview,
   operationalIntentSummary,
   operationalIntentStorageHealth,
   operationalIntentRecoveryTelemetry,
@@ -15,8 +20,54 @@ import {
   submitManualSection,
 } from "./operationalIntentOutbox";
 
+const canonicalData = (data: Record<string, unknown> = {}) => ({
+  dayState: { date: todayStr(), runs: [] }, runValues: {}, ...data,
+});
+const confirmed = (outcome = "accepted", data: Record<string, unknown> = canonicalData()) => ({
+  outcome, data, canonicalRevision: 3, serverTime: Date.now(), snapshotId: "a".repeat(64), cursor: 1,
+});
+
 describe("operational intent outbox", () => {
   beforeEach(() => setOperationalIntentIdentity({ scope: "live", userId: "operator-1" }));
+  it("retains older snapshot evidence in scoped, immutable, non-replayable review history", async () => {
+    const source = {
+      version: 1 as const, id: "legacy-snapshot", scope: "live:operator-1",
+      date: todayStr(), epoch: 0, baseSnapshotId: "a".repeat(64),
+      baseline: canonicalData(), payload: canonicalData({ runValues: { r: { traysOnLine: 9 } } }),
+    };
+    expect(retainOperationalSnapshotReview(source)).toBe(true);
+    const review = readOperationalIntentOutbox()[0];
+    expect(review.state).toBe("review-required");
+    expect(review.localSnapshotReview).toEqual(source);
+    expect(retryOperationalIntent(review.id)).toBe(false);
+    expect(discardOperationalIntent(review.id)).toBe(false);
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    await flushOperationalIntentOutbox();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(retainOperationalSnapshotReview(source)).toBe(true);
+    expect(retainOperationalSnapshotReview({ ...source, payload: canonicalData() })).toBe(false);
+    expect(retainOperationalSnapshotReview({ ...source, operationalReviewRequired: true })).toBe(true);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-2" });
+    expect(retainOperationalSnapshotReview(source)).toBe(false);
+    expect(readOperationalIntentOutbox()).toEqual([]);
+  });
+
+  it("never lets control evidence fence canonical adoption or terminal controls block a new lifecycle", () => {
+    const record = {
+      version: 1 as const, id: "control-evidence", date: todayStr(), runId: "r",
+      observedGeneration: "r:1", resetEpoch: 0, effectiveAt: Date.now(),
+      action: "control" as const, control: { kind: "auto-track" as const, enabled: false },
+      commandCategory: "correction" as const, deviceId: "device", baseRevision: 1,
+      occurredAt: Date.now(), state: "pending" as const,
+    };
+    expect(operationalIntentBlocksLifecycle("r", [record])).toBe(true);
+    expect(operationalIntentBlocksLifecycleAdoption("r", [record])).toBe(false);
+    for (const state of ["conflicted", "review-required", "permanently-rejected"] as const) {
+      expect(operationalIntentBlocksLifecycle("r", [{ ...record, state }])).toBe(false);
+      expect(operationalIntentBlocksLifecycleAdoption("r", [{ ...record, state }])).toBe(false);
+    }
+  });
   afterEach(() => {
     setOperationalIntentCanonicalAdopter(undefined);
     setOperationalIntentIdentity(null);
@@ -24,6 +75,67 @@ describe("operational intent outbox", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("adopts a rejected correction's canonical totals while preserving its attempted entry", async () => {
+    const adopt = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopt);
+    const data = canonicalData({ runValues: { "run-1": { traysOnLine: 2, batchesReady: 0 } } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...confirmed("conflicted", data), code: "section_changed",
+    }), { status: 409 })));
+    expect(await submitManualSection({
+      runId: "run-1", section: "dough", observedGeneration: "run-1:100",
+      baseRevision: 2, values: { traysOnLine: 7, batchesReady: 0 },
+      baseValues: { traysOnLine: 1, batchesReady: 0 },
+    })).toBe("conflicted");
+    expect(adopt).toHaveBeenCalledWith(data, expect.objectContaining({
+      state: "conflicted", values: { traysOnLine: 2, batchesReady: 0 },
+    }), "conflicted");
+    const evidence = Object.keys(localStorage).map((key) => {
+      try { return JSON.parse(localStorage.getItem(key) ?? "null"); } catch { return null; }
+    }).find((record) => record?.deliveryState === "rejected");
+    expect(evidence?.values.traysOnLine).toBe(7);
+  });
+
+  it("fences a manual-section reply across leaving and returning to the same account", async () => {
+    const adopt = vi.fn(); setOperationalIntentCanonicalAdopter(adopt);
+    let release!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { release = resolve; })));
+    const pending = submitManualSection({
+      runId: "run-1", section: "dough", observedGeneration: "run-1:100",
+      values: { traysOnLine: 7, batchesReady: 0 },
+      baseValues: { traysOnLine: 1, batchesReady: 0 },
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const finishOriginal = release;
+    setOperationalIntentIdentity(null);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    finishOriginal(new Response(JSON.stringify(confirmed("accepted", canonicalData({
+      runValues: { "run-1": { traysOnLine: 7, batchesReady: 0 } },
+    })))));
+    expect(await pending).toBe("identity-mismatch");
+    expect(adopt).not.toHaveBeenCalled();
+  });
+
+  it("emits locale-independent completion lines accepted by the server contract", () => {
+    const intent = queueOperationalIntent({
+      runId: "run-1", observedGeneration: "run-1:100", effectiveAt: Date.now(),
+      action: "lifecycle", lifecycle: "end",
+      preEndLifecycle: capturePreEndLifecycle({ startedAt: 50, metaUpdatedAt: 100 }),
+      inventoryLines: [
+        { itemKey: "ingredient:é:lbs", qty: 1 },
+        { itemKey: "ingredient:a:lbs", qty: 2 },
+        { itemKey: "ingredient:Z:lbs", qty: 3 },
+        { itemKey: "ingredient:_:lbs", qty: 4 },
+        { itemKey: "ingredient:a:lbs", qty: 5 },
+      ],
+    });
+    expect(intent.inventoryLines?.map((line) => line.itemKey)).toEqual([
+      "ingredient:Z:lbs", "ingredient:_:lbs", "ingredient:a:lbs", "ingredient:é:lbs",
+    ]);
+    expect(intent.inventoryLines?.find((line) => line.itemKey === "ingredient:a:lbs")?.qty).toBe(7);
+    expect(parseOperationalIntent(intent)).not.toBeNull();
   });
 
   it("does not rebase queued same-section deltas from rejected conflict data", async () => {
@@ -38,6 +150,7 @@ describe("operational intent outbox", () => {
         ok: requests.length > 1,
         status: requests.length === 1 ? 409 : 200,
         json: async () => ({
+          canonicalRevision: 3, serverTime: Date.now(),
           ...(requests.length === 1 ? { code: "section_changed" } : { outcome: "accepted" }),
           data: {
             runValues: {
@@ -104,7 +217,7 @@ describe("operational intent outbox", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          outcome: "accepted",
+          outcome: "accepted", canonicalRevision: 3, serverTime: Date.now(),
           data: { runValues: { "run-1": { skidsCompleted: 0, casesOnCurrentSkid: body.values.casesOnCurrentSkid } } },
         }),
       };
@@ -124,11 +237,133 @@ describe("operational intent outbox", () => {
     expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 50]);
     expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 49]);
   });
+  it("adopts and caches canonical values when the selected run's section is complete", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const canonical = canonicalData({
+      runValues: {
+        "run-1": { skidsCompleted: 1, casesOnCurrentSkid: 24 },
+      },
+    });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, any>);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => requests.length === 1
+          ? confirmed("accepted", canonical)
+          : confirmed("accepted", canonicalData({ runValues: { "run-1": requests.at(-1)?.values } })),
+      };
+    }));
+    const adopt = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopt);
+
+    const [first, second] = await Promise.all([
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 30 },
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 28 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        observedGeneration: "run-1:1",
+      }),
+    ]);
+
+    expect([first, second]).toEqual(["accepted", "accepted"]);
+    expect(requests[1]).toMatchObject({
+      baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 24 },
+      values: { skidsCompleted: 1, casesOnCurrentSkid: 23 },
+    });
+    expect(adopt).toHaveBeenCalledTimes(2);
+    expect(adopt).toHaveBeenCalledWith(
+      canonical,
+      expect.objectContaining({
+        values: { skidsCompleted: 1, casesOnCurrentSkid: 24 },
+      }),
+      "accepted",
+    );
+  });
+  it.each([
+    ["missing selected run values", { runValues: {} }],
+    ["malformed section field values", {
+      runValues: { "run-1": { skidsCompleted: 0, casesOnCurrentSkid: "24" } },
+    }],
+  ])("does not adopt or cache canonical data with %s", async (_case, data) => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, any>);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => requests.length === 1
+          ? confirmed("accepted", data)
+          : confirmed("accepted", canonicalData({ runValues: { "run-1": requests.at(-1)?.values } })),
+      };
+    }));
+    const adopt = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopt);
+
+    const [first, second] = await Promise.all([
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 30 },
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 28 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        observedGeneration: "run-1:1",
+      }),
+    ]);
+
+    expect([first, second]).toEqual(["offline", "accepted"]);
+    expect(requests[1]).toMatchObject({
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 28 },
+    });
+    expect(adopt).toHaveBeenCalledOnce();
+    expect(adopt).toHaveBeenCalledWith(
+      expect.objectContaining({ runValues: { "run-1": { skidsCompleted: 0, casesOnCurrentSkid: 28 } } }),
+      expect.anything(), "accepted",
+    );
+  });
+  it("retains an incomplete success receipt instead of claiming acceptance", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ outcome: "accepted" }),
+    }));
+    const intent = queueOperationalIntent({ runId: "run", action: "pause", observedGeneration: "run:1", effectiveAt: 1 });
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "pending", failure: "server" })]);
+    expect(operationalIntentSummary().accepted).toBe(0);
+  });
+  it("does not adopt a late response after leaving and returning to the same account", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const adopt = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopt);
+    let release!: (response: unknown) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => { release = resolve; })));
+    const intent = queueOperationalIntent({ runId: "run", action: "pause", observedGeneration: "run:1", effectiveAt: 1 });
+    const pending = flushOperationalIntentOutbox();
+    setOperationalIntentIdentity(null);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    release({ ok: true, status: 200, json: async () => confirmed() });
+    await pending;
+    expect(adopt).not.toHaveBeenCalled();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "sending" })]);
+  });
   it("persists the exact correction and retains it for retry until canonical outcome", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn()
       .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ outcome: "accepted" }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => confirmed() });
     vi.stubGlobal("fetch", fetch);
     const replaySignal = vi.fn();
     window.addEventListener("calculator-field-check-signal", replaySignal);
@@ -168,7 +403,7 @@ describe("operational intent outbox", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ outcome: "accepted" }),
+      json: async () => confirmed(),
     }));
     await flushOperationalIntentOutbox();
 
@@ -269,9 +504,31 @@ describe("operational intent outbox", () => {
     expect(fetch).toHaveBeenCalledOnce();
     expect(adopt).not.toHaveBeenCalled();
     expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state, failure })]);
-    expect(retryOperationalIntent(intent.id)).toBe(true);
+    expect(retryOperationalIntent(intent.id)).toBe(state !== "permanently-rejected");
     expect(fetch).toHaveBeenCalledOnce();
   });
+  it.each([400, 422])("retains HTTP %s validation rejection through direct and bulk recovery", async (status) => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status, headers: { get: () => null },
+      json: async () => ({ error: "Invalid command" }),
+    });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({
+      runId: "invalid-run", observedGeneration: "invalid-run:1",
+      effectiveAt: 1, action: "lifecycle", lifecycle: "start",
+    });
+    await flushOperationalIntentOutbox();
+    const rejected = readOperationalIntentOutbox();
+    expect(rejected).toEqual([expect.objectContaining({
+      id: intent.id, state: "permanently-rejected", failure: "validation",
+    })]);
+    expect(retryOperationalIntent(intent.id)).toBe(false);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(readOperationalIntentOutbox()).toEqual(rejected);
+  });
+
   it("keeps transient 5xx responses queued for backoff", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn().mockResolvedValue({
@@ -295,10 +552,10 @@ describe("operational intent outbox", () => {
   });
   it("adopts canonical data only for the documented 409 conflict response", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
-    const canonical = { runValues: { "run-1": { casesNeeded: 12 } } };
+    const canonical = canonicalData({ runValues: { "run-1": { casesNeeded: 12 } } });
     const fetch = vi.fn().mockResolvedValue({
       ok: false, status: 409, headers: { get: () => null },
-      json: async () => ({ outcome: "conflicted", data: canonical, canonicalRevision: 3 }),
+      json: async () => confirmed("conflicted", canonical),
     });
     const adopt = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -330,7 +587,7 @@ describe("operational intent outbox", () => {
   });
   it("discards only discardable work and keeps review-required evidence", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
-    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "review-required" }) });
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed("review-required") });
     vi.stubGlobal("fetch", fetch);
     const review = queueOperationalIntent({ runId: "review", observedGeneration: "review:1", effectiveAt: 1, action: "pause" });
     const pending = queueOperationalIntent({ runId: "discard", observedGeneration: "discard:1", effectiveAt: 2, action: "resume" });
@@ -342,8 +599,8 @@ describe("operational intent outbox", () => {
   it("uses per-ID terminal keys so another tab's terminal record is not clobbered", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "rebased" }) });
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed() })
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed("rebased") });
     vi.stubGlobal("fetch", fetch);
     queueOperationalIntent({ runId: "one", observedGeneration: "one:1", effectiveAt: 1, action: "pause" });
     queueOperationalIntent({ runId: "two", observedGeneration: "two:1", effectiveAt: 2, action: "resume" });
@@ -364,7 +621,7 @@ describe("operational intent outbox", () => {
         ok: false, status: 401, headers: { get: () => null }, json: async () => ({}),
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }),
+        ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed(),
       });
     vi.stubGlobal("fetch", fetch);
 
@@ -404,7 +661,7 @@ describe("operational intent outbox", () => {
     await vi.waitFor(() => expect(readOperationalIntentOutbox()[0]?.state).toBe("sending"));
     expect(discardOperationalIntent(intent.id)).toBe(false);
     setOperationalIntentIdentity({ scope: "live", userId: "operator-2" });
-    release({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    release({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed() });
     await flushing;
     expect(readOperationalIntentOutbox()).toEqual([]);
     setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
@@ -418,7 +675,7 @@ describe("operational intent outbox", () => {
       .mockReturnValueOnce(pendingResponse)
       .mockResolvedValueOnce({
         ok: true, status: 200, headers: { get: () => null },
-        json: async () => ({ outcome: "accepted" }),
+        json: async () => confirmed(),
       });
     vi.stubGlobal("fetch", fetch);
     const intent = queueOperationalIntent({
@@ -475,7 +732,7 @@ describe("operational intent outbox", () => {
       }
       return {
         ok: true, status: 200, headers: { get: () => null },
-        json: async () => ({ outcome: "accepted" }),
+        json: async () => confirmed(),
       };
     });
     vi.stubGlobal("fetch", fetch);
@@ -510,10 +767,10 @@ describe("operational intent outbox", () => {
   });
   it("keeps a pending action across an offline reload boundary and adopts canonical data only after retry", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
-    const canonical = { runValues: { "run-1": { casesOnCurrentSkid: 12 } } };
+    const canonical = canonicalData({ runValues: { "run-1": { casesOnCurrentSkid: 12 } } });
     const fetch = vi.fn()
       .mockRejectedValueOnce(new Error("browser went offline"))
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted", data: canonical }) });
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed("accepted", canonical) });
     const adopt = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const { setOperationalIntentCanonicalAdopter } = await import("./operationalIntentOutbox");
@@ -538,13 +795,13 @@ describe("operational intent outbox", () => {
     const firstResponse = new Promise((resolve) => { release = resolve; });
     const fetch = vi.fn()
       .mockReturnValueOnce(firstResponse)
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed() });
     vi.stubGlobal("fetch", fetch);
     const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause" });
     const firstFlush = flushOperationalIntentOutbox();
     await vi.waitFor(() => expect(readOperationalIntentOutbox()[0]?.state).toBe("sending"));
     setOperationalIntentIdentity(null);
-    release({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    release({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed() });
     await firstFlush;
     setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
     expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "sending" })]);
@@ -556,7 +813,7 @@ describe("operational intent outbox", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed() });
     vi.stubGlobal("fetch", fetch);
     const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "resume" });
     await flushOperationalIntentOutbox();
@@ -575,7 +832,7 @@ describe("operational intent outbox", () => {
   it("keeps an accepted action replayable when terminal storage is quota-exhausted", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }),
+      ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed(),
     });
     vi.stubGlobal("fetch", fetch);
     const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause" });
@@ -595,7 +852,7 @@ describe("operational intent outbox", () => {
   });
   it("fences pending intents across reset and makes an explicit retry adopt the new epoch", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
-    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }) });
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, json: async () => confirmed() });
     vi.stubGlobal("fetch", fetch);
     const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause" });
     const { applyResetWipe } = await import("./adapters/browserResetPersistence");

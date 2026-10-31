@@ -125,7 +125,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                     : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
                 }`}>
                   {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} ahead` : `▼ ${Math.abs(calc.paceDelta)} behind`}
-                  {calc.ppm > 0 ? ` · ${calc.ppm} PPM` : ""}
+                  {calc.ppm > 0 ? ` · ${calc.ppm} pizzas/min (${calc.ppm / 2} pairs/min)` : ""}
                 </span>
               )}
               {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (
@@ -202,6 +202,8 @@ const CompactRunStrip = memo(function CompactRunStrip() {
             pauseStopsTunnel: pauseStopsTunnel(openPause),
             lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
             runStatus: runStatus as string,
+            pressOvenMin: ve.pressOvenMin,
+            frontlineMin: ve.frontlineMin,
             preTunnelMin: preTun,
             postTunnelMin: postTun,
             freezerTime: freezerMin,

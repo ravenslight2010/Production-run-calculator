@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import {
   dieLineDefaultsFor,
@@ -95,6 +96,23 @@ describe("resolveDieLineDefaults", () => {
   it("fills preTunnelMin / postTunnelMin when still 0 (stored untouched default)", () => {
     const filled = resolveDieLineDefaults('7"', BLANK);
     expect(filled).toMatchObject({ preTunnelMin: 3.5, postTunnelMin: 3.0 });
+  });
+
+  it("does not overwrite an explicit split when die defaults are applied", () => {
+    const defaults = {
+      crustsPerCycle: 6, cycleSpeed: 8, speedAdjustment: 0.92,
+      freezerTime: 22, casesPerLayer: 6, pressOvenMin: 3, frontlineMin: 2,
+    };
+    expect(resolveDieLineDefaults("7 inch", {
+      pressOvenMin: 1.75,
+      frontlineMin: 0,
+    }, {
+      "7 inch": defaults,
+    })).not.toHaveProperty("pressOvenMin");
+    expect(resolveDieLineDefaults("7 inch", {
+      pressOvenMin: 1.75,
+      frontlineMin: 0,
+    }, { "7 inch": defaults })).not.toHaveProperty("frontlineMin");
   });
 
   it("fills preTunnelMin / postTunnelMin when at the generic 2.5-min display fallback", () => {
