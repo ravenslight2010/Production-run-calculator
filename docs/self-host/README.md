@@ -1,6 +1,9 @@
 # Windows LAN self-hosting — integration candidate
 
-**Status: DRAFT / NO-GO for production.** This branch uses the current `Replit`
+**Status: DRAFT / NO-GO for production.** Replit/main source integration is complete
+for the captured refreshed tips; see the [current integration report](integration-2026-10-31.md).
+Private build/workbook inputs and full CI still block production readiness.
+ This branch uses the current `Replit`
 application as its functional baseline. It does not change Replit publishing,
 move production data, merge into main, or install an automatic updater.
 
