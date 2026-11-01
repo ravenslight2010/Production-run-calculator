@@ -139,3 +139,13 @@ selected an ended run rather than the paused run actually being tested.
 exact key, and explicitly select that same run in the independent browser. Keep
 its operational storage empty; copying cached run values would hide hydration
 failures.
+
+For error-and-retry UI journeys, keep a mocked outage active until the intended
+recovery action rather than failing only the first request.
+
+**Why:** Mount/session refetches can consume a one-shot error and restore the
+empty/success state before the error assertion, without any user retry.
+
+**How to apply:** Hold the failure flag through the visible error assertion,
+then release it immediately before the explicit Retry action. Do not disable
+normal application refetching or change the production retry policy.

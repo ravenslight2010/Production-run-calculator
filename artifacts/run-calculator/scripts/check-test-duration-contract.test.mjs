@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   DEFAULT_CALCULATOR_TEST_BUDGET_MS,
+  formatCalculatorTestStart,
   MIN_CALCULATOR_TEST_WORKERS,
 } from "./check-test-duration.mjs";
 
@@ -12,6 +13,32 @@ const documentationPath = new URL(
   import.meta.url,
 );
 const packageManifestPath = new URL("../package.json", import.meta.url);
+const durationGuardPath = new URL("./check-test-duration.mjs", import.meta.url);
+
+test("startup diagnostics include the runner runtime and actual requested settings", () => {
+  const message = formatCalculatorTestStart(150_000, 4, 8, "v24.21.0");
+  assert.match(message, /Runner Node v24\.21\.0/);
+  assert.match(message, /budget 150\.0s/);
+  assert.match(message, /requested workers 4/);
+  assert.match(message, /8 available CPU workers/);
+  assert.match(message, /configured worker ceiling: 4/);
+});
+
+test("startup diagnostics do not hide an overridden worker request", () => {
+  const message = formatCalculatorTestStart(150_000, 2, 16, "v24.21.0");
+  assert.match(message, /requested workers 2/);
+  assert.match(message, /16 available CPU workers/);
+});
+
+test("startup diagnostics are emitted before the suite is spawned", () => {
+  const source = readFileSync(durationGuardPath, "utf8");
+  const diagnosticCall = source.indexOf(
+    "formatCalculatorTestStart(budgetMs, configuredWorkers, availableWorkers)",
+  );
+  const spawnCall = source.indexOf("const child = spawn(");
+  assert.ok(diagnosticCall >= 0, "the startup metadata must actually be emitted");
+  assert.ok(spawnCall > diagnosticCall, "metadata must survive an interrupted suite");
+});
 
 const numberWords = new Map([
   ["one", 1],

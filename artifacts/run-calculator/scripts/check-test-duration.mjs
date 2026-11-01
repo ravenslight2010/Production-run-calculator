@@ -42,6 +42,19 @@ export function formatCalculatorTestCapacity(
   );
 }
 
+export function formatCalculatorTestStart(
+  budgetMs,
+  configuredWorkers,
+  availableWorkers,
+  nodeVersion = process.version,
+) {
+  return [
+    `Starting calculator test suite. Runner Node ${nodeVersion};`,
+    `budget ${(budgetMs / 1000).toFixed(1)}s; requested workers ${configuredWorkers}.`,
+    formatCalculatorTestCapacity(availableWorkers),
+  ].join(" ");
+}
+
 export function calculatorTestResourceError(
   availableWorkers,
   minimumWorkers = MIN_CALCULATOR_TEST_WORKERS,
@@ -105,6 +118,10 @@ async function runCalculatorTests() {
     console.error(resourceError);
     return 1;
   }
+
+  console.info(
+    formatCalculatorTestStart(budgetMs, configuredWorkers, availableWorkers),
+  );
 
   const temporaryDirectory = await mkdtemp(
     join(tmpdir(), "calculator-vitest-"),

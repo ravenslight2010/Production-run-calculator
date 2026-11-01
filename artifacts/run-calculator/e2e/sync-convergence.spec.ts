@@ -12,6 +12,7 @@ import { Client } from "pg";
 import { DEFAULT_VALUES } from "../src/types";
 import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
+  DEFAULT_MANAGER_CAPABILITIES,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
 } from "./isolation";
@@ -23,16 +24,7 @@ import {
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const users = new Set<string>();
-const MANAGER_CAPABILITIES = [
-  "manage-staff",
-  "manage-inventory",
-  "edit-production-rules",
-  "approve-password-resets",
-  "review-incidents",
-  "use-ai-tools",
-  "manage-factory-settings",
-  "manage-profiles",
-];
+const MANAGER_CAPABILITIES = DEFAULT_MANAGER_CAPABILITIES;
 
 function uid(): string {
   return `e2e_sync_${Math.random().toString(36).slice(2, 10)}`;

@@ -6,6 +6,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import {
+  DEFAULT_MANAGER_CAPABILITIES,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -14,16 +15,7 @@ import { signUpAndHandleOnboarding } from "./onboarding";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-const MANAGER_CAPABILITIES = [
-  "manage-staff",
-  "manage-inventory",
-  "edit-production-rules",
-  "approve-password-resets",
-  "review-incidents",
-  "use-ai-tools",
-  "manage-factory-settings",
-  "manage-profiles",
-];
+const MANAGER_CAPABILITIES = DEFAULT_MANAGER_CAPABILITIES;
 const START_DATE = "2026-01-01";
 const END_DATE = "2026-01-02";
 const RESOURCE_PREFIX = "e2e:audit-pdf:";

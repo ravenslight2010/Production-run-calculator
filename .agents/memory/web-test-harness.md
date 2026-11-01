@@ -21,6 +21,19 @@ which could be mistaken for missing browser evidence.
 **How to apply:** Inspect the network schema first, then extract only the
 needed sanitized facts. Do not dump request headers, cookies, or entire bodies.
 
+### Network-event ordering
+
+Sort captured requests by their recorded timestamps before comparing writes or
+snapshots; ZIP member names are not an event sequence. Inspect response timing
+as well before treating an older body as a server rollback.
+
+**Why:** Different network members placed a fixture's initial seed after its
+later edit when iterated by filename, falsely suggesting a reverting write.
+
+**How to apply:** Combine relevant events across members, order their recorded
+times and compare acknowledgment/revision evidence. Keep extracted facts bounded
+and sanitized; archive iteration order cannot establish a sync conflict.
+
 ## Browser frame references
 
 **Rule:** Inspect the screencast event schema before extracting an image. The

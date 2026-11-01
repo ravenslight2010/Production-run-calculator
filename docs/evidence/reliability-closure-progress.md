@@ -13,6 +13,156 @@ browser attempt remains one pass/three failures; its identified fixture cause
 was corrected and checked at the preparation layer, not replayed in a browser.
 The wider task and its unresolved app-wide browser evidence remain open.
 
+## Resumed objective — reconnect and Gold fixture contracts
+
+The next bounded repair batch addresses seven retained browser failures, not a
+new complete-suite attempt. Three facility-reconnect fixtures now capture the
+server's current write epoch for newly created commands, count only validated
+canonical replies as acknowledgments, and examine the two intended queue keys
+without discarding unrelated bootstrap work. The original command/generation,
+independent-setting result, final durable totals and other-account byte
+preservation assertions remain. Unbound legacy commands are not upgraded by
+application code.
+
+Three Gold retention/reminder mocks now carry the required 64-hex snapshot
+revision, changing it after a simulated verification changes the register.
+The approval-error fixture holds its synthetic outage until the explicit Retry
+action instead of allowing a background remount/refetch to clear the error
+before the assertion. Production permissions, retention consistency checks,
+retry policy and source approval rules are unchanged.
+
+Focused source checks passed: 49 factory-queue/write-epoch tests and 41 Gold
+API/component/reminder tests. Syntax checks for the three edited browser files
+and `git diff --check` passed. These are not new browser passes.
+
+The narrow reconnect follow-up passed **3/3**, with no unexpected, flaky or
+skipped cases (85.9 seconds). It used disposable loopback services/PostgreSQL;
+private output is under
+`artifacts/run-calculator/generated-artifacts/facility-reconnect-followup.moyOqq/`.
+It establishes those cross-process write-fence/acknowledgment journeys only.
+
+The premade-crust fixture also needed its own canonical day: its old first-Start
+failure showed an already-running line before this test had started a run.
+Its bespoke setup additionally overwrote the global test manager role with
+eight capabilities. It now uses the established authorized-fixture lifecycle,
+owned account/role, complete empty day on the browser-local date, tracked
+profile cleanup and a fail-closed loopback API origin. It does not remove
+production permission checks or change operational crust selection.
+The narrowly scoped follow-up passed **1/1** (2.5 minutes), including started-run
+mode preservation. Private output is under
+`artifacts/run-calculator/generated-artifacts/premade-isolation-followup.E1MtVg/`.
+The browser syntax validator passed for 71 files; no inventory cases were added,
+removed or renamed.
+
+Gold's four corrected fixture paths have not received a new browser pass.
+The two historical recipe-refresh failures also remain unclosed. Their saved
+synthetic traces have acknowledged master-data writes and differing run-value
+snapshots; those observations do not yet identify a current application defect
+or distinguish late reads from conflicting writes/profile propagation.
+Trace members must be ordered by event timing, not ZIP member names, before
+inferring a reversal. No operational math or conflict guard was changed on
+this evidence alone.
+
+Do not repeat the 187 previously passing full-run flows or represent these
+four focused browser passes as complete-suite certification. The owning task,
+remaining integrated journeys, physical-device gaps and publication-bound
+evidence requirements remain open. No publish, production/shared-development
+database mutation or managed workflow restart occurred.
+
+### Default-manager fixture drift found during the same audit
+
+Eight remaining browser fixtures copied the obsolete eight-capability manager
+baseline instead of using `DEFAULT_MANAGER_CAPABILITIES`. Those copies are now
+replaced in audit export, critical workflows, management performance, manager
+queue, phone layout, photo count, profile reload and sync convergence fixtures.
+The scan also checked copies with extra capabilities, not just eight-element
+arrays. No additional copies of that baseline were found in the spec set.
+
+The existing pre-database browser preflight now rejects both default-role
+declarations and inline built-in-manager SQL assignments that copy the old
+baseline, including copies with additional permissions. It continues to allow
+canonical defaults, explicit filtered restrictions, empty-capability revocation
+and owned custom-role assignments. This is fixture hygiene, not a production
+permission grant or an authorization bypass.
+
+The focused validator unit file passed **13/13**, including the real preflight
+entry-point check; the complete 71-file preflight also passed. Combined with
+the earlier focused runs, 103 focused native tests passed in this resumed work.
+This is not a new complete-client-suite result, nor runtime certification of
+the eight changed browser fixtures.
+
+An initial validator launch timed out after 60 seconds without output and
+established no test result. The shell selected Node 24.22.1 while the installed
+required runtime was 24.21.0. Selecting that installed runtime on PATH let the
+unchanged guarded release runner execute successfully (13 tests in 11 seconds).
+No engine constraint, runner lock, network/TLS guard or tool acquisition policy
+was weakened. This observation does not establish the cause of older platform
+Agent stalls or merge-lock incidents.
+
+### Manager workflow follow-up
+
+The four previously failing `manager-attention.spec.ts` journeys passed
+**4/4** on the recorded candidate, with zero skipped, flaky or unexpected cases
+and no top-level runner errors (91.17 seconds). They cover keyboard incident
+review/resolution, keyboard workflow navigation/focus, badge/destination
+transitions and setup with incomplete recipe names. Private results are under
+`artifacts/run-calculator/generated-artifacts/manager-attention-followup.ocFcFl/`.
+This brings the focused browser follow-ups in this resumed work to eight
+passing journeys, not a complete-suite pass.
+
+The old keyboard trace was not used to rewrite current application behavior:
+the present fixture already accounts for new incidents starting expanded, and
+the current runtime follow-up passed. The other historical manager failures
+also did not reproduce in this follow-up.
+
+The calculator's declared typecheck was attempted with the pinned runtime.
+Its three config-loader unit tests, real Vite config loading, library build
+prerequisites and reviewed `as any` budget checks passed. The final app compiler
+phase produced no diagnostic before the shell's 120-second limit; the typecheck
+is **INCOMPLETE**, not green and not a confirmed source error. Do not repeat
+those completed prerequisites merely to retry the interrupted compiler phase.
+
+The interrupted compiler phase was then run directly with the same pinned
+runtime and `tsc -p tsconfig.json --noEmit`; it completed with exit 0 and no
+diagnostics. The calculator package's completed prerequisite checks plus this
+compiler result establish the scoped typecheck. They are not a new root
+workspace typecheck or a complete release check.
+
+### Current blocker — expanded client suite runtime
+
+The declared client test command was attempted once after the focused fixes.
+The duration/worker contract, reviewed-cast checks and startup/boundary
+prerequisites ran before Vitest. The outer command hit its unchanged
+300-second shell limit before Vitest completed. Its last captured progress was
+**226 of 396 files passed, 2,720 passing tests observed, 251.99 seconds elapsed**.
+Those partial counts do not establish a complete assertion result. The
+observed Vitest elapsed time already exceeds the existing **150-second**
+wall-clock budget, so no current complete-suite or runtime-budget pass is
+claimed.
+
+The existing runner still uses isolated worker threads, file-level
+parallelism, a four-worker default/ceiling and the same duration contract.
+No worker count, budget, assertion or inventory was relaxed. Completed-file
+timings alone cannot attribute the excess to test execution versus environment,
+module-import, worker-startup or runner contention costs. The earlier 143.5s
+result remains historical, not certification of this expanded attempt.
+
+The runner previously printed capacity only in its completion summary. An
+early metadata line now records runner Node version, actual requested workers,
+detected capacity and configured budget before spawning Vitest, so an interrupted
+attempt does not lose those facts. This adds observation only; it changes no
+allocation, test or budget behavior. No further complete-suite retry was started.
+The metadata change passed Node syntax validation and all **5/5** focused
+duration-contract tests, including emission before spawn and visibility of an
+overridden worker request. `git diff --check` also passed. These cheap controls
+do not turn the incomplete expanded client run into a pass.
+
+The owning task remains **IN PROGRESS**, blocked on current complete-suite
+verification and its remaining local coverage gaps. Keep runtime diagnosis and
+repairs in this task rather than generating recursive follow-ups. No publish,
+production write, shared development-data mutation or managed-workflow restart
+was performed in this resumed work.
+
 ## Intake
 
 - Owner: assigned Replit Agent. One task owns all four internal milestones.

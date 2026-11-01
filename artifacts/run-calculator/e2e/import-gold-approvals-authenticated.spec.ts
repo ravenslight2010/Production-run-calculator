@@ -45,7 +45,8 @@ test("Gold Lab approval metadata lifecycle, authorization, errors, and responsiv
     let failFirstList = true;
     await page.route("**/api/import-gold/approvals*", async (route) => {
       if (route.request().method() === "GET" && failFirstList) {
-        failFirstList = false;
+        // Keep the outage stable across mount/session refetches. Only the
+        // deliberate retry below restores service; a second GET is not recovery.
         await route.fulfill({
           status: 503,
           contentType: "application/json",
@@ -63,6 +64,7 @@ test("Gold Lab approval metadata lifecycle, authorization, errors, and responsiv
     const card = settings.getByTestId("import-gold-approvals");
     await expect(card).toBeVisible();
     await expect(card.getByTestId("gold-approvals-load-error")).toContainText("Try again");
+    failFirstList = false;
     await card.getByTestId("button-retry-gold-approvals").click();
     await expect(card.getByTestId("gold-approvals-empty")).toBeVisible();
     await page.unroute("**/api/import-gold/approvals*");

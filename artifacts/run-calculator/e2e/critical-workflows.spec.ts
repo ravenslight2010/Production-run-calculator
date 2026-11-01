@@ -9,6 +9,7 @@
 import { expect, test, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import {
+  DEFAULT_MANAGER_CAPABILITIES,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -18,16 +19,7 @@ import { signUpAndHandleOnboarding } from "./onboarding";
 const OLD_PASSWORD = "TestPass123!";
 const NEW_PASSWORD = "NewTestPass456!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-const MANAGER_CAPABILITIES = [
-  "manage-staff",
-  "manage-inventory",
-  "edit-production-rules",
-  "approve-password-resets",
-  "review-incidents",
-  "use-ai-tools",
-  "manage-factory-settings",
-  "manage-profiles",
-];
+const MANAGER_CAPABILITIES = DEFAULT_MANAGER_CAPABILITIES;
 
 type CleanupPlan = {
   usernames: string[];

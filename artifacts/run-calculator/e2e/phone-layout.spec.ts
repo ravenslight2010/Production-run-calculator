@@ -596,16 +596,7 @@ async function promoteToManager(username: string): Promise<void> {
     );
     await db.query(
       "UPDATE roles SET capabilities = $1::jsonb, updated_at = NOW() WHERE name = 'manager'",
-      [JSON.stringify([
-        "manage-staff",
-        "manage-inventory",
-        "edit-production-rules",
-        "approve-password-resets",
-        "review-incidents",
-        "use-ai-tools",
-        "manage-factory-settings",
-        "manage-profiles",
-      ])],
+      [JSON.stringify(DEFAULT_MANAGER_CAPABILITIES)],
     );
   } finally {
     await db.end().catch(() => {});

@@ -932,6 +932,12 @@ test(acknowledgment === "valid"
       [key, JSON.stringify(baseline), new Date(editedAt - 60_000)],
     );
 
+    // Model a newly captured edit, not an old unbound command. The real writer
+    // carries the epoch of the canonical read; never invent/reset that fence.
+    const baselineResponse = await page.request.get("/api/factory-data");
+    expect(baselineResponse.ok(), "the fixture must read its current write fence").toBe(true);
+    const undoEpoch = baselineResponse.headers()["x-master-data-epoch"];
+    expect(undoEpoch, "the server must supply a valid write epoch").toMatch(/^\d+$/);
     const identity = `live:${userId}`;
     const queueKey = `run-calc-fkv-queue-v2:${encodeURIComponent(identity)}`;
     const commands = [{
@@ -939,8 +945,9 @@ test(acknowledgment === "valid"
       value: intended,
       updatedAt: editedAt,
       g: 1,
+      undoEpoch,
     }, ...(acknowledgment === "valid" ? [] : [{
-      key: independentKey, value: independentValue, updatedAt: editedAt, g: 2,
+      key: independentKey, value: independentValue, updatedAt: editedAt, g: 2, undoEpoch,
     }])];
     const pendingQueue = JSON.stringify(commands);
     const unrelatedQueueKey =
@@ -1000,11 +1007,18 @@ test(acknowledgment === "valid"
       await route.continue();
     };
     await page.route("**/api/factory-data", abortWhileOffline);
-    page.on("response", (response) => {
+    page.on("response", async (response) => {
       const body = response.request().postDataJSON() as { key?: unknown } | null;
       if (body?.key === key && response.request().method() === "PUT"
         && new URL(response.url()).pathname === "/api/factory-data" && response.ok()) {
-        successfulAcknowledgments++;
+        try {
+          const accepted = await response.json() as { value?: unknown; updatedAt?: unknown };
+          if (typeof accepted.updatedAt === "string"
+            && Number.isFinite(Date.parse(accepted.updatedAt))
+            && JSON.stringify(accepted.value) === JSON.stringify(intended)) {
+            successfulAcknowledgments++;
+          }
+        } catch { /* A malformed or interrupted response is not an acknowledgement. */ }
       }
     });
 
@@ -1071,8 +1085,14 @@ test(acknowledgment === "valid"
 
       if (acknowledgment !== "valid") {
         await expect.poll(() => independentAttempts).toBe(1);
-        await expect.poll(async () => page.evaluate((storageKey) =>
-          localStorage.getItem(storageKey), queueKey)).toBe(JSON.stringify([commands[0]]));
+        await expect.poll(async () => page.evaluate(({ storageKey, retainedKey, progressedKey }) => {
+          const queue = JSON.parse(localStorage.getItem(storageKey) ?? "[]") as Array<{ key: string }>;
+          return {
+            retained: queue.filter((op) => op.key === retainedKey),
+            progressed: queue.filter((op) => op.key === progressedKey),
+          };
+        }, { storageKey: queueKey, retainedKey: key, progressedKey: independentKey }))
+          .toEqual({ retained: [commands[0]], progressed: [] });
         const retainedCanonical = await readCanonicalFactoryValues(page);
         expect(retainedCanonical[key]).toEqual(baseline);
         expect(retainedCanonical[independentKey]).toBe(independentValue);

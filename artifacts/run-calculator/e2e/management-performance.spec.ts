@@ -10,7 +10,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import fs from "node:fs";
 import path from "node:path";
-import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
+import { DEFAULT_MANAGER_CAPABILITIES, cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
 import { signUpAndHandleOnboarding } from "./onboarding";
 import {
   AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS,
@@ -105,16 +105,7 @@ async function promoteToManager(username: string): Promise<void> {
       `UPDATE roles
        SET capabilities = $1::jsonb, updated_at = NOW()
        WHERE name = 'manager'`,
-      [JSON.stringify([
-        "manage-staff",
-        "manage-inventory",
-        "edit-production-rules",
-        "approve-password-resets",
-        "review-incidents",
-        "use-ai-tools",
-        "manage-factory-settings",
-        "manage-profiles",
-      ])],
+      [JSON.stringify(DEFAULT_MANAGER_CAPABILITIES)],
     );
     const user = await database.query("SELECT id FROM users WHERE username = $1", [username]);
     expect(user.rows).toHaveLength(1);

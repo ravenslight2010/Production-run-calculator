@@ -10,6 +10,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { Client } from "pg";
 import {
+  DEFAULT_MANAGER_CAPABILITIES,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -57,16 +58,7 @@ async function createManager(
   await db.query(
     "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
     [
-      JSON.stringify([
-        "manage-staff",
-        "manage-inventory",
-        "edit-production-rules",
-        "approve-password-resets",
-        "review-incidents",
-        "use-ai-tools",
-        "manage-factory-settings",
-        "manage-profiles",
-      ]),
+      JSON.stringify(DEFAULT_MANAGER_CAPABILITIES),
     ],
   );
   await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [

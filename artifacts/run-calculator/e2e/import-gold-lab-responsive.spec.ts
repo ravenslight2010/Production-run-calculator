@@ -69,6 +69,7 @@ test("Import Gold manager panel fits and remains reviewable at this browser view
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
+        revision: (deletionVerified ? "b" : "a").repeat(64),
         records: [
           {
             caseId: 91,
@@ -252,6 +253,7 @@ test("QC Manager can use the scoped retention panel without opening the Gold Lab
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
+        revision: (verified ? "b" : "a").repeat(64),
         records: [{
           caseId: 92,
           capturedAt: "2026-09-05T12:00:00.000Z",
@@ -385,6 +387,7 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
+          revision: "a".repeat(64),
           records: filteredRecords,
           hasMore,
           nextOffset: hasMore ? pageOffset + 1 : null,

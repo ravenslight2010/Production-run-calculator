@@ -1,68 +1,23 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import {
+  AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
+  requireIsolatedTestDatabase,
+} from "./isolation";
+import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-const API_BASE =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
-const MANAGER_CAPABILITIES = [
-  "manage-staff",
-  "manage-inventory",
-  "edit-production-rules",
-  "approve-password-resets",
-  "review-incidents",
-  "use-ai-tools",
-  "manage-factory-settings",
-  "manage-profiles",
-];
-const usernames = new Set<string>();
+const API_BASE = requireLocalFixtureApiOrigin(
+  "Premade crust profile browser fixture",
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+);
 const recipeIds = new Set<string>();
 
 function uid(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-async function createManager(
-  request: APIRequestContext,
-  db: Client,
-  username: string,
-): Promise<void> {
-  const response = await request.post(`${API_BASE}/api/auth/sign-up`, {
-    headers: { "Content-Type": "application/json" },
-    data: { username, password: PASSWORD, accessCode: SIGNUP_CODE },
-  });
-  expect(response.ok(), "manager test account sign-up").toBe(true);
-  const userResult = await db.query<{ id: string }>(
-    "SELECT id FROM users WHERE username = $1",
-    [username],
-  );
-  const userId = userResult.rows[0]?.id;
-  expect(userId, "sign-up creates a database user").toBeTruthy();
-  await db.query("BEGIN");
-  try {
-    await db.query(
-      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-      [JSON.stringify(MANAGER_CAPABILITIES)],
-    );
-    await db.query(
-      `INSERT INTO user_roles (user_id, role)
-       VALUES ($1, 'manager')
-       ON CONFLICT (user_id)
-       DO UPDATE SET role = 'manager', updated_at = NOW()`,
-      [userId],
-    );
-    await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [userId]);
-    await db.query("COMMIT");
-  } catch (error) {
-    await db.query("ROLLBACK").catch(() => {});
-    throw error;
-  }
 }
 
 async function signIn(page: Page, username: string): Promise<void> {
@@ -126,47 +81,27 @@ async function writeDoughRecipe(
 }
 
 async function writeDoughProfile(
-  page: Page,
+  account: Parameters<AuthorizedBrowserFixtures["seedBrandProfile"]>[0],
   brand: string,
   flavor: string,
   recipeName: string,
 ): Promise<void> {
-  const result = await page.evaluate(async ({ profileBrand, profileFlavor, doughRecipeName }) => {
-    const current = await fetch("/api/brand-profiles", { cache: "no-store" });
-    const epoch = current.headers.get("x-master-data-epoch");
-    if (!current.ok || !epoch) return { status: current.status, hasEpoch: Boolean(epoch) };
-    const response = await fetch("/api/brand-profiles", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Master-Data-Epoch": epoch,
-      },
-      body: JSON.stringify({
-        items: [{
-          key: `${profileBrand.toLowerCase()}__${profileFlavor.toLowerCase()}`,
-          brand: profileBrand,
-          flavor: profileFlavor,
-          values: {
-            _subTab: "dough",
-            dieType: "8-Cut",
-            cycleSpeed: 10,
-            doughRecipeName,
-            doughballsPerTray: 12,
-            casesNeeded: 100,
-            casesPerSkid: 3,
-            pizzasPerCase: 12,
-            crustsPerCycle: 4,
-            freezerTime: 0.25,
-          },
-          crustValues: {},
-          updatedAt: Date.now(),
-        }],
-      }),
-    });
-    return { status: response.status, hasEpoch: true };
-  }, { profileBrand: brand, profileFlavor: flavor, doughRecipeName: recipeName });
-  expect(result.hasEpoch, "profile write uses the current master-data epoch").toBe(true);
-  expect(result.status, "brand profile fixture write").toBe(200);
+  await fixtures.seedBrandProfile(account, {
+    brand,
+    flavor,
+    values: {
+      _subTab: "dough",
+      dieType: "8-Cut",
+      cycleSpeed: 10,
+      doughRecipeName: recipeName,
+      doughballsPerTray: 12,
+      casesNeeded: 100,
+      casesPerSkid: 3,
+      pizzasPerCase: 12,
+      crustsPerCycle: 4,
+      freezerTime: 0.25,
+    },
+  });
 }
 
 async function ensureLineSetupOpen(page: Page): Promise<void> {
@@ -203,21 +138,22 @@ async function selectBrandAndFlavor(
 }
 
 let db: Client;
-test.beforeAll(async () => {
+let fixtures: AuthorizedBrowserFixtures;
+test.beforeAll(async ({ playwright }) => {
   db = new Client({
     connectionString: requireIsolatedTestDatabase("premade-crust profile browser test"),
   });
   await db.connect();
+  fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
 });
 
 test.afterAll(async () => {
   if (!db) return;
   try {
-    await db.query("DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'", [today()]);
+    await fixtures?.cleanup();
     if (recipeIds.size > 0) {
       await db.query("DELETE FROM dough_recipes WHERE id = ANY($1::text[])", [[...recipeIds]]);
     }
-    await cleanupTestUsers(db, usernames);
   } finally {
     await db.end();
   }
@@ -225,7 +161,6 @@ test.afterAll(async () => {
 
 test("marked profile selects Crust for a new run, not an already-started run", async ({
   page,
-  request,
 }) => {
   test.setTimeout(150_000);
   const suffix = uid("premade_profile");
@@ -234,13 +169,38 @@ test("marked profile selects Crust for a new run, not an already-started run", a
   const flavor = `Pepperoni ${suffix}`;
   const recipeId = `premade_recipe_${randomUUID()}`;
   const recipeName = `In-house Dough ${suffix}`;
-  usernames.add(username);
   recipeIds.add(recipeId);
 
-  await createManager(request, db, username);
+  const account = await fixtures.createAccount({
+    username,
+    password: PASSWORD,
+    capabilities: DEFAULT_MANAGER_CAPABILITIES,
+    onboardingSeen: true,
+  });
+  const fixtureDate = await page.evaluate(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
+  // Establish our own empty canonical day before Home mounts. A preceding case
+  // may have left an active run; its frozen setup is not this profile's defaults.
+  // The fixture validates disposable DB ownership, binds the authenticated
+  // account and takes the same live-scope lock as the other canonical fixtures.
+  await fixtures.seedCanonicalTodaySnapshot({
+    token: account.token,
+    date: fixtureDate,
+    payload: {
+      dayState: {
+        date: fixtureDate, runs: [], currentIndex: 0, resetAt: 0,
+        substitutions: [], substitutionLog: [], stagedItems: {},
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+      packagingProgress: {},
+    },
+  });
   await signIn(page, username);
   await writeDoughRecipe(page, { id: recipeId, name: recipeName, isPremadeCrust: false });
-  await writeDoughProfile(page, brand, flavor, recipeName);
+  await writeDoughProfile(account, brand, flavor, recipeName);
 
   // Reload so both the shared recipe and profile are adopted from the server.
   await page.reload({ waitUntil: "domcontentloaded" });

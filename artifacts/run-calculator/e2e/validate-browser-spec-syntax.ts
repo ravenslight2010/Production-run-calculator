@@ -38,6 +38,70 @@ function browserSpecFileName(fileUrl: URL): string {
   return basename(fileURLToPath(fileUrl)) || "browser spec";
 }
 
+export function browserSpecManagerDefaultsErrors(
+  source: string,
+  fileName: string,
+): string[] {
+  // This recognizes historical fixture copies, not production permissions.
+  // Extra copied capabilities must not evade the guard as the role grows.
+  const historicalBaseline = [
+    "manage-staff",
+    "manage-inventory",
+    "edit-production-rules",
+    "approve-password-resets",
+    "review-incidents",
+    "use-ai-tools",
+    "manage-factory-settings",
+    "manage-profiles",
+  ];
+  const sourceFile = ts.createSourceFile(
+    fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS,
+  );
+  const errors: string[] = [];
+  function visit(node: ts.Node): void {
+    if (
+      ts.isArrayLiteralExpression(node) &&
+      node.elements.every(ts.isStringLiteral) &&
+      historicalBaseline.every((capability) =>
+        node.elements.some((element) =>
+          ts.isStringLiteral(element) && element.text === capability))
+    ) {
+      let parent: ts.Node | undefined = node.parent;
+      while (parent && !ts.isSourceFile(parent)) {
+        const defaultDeclaration =
+          ts.isVariableDeclaration(parent) &&
+          ts.isIdentifier(parent.name) &&
+          parent.name.text === "MANAGER_CAPABILITIES";
+        const querySql =
+          ts.isCallExpression(parent) &&
+          ts.isPropertyAccessExpression(parent.expression) &&
+          parent.expression.name.text === "query"
+            ? parent.arguments[0]
+            : undefined;
+        const builtinManagerWrite =
+          querySql != null &&
+          ts.isStringLiteralLike(querySql) &&
+          /UPDATE\s+roles\b[\s\S]*\bname\s*=\s*'manager'/i.test(querySql.text);
+        if (defaultDeclaration || builtinManagerWrite) {
+          const { line } = sourceFile.getLineAndCharacterOfPosition(
+            node.getStart(sourceFile),
+          );
+          errors.push(
+            `${fileName}:${line + 1}: copied default-manager capabilities; ` +
+            "use DEFAULT_MANAGER_CAPABILITIES. Express intentional access " +
+            "restrictions explicitly rather than copying the old default role.",
+          );
+          break;
+        }
+        parent = parent.parent;
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return errors;
+}
+
 function browserSpecErrors(fileUrl: URL): string[] {
   const filePath = fileURLToPath(fileUrl);
   const fileName = browserSpecFileName(fileUrl);
@@ -46,7 +110,10 @@ function browserSpecErrors(fileUrl: URL): string[] {
     return [`unable to read ${fileName}.`];
   }
 
-  return browserSpecSyntaxErrors(source, fileName);
+  return [
+    ...browserSpecSyntaxErrors(source, fileName),
+    ...browserSpecManagerDefaultsErrors(source, fileName),
+  ];
 }
 
 export function configuredBrowserSpecFiles(): URL[] {
