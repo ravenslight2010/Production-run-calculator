@@ -146,6 +146,45 @@ async function seedAudit(count: number, scope = "live"): Promise<void> {
 }
 
 describe("operational audit HTTP boundary", () => {
+  it("filters before limiting and paging, consistently across list and exports", async () => {
+    await seedAudit(5);
+    const createdAt = new Date("2025-12-01T00:00:00.000Z");
+    await db.insert(auditLogsTable).values([
+      { scope: "live", actor: LIVE_MANAGER, action: "role_changed", resource: "filtered-first", changes: {}, createdAt },
+      { scope: "live", actor: LIVE_MANAGER, action: "role_changed", resource: "filtered-second", changes: {}, createdAt },
+      { scope: "sandbox", actor: sandboxUserId, action: "role_changed", resource: "sandbox-excluded", changes: {}, createdAt },
+    ]);
+    const first = await req(LIVE_MANAGER, "GET", "/api/audit-logs?action=role_changed&limit=1");
+    expect(first.status).toBe(200);
+    type FilteredPage = { logs: Array<{ id: number; action: string }>; nextCursor: string | null };
+    const page = await first.json() as FilteredPage;
+    expect(page.logs).toHaveLength(1);
+    expect(page.logs[0].action).toBe("role_changed");
+    expect(page.nextCursor).toEqual(expect.any(String));
+    if (typeof page.nextCursor !== "string") throw new Error("Filtered audit page did not provide its continuation cursor");
+    const second = await req(LIVE_MANAGER, "GET",
+      `/api/audit-logs?action=role_changed&limit=1&cursor=${encodeURIComponent(page.nextCursor)}`);
+    const nextPage = await second.json() as FilteredPage;
+    expect(second.status).toBe(200);
+    expect(nextPage.logs).toHaveLength(1);
+    expect(nextPage.logs[0].id).not.toBe(page.logs[0].id);
+    expect(nextPage.nextCursor).toBeNull();
+    for (const format of ["csv", "pdf"]) {
+      const response = await req(LIVE_MANAGER, "GET", `/api/audit-logs/export.${format}?action=role_changed&limit=1`);
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).toContain("role_changed");
+      expect(body).not.toContain("factory_reset");
+      expect(body).not.toContain("sandbox-excluded");
+    }
+    const empty = await req(LIVE_MANAGER, "GET", "/api/audit-logs?action=unknown_event");
+    expect((await empty.json() as FilteredPage).logs).toEqual([]);
+    for (const path of ["/api/audit-logs", "/api/audit-logs/export.csv", "/api/audit-logs/export.pdf"]) {
+      expect((await req(LIVE_MANAGER, "GET", `${path}?action=role_changed&action=factory_reset`)).status).toBe(400);
+      expect((await req(LIVE_OPERATOR, "GET", `${path}?action=role_changed`)).status).toBe(403);
+    }
+  });
+
   it("rejects anonymous and insufficient-capability reads", async () => {
     expect((await req(null, "GET", "/api/audit-logs")).status).toBe(401);
     expect((await req(LIVE_OPERATOR, "GET", "/api/audit-logs")).status).toBe(403);

@@ -10926,6 +10926,12 @@ export type GetProfileDataHealthWorkspace200 = {
 };
 
 export type ListAuditLogsParams = {
+/**
+ * Exact event type, applied before pagination. Omit or leave empty for all event types.
+ * @maxLength 100
+ * @pattern ^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$
+ */
+action?: string;
 startDate?: string;
 endDate?: string;
 /**
@@ -10939,6 +10945,12 @@ cursor?: string;
 };
 
 export type ExportAuditLogsCsvParams = {
+/**
+ * Exact event type, applied before the export row limit.
+ * @maxLength 100
+ * @pattern ^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$
+ */
+action?: string;
 startDate?: string;
 endDate?: string;
 /**
@@ -10948,6 +10960,12 @@ limit?: number;
 };
 
 export type ExportAuditLogsPdfParams = {
+/**
+ * Exact event type, applied before the export row limit.
+ * @maxLength 100
+ * @pattern ^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$
+ */
+action?: string;
 startDate?: string;
 endDate?: string;
 /**

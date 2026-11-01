@@ -40,6 +40,9 @@ export const DEFAULT_MANAGER_CAPABILITIES = [
   "use-ai-tools",
   "manage-factory-settings",
   "manage-profiles",
+  "manage-allergens",
+  "record-qc",
+  "manage-qc",
 ] as const;
 export type E2ECapability =
   | (typeof DEFAULT_MANAGER_CAPABILITIES)[number]

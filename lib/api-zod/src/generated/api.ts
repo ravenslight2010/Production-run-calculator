@@ -719,6 +719,8 @@ export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationS
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+export const listAuditLogsQueryActionMax = 100;
+export const listAuditLogsQueryActionRegExp = new RegExp('^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$');
 export const listAuditLogsResponseLogsItemChangesReasonCodeMax = 200;
 export const listAuditLogsResponseLogsItemChangesTargetIdOneMax = 200;
 export const listAuditLogsResponseLogsItemChangesTargetTypeMax = 200;
@@ -729,6 +731,10 @@ export const listAuditLogsResponseLogsItemChangesMethodMax = 200;
 export const listAuditLogsResponseLogsItemChangesRequestIdMax = 200;
 export const listAuditLogsResponseLogsItemChangesFieldNamesMax = 8;
 export const listAuditLogsResponseLogsItemChangesCorrelationIdMax = 128;
+export const exportAuditLogsCsvQueryActionMax = 100;
+export const exportAuditLogsCsvQueryActionRegExp = new RegExp('^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$');
+export const exportAuditLogsPdfQueryActionMax = 100;
+export const exportAuditLogsPdfQueryActionRegExp = new RegExp('^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$');
 export const listSpecImportAliasesHeaderXMasterDataEpochRegExp = new RegExp('^(?:0|[1-9][0-9]{0,14})$');
 export const saveSpecImportAliasesHeaderXMasterDataEpochRegExp = new RegExp('^(?:0|[1-9][0-9]{0,14})$');
 export const deleteSpecImportAliasesHeaderXMasterDataEpochRegExp = new RegExp('^(?:0|[1-9][0-9]{0,14})$');
@@ -7472,7 +7478,9 @@ export const UndoProfileDataHealthRepairBatchResponse = zod.unknown()
  * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
  * @summary List private facility-scoped operational audit records
  */
+
 export const ListAuditLogsQueryParams = zod.object({
+  "action": zod.coerce.string().max(listAuditLogsQueryActionMax).regex(listAuditLogsQueryActionRegExp).optional().describe('Exact event type, applied before pagination. Omit or leave empty for all event types.'),
   "startDate": zod.date().optional(),
   "endDate": zod.date().optional(),
   "limit": zod.coerce.number().int().optional().describe('Maximum 200 rows per page; defaults to 100.'),
@@ -7509,7 +7517,9 @@ export const ListAuditLogsResponse = zod.object({
  * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
  * @summary Export private facility-scoped audit records as CSV
  */
+
 export const ExportAuditLogsCsvQueryParams = zod.object({
+  "action": zod.coerce.string().max(exportAuditLogsCsvQueryActionMax).regex(exportAuditLogsCsvQueryActionRegExp).optional().describe('Exact event type, applied before the export row limit.'),
   "startDate": zod.date().optional(),
   "endDate": zod.date().optional(),
   "limit": zod.coerce.number().int().optional().describe('Maximum 5000 rows per export; defaults to 5000.')
@@ -7521,7 +7531,9 @@ export const ExportAuditLogsCsvResponse = zod.unknown()
  * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
  * @summary Export private facility-scoped audit records as PDF
  */
+
 export const ExportAuditLogsPdfQueryParams = zod.object({
+  "action": zod.coerce.string().max(exportAuditLogsPdfQueryActionMax).regex(exportAuditLogsPdfQueryActionRegExp).optional().describe('Exact event type, applied before the export row limit.'),
   "startDate": zod.date().optional(),
   "endDate": zod.date().optional(),
   "limit": zod.coerce.number().int().optional().describe('Maximum 5000 rows per export; defaults to 5000.')

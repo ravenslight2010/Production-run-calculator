@@ -12,15 +12,29 @@ On 2026-10-27, the owner separately approved replacing the one
 `Frontline App on-hand stock survives off-tab work, adjustment, pause, and reload`
 identity with
 `Frontline App1 batch supply survives off-tab work, adjustment, pause, and reload`.
-The reviewed total remains 216. This follows the current whole-batch UI and
+At that checkpoint the reviewed total remained 216. This follows the whole-batch UI and
 retains off-tab server depletion, manual adjustment, pause, and reload coverage;
 the replaced case's direct fractional-pound edit is no longer exposed by the UI.
 
-On 2026-10-30, the owner approved the current default inventory at **227**
+On 2026-10-30, the owner approved the default inventory at **227**
 identities after a fresh no-test listing found 12 additions and one retired
 identity against the prior 216-case contract (net +11). The updated exact set is
 recorded in the linked contract. This is inventory approval only; no browser
 tests were run, and #3692 retains ownership of the full runtime suite.
+
+On 2026-11-01, the owner approved including all **13 additional cases** in the
+main suite, bringing the current reviewed inventory to **240**. Read-only
+collection found no missing prior identities. The additions cover six
+sync/reconnect/first-baseline journeys, one repeated saved-copy-removal journey,
+five Gold approval/retention journeys, and one Schedule dialog journey.
+Every prior identity remains required. The single Chromium worker, zero retries,
+80-minute warning, and 90-minute hard limit are unchanged.
+
+The preceding runtime attempt was stopped because the reporter rejected the
+240-case collection against the then-approved 227-case contract. Its partial
+results are not complete-suite evidence. The new approval changes the reviewed
+inventory only; it is not a runtime pass, release decision, publication approval,
+or permission to use operational records.
 
 The exact default identities are the file and complete title path strings in
 [`full-browser-case-contract.mts`](../scripts/src/full-browser-case-contract.mts).
@@ -43,7 +57,8 @@ No browser cases were deleted or skipped to meet a numeric target.
 | Additional intended app regressions | 44 | Explicitly accepted below |
 | Dedicated-only additions | 36 | Explicit harness/engine/opt-in decisions below, not deletion |
 | Previously approved default (2026-10-23) | **216** | `171 + 1 + 44`; equivalently `252 - 36` |
-| Current owner-approved default (2026-10-30) | **227** | Fresh current listing: 12 added, 1 retired from the prior contract |
+| Previously approved default (2026-10-30) | **227** | Fresh listing: 12 added, 1 retired from the prior contract |
+| Current owner-approved default (2026-11-01) | **240** | 13 approved additions; all 227 previous identities retained |
 
 The historical 249-case observation and 252-case collection are not reused as
 current discovery evidence. The 252-case discovery above was read-only, using the pinned release runner
@@ -128,7 +143,7 @@ No ownership changed for these lanes:
 
 - `task3494-audited-import.spec.ts`: focused audited import config, not default;
   the shared-dialog matrix uses Vite source mode so its direct module import
-  shares the app's singleton. The standard 227-case release lane remains built
+  shares the app's singleton. The standard default release lane remains built
   preview and excludes this file.
 - `completed-history-archive.spec.ts`: focused synthetic archive read/reload
   check via `playwright.release-debug.config.ts`, not default.
@@ -266,10 +281,16 @@ not a default contract or runtime result.
 
 On 2026-10-30, the owner separately approved the discovered 278-identity
 release-debug set. A fresh `--list` returned 278 cases in 66 files, all under
-the Chromium project. The selection is distinct from the 227-case default
+the Chromium project. The selection is distinct from the default
 contract. Its reviewed identity SHA-256 is
 `95096de5dc942ddd1afd9c2eb5aa4e41cf3ec2ad55cfc4b387ef653542766562`.
 The reporter regression now locks both the 278 count and the exact identities.
+
+On 2026-11-01, the same standalone discovery assertion found **293** cases and
+failed against the approved 278-case guard. The main suite's separate expansion
+to 240 cases does not authorize changing this count or its identity digest.
+Standalone reconciliation remains open in the reliability-closure ledger; no
+standalone runtime result or replacement approval is claimed.
 This was listing-only evidence: no browser tests, server startup, database
 setup, or production access occurred. The prior 264-case result remains
 historical; the full release runtime remains owned by #3692.

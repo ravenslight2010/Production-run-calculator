@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { exportAuditLogsPdf } from "@workspace/api-client-react";
 import { FileDown, Loader2, ShieldCheck, RefreshCw } from "lucide-react";
@@ -96,28 +96,31 @@ function pdfDownloadError(error: unknown): string {
 // Manager-only read-only audit log viewer.
 // Reads from GET /api/audit-logs with optional date-range and limit filters.
 export default function AuditLogCard() {
+  const actionOptionsId = useId();
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
   const [limit, setLimit] = useState(100);
+  const [action, setAction] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
 
   // Committed filter state — only update on explicit Apply
   const [committedStart, setCommittedStart] = useState(startDate);
   const [committedEnd, setCommittedEnd] = useState(endDate);
   const [committedLimit, setCommittedLimit] = useState(limit);
+  const [committedAction, setCommittedAction] = useState(action);
 
   const params = new URLSearchParams({
-    scope: "live",
+    ...(committedAction ? { action: committedAction } : {}),
     ...(committedStart ? { startDate: committedStart } : {}),
     ...(committedEnd ? { endDate: committedEnd + "T23:59:59" } : {}),
-    limit: String(Math.min(Math.max(1, committedLimit), 1000)),
+    limit: String(Math.min(Math.max(1, committedLimit), 200)),
   });
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<{
     logs: AuditLogEntry[];
     count: number;
   }>({
-    queryKey: ["audit-logs", committedStart, committedEnd, committedLimit],
+    queryKey: ["audit-logs", committedStart, committedEnd, committedLimit, committedAction],
     queryFn: async () => {
       const res = await fetch(`/api/audit-logs?${params}`);
       if (!res.ok) throw new Error(`Failed to fetch audit logs (${res.status})`);
@@ -130,6 +133,7 @@ export default function AuditLogCard() {
     setCommittedStart(startDate);
     setCommittedEnd(endDate);
     setCommittedLimit(limit);
+    setCommittedAction(action);
   }
 
   async function downloadPdf() {
@@ -139,6 +143,7 @@ export default function AuditLogCard() {
         startDate: exportDate(committedStart),
         endDate: exportDate(committedEnd, true),
         limit: Math.min(Math.max(1, committedLimit), 5000),
+        ...(committedAction ? { action: committedAction } : {}),
       });
       const url = URL.createObjectURL(pdf);
       const link = document.createElement("a");
@@ -206,11 +211,29 @@ export default function AuditLogCard() {
             <Input
               type="number"
               min={1}
-              max={1000}
+              max={200}
               value={limit}
               onChange={(e) => setLimit(Number(e.target.value) || 100)}
               className="h-7 text-xs w-20"
             />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor={`${actionOptionsId}-input`} className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">
+              Event type
+            </label>
+            <Input
+              id={`${actionOptionsId}-input`}
+              list={actionOptionsId}
+              maxLength={100}
+              value={action}
+              onChange={(event) => setAction(event.target.value)}
+              placeholder="All event types"
+              className="h-7 text-xs w-48"
+            />
+            <datalist id={actionOptionsId}>
+              {[...new Set(["role_changed", "factory_reset", "import_gold_case_deleted", ...logs.map((log) => log.action)])]
+                .sort().map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
+            </datalist>
           </div>
           <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={applyFilter}>
             Apply

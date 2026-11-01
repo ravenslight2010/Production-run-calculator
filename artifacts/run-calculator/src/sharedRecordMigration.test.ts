@@ -3,13 +3,29 @@ import {
   readCachedProfileBlobs, reconcileLegacyProfileReads, setProfileCacheIdentity,
 } from "./profileCache";
 import {
-  retireMatchingLegacyArray, retainedSharedRecordEvidence, removeRetainedSharedRecord,
+  retireMatchingLegacyArray, retainedSharedRecordEvidence, removeRetainedSharedRecord, readRetainedHistoryForComparison,
   withoutArchivedSyncHistory, LEGACY_SYNC_HISTORY_REVIEW_PREFIX,
 } from "./sharedRecordMigration";
 import { DEFAULT_VALUES, type SyncPayload } from "./types";
 import { loadPendingSyncIntent, savePendingSyncIntent } from "./syncPendingIntent";
 import { applyResetWipe } from "./adapters/browserResetPersistence";
 import { captureMasterDataSnapshot, restoreMasterDataSnapshot } from "./storage";
+
+describe("read-only retained history selection", () => {
+  it("reads only the reviewed bytes with manager review access and never removes them", () => {
+    const day = { date: "2026-01-01", runs: [], runValues: {} };
+    const raw = JSON.stringify([day]);
+    localStorage.setItem("run-calc-history", raw);
+    const identity = "live:authenticated-facility:owner";
+    const selected = retainedSharedRecordEvidence(identity, true).find((item) => item.key === "run-calc-history")!;
+    expect(readRetainedHistoryForComparison(identity, false, selected)).toBeUndefined();
+    expect(readRetainedHistoryForComparison(null, true, selected)).toBeUndefined();
+    expect(readRetainedHistoryForComparison(identity, true, selected)).toEqual({ record: day, version: raw });
+    expect(localStorage.getItem("run-calc-history")).toBe(raw);
+    localStorage.setItem("run-calc-history", JSON.stringify([{ ...day, date: "2026-01-02" }]));
+    expect(readRetainedHistoryForComparison(identity, true, selected)).toBeUndefined();
+  });
+});
 
 beforeEach(() => {
   setProfileCacheIdentity(null);

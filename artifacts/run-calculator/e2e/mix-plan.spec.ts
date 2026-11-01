@@ -700,7 +700,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       // Switch to run 1 via Prev and start it
       await page.locator('[data-testid="tab-run"]').click();
-      const prevBtn = page.getByRole("button", { name: /prev/i });
+      const prevBtn = page.getByRole("button", { name: /^Prev\b/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
       await waitForCurrentRun(page, runId1);
@@ -1102,7 +1102,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       // Leave the new run first: switching away saves the live form, so doing
       // this in the opposite order would overwrite the direct fixture values
       // with the compact form's defaults.
-      await page.getByRole("button", { name: /prev/i }).click();
+      await page.getByRole("button", { name: /^Prev\b/i }).click();
       await page.waitForTimeout(300);
 
       // The Run tab's compact view does not render the applicator editor.
@@ -3298,7 +3298,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       // Switch to run 1 via Prev, start + stop it
       await page.locator('[data-testid="tab-run"]').click();
-      const prevBtn = page.getByRole("button", { name: /prev/i });
+      const prevBtn = page.getByRole("button", { name: /^Prev\b/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
       await waitForCurrentRun(page, runId1);
@@ -4189,7 +4189,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       // Switch to run 1 via Prev, start + stop it
       await page.locator('[data-testid="tab-run"]').click();
-      const prevBtn = page.getByRole("button", { name: /prev/i });
+      const prevBtn = page.getByRole("button", { name: /^Prev\b/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
       await page.waitForTimeout(600);
@@ -4322,7 +4322,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       // Complete both runs without visiting Mixes. The cold reload below must
       // be followed by this browser's first Mixes visit.
-      const prevBtn = page.getByRole("button", { name: /prev/i });
+      const prevBtn = page.getByRole("button", { name: /^Prev\b/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
       await waitForCurrentRun(page, runId1);

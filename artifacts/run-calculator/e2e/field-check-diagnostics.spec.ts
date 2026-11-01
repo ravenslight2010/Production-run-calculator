@@ -228,7 +228,9 @@ test("manager sees safe sync categories and performance sources from isolated AP
   const legacyRemoval = page.waitForEvent("dialog").then((dialog) => dialog.accept());
   await legacyReview.getByRole("button", { name: "Remove saved copy from this device" }).click();
   await legacyRemoval;
-  await expect(legacyReview).toHaveCount(0);
+  // The removed item disappears, but its success receipt remains readable.
+  await expect(legacyReview.locator("details")).toHaveCount(0);
+  await expect(legacyReview.getByRole("status")).toHaveText("Saved copy removed from this device.");
   expect(await page.evaluate((key) => localStorage.getItem(key), legacyBrandKey)).toBeNull();
 
   const retainedReview = page.getByTestId("shared-records-status");

@@ -4848,6 +4848,10 @@ paths:
         are derived from authentication; scope is never accepted as a query parameter.
         Records are retained indefinitely and returned through a bounded cursor.
       parameters:
+        - name: action
+          in: query
+          description: Exact event type, applied before pagination. Omit or leave empty for all event types.
+          schema: { type: string, maxLength: 100, pattern: "^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$" }
         - name: startDate
           in: query
           schema: { type: string, format: date-time }
@@ -4881,6 +4885,10 @@ paths:
         are retained indefinitely and are excluded from ordinary
         reset and purge operations.
       parameters:
+        - name: action
+          in: query
+          description: Exact event type, applied before the export row limit.
+          schema: { type: string, maxLength: 100, pattern: "^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$" }
         - name: startDate
           in: query
           schema: { type: string, format: date-time }
@@ -4911,6 +4919,10 @@ paths:
         retained indefinitely and are excluded from ordinary reset and purge
         operations.
       parameters:
+        - name: action
+          in: query
+          description: Exact event type, applied before the export row limit.
+          schema: { type: string, maxLength: 100, pattern: "^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$" }
         - name: startDate
           in: query
           schema: { type: string, format: date-time }

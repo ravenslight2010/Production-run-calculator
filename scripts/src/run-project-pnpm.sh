@@ -5,9 +5,24 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 cd "$REPO_ROOT"
 
+use_retained_startup_tools=0
+if [[ "${1:-}" == "--use-retained-startup-tools" ]]; then
+  use_retained_startup_tools=1
+  shift
+fi
+
 if (( $# == 0 )); then
-  printf 'Usage: %s <pnpm arguments...>\n' "${BASH_SOURCE[0]}" >&2
+  printf 'Usage: %s [--use-retained-startup-tools] <pnpm arguments...>\n' "${BASH_SOURCE[0]}" >&2
   exit 2
+fi
+
+if (( use_retained_startup_tools )); then
+  retained_corepack_home=$(node "${SCRIPT_DIR}/runtime-tool-cache.mjs" restore) || exit $?
+  export COREPACK_HOME="$retained_corepack_home"
+  export COREPACK_ENABLE_NETWORK=0
+  # The API itself does not need the startup manager. Remove only the private
+  # cache returned by the verified restorer after maintenance exits.
+  trap 'rm -rf -- "$(dirname "$retained_corepack_home")"' EXIT
 fi
 
 # Load the same selection logic used by the interactive Replit shell.
@@ -33,4 +48,8 @@ if [[ "$selected_version" != "$pnpm_version" ]]; then
   exit 1
 fi
 
-exec pnpm "$@"
+if (( use_retained_startup_tools )); then
+  pnpm "$@"
+else
+  exec pnpm "$@"
+fi

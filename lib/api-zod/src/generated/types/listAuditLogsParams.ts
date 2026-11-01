@@ -7,6 +7,12 @@
  */
 
 export type ListAuditLogsParams = {
+/**
+ * Exact event type, applied before pagination. Omit or leave empty for all event types.
+ * @maxLength 100
+ * @pattern ^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$
+ */
+action?: string;
 startDate?: Date;
 endDate?: Date;
 /**

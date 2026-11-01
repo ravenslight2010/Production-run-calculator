@@ -253,12 +253,23 @@ type AuditExportRow = {
   createdAt: Date;
 };
 
+export function parseAuditActionFilter(value: unknown): { action?: string; error?: string } {
+  if (value === undefined || value === "") return {};
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/.test(value)) {
+    return { error: "Invalid audit event type" };
+  }
+  return { action: value };
+}
+
 function parseAuditExportQuery(req: Request): {
   limit: number;
   startDate?: string;
   endDate?: string;
+  action?: string;
   error?: string;
 } {
+  const actionQuery = parseAuditActionFilter(req.query.action);
+  if (actionQuery.error) return { limit: MAX_EXPORT_ROWS, error: actionQuery.error };
   const rawLimit = req.query.limit;
   const requestedLimit = rawLimit === undefined ? MAX_EXPORT_ROWS : Number(rawLimit);
   if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > MAX_EXPORT_ROWS) {
@@ -271,14 +282,15 @@ function parseAuditExportQuery(req: Request): {
     return { limit: requestedLimit, startDate, endDate, error: "Invalid audit date range" };
   }
 
-  return { limit: requestedLimit, startDate, endDate };
+  return { limit: requestedLimit, startDate, endDate, ...actionQuery };
 }
 
 async function selectAuditExportRows(
   scope: string,
-  query: Pick<ReturnType<typeof parseAuditExportQuery>, "limit" | "startDate" | "endDate">,
+  query: Pick<ReturnType<typeof parseAuditExportQuery>, "limit" | "startDate" | "endDate" | "action">,
 ): Promise<AuditExportRow[]> {
   const conditions: SQL[] = [eq(auditLogsTable.scope, scope)];
+  if (query.action) conditions.push(eq(auditLogsTable.action, query.action));
   if (query.startDate) {
     conditions.push(sql`${auditLogsTable.createdAt} >= ${query.startDate}::timestamp`);
   }
@@ -402,6 +414,11 @@ router.get(
   async (req: Request, res: Response) => {
     try {
       const scope = currentScope();
+      const actionQuery = parseAuditActionFilter(req.query.action);
+      if (actionQuery.error) {
+        res.status(400).json({ error: actionQuery.error });
+        return;
+      }
       const startDate = (req.query.startDate as string) || "";
       const endDate = (req.query.endDate as string) || "";
       if ((startDate && Number.isNaN(Date.parse(startDate))) || (endDate && Number.isNaN(Date.parse(endDate)))) {
@@ -421,6 +438,7 @@ router.get(
       }
 
       const conditions: SQL[] = [eq(auditLogsTable.scope, scope)];
+      if (actionQuery.action) conditions.push(eq(auditLogsTable.action, actionQuery.action));
 
       if (startDate) {
         conditions.push(sql`${auditLogsTable.createdAt} >= ${startDate}::timestamp`);

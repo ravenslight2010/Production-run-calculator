@@ -229,6 +229,20 @@ export const FULL_BROWSER_EXPECTED_CASE_IDENTITIES: readonly string[] = [
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: operator staging check persists for a canonical per-run material across reload",
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: shows capped offsite transfer guidance and hides it when onsite stock covers demand",
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: shows the Warehouse switchover handoff through real tab navigation",
+  // Owner-approved additions, 2026-11-01: retain every prior identity.
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › independent facility edit progresses after a malformed acknowledgment on reconnect",
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › independent facility edit progresses after a stale acknowledgment on reconnect",
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › pending facility edit is acknowledged once after connectivity returns",
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: manager removes saved copies repeatedly without touching pending or active data",
+  "artifacts/run-calculator/e2e/import-gold-approvals-authenticated.spec.ts :: Gold Lab approval metadata lifecycle, authorization, errors, and responsive review",
+  "artifacts/run-calculator/e2e/import-gold-approvals-authenticated.spec.ts :: expired metadata remains reviewable with correct role and capability gating at this viewport",
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: Import Gold cleanup-only manager panel fits, deletes, and refreshes in this browser viewport",
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: QC Manager can use the scoped retention panel without opening the Gold Lab",
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: daily retention reminders stay metadata-only and scoped by role",
+  "artifacts/run-calculator/e2e/schedule-dialog-layering.spec.ts :: Schedule access and nested brand picker work across browser sizes",
+  "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's explicit empty first daily baseline removes stale local day state",
+  "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's first daily baseline is adopted after a stream interruption",
+  "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's first daily baseline replaces stale local day state before recovery push",
 ];
 
 export const FULL_BROWSER_EXPECTED_CASES =

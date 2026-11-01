@@ -3,6 +3,18 @@ name: Browser fixture seeding
 description: Reliable ways to seed master data for authenticated browser journeys that reload and hydrate from the server.
 ---
 
+Role fixtures that overwrite a shared built-in role must preserve its full
+canonical capability set, not just the capabilities used by their own journey.
+
+**Why:** An incomplete manager fixture removed QC capabilities from the isolated
+database's role definition, hiding legitimate surfaces in subsequent cases.
+Per-account cleanup does not undo mutations to shared role definitions.
+
+**How to apply:** Compare the full-manager fixture against the current server
+capability authority before interpreting downstream authorization failures.
+Give restricted-role journeys only their explicitly intended grants; never
+change production permissions to compensate for an incorrectly seeded test.
+
 Use the production surface's rendered accessibility tree when selecting
 portaled controls; do not assume a standalone component demo's named wrapper
 also exists in the operational page.

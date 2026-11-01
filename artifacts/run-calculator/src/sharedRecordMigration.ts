@@ -186,6 +186,28 @@ export function removeRetainedSharedRecord(
   }
 }
 
+/** Read only the exact still-reviewed local history item, never a pending command. */
+export function readRetainedHistoryForComparison(
+  identity: string | null,
+  manager: boolean,
+  selected: RetainedRecordEvidence,
+): { record: unknown; version: string } | undefined {
+  if (!identity || !manager || !selected.canRemove || !removableLocalRecordKeys.has(selected.key)) return;
+  const snapshot = retainedRecordSnapshots.get(selected);
+  if (!snapshot || snapshot.raw.length > 1_000_000) return;
+  try {
+    if (browserStorage.getItem(selected.key) !== snapshot.raw) return;
+    const current = retainedSharedRecordEvidence(identity, manager).find((item) =>
+      item.key === selected.key && item.recordIndex === snapshot.recordIndex && item.canRemove);
+    if (!current || retainedRecordSnapshots.get(current)?.raw !== snapshot.raw) return;
+    const records: unknown = JSON.parse(snapshot.raw);
+    if (!Array.isArray(records) || !isSafelyIdentifiableRetainedRecord(selected.key, records[snapshot.recordIndex])) return;
+    return { record: records[snapshot.recordIndex], version: snapshot.raw };
+  } catch {
+    return;
+  }
+}
+
 export function stableRecordJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableRecordJson).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.entries(value)

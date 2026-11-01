@@ -9,6 +9,15 @@ export const ROLE_SURFACE_CAPABILITIES = {
 
 export type RoleSurface = keyof typeof ROLE_SURFACE_CAPABILITIES;
 
+/** Match both server gates before requesting source-retention metadata. */
+export function canReviewGoldRetention(
+  role: string | null | undefined,
+  capabilities: readonly Capability[],
+): boolean {
+  return (role === "manager" || role === "qc-manager") &&
+    capabilities.some((capability) => capability === "manage-staff" || capability === "manage-qc");
+}
+
 export function hasRoleSurfaceAccess(
   surface: RoleSurface,
   capabilities: readonly Capability[],

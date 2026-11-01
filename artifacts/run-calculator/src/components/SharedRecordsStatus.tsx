@@ -12,6 +12,7 @@ import {
   flushCompletedHistoryOutbox, hydrateCompletedHistory, pendingCompletedHistoryCount,
 } from "../completedHistorySync";
 import { retainedSharedRecordEvidence, removeRetainedSharedRecord } from "../sharedRecordMigration";
+import { RetainedHistoryComparison } from "./RetainedHistoryComparison";
 
 /** Separate empty server results from unavailable cold reads. Recovery commands
  * and unresolved migration evidence are never presented as canonical history. */
@@ -71,6 +72,7 @@ export function SharedRecordsStatus() {
           return <li key={itemId} className="rounded border border-border p-3">
           <p className="font-medium">{item.kind}</p>
           <p>{item.summary}</p>
+          <RetainedHistoryComparison identity={identity} manager={me.capabilities.includes("manage-profiles")} item={item} />
           <p className="text-muted-foreground">Removing this copy affects only this device. It does not delete the facility’s shared records, but this may be the only offline copy here.</p>
           {item.canRemove ? <button type="button" className="mt-2 underline" onClick={() => {
             if (removingItemId.current) return;

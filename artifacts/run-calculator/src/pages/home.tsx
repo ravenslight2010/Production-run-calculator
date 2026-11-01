@@ -735,7 +735,7 @@ import {
 } from "@workspace/production-rules";
 import { saveProductionRules, deleteProductionRules } from "../productionRules";
 import { useMe } from "../useRole";
-import { hasRoleSurfaceAccess } from "../roleSurfaceAccess";
+import { canReviewGoldRetention, hasRoleSurfaceAccess } from "../roleSurfaceAccess";
 import { getImportAccess } from "../importAccess";
 import {
   Factory,
@@ -3270,10 +3270,11 @@ export default function Home() {
   const canRecordQc = hasCapability("record-qc");
   const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
+  const canAccessGoldRetention = canReviewGoldRetention(serverRole, me?.capabilities ?? []);
   const importGoldRetentionReminders = useQuery({
-    queryKey: ["import-gold-retention-reminder-counts", me?.userId, me?.sandbox],
+    queryKey: ["import-gold-retention-reminder-counts", me?.userId, me?.sandbox, serverRole, canAccessGoldRetention],
     queryFn: fetchImportGoldRetentionReminderCounts,
-    enabled: (canManageStaff || canManageQc) && screenMode === null,
+    enabled: canAccessGoldRetention && screenMode === null,
     staleTime: 30_000,
     refetchInterval: 60_000,
     retry: false,
@@ -16990,7 +16991,7 @@ export default function Home() {
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
            ...(canManageStaff ? [{ key: "audit", label: "Data Health & Audit" }] : []),
-           ...(canManageStaff || canManageQc ? [{ key: "gold-retention", label: "Gold Lab Retention" }] : []),
+           ...(canAccessGoldRetention ? [{ key: "gold-retention", label: "Gold Lab Retention" }] : []),
           ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
             ? [{ key: "gold-approvals", label: "Gold Lab Approvals" }] : []),
           ...(canManageStaff ? [{ key: "ai-corrections", label: "AI Memory" }] : []),
@@ -17038,7 +17039,7 @@ export default function Home() {
               ...(canManageInventory ? ["dieDefaults", "freezer", "cycleCount"] : []),
               ...(canManageStaff || canApproveResets ? ["staff"] : []),
               ...(canManageStaff ? ["audit", "ai-corrections"] : []),
-              ...(canManageStaff || canManageQc ? ["gold-retention"] : []),
+              ...(canAccessGoldRetention ? ["gold-retention"] : []),
               ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
                 ? ["gold-approvals"] : []),
               "pin",
@@ -18265,7 +18266,7 @@ export default function Home() {
                     />
                   </div>
                 )}
-                {manageCategory === "gold-retention" && (canManageStaff || canManageQc) && (
+                {manageCategory === "gold-retention" && canAccessGoldRetention && (
                   <DeferredSurface
                     label="Gold Lab retention"
                     load={loadImportGoldRetentionCard}
@@ -18689,7 +18690,7 @@ export default function Home() {
 
         <Form {...form}>
           <form>
-            {activeTab === "run" && screenMode === null && (canManageStaff || canManageQc) && (
+            {activeTab === "run" && screenMode === null && canAccessGoldRetention && (
               importGoldRetentionReminders.isError ? (
                 <div
                   className="mb-3 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"

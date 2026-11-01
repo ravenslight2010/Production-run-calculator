@@ -38,15 +38,20 @@ export async function reloadThroughSettlingSession(page: Page): Promise<void> {
     await route.continue();
   }, { times: 1 });
 
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByTestId("app-loading")).toBeVisible({
-    timeout: APP_READY_TIMEOUT,
-  });
-  await expect(page.getByRole("status")).toContainText(
-    "Confirming your staff session",
-  );
-
-  releaseMe?.();
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const loading = page.getByTestId("app-loading");
+    await expect(loading).toBeVisible({
+      timeout: APP_READY_TIMEOUT,
+    });
+    await expect(loading.getByRole("status")).toContainText(
+      "Confirming your staff session",
+    );
+  } finally {
+    // An assertion failure must not leave the intercepted auth request held
+    // until teardown or hide its original failure behind cleanup timeouts.
+    releaseMe?.();
+  }
   await page.getByTestId("tab-run").waitFor({
     state: "attached",
     timeout: APP_READY_TIMEOUT,

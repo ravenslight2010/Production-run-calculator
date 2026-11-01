@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { profileNameLinkCleanupSummary, redactAuditChanges } from "./auditLogs";
+import { parseAuditActionFilter, profileNameLinkCleanupSummary, redactAuditChanges } from "./auditLogs";
+
+describe("audit action filter", () => {
+  it("keeps the unfiltered default and accepts bounded exact event names", () => {
+    expect(parseAuditActionFilter(undefined)).toEqual({});
+    expect(parseAuditActionFilter("")).toEqual({});
+    expect(parseAuditActionFilter("role_changed")).toEqual({ action: "role_changed" });
+    expect(parseAuditActionFilter("a".repeat(100))).toEqual({ action: "a".repeat(100) });
+  });
+
+  it("rejects repeated, nested, oversized, and malformed query input", () => {
+    for (const input of [["role_changed"], { action: "role_changed" }, null, 3, "a".repeat(101), "a b", "a%_", "' OR 1=1", "\n"]) {
+      expect(parseAuditActionFilter(input)).toEqual({ error: "Invalid audit event type" });
+    }
+  });
+});
 
 describe("profileNameLinkCleanupSummary", () => {
   it("keeps a completed cleanup result manager-readable", () => {

@@ -7,6 +7,7 @@ import {
   requireIsolatedTestDatabase,
   uniqueTestId,
   AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
 } from "./isolation";
 import {
   dismissOnboardingIfPresent,
@@ -375,21 +376,14 @@ async function signUp(
         if (role === "manager") {
           await db.query(
             "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-            [JSON.stringify([
-              "manage-staff",
-              "manage-inventory",
-              "edit-production-rules",
-              "approve-password-resets",
-              "review-incidents",
-              "use-ai-tools",
-              "manage-factory-settings",
-              "manage-profiles",
-            ])],
+            [JSON.stringify(DEFAULT_MANAGER_CAPABILITIES)],
           );
         } else if (role === "supervisor") {
           await db.query(
             "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'supervisor'",
-            [JSON.stringify(["review-incidents", "edit-production-rules"])],
+            // This journey exercises a supervisor explicitly authorized to
+            // plan the schedule, not the unmodified starter supervisor role.
+            [JSON.stringify(["review-incidents", "edit-production-rules", "manage-factory-settings"])],
           );
         }
       } finally {

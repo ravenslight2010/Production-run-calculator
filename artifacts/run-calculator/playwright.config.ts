@@ -77,7 +77,7 @@ export default defineConfig({
   // exclusions live here so focused suites still run them without relying on
   // an operator CLI grep flag. Three previously reviewed PWA sentinels remain
   // included; the other handoff cases belong to playwright.pwa.config.ts.
-  // The reviewed 216-case contract includes the
+  // The reviewed 240-case contract includes the
   // Summary-card live-timer focus regression. Narrow-landscape sign-in checks remain
   // included, while physical Android suspension/restart journeys stay in the
   // real-mobile-chromium lane.

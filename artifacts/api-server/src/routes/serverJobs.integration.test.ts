@@ -18,6 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
 import pg from "pg";
 import { signLegacyTokenForTests } from "../lib/auth";
+import { assertIsolatedConcurrencyTrial, runIsolatedBackgroundConcurrencyTrial } from "../lib/isolatedBackgroundConcurrencyTrial";
 import {
   stopIsolatedApiProcess,
   waitForIsolatedApiProcess,
@@ -25,6 +26,8 @@ import {
 } from "./serverJobsProcess";
 
 type DbModule = typeof import("@workspace/db");
+const concurrencyTrial = process.env.RUN_ISOLATED_BACKGROUND_CONCURRENCY_TRIAL === "1";
+if (concurrencyTrial) assertIsolatedConcurrencyTrial("1", process.env.NODE_ENV, process.env.DATABASE_URL);
 
 let db: DbModule["db"];
 let pool: DbModule["pool"];
@@ -92,7 +95,7 @@ beforeAll(async () => {
   // A single application connection makes the backend used by the route the
   // same backend checked out by loseCommittedReply after the insert completes.
   originalPoolMax = process.env.DATABASE_POOL_MAX;
-  process.env.DATABASE_POOL_MAX = "1";
+  process.env.DATABASE_POOL_MAX = concurrencyTrial ? "4" : "1";
   process.env.DATABASE_URL = testUrlString;
 
   const dbMod = await import("@workspace/db");
@@ -227,6 +230,29 @@ beforeEach(async () => {
     { userId: OPERATOR_ACTOR, role: "operator" },
   ]);
 });
+
+it.runIf(concurrencyTrial)("isolated background concurrency trial preserves protected jobs and reports both settings", async () => {
+  const jobs = await import("../lib/serverJobs");
+  const result = await runIsolatedBackgroundConcurrencyTrial({
+    optIn: process.env.RUN_ISOLATED_BACKGROUND_CONCURRENCY_TRIAL,
+    nodeEnv: process.env.NODE_ENV,
+    parentDatabaseUrl: originalDatabaseUrl,
+    databaseName: testDbName, actorId: ACTOR, pool, db, jobsTable: serverJobsTable,
+    attemptsTable: serverJobAttemptsTable, jobs,
+  });
+  for (const metrics of [result.baseline, result.trial]) {
+    expect(metrics).toMatchObject({
+      succeeded: 10, cancelled: 1, failed: 0, pending: 0,
+      acquisitionFailures: 0, duplicateEffects: 0, effectMismatches: 0, retryAttempts: 2, stoppedCleanly: true,
+    });
+    expect(metrics.eventLoopDelayMaxMs).not.toBeNull();
+    expect(metrics.reminderLatencyMs).not.toBeNull();
+  }
+  expect(result.baseline.concurrency).toBe(2);
+  expect(result.trial.concurrency).toBe(1);
+  // Preserve bounded numeric evidence even when Vitest suppresses console logs.
+  process.stdout.write(`ISOLATED_CONCURRENCY_METRICS=${JSON.stringify(result)}\n`);
+}, 30_000);
 
 
 async function loseCommittedReply(): Promise<number> {

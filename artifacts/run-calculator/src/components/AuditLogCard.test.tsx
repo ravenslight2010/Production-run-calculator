@@ -65,11 +65,16 @@ describe("AuditLogCard PDF export", () => {
       .mockResolvedValueOnce(auditResponse());
     vi.stubGlobal("fetch", fetchMock);
     const pdf = new Blob(["%PDF-1.4"], { type: "application/pdf" });
-    exportAuditLogsPdf.mockResolvedValueOnce(pdf);
+    exportAuditLogsPdf.mockResolvedValue(pdf);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:audit-filter-fixture");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     renderAuditLogCard();
     await screen.findByText("role_changed");
+    fireEvent.change(screen.getByLabelText("Event type"), { target: { value: "factory_reset" } });
     await userEvent.click(screen.getByRole("button", { name: "PDF" }));
+    expect(exportAuditLogsPdf.mock.calls[0]?.[0]).not.toHaveProperty("action");
 
     const dateInputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
 
@@ -80,6 +85,7 @@ describe("AuditLogCard PDF export", () => {
     fireEvent.change(dateInputs[0] as HTMLInputElement, { target: { value: "2026-01-01" } });
     fireEvent.change(dateInputs[1] as HTMLInputElement, { target: { value: "2026-01-02" } });
     fireEvent.change(limitInput as HTMLInputElement, { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Event type"), { target: { value: "role_changed" } });
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -87,12 +93,14 @@ describe("AuditLogCard PDF export", () => {
     expect(listUrl.searchParams.get("startDate")).toBe("2026-01-01");
     expect(listUrl.searchParams.get("endDate")).toBe("2026-01-02T23:59:59");
     expect(listUrl.searchParams.get("limit")).toBe("7");
+    expect(listUrl.searchParams.get("action")).toBe("role_changed");
 
     await userEvent.click(screen.getByRole("button", { name: "PDF" }));
     await waitFor(() => expect(exportAuditLogsPdf).toHaveBeenCalledWith({
       startDate: "2026-01-01T00:00:00.000Z",
       endDate: "2026-01-02T23:59:59.999Z",
       limit: 7,
+      action: "role_changed",
     }));
   });
 

@@ -182,7 +182,8 @@ test("manager reviews a staff issue report and retains the review after reload",
       .click();
     const incident = managerPage
       .getByTestId("incident-row")
-      .filter({ hasText: staff.username });
+      .filter({ hasText: staff.username })
+      .filter({ hasText: report.correlationId });
     await expect(incident).toBeVisible();
     await expect(incident).toContainText(report.correlationId);
     const reviewResponse = managerPage.waitForResponse(
@@ -210,7 +211,8 @@ test("manager reviews a staff issue report and retains the review after reload",
       .click();
     const reloadedIncident = managerPage
       .getByTestId("incident-row")
-      .filter({ hasText: staff.username });
+      .filter({ hasText: staff.username })
+      .filter({ hasText: report.correlationId });
     await expect(reloadedIncident).toBeVisible();
     await expect(
       reloadedIncident.getByText("Reviewed", { exact: true }),

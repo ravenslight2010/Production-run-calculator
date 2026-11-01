@@ -58,3 +58,17 @@ prompt for the approved exact pin does not disable signature or TLS checks.
 **How to apply:** Retain cold-cache PTY coverage with a deadline and a
 fixture-owned process-session guard; a non-TTY version probe alone does not
 prove unattended workflow startup.
+
+Offline proof must include pnpm's native payload, not only the Corepack
+dispatcher archive. Warming and packing must happen outside project discovery.
+
+**Why:** pnpm 12's Corepack package dispatches to a separately downloaded native
+executable. A signed Corepack pack and passing metadata tests did not establish
+that a cold, network-isolated manager could execute.
+
+**How to apply:** Keep default TLS and npm-signature verification enabled while
+preparing the exact pin, retain the platform payload, then require a fresh-cache
+OS-network-isolated execution with loopback available and actual application
+startup. Warm-cache version checks and archive integrity are necessary evidence,
+not startup certification. Do not enable a startup-cache optimization by default
+before that handoff passes.

@@ -41,6 +41,7 @@ import { SharedRecordsStatus } from "./SharedRecordsStatus";
 
 describe("retained local record review", () => {
   beforeEach(() => {
+    mocks.me.userId = "manager-1";
     localStorage.clear();
     localStorage.setItem("run-calc-history", '[{"date":"2026-01-01","runs":[],"runValues":{},"detail":"PRIVATE_HISTORY_VALUE"}]');
     localStorage.setItem("run-calc-completed-history-cache.live", '[{"date":"2026-01-02","detail":"PRIVATE_CACHE_VALUE"}]');
@@ -107,5 +108,39 @@ describe("retained local record review", () => {
     expect(localStorage.getItem("run-calc-completed-history-outbox.live")).toBe('[{"pending":true}]');
     expect(screen.getByText("Saved copy removed from this device.")).toBeTruthy();
     expect(screen.queryByText("2 saved local items to review")).toBeNull();
+  });
+
+  it("compares a selected saved item read-only and shows no raw history contents", async () => {
+    const run = { id: "selected-history-run", endedAt: 100 };
+    const day = { date: "2026-01-01", runs: [run], runValues: { [run.id]: { casesNeeded: 12 } } };
+    const raw = JSON.stringify([day]);
+    localStorage.setItem("run-calc-history", raw);
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({
+      history: [{ date: day.date, runId: run.id, snapshot: { dayState: { runs: [run] }, runValues: day.runValues } }],
+    }));
+    render(<SharedRecordsStatus />);
+    const item = screen.getByText("Saved record on this device. Date: 2026-01-01.").closest("li")!;
+    fireEvent.click(within(item).getByRole("button", { name: "Compare with shared history" }));
+    expect(await within(item).findByText("These run details match shared history.")).toBeTruthy();
+    expect(localStorage.getItem("run-calc-history")).toBe(raw);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(run.id)).toBeNull();
+    expect(screen.getAllByText(/does not confirm ownership/).length).toBeGreaterThan(0);
+  });
+
+  it("does not show a late comparison result after an account change", async () => {
+    const run = { id: "late-history-run", endedAt: 100 };
+    const day = { date: "2026-01-01", runs: [run], runValues: { [run.id]: {} } };
+    localStorage.setItem("run-calc-history", JSON.stringify([day]));
+    let finish!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { rerender } = render(<SharedRecordsStatus />);
+    const item = screen.getByText("Saved record on this device. Date: 2026-01-01.").closest("li")!;
+    fireEvent.click(within(item).getByRole("button", { name: "Compare with shared history" }));
+    mocks.me.userId = "manager-2";
+    rerender(<SharedRecordsStatus />);
+    finish(Response.json({ history: [{ date: day.date, runId: run.id, snapshot: { dayState: { runs: [run] }, runValues: day.runValues } }] }));
+    await Promise.resolve();
+    expect(screen.queryByText("These run details match shared history.")).toBeNull();
   });
 });
