@@ -162,3 +162,32 @@ test("repair PR145 has its own exact branch, reviewed head and independent defau
   assert.match(gate, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
   assert.doesNotMatch(gate, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64|cache-to:|cache-from:|pull_request_target|--allow/);
 });
+
+test("installer PR146 has an independent exact branch, reviewed head and capability channel", () => {
+  const installerContext = { ...context, GITHUB_REF: "refs/pull/146/merge" };
+  const installerEvent = structuredClone(event);
+  installerEvent.number = 146;
+  installerEvent.pull_request.head.ref = "feat/windows-server-installer";
+  assert.doesNotThrow(() => authorize(installerContext, installerEvent, head, cap, sha(cap)));
+  assert.throws(() => authorize(installerContext, installerEvent, head, cap));
+  assert.throws(() => authorize(context, installerEvent, head, cap, sha(cap)));
+  assert.throws(() => authorize(installerContext, event, head, cap, sha(cap)));
+  for (const change of [{ GITHUB_ACTIONS: "false" }, { GITHUB_REPOSITORY: "fork/repo" }, { GITHUB_EVENT_NAME: "push" }, { GITHUB_EVENT_NAME: "pull_request_target" }, { GITHUB_REF: "refs/heads/main" }]) {
+    assert.throws(() => authorize({ ...installerContext, ...change }, installerEvent, head, cap, sha(cap)));
+  }
+  for (const edit of [e => { e.number = 145; }, e => { e.pull_request.head.repo.full_name = "fork/repo"; }, e => { e.pull_request.head.ref = "fix/main-green-pr-audit"; }, e => { e.pull_request.base.ref = "other"; }, e => { e.pull_request.head.sha = "b".repeat(40); }]) {
+    const e = structuredClone(installerEvent); edit(e);
+    assert.throws(() => authorize(installerContext, e, head, cap, sha(cap)));
+  }
+  for (const file of ["ci.yml", "department-navigation.yml", "release-check.yml"]) {
+    const text = readFileSync(new URL(`../../.github/workflows/${file}`, import.meta.url), "utf8");
+    assert.match(text, /number == 146/);
+    assert.match(text, /feat\/windows-server-installer/);
+    assert.match(text, /pr-146-reviewed-test-inputs/);
+  }
+  const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const reviewedDocker = ci.slice(ci.indexOf("  reviewed-docker-caddy-browser:\n"), ci.indexOf("  typecheck:\n"));
+  assert.doesNotMatch(reviewedDocker, /number == 146|pr-146-reviewed-test-inputs/);
+  assert.match(reviewedDocker, /number == 145/);
+  assert.match(reviewedDocker, /environment: pr-145-reviewed-test-inputs/);
+});

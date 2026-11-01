@@ -8,6 +8,7 @@ import { restoreReviewedBuildInputsFromDirectory } from "./restore-reviewed-buil
 const repository = "ravenslight2010/Production-run-calculator";
 const capabilityHash = "b1675a82fb76e091811eaa336642a70e7695f57a5c7f54d8551084c47b233ed3";
 const repairCapabilityHash = "1d9b93feec30fd89b2e1443f82d9062a676fd5305dc1bc08fb542994b1c40e9a";
+const installerCapabilityHash = "ed6f54492f6e436bc2c947278c5aa7a217bbd5e654424d718f18faccb5cbe04a";
 const mainCapabilityHash = "837ccd959aa818cdb163e6a1763bdc37ede875d56965437f6c3f27110d6aa279";
 export const manifest = JSON.parse(readFileSync(new URL("./reviewed-ci-input-manifest.json", import.meta.url), "utf8"));
 export const archiveManifest = JSON.parse(readFileSync(new URL("./reviewed-ci-archive-manifest.json", import.meta.url), "utf8"));
@@ -21,7 +22,9 @@ export function authorize(context, event, approvedHead, capability, expectedCapa
     ? { number: 142, branch: "feat/windows-lan-self-hosting", hash: capabilityHash }
     : event?.number === 145
       ? { number: 145, branch: "fix/main-green-pr-audit", hash: repairCapabilityHash }
-      : undefined;
+      : event?.number === 146
+        ? { number: 146, branch: "feat/windows-server-installer", hash: installerCapabilityHash }
+        : undefined;
   if (!policy || context.GITHUB_ACTIONS !== "true" || context.GITHUB_REPOSITORY !== repository ||
       digest(capability ?? "") !== (expectedCapabilityHash ?? policy.hash)) throw new Error("Restricted input authorization missing.");
   const pr = event?.pull_request;
