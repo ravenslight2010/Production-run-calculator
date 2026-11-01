@@ -26,6 +26,7 @@ explicitly for Docker/Caddy: use the local `chromium` path in Replit and Playwri
 - [Package-manager bootstrap](native-pnpm-runtime.md) — distinguish runtime bootstrap from application failures; preserve exact engine and lockfile constraints.
 - [Pinned Node](pinned-node-nix-runner.md) — use the exact installed Node when provisioning fails.
 - [Pinned pnpm bootstrap](pnpm-workspace-tool-cache.md) — workspace-local tool provisioning can recurse before a validation command starts.
+- [Pure test environments](pure-test-environments.md) — source-only and pure-math tests should not pay for an unused DOM; retain actual DOM/browser coverage.
 - [Docker healthcheck exec](docker-healthcheck-setns.md) — if healthchecks and `docker exec` both fail with `setns`, preserve CI health semantics and validate on a supported runner.
 - [Loopback probes](release-runner-loopback-probes.md) — bypass only local readiness probes, not TLS guards.
 - [Browser routing](local-browser-suite-routing.md) — offline installs and scoped loopback exceptions.

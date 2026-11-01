@@ -49,6 +49,57 @@ export function shouldAutosaveHomeForm(
     && !isEmptyOverPopulated(incoming, stored);
 }
 
+const RECIPE_ROW_FIELDS = [
+  "doughRecipe", "frontlineRecipe",
+  "app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe",
+] as const;
+
+/** Catalog ID enrichment is not an operator edit of a shared recipe. */
+export function prepareHomeFormWrite(
+  baseline: FormValues,
+  submitted: FormValues,
+  latest: FormValues,
+): { values: FormValues; catalogBackfillOnly: boolean } {
+  const before = JSON.parse(JSON.stringify(baseline)) as FormValues;
+  const comparable = JSON.parse(JSON.stringify(submitted)) as FormValues;
+  let addedId = false;
+  for (const field of RECIPE_ROW_FIELDS) {
+    if (!Array.isArray(before[field]) || !Array.isArray(comparable[field])) {
+      return { values: submitted, catalogBackfillOnly: false };
+    }
+    if (before[field].length !== comparable[field].length) continue;
+    comparable[field].forEach((row, index) => {
+      if (before[field][index].ingredientId === undefined && row.ingredientId?.trim()) {
+        delete row.ingredientId;
+        addedId = true;
+      }
+    });
+  }
+  if (!addedId || !deepEqual(before, comparable)) {
+    return { values: submitted, catalogBackfillOnly: false };
+  }
+
+  // A canonical recipe edit can land during the debounce. Add IDs only to
+  // rows that still match the captured baseline; never restore its quantities,
+  // names, order or run counters over a newer snapshot.
+  const values = structuredClone(latest);
+  for (const field of RECIPE_ROW_FIELDS) {
+    if (!Array.isArray(values[field])) continue;
+    if (before[field].length !== values[field].length) continue;
+    submitted[field].forEach((row, index) => {
+      const current = values[field][index];
+      if (
+        before[field][index].ingredientId === undefined
+        && row.ingredientId?.trim()
+        && deepEqual(current, before[field][index])
+      ) {
+        current.ingredientId = row.ingredientId;
+      }
+    });
+  }
+  return { values, catalogBackfillOnly: true };
+}
+
 export function clearSeededFlagForAutosave(
   current: DayState,
   runId: string,
@@ -208,6 +259,9 @@ export function useHomeFormLifecycle({
     const capturedValues = structuredClone(values);
     const writeKey = `${persistenceScope}:${runId}`;
     homeFormDurableWriter.schedule(writeKey, () => {
+      const latestValues = loadRunValues(runId);
+      const write = prepareHomeFormWrite(stored, capturedValues, latestValues);
+      if (write.catalogBackfillOnly && deepEqual(write.values, latestValues)) return;
       const now = Date.now();
       const seededPatch = clearSeededFlagForAutosave(
         dayStateRef.current,
@@ -219,7 +273,7 @@ export function useHomeFormLifecycle({
         saveDayState(seededPatch.dayState);
         setDayState(seededPatch.dayState);
       }
-      saveRunValues(runId, capturedValues);
+      saveRunValues(runId, write.values);
       markRunValuesUpdated(runId, now);
       // A started/paused/ended run owns an immutable recipe snapshot. Its
       // debounced form write must not rewrite the shared profile after a
@@ -232,8 +286,8 @@ export function useHomeFormLifecycle({
         !latestRun.startedAt &&
         !latestRun.pausedAt &&
         !latestRun.endedAt;
-      if (canManageProfiles && canWriteSharedProfile && (capturedRun.brand || capturedRun.flavor)) {
-        if (saveProfileForRun(capturedRun.brand, capturedRun.flavor, capturedValues)) {
+      if (!write.catalogBackfillOnly && canManageProfiles && canWriteSharedProfile && (capturedRun.brand || capturedRun.flavor)) {
+        if (saveProfileForRun(capturedRun.brand, capturedRun.flavor, write.values)) {
           void propagateProfileToPendingRuns(capturedRun.brand, capturedRun.flavor);
         }
       }

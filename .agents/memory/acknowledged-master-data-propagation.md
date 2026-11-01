@@ -68,3 +68,15 @@ ignores, especially on a fast touch interaction.
 **How to apply:** Match control availability to the complete mutation-and-refresh
 lifecycle. Browser helpers should wait for enabled editing and the acknowledged
 canonical row before beginning another command.
+
+Catalog ID backfills are metadata enrichment, not manager edits to a shared
+recipe. A delayed backfill must rebase onto the latest run rows without
+republishing captured quantities or propagating an older profile.
+
+**Why:** A two-browser synthetic reproduction showed a successful shared cheese
+recipe edit being overwritten by both browsers' older rows when automatic
+ingredient ID enrichment entered the normal profile autosave path.
+
+**How to apply:** Separate ID-only additions from quantity, name, existing-ID
+and counter changes. Preserve newer row sets and counters at the delayed write
+boundary; keep genuine operator edits on their ordinary protected save path.

@@ -1,3 +1,5 @@
+// @vitest-environment node
+// Pagination/counting uses mocked API results, not a browser document.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listImportGoldRetention } from "@workspace/api-client-react";
 import { fetchImportGoldRetentionReminderCounts } from "./importGold";

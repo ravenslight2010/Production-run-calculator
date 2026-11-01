@@ -323,6 +323,9 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+    // Retention review requires the built-in role as well as its capabilities.
+    // A fixture-created custom role must remain outside that boundary.
+    await fixtures.assignManagerRole(manager);
     const qcManager = await fixtures.createAccount({
       username: uniqueTestId("e2e_gold_reminder_qc"),
       password: PASSWORD,

@@ -6,6 +6,16 @@ completion certificate or release decision.
 Last refreshed: 2026-11-01 UTC. This checkpoint preserves earlier failed
 attempts; it does not recast a focused rerun as a full-suite pass.
 
+Latest resumed checkpoint: the ingredient-ID stale-profile overwrite is
+repaired, and both mix/cheese pending-refresh → Start freeze → peer reload
+browser journeys passed. Three Gold journeys passed; the reminder fixture's
+role assignment is corrected but its browser journey is not rerun. The declared
+client command subsequently exited 0: **395 files passed, one file skipped;
+3,868 tests passed, one skipped; duration guard 103.7s / 150.0s**. The existing
+real-workbook audit skip is retained, not newly added. This clears the current
+client-runtime blocker only. The full-browser failure and remaining app-wide,
+physical-device and publication-bound gaps keep this task **IN PROGRESS**.
+
 Current source-boundary checkpoint: synthetic local coverage is implemented.
 The actual preparation/snapshot regression file passed 23/23, including the two
 new eligibility checks, and the root workspace typecheck passed. The focused
@@ -128,7 +138,7 @@ diagnostics. The calculator package's completed prerequisite checks plus this
 compiler result establish the scoped typecheck. They are not a new root
 workspace typecheck or a complete release check.
 
-### Current blocker — expanded client suite runtime
+### Historical client runtime failure — current follow-up passed
 
 The declared client test command was attempted once after the focused fixes.
 The duration/worker contract, reviewed-cast checks and startup/boundary
@@ -152,18 +162,158 @@ early metadata line now records runner Node version, actual requested workers,
 detected capacity and configured budget before spawning Vitest, so an interrupted
 attempt does not lose those facts. This adds observation only; it changes no
 allocation, test or budget behavior. No further complete-suite retry was started.
+That statement describes the pre-repair checkpoint; the single post-repair
+client check is recorded below.
 The metadata change passed Node syntax validation and all **5/5** focused
 duration-contract tests, including emission before spawn and visibility of an
 overridden worker request. `git diff --check` also passed. These cheap controls
 do not turn the incomplete expanded client run into a pass.
 
-The owning task remains **IN PROGRESS**, blocked on current complete-suite
-verification and its remaining local coverage gaps. Keep runtime diagnosis and
-repairs in this task rather than generating recursive follow-ups. No publish,
+The owning task remains **IN PROGRESS**, with the failed full-browser attempt
+and remaining local coverage gaps still open. The client-runtime failure is
+superseded by the passing post-repair command recorded below, not erased.
+Keep diagnosis and repairs in this task rather than generating recursive
+follow-ups. No publish,
 production write, shared development-data mutation or managed-workflow restart
 was performed in this resumed work.
 
+A read-only capacity observation at 2026-11-01 18:49:57 UTC, during the later
+focused disposable browser run, reported pinned Node 24.21.0, eight available
+logical CPUs, an eight-CPU cgroup quota, a 16-GiB memory limit and about 4.18 GiB
+current cgroup memory usage. This is not a sample from the interrupted client
+suite and cannot establish or exclude resource contention during that earlier
+attempt. No capacity setting was changed.
+
 ## Intake
+
+### Continued focused verification — recipe propagation
+
+The next bounded local check selects only the two retained mix/cheese recipe
+refresh-and-freeze failures. It uses synthetic accounts, disposable loopback
+services/PostgreSQL and the unchanged diagnostic browser configuration. It does
+not rerun the 187 previously passing full-run journeys.
+
+An initial setup attempt was stopped before browser execution to correct a
+selection expression: Playwright matches qualified test titles, so anchoring
+the expression at the scenario label could select no cases. This interrupted
+setup establishes no browser result. Its private output directory is
+`artifacts/run-calculator/generated-artifacts/recipe-freeze-followup.1ooaBq/`.
+The corrected selection removes only that leading anchor; scenario names,
+assertions, inventory, retry policy and time limits are unchanged.
+
+The corrected two-case execution completed with **1 PASS / 1 FAIL**, no skipped
+or flaky cases (122.98 seconds): mix passed its edit, Start, freeze and peer
+reload journey; cheese retained the old first-edit Ingredient Detail. Private
+artifacts are under
+`artifacts/run-calculator/generated-artifacts/recipe-freeze-followup.sq4bSL/`.
+This is a current reproduction, not just an interpretation of the old trace.
+
+The cheese trace was ordered by network timestamps across browser contexts.
+The synthetic recipe write acknowledged 20 lb; linked profile writes then
+alternated between 20 lb and the previous 10 lb with newly added catalog IDs.
+Canonical pending-run reads briefly showed 20 lb before reverting to 10 lb.
+This establishes a stale write after acknowledgment, unlike an archive-entry
+ordering artifact. No credentials, raw trace or customer data are published.
+
+The bounded repair separates ID-only recipe enrichment from operator edits in
+the existing Home durable writer. At flush, ID additions rebase onto the latest
+run snapshot only where the original row is unchanged. They cannot replace
+newer quantities, names, row sets, existing IDs or counters, and do not rewrite
+or propagate the shared profile. Actual quantity/name/identity/counter edits
+retain the ordinary save path. Recipe data is not stripped from write payloads;
+valid new IDs still persist through ordinary run synchronization.
+
+Four focused native files passed **61/61** after the repair, including all six
+recipe row fields, late canonical replacement, newer counters, existing-ID
+conflicts, real edits and omitted arrays. The calculator compiler completed
+with exit 0. An earlier optional native-check launch timed out while waiting
+for the browser runner's validation lock; it established no test result and
+was superseded by the completed focused command. Validation locks and runtime
+limits were not bypassed.
+
+The six-case browser follow-up completed with **5 PASS / 1 FAIL**, zero skipped
+or flaky cases (210.20 seconds). Both mix and cheese passed pending-run refresh,
+Start-time freeze and peer reload. Gold approval lifecycle/error/retry, the
+responsive Gold panel and the QC Manager retention-only panel also passed.
+Private artifacts are under
+`artifacts/run-calculator/generated-artifacts/recipe-gold-repair-followup.hdZQFD/`.
+This supersedes the recipe reproduction failure for these two exact journeys;
+it does not recast the full-suite result or the remaining Gold case as passing.
+
+The remaining Gold reminder fixture did not assign its synthetic manager the
+built-in Manager role. Its custom role held default manager capabilities, but
+retention intentionally requires both the built-in Manager/QC Manager identity
+and a review capability. The trace recorded no retention request from that
+identity, consistent with the current fail-closed gate. The fixture now uses the
+existing isolated Manager-role assignment; no application role check was
+weakened. The focused role/counting checks passed **14/14** and the edited
+browser spec passed the direct pinned-Node syntax preflight. The reminder
+browser journey itself remains **NOT RERUN** after that fixture correction.
+
+The first attempted syntax command used an obsolete package-local `tsx`
+launcher and failed before validation: its referenced 4.23.13 installation is
+absent while 4.23.15 is present. The repository's explicitly scoped scripts
+launcher is a different file, and API development already uses that launcher;
+this observation is not proof that API startup is broken. Direct pinned-Node
+execution of this erasable-TypeScript validator passed without installing,
+changing or bypassing a dependency.
+
+### Pure-test environment cost — bounded repair and measurements
+
+Two unchanged pure test files spent 98% of a 9.67-second focused run in the
+browser-like environment, despite using only role decisions and mocked
+retention pagination/counting. Explicit Node environments kept all **14/14**
+assertions and completed in **0.587 seconds**. A conservative source/import
+inspection then identified ten additional Node-only source/math test files:
+their unchanged **37/37** checks passed before and after the annotation,
+at **13.95 seconds** and **2.01 seconds** respectively, using the same four
+workers. The ingredient-catalog source guard also passed **2/2** under Node
+(0.638 seconds).
+
+These thirteen files now select Node rather than initialize an unused DOM.
+No assertion, test identity, browser scenario, worker default/ceiling,
+isolation setting, retry or duration limit was removed or relaxed. Actual DOM,
+component, accessibility and browser verification still belongs to its
+existing environments; a source-inspection assertion is not a rendered UI
+test. These scoped observations address avoidable startup cost, not the
+cause or complete duration of the interrupted 396-file run. At that checkpoint
+the full client runtime budget remained unresolved pending its declared gate.
+
+One post-repair invocation of the declared client command was started,
+with private output in
+`artifacts/run-calculator/generated-artifacts/client-runtime-followup.DRqIi9/command.log`.
+Its early metadata confirms Node 24.21.0, the unchanged 150-second duration
+budget, four requested workers, eight detected available CPU workers and the
+four-worker ceiling. The unchanged 300-second outer bound is explicit for this
+background invocation; no additional full-browser attempt was started.
+
+A read-only sample during this actual client attempt at 19:03:03 UTC reported
+an eight-CPU quota, zero reported cgroup throttling, a 16-GiB memory limit and
+about 3.25 GiB current memory usage. This describes that moment, not the
+historical failure; it does not exclude I/O, module-loading, worker-startup or
+other contention costs. A running command or partial pass count is not a
+complete suite or budget result.
+
+That invocation completed with **exit 0**. Vitest reported **395 passed files
+and one skipped file (396 total), 3,868 passed tests and one skipped test
+(3,869 total)**. Its own duration was 102.33 seconds; the enclosing unchanged
+duration guard measured **103.7 seconds against 150.0 seconds** and passed.
+The skipped real-workbook audit existed before this batch and remains outside
+the approved synthetic-local source boundary. The runner's aggregate
+“396 passed files” wording includes that skipped file; this ledger preserves
+the more precise Vitest statuses rather than claiming every file executed.
+
+This establishes a current complete client assertion/budget result, not a
+full-browser result, root typecheck rerun, physical-device result or release
+decision. Do not rerun this passing command without an invalidating change.
+No further application/test source edits were made after it started; only
+this ledger was refreshed with its result.
+
+The repaired cheese/mix journeys and four previously corrected synthetic Gold
+fixtures are selected for one bounded diagnostic follow-up. Their current
+browser result is pending; native checks alone do not close the reproduced
+cheese failure. The incomplete complete-client runtime lane and remaining
+app-wide/external evidence gaps remain open in this owning task.
 
 - Owner: assigned Replit Agent. One task owns all four internal milestones.
 - Repository at intake: clean application tree, Replit branch ahead of its

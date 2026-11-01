@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 // Keep the run-closing call sites covered by a cheap contract test. These

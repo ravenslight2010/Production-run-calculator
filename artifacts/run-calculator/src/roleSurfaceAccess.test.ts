@@ -1,3 +1,5 @@
+// @vitest-environment node
+// These permission decisions are pure; browser journeys own DOM/role rendering.
 import { describe, expect, it } from "vitest";
 import { canReviewGoldRetention, hasRoleSurfaceAccess } from "./roleSurfaceAccess";
 
