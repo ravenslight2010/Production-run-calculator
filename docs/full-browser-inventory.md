@@ -232,6 +232,55 @@ budget stay intact. Adding intended cases does not demonstrate that they fit
 that budget. Preserve existing retained runtime reports; do not rewrite them
 to manufacture a 216-case result.
 
+## Owner-approved standalone inventory reconciliation — 2026-11-01
+
+The separate standalone diagnostic inventory is now **293** unique Chromium
+project/file/title identities, not the main suite's **240**. The owner approved
+reviewing and including valid standalone additions. No config matcher, exclusion,
+retry, worker, timeout, or browser-test assertion was changed by this reconciliation.
+
+The exact delta from the original frozen standalone inventory is **15 additions,
+zero removals**:
+
+| Area | Added cases | Review |
+| --- | ---: | --- |
+| Facility reconnect | 3 | Valid acknowledgment once; independent edits progress after stale or malformed acknowledgment. |
+| Device-only saved copies | 1 | Repeated selected removal preserves pending and active data. |
+| Gold approval metadata | 2 | Metadata lifecycle/access/errors/responsive review; expired metadata and capability gating. |
+| Gold retention | 3 | Cleanup/reload, QC Manager scoped access, metadata-only daily reminders. |
+| Scheduling | 2 | Cross-size nested picker/access (main); saved date/brand/cases after reload (focused only). |
+| First daily sync baseline | 3 | Stale local replacement, explicit empty replacement, adoption after stream interruption. |
+| Synthetic importer Apply | 1 | Workbook imports persist with Gold capture explicitly disabled; dedicated lane only. |
+
+Thirteen are the previously approved main-suite additions. The saved-schedule
+and ordinary synthetic-import journeys remain outside the main contract. The
+ordinary import case already exists in the historical source reference; this
+review does not assume that every added inventory identity is newly written code.
+
+The reporter regression records all fifteen exact identities. Removing them from
+the current sorted collection must reproduce **278** identities and SHA-256
+`95096de5dc942ddd1afd9c2eb5aa4e41cf3ec2ad55cfc4b387ef653542766562`.
+The full 293-identity SHA-256 is
+`d52aaef6fcc989589caab0d1176b0540760c13c6e091fdd61e57f897bbfb83fe`.
+Both fences are retained, along with unique-identity, Chromium-only,
+browser-spec-only and no-web-server discovery checks.
+
+Historical-source-only collection was attempted in a private temporary copy.
+It first lacked package-module metadata, then reported missing imported source
+and build manifests. Those setup failures are not browser results. Instead, the
+original identity set was reconstructed from current discovery and reviewed
+source differences and accepted **only because its exact fingerprint matched the
+original frozen guard**. No historical checkout or managed-workflow restart was
+performed.
+
+This is collection/reporter verification, not execution of 293 browser journeys.
+The debug harness still cannot retain or replace full-suite runtime evidence;
+its broader inventory includes dedicated and opt-in lanes.
+
+The combined reporter regression passed after the guard update, including fresh
+main and standalone collection and both identity fences. No browser was launched
+and no full runtime report was replaced.
+
 ## Standalone discovery boundary maintenance — 2026-10-24
 
 This is separate from the approved default inventory and runtime release check.

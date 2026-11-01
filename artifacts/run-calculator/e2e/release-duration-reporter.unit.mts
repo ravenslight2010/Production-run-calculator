@@ -183,7 +183,7 @@ assert.deepEqual(
 const debugIdentities = collectPlaywrightCaseIdentities(debugReport.suites);
 assert.equal(
   debugIdentities.length,
-  278,
+  293,
   "the owner-approved standalone Chromium inventory must keep its reviewed case count",
 );
 assert.equal(debugIdentities.length, new Set(debugIdentities).size);
@@ -193,8 +193,54 @@ assert.ok(
 );
 assert.equal(
   createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
-  "95096de5dc942ddd1afd9c2eb5aa4e41cf3ec2ad55cfc4b387ef653542766562",
+  "d52aaef6fcc989589caab0d1176b0540760c13c6e091fdd61e57f897bbfb83fe",
   "standalone Chromium project/file/title identities changed; review its own lane selections, not the default suite count",
+);
+
+// Owner-reviewed catch-up, separate from the main 240-case contract. Removing
+// these exact additions must reproduce the original 278-case fingerprint.
+// Keep the baseline fence even if a future review updates the current digest.
+const standaloneReviewedAdditions = [
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › independent facility edit progresses after a malformed acknowledgment on reconnect",
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › independent facility edit progresses after a stale acknowledgment on reconnect",
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › pending facility edit is acknowledged once after connectivity returns",
+  "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: manager removes saved copies repeatedly without touching pending or active data",
+  "artifacts/run-calculator/e2e/import-gold-apply.spec.ts :: synthetic workbook imports Apply and persist without Gold capture",
+  "artifacts/run-calculator/e2e/import-gold-approvals-authenticated.spec.ts :: Gold Lab approval metadata lifecycle, authorization, errors, and responsive review",
+  "artifacts/run-calculator/e2e/import-gold-approvals-authenticated.spec.ts :: expired metadata remains reviewable with correct role and capability gating at this viewport",
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: Import Gold cleanup-only manager panel fits, deletes, and refreshes in this browser viewport",
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: QC Manager can use the scoped retention panel without opening the Gold Lab",
+  "artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts :: daily retention reminders stay metadata-only and scoped by role",
+  "artifacts/run-calculator/e2e/schedule-dialog-layering.spec.ts :: Saved Schedule date, brand, and cases survive a reload @focused-only",
+  "artifacts/run-calculator/e2e/schedule-dialog-layering.spec.ts :: Schedule access and nested brand picker work across browser sizes",
+  "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's explicit empty first daily baseline removes stale local day state",
+  "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's first daily baseline is adopted after a stream interruption",
+  "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's first daily baseline replaces stale local day state before recovery push",
+];
+const standaloneAdditionSet = new Set(standaloneReviewedAdditions);
+assert.equal(standaloneAdditionSet.size, 15);
+assert.ok(
+  standaloneReviewedAdditions.every((identity) => debugIdentities.includes(identity)),
+  "every reviewed standalone addition must remain collected",
+);
+const retainedStandaloneBaseline = debugIdentities.filter(
+  (identity) => !standaloneAdditionSet.has(identity),
+);
+assert.equal(retainedStandaloneBaseline.length, 278);
+assert.equal(
+  createHash("sha256").update(JSON.stringify(retainedStandaloneBaseline)).digest("hex"),
+  "95096de5dc942ddd1afd9c2eb5aa4e41cf3ec2ad55cfc4b387ef653542766562",
+  "the original reviewed standalone identities must survive, not just the current count",
+);
+assert.deepEqual(
+  standaloneReviewedAdditions.filter(
+    (identity) => !FULL_BROWSER_EXPECTED_CASE_IDENTITIES.includes(identity),
+  ),
+  [
+    "artifacts/run-calculator/e2e/import-gold-apply.spec.ts :: synthetic workbook imports Apply and persist without Gold capture",
+    "artifacts/run-calculator/e2e/schedule-dialog-layering.spec.ts :: Saved Schedule date, brand, and cases survive a reload @focused-only",
+  ],
+  "only the two reviewed dedicated-lane additions remain outside the main contract",
 );
 
 const addedIdentity =

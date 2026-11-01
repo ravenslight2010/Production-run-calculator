@@ -17,3 +17,17 @@ complete-suite evidence.
 stop the isolated attempt with fixture cleanup and preserve its failed/interrupted
 status. Compare added and missing identities separately, obtain any required
 inventory approval, and distinguish discovery from executed browser results.
+
+When a historical source-only copy cannot collect without its package metadata,
+imports or build manifests, an identity reconstruction is acceptable only if it
+reproduces the original frozen digest exactly. Preserve that original-set fence
+alongside any newly approved inventory.
+
+**Why:** Source-only historical discovery can fail before collection, while a
+case already present in that source can still be absent from its recorded guard.
+A matching count or a source diff alone does not prove preservation.
+
+**How to apply:** Label failed setup attempts honestly; compare the reconstructed
+sorted identity set to the prior digest, review every addition, and report
+discovery separately from real browser execution. Do not treat reconstruction
+as a historical runtime pass.

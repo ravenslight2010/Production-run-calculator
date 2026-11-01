@@ -12,6 +12,7 @@ import { Client } from "pg";
 import { attachVisualEvidence } from "./captureVisualEvidence";
 import {
   AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -61,12 +62,7 @@ async function createManager(
   await db.query(
     "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
     [
-      JSON.stringify([
-        "manage-staff",
-        "manage-inventory",
-        "manage-profiles",
-        "use-ai-tools",
-      ]),
+      JSON.stringify(DEFAULT_MANAGER_CAPABILITIES),
     ],
   );
   await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [

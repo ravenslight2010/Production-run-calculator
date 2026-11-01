@@ -15,6 +15,17 @@ and HTTPS-only safeguards; do not change `packageManager` or the lockfile to
 repair local provisioning. Check retained output for the actual validation
 command before diagnosing application code or claiming a check passed.
 
+If the runner stalls before the requested command, compare the shell's Node
+with the repository pin before diagnosing pnpm or a validation-lock fault.
+
+**Why:** A shell runtime update caused the runner to fall back to external
+Node acquisition even though the retained pinned executable was still present.
+Both a pnpm check and a direct-Node check then stalled before collection.
+
+**How to apply:** Verify the retained executable against the repository pin,
+put its directory first on PATH, and keep using the supported runner. Do not
+bypass its lock or TLS guards or count the bootstrap attempts as test failures.
+
 Ad-hoc external tool links can outlive their temporary targets. Also, a version
 check through a shell or Node launcher is not proof that a direct child-process
 spawn can execute the same entry.

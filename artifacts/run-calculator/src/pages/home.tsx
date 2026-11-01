@@ -1793,6 +1793,8 @@ function LiveRunHandoffGuard() {
       prepHandoffFromRunId: currentRunId,
     };
     const newDs = { ...dayStateRef.current!, prepPhase: newPrepPhase };
+    // schedulePush reads this ref before the state effect can adopt the phase.
+    dayStateRef.current = newDs;
     saveDayState(newDs, { stampMeta: false });
     setDayState(newDs);
     schedulePush(newDs, 0);
@@ -12025,6 +12027,9 @@ export default function Home() {
     const prevLog = dayStateRef.current.substitutionLog ?? [];
     const nextLog = logEntries.length ? [...prevLog, ...logEntries] : prevLog;
     const newDs = { ...dayStateRef.current, substitutions: subs, substitutionLog: nextLog };
+    // The queue checks this ref synchronously before React's effect runs.
+    // Publish the local snapshot first, including any activity-log additions.
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     setActiveSubstitutions(subs);
@@ -12075,6 +12080,9 @@ export default function Home() {
     if (next[key]) delete next[key];
     else next[key] = true;
     const newDs = { ...dayStateRef.current, stagedItems: next };
+    // Do not let the acknowledged old snapshot suppress this edit, or let a
+    // second click before the render build its overlay from the previous map.
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     lastLocalEditRef.current = Date.now();
@@ -13107,13 +13115,29 @@ export default function Home() {
   });
 
   function moveRun(fromIdx: number, toIdx: number) {
-    if (toIdx < 0 || toIdx >= dayState.runs.length) return;
-    const runs = [...dayState.runs];
+    const latest = dayStateRef.current;
+    if (fromIdx < 0 || fromIdx >= latest.runs.length
+      || toIdx < 0 || toIdx >= latest.runs.length) return;
+    // Positional input belongs to the rendered list. Do not apply it to a
+    // different ordering, or restore older rows over a newer local snapshot.
+    if (latest.date !== dayState.date
+      || (latest.resetAt ?? 0) !== (dayState.resetAt ?? 0)
+      || latest.runs.length !== dayState.runs.length
+      || latest.runs.some((run, index) => run.id !== dayState.runs[index]?.id)) {
+      toast({
+        title: "Run order changed",
+        description: "Your current changes were kept. Review the current run list before moving a run.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const runs = [...latest.runs];
     const [moved] = runs.splice(fromIdx, 1);
     runs.splice(toIdx, 0, moved);
     // Keep currentIndex pointing at the same run after the move
-    const newCurrentIndex = runs.indexOf(dayState.runs[dayState.currentIndex]);
-    const newDs = { ...dayState, runs, currentIndex: newCurrentIndex };
+    const newCurrentIndex = runs.indexOf(latest.runs[latest.currentIndex]);
+    const newDs = { ...latest, runs, currentIndex: newCurrentIndex };
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
@@ -13125,8 +13149,16 @@ export default function Home() {
   // only runs on the manager's explicit tap. Returns an undo to restore the
   // prior order. Mirrors the mobile applyScheduleOrder for parity.
   function applyScheduleOrder(order: string[]): { ok: boolean; message: string; undo?: () => void } {
-    const prevRuns = dayState.runs;
-    const prevIndex = dayState.currentIndex;
+    const latest = dayStateRef.current;
+    if (latest.date !== dayState.date
+      || (latest.resetAt ?? 0) !== (dayState.resetAt ?? 0)) {
+      return {
+        ok: false,
+        message: "The production day changed. Your current changes were kept; review the current run list before applying an order.",
+      };
+    }
+    const prevRuns = latest.runs;
+    const prevIndex = latest.currentIndex;
     const rank = new Map(order.map((id, i) => [id, i]));
     const reordered = [...prevRuns].sort((a, b) => {
       const ra = rank.has(a.id) ? rank.get(a.id)! : Number.MAX_SAFE_INTEGER;
@@ -13137,7 +13169,11 @@ export default function Home() {
     const unchanged = reordered.every((r, i) => r.id === prevRuns[i]?.id);
     if (unchanged) return { ok: true, message: "Already in suggested order" };
     const newCurrentIndex = reordered.indexOf(prevRuns[prevIndex]);
-    const newDs = { ...dayState, runs: reordered, currentIndex: newCurrentIndex };
+    const newDs = { ...latest, runs: reordered, currentIndex: newCurrentIndex };
+    const undoScope = operationalRevisionScopeRef.current;
+    const previousOrderIds = prevRuns.map((run) => run.id);
+    const appliedOrderIds = reordered.map((run) => run.id);
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
@@ -13145,7 +13181,27 @@ export default function Home() {
       ok: true,
       message: "Run order updated",
       undo: () => {
-        const restored = { ...dayStateRef.current, runs: prevRuns, currentIndex: prevIndex };
+        const latest = dayStateRef.current;
+        if (operationalRevisionScopeRef.current !== undoScope
+          || latest.date !== dayState.date
+          || (latest.resetAt ?? 0) !== (dayState.resetAt ?? 0)
+          || latest.runs.length !== appliedOrderIds.length
+          || latest.runs.some((run, index) => run.id !== appliedOrderIds[index])) {
+          toast({
+            title: "Run order changed",
+            description: "Undo was not applied because the run list or session changed. Your current changes were kept; review the current run list before changing its order.",
+            variant: "destructive",
+          });
+          return;
+        }
+        // Undo the ordering only, not later quantities, lifecycle edits or
+        // selection. Never restore captured old run objects over current rows.
+        const selectedId = latest.runs[latest.currentIndex]?.id;
+        const currentById = new Map(latest.runs.map((run) => [run.id, run]));
+        const restoredRuns = previousOrderIds.map((id) => currentById.get(id)!);
+        const currentIndex = Math.max(0, restoredRuns.findIndex((run) => run.id === selectedId));
+        const restored = { ...latest, runs: restoredRuns, currentIndex };
+        dayStateRef.current = restored;
         setDayState(restored);
         saveDayState(restored);
         schedulePush(restored);

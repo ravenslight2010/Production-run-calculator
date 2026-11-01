@@ -1,6 +1,6 @@
 ---
 name: Build integration isolation
-description: Seal external runtime assets and isolate caches and stale build stages in temporary build workspaces.
+description: Isolate build environments, caches, external runtime assets and stale stages in temporary build workspaces.
 ---
 
 Reuse installed third-party dependencies read-only, but keep bundler cache directories local to the disposable build workspace.
@@ -8,6 +8,12 @@ Reuse installed third-party dependencies read-only, but keep bundler cache direc
 **Why:** Installed dependency directories can already contain writable Vite configuration caches. Linking every entry shares those caches with a running workspace, even when application source and output directories were copied correctly.
 
 **How to apply:** Treat dependency links as an allowlisted resource, not a whole-directory clone. Rebind workspace-owned library packages to copied sources and exclude generated tool caches; build configuration loaders can write inside dependency directories before the application build begins.
+
+Explicitly set the child build's `NODE_ENV` to `production` when a browser fixture must exercise production-only behavior. Do not change the parent process environment.
+
+**Why:** Vite can resolve `import.meta.env.DEV` as true during `vite build` when the parent supplies a development/test `NODE_ENV`. An apparently production-built PWA fixture can therefore disable its own update checks and test the wrong application branch.
+
+**How to apply:** Preserve unrelated child flags, use distinct fixture identities, and verify Vite's resolved DEV/PROD flags. A passing environment regression does not certify the browser handoff or permit relaxing active-work protection.
 
 Keep an isolated copy of the installed package-manager state when reusing dependencies.
 

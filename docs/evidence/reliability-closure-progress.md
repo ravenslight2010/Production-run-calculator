@@ -76,14 +76,17 @@ The task is **IN PROGRESS**. The root typecheck passed, including the
 generated-API and recovery checks, before the inventory-only update. The
 scripts typecheck subsequently passed for the approved 240-case contract.
 Fresh default-suite discovery, Chromium-only selection, and exact identity
-checks passed within the combined reporter regression. That regression then
-failed on a separate standalone-diagnostic inventory assertion (293 collected,
-278 recorded); the combined regression is **not** a pass.
+checks passed. The first combined reporter regression failed on a separate
+standalone-diagnostic mismatch (293 collected, 278 recorded). That failed
+attempt is preserved. Following owner-approved exact review, the updated
+combined regression passed both current collections and the original-set
+retention fence; see the ledger and inventory document.
 
-The earlier invalid Chromium attempt remains stopped/preserved. The new isolated
-main-suite attempt accepted all 240 approved identities and is executing.
-Its ten-minute check-in showed continuing progress and failures; there is no
-complete runtime result yet.
+The earlier invalid Chromium attempt remains stopped/preserved. The approved
+240-case main attempt subsequently ended with 187 passed, 43 failed, one
+interrupted and nine not run. It is a failed attempt, not an executing run or
+a passing-duration certificate. Subsequent bounded repairs and the selected
+Warehouse recheck are recorded separately below.
 Current sync/wake behavior against a second physical device and the
 remaining scheduled, inventory and operational-domain journeys have not all
 passed. Full release evidence remains a separate lane; the standard release
@@ -98,8 +101,11 @@ data were used in the isolated API tests.
 | Manager sync-health uses device selection while shared calculations follow lifecycle | FOCUSED PASS | Shared selector/calculator identity has 12 passing focused tests, including no-mutation checks. Final integrated browser evidence remains separate. Owner: this task. |
 | Production database aggregate measurement unavailable | BLOCKED | Supported production aggregate SELECT rejected with `Production database access requires an authenticated user.` No result or direct-connection workaround. Owner: supported production-access authority; next action is an authenticated read-only session, not credentials in chat. |
 | Published stalls' causal attribution | INVESTIGATING | Read-only SRE investigation running against the supported deployment. Historical pool and loop-delay overlap remains correlation, not root cause. Owner: this task/platform measurement authority. |
-| Required local integrated verification | IN PROGRESS; APPROVED MAIN ATTEMPT EXECUTING | Root and subsequent scripts typechecks passed on their recorded inputs. Runtime accepted the approved 240-case inventory. Failures are preserved below; no final result, retry, or duration-gate change is claimed. |
-| Standalone diagnostic inventory | FAIL; SEPARATE INVENTORY REVIEW REQUIRED | Combined reporter regression collected 293 standalone cases against its recorded 278. The approved main 240-case checks passed earlier in that same command. No standalone count/filter was changed; this failure remains owned here, not hidden by the independent main run. |
+| Required local integrated verification | FAILED MAIN ATTEMPT; REPAIR BATCHES IN PROGRESS | The approved 240-case attempt ended with 187 passed, 43 failed, one interrupted and nine not run. Focused repairs do not replace that result. No full-browser pass, certified duration, retry or duration-gate change is claimed. |
+| Standalone diagnostic inventory | RECONCILED; REPORTER REGRESSION PASS | Owner-approved exact review established 15 additions and zero removals: 13 already-approved main cases plus focused saved-schedule and synthetic-import journeys. Updated 293-case digest retains a second fence for every original 278-case identity. Combined reporter regression exited 0 with fresh main 240 and standalone 293 collections and the original-set fence. No matcher, retry, timeout or browser assertion changed; no browser launched. See `docs/full-browser-inventory.md`. The previous failed attempt remains preserved, not relabeled. |
+| Warehouse/local day-overlay queue | FOCUSED PASS; SELECTED WAREHOUSE BROWSER PASS | The staging, substitution/log and prep producers advance their synchronous local reference before the queue's acknowledged-snapshot comparison. The original nine regressions and 84 existing checks passed (93), with root typecheck. One exact, preflighted Warehouse staging/database/reload follow-up then passed 1/1 on disposable local fixtures. Other overlays are unit-verified, not browser-certified. The old main failure remains preserved. |
+| Run ordering and suggested-order Undo | SOURCE REPAIR; CURRENT FOCUSED PASS | Manual/suggested ordering and Undo now queue the intended current snapshot. Forward actions preserve newer rows/values; positional moves refuse stale lists. Order-only Undo retains current fields and selection, and refuses changed membership/order, day, reset or operational scope. Final actual-source producer suite passed 27/27 with client typecheck and diff check. Earlier combined 105/root-typecheck evidence is recorded separately below. No run-order browser or physical-device pass is claimed. |
+| Dough speed-change/wake fixture | CLOCK-DOMAIN ASSERTION REPAIR; RUNTIME RECHECK OPEN | The failed trace's simulated tick projected 8 trays about 159 seconds ahead of wall time; both subsequent wake GETs and the form showed 9. The test now binds adoption to that received wake projection and separately requires the simulated consumption interval to reduce batch stock. Exact one-case collection passed; this is not a browser pass or a production counter-formula repair. |
 | Role/Gold API integration rerun | FOCUSED PASS | Role/import-operations rerun 268/268 and API typecheck passed. The later five-file run passed 291/292 before the final route inventory fix; that failure is preserved. |
 | New active run hides eligible ended-run drain | REPAIRED; FOCUSED PASS | Explicit run identity prevents the newer active lifecycle from stealing the bounded case-only drain. Final server-claim/registration rerun: 50/50. No Sauce, applicator, or Dough cadence formula changed. |
 | Missing protected Gold read inventory | REPAIRED; FOCUSED PASS | Approvals/retention use either manage-staff or manage-qc; cleanup uses manage-staff. All remain scoped and retain their existing role middleware. The mounted-router registration test passes. |
@@ -120,8 +126,9 @@ attempt cannot establish a feature that has not been delivered.
 | No-install startup diagnostic | The freeze-time inspection found no exposed diagnostic command. | Delivered direct Node command and root script with four passing tests. Live inspection found the shell/runtime pin mismatch and missing/unreadable expected cache metadata without executing tools. Integrity/offline handoff remain unverified. |
 | Isolated background-concurrency trial | The worker already has bounded concurrency options; monitoring alone did not establish a measured trial. | The guarded baseline-2/trial-1 experiment passed its protected-job checks but **rejected** the candidate because synthetic queue age worsened and throughput fell. Existing source fallback remains 2; no app setting changed. Cross-scheduler/outbox and production behavior remain unverified. |
 
-Application/test inputs are not being edited while the approved runtime attempt
-runs. This table is a delivery-gap record, not a claim of comprehensive source
+Application/test inputs were frozen during the approved runtime attempt;
+that attempt has ended and bounded repair batches have resumed. This table is
+a delivery-gap record, not a claim of comprehensive source
 review or a conclusion that these omissions caused the published stalls.
 
 ## Approved runtime attempt: ten-minute checkpoint
@@ -535,3 +542,337 @@ Production observations are read-only and do not certify the repaired local
 source. Local passing tests cannot certify an unmatched published build. The
 development database remains unmodified. The captured production SQL gateway
 still denies aggregate access without an authenticated user.
+
+## 2026-11-01 — Warehouse and local-overlay queue repair
+
+The preserved Warehouse staging trace failed while polling the disposable
+database: expected the staged value `"true"`, received `null`, then reached the
+20-second test deadline. The actual control is a button with `aria-pressed`;
+its button semantics were not the defect and were not changed.
+
+Source inspection found a separate, reproducible queue race that fits that
+missed-write symptom. The queue's synchronous no-op comparison and eventual
+payload both read the current day-state reference. Warehouse staging and
+substitution handlers previously updated React/local storage but left that
+reference unchanged until a later React effect. An acknowledged old snapshot
+could therefore suppress the edit entirely. Rapid edits could also calculate
+their next overlay or activity log from the same old reference. The prep
+handoff effect had the same ordering problem.
+
+All three producers now update the reference with the new local snapshot
+before scheduling. No canonical baseline, hidden-document, foreground-wake,
+in-flight-adoption, scope/date, epoch or acknowledgement fence was removed.
+No production arithmetic, counter ownership, API contract or persisted schema
+changed. Server-side staged-item union/uncheck policy is unchanged.
+
+The Warehouse test manager fixture now uses the existing canonical manager
+capability list rather than narrowing the shared fixture role to four
+capabilities. This is fixture source only: no accounts or role records were
+changed by this repair batch.
+
+Verification sequence, including failed attempts:
+
+- The first new test-loader attempt failed before executing the handlers
+  because compiler directives were incorrectly treated as a function
+  expression. That was a harness error, not six reproduced application defects.
+  The loader now selects the emitted function structurally.
+- Six subsequent assertions failed against the old Warehouse/substitution
+  handlers, including no dispatch, rapid-edit loss and stale local references.
+- After repairing those handlers, eight new regressions plus 84 existing
+  focused sync/tracking checks passed. The following wider typecheck failed
+  because the test imported TypeScript directly. The import was corrected to
+  the required workspace adapter; no boundary rule was waived.
+- A separate focused prep-handoff assertion then reproduced no dispatch
+  against the old effect. Its producer received the same reference-order fix.
+- The final combined command exited zero: all nine new regressions and
+  84 existing focused checks passed (93 total), followed by the root workspace
+  typecheck and `git diff --check`.
+
+The regressions execute the actual source handlers/effect and `schedulePush`.
+Payload construction and transport are bounded test doubles. They cover an
+already-acknowledged baseline, rapid row checks, local net-zero unchecking,
+successive substitution activity, prep handoff, and hidden/foreground/adoption
+fences. They do **not** establish real React/device wake timing, server
+acceptance, stock consumption, reload persistence or cross-device convergence.
+At this checkpoint the original Warehouse browser journey still needed its
+isolated recheck; the subsequent result is recorded below.
+Other non-reference `schedulePush` callers have been enumerated for continued
+review; they are not all classified as bugs because some independently stamp
+run metadata or enqueue operational intents.
+
+No browser, managed workflow restart, publish, shared development-data write,
+production mutation or release decision occurred in this batch. The task
+remains in progress and the failed main-suite result remains authoritative.
+
+## 2026-11-01 — Selected Warehouse follow-up and run-order repair
+
+### Warehouse persistence follow-up
+
+Collection-only preflight selected exactly the existing Chromium case
+`operator staging check persists for a canonical per-run material across reload`.
+The approved isolated runner then executed that single case with its existing
+assertions, timeout, no-retry policy and one worker. It passed **1/1**: the
+operator's staging check reached the disposable database and remained checked
+after reload at the tested emulated screen sizes. The runner exited zero and
+cleaned up its disposable services. Shared development and production records
+were not changed.
+
+Bounded trace review found two `/api/sync/today` PUT responses with status 200,
+no recorded HTTP failures and no unexpected browser console/page errors.
+The six console warnings were the expected Playwright-blocked service-worker
+registration notice. Build output retained chunk-size/deprecation/color
+warnings; no warning threshold or assertion was weakened. Authenticated trace
+images showed the synthetic Warehouse screen. Raw traces remain in ignored
+private generated output, not published or exported.
+
+This is a selected-flow result on its recorded inputs, before the later
+run-order repairs below. It does not replace the failed 240-case attempt,
+establish physical wake/cross-device behavior, or certify other overlays.
+
+### Same queue class in run ordering
+
+Source review found the same reference-before-queue omission in manual moves,
+suggested ordering and its Undo. Per-run metadata stamping compares rows by ID,
+so an order-only edit does not independently provide a changed metadata stamp
+to rescue the old-reference no-op check.
+
+The old Undo also restored captured run objects and the previous selection.
+It could overwrite newer values or drop later membership changes. The repair
+captures immutable order IDs, reorders current records only, preserves current
+selection and values, and rejects compensation after membership/order,
+day/reset or operational-scope changes. Rejected work shows an actionable
+message and performs no partial save or dispatch.
+
+Forward ordering also uses the latest synchronous rows. Suggestions keep
+newly added runs; a positional move refuses a changed rendered ordering
+rather than moving a different run. Both refuse crossing a changed day/reset.
+No cadence formula, production quantity, API/schema, role permission, canonical
+acknowledgment requirement or existing wake/adoption fence changed.
+
+Verification chronology:
+
+- Two launcher attempts timed out before test collection. The shell used
+  Node 24.22.1 while the repository required 24.21.0, causing external fallback
+  acquisition despite the retained matching executable. Putting the verified
+  executable first on PATH restored the supported runner. Its locks, pin
+  validation, TLS and signature safeguards were not bypassed.
+- Against the old ordering/Undo handlers, eight actual-source assertions
+  failed and ten passed. This was an application-regression result, unlike
+  the earlier unstarted launcher attempts.
+- After the initial order/Undo repair, the combined six-file batch passed
+  **105/105**, followed by the full root workspace typecheck and diff check.
+- Immutable-ID hardening then passed **22/22** producer regressions plus the
+  client typecheck and diff check. This was a narrower follow-up, not another
+  full workspace or browser certification.
+- Five additional latest-row/stale-position/day/reset cases reproduced
+  failures before forward ordering was repaired: five failed, 22 passed.
+- The final actual-source producer suite passed **27/27**, followed by the
+  client typecheck and diff check. Unchanged focused suites were not rerun
+  merely to inflate counts; results from different inputs are not summed
+  into a claimed single run.
+
+These tests execute the source handlers and queue with bounded state/transport
+doubles, not a real React/account transition or server ordering transaction.
+The desktop preview loaded the signed-out entry screen on its current port;
+that screenshot does not verify the changed authenticated flows. The earlier
+default-port capture could not connect, and the component-preview port was
+not mistaken for the application.
+
+No managed workflow restart, publish, manual commit/push, provider send, real
+source capture, shared development-data write or production mutation occurred.
+The task remains **IN PROGRESS**. Remaining local integrated journeys and
+failure dispositions are still owned here; the full-browser and external
+evidence gaps are not waived.
+
+### Dough speed-change/wake failure disposition
+
+The ordinary Dough correction/Resume case is separate from the failed
+`speed adjustment during a dough run stays aligned across screen wake` case.
+The preserved latter trace failed on expected 8 versus displayed 9 trays;
+batch stock matched at 1.5.
+
+Bounded request/response metadata shows that its last simulated tick evaluated
+a time approximately 158.6 seconds ahead of server capture time. That tick
+accepted two claims and returned the future projection of 8 trays/1.5 batches.
+Both subsequent actual wake GETs returned 9 trays/1.5 batches, matching the
+form. The failing assertion compared that real-time display with the earlier
+future projection. This evidence does not establish a production counting
+defect or justify changing a production formula.
+
+The test repair:
+
+- keeps the simulated due-boundary and accepted-claim checks;
+- additionally requires batch stock to decrease across that simulated
+  consumption interval, rather than accepting success from an unrelated channel;
+- binds form/adopted-value checks to the projection in the actual final wake
+  response, with numeric and run-identity assertions;
+- watches for forbidden retired browser claims through form adoption, not
+  merely until the wake acknowledgment;
+- retains the existing recovery fence, speed, hidden-time bounds, case count,
+  projection/calculation consistency, timeouts and no-retry policy.
+
+Collection-only preflight passed for the exact changed Chromium case, with no
+collection errors; `git diff --check` passed. Private collection metadata is
+under the ignored `dough-wake-clock` generated-output prefix. **The corrected
+journey has not been rerun.** No browser result, physical-device behavior or
+full-suite certification is inferred from collection, and the old failed
+attempt is preserved.
+
+### Bounded documentation/reference review
+
+Input scope: the current task plan, this progress record, the browser inventory,
+and seven Markdown documents in `docs/research-reconciliation`, reviewed on
+2026-11-01. The inventory's historical screenshot hashes and the available
+local duplicate uploads were permitted evidence. No external service, live
+records or image contents were inspected for this check.
+
+| Atomic claim/reference | Assessment and confidence | Evidence and limitation |
+| --- | --- | --- |
+| Explicit local Markdown links resolve in the ten-document set | **verified — high**, after repair | The initial scan found 160 targets and four broken screenshot links. Each replacement upload matched its original retained SHA-256 exactly; only navigation links changed, not the original inventory/provenance. The post-repair scan passed all 160 targets with zero missing. This is not a review of all repository prose or remote links. |
+| Primary-document literal path references remain available | **partially verified — high** | The final scan found 44 literal references in the three primary documents: 42 resolved and two occurrences refer to the same historical ignored archive directory absent from this workspace. Path existence does not validate every cited symbol, line anchor, or semantic claim. |
+| Historical stage-marker archive can establish byte-for-byte integrity now | **unsupported — medium** | The historical browser-inventory row says the marker was archived under `.local/build-identity/archived-stages/`; that directory is not available here. This does not disprove the historical action, but current integrity cannot be rechecked without the original archive and its recorded identity. The artifact was not recreated or substituted. |
+
+The historical marker wording and its dated test outcomes are preserved,
+qualified by this current availability review. The archive gap does not
+invalidate independently recorded later typechecks and does not establish a
+current application defect. No full source-catalog content review, production
+verification or complete code-reference certification is inferred.
+
+### PWA fixture build-mode repair — browser results still open
+
+The preserved safe-before-update failure's page snapshot shows
+“Development preview. Published updates are not checked in this development
+preview,” while the test expects “Update ready.” Current application source
+selects that preview state using Vite's DEV flag. The two-version fixture built
+with an inherited process environment and did not pin its child's NODE_ENV.
+
+A focused regression reproduced the mismatch with the real installed Vite
+resolver: a build command with a development parent resolved DEV=true,
+PROD=false, isProduction=false. Before the fix, four of eight assertions
+failed. The fixture now supplies production NODE_ENV only to its child build;
+it retains the distinct old/new fixture IDs, the existing fixture-only idle
+interval, unrelated inherited flags, and the unchanged parent environment.
+The eight regressions then passed, including Vite resolving DEV=false,
+PROD=true, isProduction=true.
+
+This is a fixture correction, not a production update-policy change. No
+application safety gate, timeout, retry, worker count, browser inventory or
+production inactivity interval was relaxed. The three historical PWA browser
+failures remain open pending runtime verification; the build-mode evidence
+does not prove every failure has this single cause.
+
+The passing eight-test invocation was followed by an unnecessary repeated
+client typecheck attempt that reached the shell command's 60-second deadline
+without emitting a type diagnostic. No new typecheck pass is claimed from
+that attempt. The application source covered by the earlier passing client
+typecheck has not changed in this fixture-only batch; that check does not
+typecheck these excluded test files.
+
+The three selected PWA cases subsequently collected without errors. This
+validated fixture imports and test discovery only; no browser was launched.
+
+### Run Insights navigation/readiness repair — runtime recheck open
+
+Both preserved Run Insights failures terminate in the profile-storage
+readiness poll following sign-in. Their failing expression reads storage; it
+is not the later Accept, Dismiss or “Got it” mutation. The traces contain two
+document requests, but that alone does not establish the cause of navigation
+or certify the application actions. Source review also confirms the shared
+native Button already defaults to a non-submit button; no speculative button
+or production change was made.
+
+The readiness helper now uses Playwright's navigation-resilient browser wait
+with the exact same storage predicate and 20-second limit, rather than a
+Node-side assertion poll whose page evaluation can lose its execution context.
+No API errors, response codes, final storage assertions or action outcomes are
+ignored. These browser journeys remain unverified on the repaired fixture;
+collection and source review are not runtime passes.
+
+All three Run Insights cases subsequently collected without errors. This is
+discovery/import evidence only, not verification of their interactive outcomes.
+
+### Source/provider-boundary preflight — decision pending
+
+The selected “manager gets Mauro's three products in review; source audit calls
+are read-only” case uses a real customer workbook, allows AI requests to pass
+through, and retains review evidence. “Read-only” does not make that source use,
+retention, or provider call authorized for this task.
+
+This phase did not execute that case or read the workbook. Neither the approved
+240-case main inventory nor the reconciled 293-case diagnostic inventory was
+changed. A decision was requested about synthetic local coverage while preserving
+the real-source check as blocked, retaining the current blocked inventory, or
+reviewing the necessary approvals. No answer or authorization is assumed.
+Source-dependent verification must remain blocked until that boundary is
+resolved; it must not be silently skipped or reported as passing.
+
+### Published runtime observation — 2026-11-01 15:25–15:33 UTC
+
+A read-only runtime investigation confirmed an active public Autoscale
+deployment with a successful build. The 84 returned, non-truncated log entries
+were scoped to serving revision `42763954-0c35-47c4-8b4b-6ea38c26deb1`, created
+2026-10-30 15:38:15 UTC. No build was created in the incident window. This
+revision binding does not establish agreement with the current local candidate.
+
+Observed background impact includes repeated sync-outbox retries, push enqueue
+failures, queue-monitor sample failures, and server-job dependency/deadline
+failures. One approximately 61-second capacity window recorded 32 acquisition
+errors, acquisition p95 8.1 seconds/max 11 seconds, and event-loop delay p95
+2.3 seconds/max 6 seconds. Another window recorded event-loop delay p95
+6.4 seconds/max 25.4 seconds and acquisition max 29.2 seconds. These are
+server-runtime observations, not a trace of a particular user's action.
+
+The initiating cause remains **inconclusive**. Successful post-checkout phases
+also sometimes took seconds; those durations include runtime scheduling and
+cannot isolate database execution time. A point-in-time database-capacity
+observation showed one active/five idle backends and no active/lock waiters,
+against a reported 450-connection maximum. That sample neither proves sustained
+healthy connectivity nor supports a database-wide connection-limit diagnosis.
+Increasing the pool is not justified by this evidence.
+
+Resource/aggregate metric queries were unavailable from the observability
+service. Endpoint telemetry exposed only readiness: four requests, no reported
+4xx/5xx, p95 483 ms. User-route impact, CPU saturation and memory pressure remain
+unverified, not zero. Failure events were exported at INFO severity, so an empty
+ERROR-only query would have hidden them.
+
+The investigation made no file, configuration, account, database, infrastructure,
+or deployment changes and generated no synthetic production traffic. No claim
+is made that the local repairs caused or fixed the published symptoms. The next
+useful measurement is aligned runtime-resource, acquisition/post-checkout and
+background-concurrency evidence for the same revision/time window; unavailable
+measurements remain gaps rather than grounds for speculative capacity changes.
+
+### Current client timing gate — failed attempt preserved
+
+The standard client command completed its prerequisite checks and reported
+395 passing test files/one skipped file, with 3,843 passing assertions and one
+existing skipped test. Nevertheless, the command **failed**: the budget runner
+measured 159.0 seconds against the unchanged 150.0-second limit. This is not a
+passing client validation result.
+
+The two new suites accounted for approximately 2.869 seconds and 0.418 seconds
+of reported test-body time. These figures do not include all import/environment
+cost and cannot explain or attribute the whole difference from the earlier
+121.7-second workflow result. Detailed temporary JSON timing reports were no
+longer retained; bounded per-file timings remain available in command logs.
+Current host load/quota observations do not establish resource conditions
+throughout either earlier run.
+
+The handler-source harness was found to traverse/transpile the same immutable
+callbacks repeatedly. It now caches only emitted source expressions, not bound
+functions; each scenario still gets fresh refs, mocks and timers. All assertions
+and the 150-second limit/worker ceiling remain unchanged. Only the failed timing
+gate is being rechecked after that concrete test-helper change; unchanged
+prerequisite checks are not being repeated. A passing result is not assumed,
+and no runtime improvement will be attributed solely to this cache without
+controlled evidence.
+
+The post-optimization timing-gate invocation subsequently **passed** (exit 0):
+395 files passed/one skipped, 3,843 assertions passed/one existing skip, measured
+143.5 seconds against the same 150.0-second budget and four-worker ceiling.
+This verifies the current test-helper inputs without changing assertions or
+budgets. The earlier 159.0-second failed attempt remains recorded. Unchanged
+prerequisite checks retain their earlier passes; the entire standard command
+was not rerun. This client result is not browser certification, a production
+performance finding, or completion of the wider task.

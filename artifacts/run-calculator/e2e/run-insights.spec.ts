@@ -95,17 +95,18 @@ async function signIn(
   // profile may be written as an individual dough key or inside the scoped
   // profile cache blob, so accept either shape.
   const profileSuffix = `${product.brand.toLowerCase().trim()}__${product.flavor.toLowerCase().trim()}`;
-  await expect.poll(
-    () => page.evaluate(
-      ({ doughKey, suffix }) =>
-        Boolean(localStorage.getItem(doughKey)) ||
-        Array.from({ length: localStorage.length }, (_, i) =>
-          localStorage.getItem(localStorage.key(i)!) ?? "",
-        ).some((v) => v.includes(`"${suffix}"`)),
-      { doughKey: `run-calc-profile-${profileSuffix}`, suffix: profileSuffix },
-    ),
+  // Profile hydration may overlap the sign-in navigation. Playwright's
+  // browser-side wait resumes in the new document; a polled page.evaluate
+  // instead fails immediately when its execution context is destroyed.
+  await page.waitForFunction(
+    ({ doughKey, suffix }) =>
+      Boolean(localStorage.getItem(doughKey)) ||
+      Array.from({ length: localStorage.length }, (_, i) =>
+        localStorage.getItem(localStorage.key(i)!) ?? "",
+      ).some((v) => v.includes(`"${suffix}"`)),
+    { doughKey: `run-calc-profile-${profileSuffix}`, suffix: profileSuffix },
     { timeout: 20_000 },
-  ).toBe(true);
+  );
 }
 
 /**

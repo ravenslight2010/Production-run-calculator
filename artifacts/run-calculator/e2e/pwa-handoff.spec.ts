@@ -24,6 +24,7 @@ import * as XLSX from "xlsx";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
+import { pwaFixtureBuildEnv } from "./pwaFixtureBuildEnv";
 import { applySyncDeltaData, canonicalSyncJson, isSyncRecord } from "@workspace/sync-contract";
 import { applyOperationalIntent } from "../../api-server/src/lib/operationalIntents";
 import { syncSnapshotId } from "../../api-server/src/lib/syncContract";
@@ -148,11 +149,7 @@ async function buildTwoVersionFixture() {
         cwd: packageRoot,
         // Production uses one minute. Keep the exact policy path while making
         // this two-version browser fixture finish promptly.
-        env: {
-          ...process.env,
-          PWA_HANDOFF_BUILD_ID: `pwa-${version}-build`,
-          VITE_UPDATE_RELOAD_IDLE_MS: "1000",
-        },
+        env: pwaFixtureBuildEnv(process.env, version),
         maxBuffer: 10 * 1024 * 1024,
       });
       await Promise.all([

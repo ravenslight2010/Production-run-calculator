@@ -2454,6 +2454,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       wakeAt + 1,
       nextBatchConsumption.dueAt + 1,
     );
+    const beforeVisibleBatchStock = Number(
+      (await readLiveRunSnapshot(page)).values.batchesReady,
+    );
+    expect(beforeVisibleBatchStock).toBeGreaterThan(0);
     const cadenceBeat = await mockDateNow(page, nextVisibleIntervalAt);
     const cadenceEntries = (
       cadenceBeat.autoTrackSchedule as {
@@ -2482,6 +2486,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       cadenceBeat.operationalProjection?.counters?.batchesReady;
     expect(authoritativeTrays).toEqual(expect.any(Number));
     expect(authoritativeBatches).toEqual(expect.any(Number));
+    // Prove that this simulated edited-speed interval consumed stock, not
+    // merely that some unrelated channel accepted a claim.
+    expect(authoritativeBatches).toBeLessThan(beforeVisibleBatchStock);
     const syncAckBeforeWake = await recoveryStatus.getAttribute(
       "data-foreground-sync-ack",
     );
@@ -2532,25 +2539,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           "wake did not acknowledge shared sync after releasing its fence",
       })
       .not.toBe(syncAckBeforeWake);
-    // With server authority enabled, the browser must never duplicate the
-    // server beat by issuing its retired client-side dough claims.
-    expect(
-      wakeClaimChannels,
-      "authoritative wake emitted browser claims",
-    ).toEqual([]);
-    await expect
-      .poll(() => readDoughCounters(page), {
-        timeout: 10_000,
-        message: "post-wake dough cadence did not use the edited speed",
-      })
-      .toEqual({
-        trays: authoritativeTrays,
-        batches: authoritativeBatches,
-      });
     // The foreground-sync acknowledgment is the wake boundary. Verify the
-    // authoritative server snapshot below instead of waiting on a secondary
-    // local snapshot push after the wake.
-    page.off("request", recordWakeClaim);
+    // received projection, not the future simulated cadence projection above.
+    // In this fixture the next batch boundary may be minutes ahead of wall
+    // time; its projected tray stock is not the real-time wake display.
     const finalWakeResponse = await finalWakeResponsePromise;
     expect(finalWakeResponse.ok()).toBe(true);
     const finalWakePayload = (await finalWakeResponse.json()) as {
@@ -2583,6 +2575,29 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         } | null;
       };
     };
+    const wakeProjection =
+      finalWakePayload.operationalProjection ??
+      finalWakePayload.data?.operationalProjection;
+    const wakeAuthoritativeTrays = wakeProjection?.counters?.traysOnLine;
+    const wakeAuthoritativeBatches = wakeProjection?.counters?.batchesReady;
+    expect(wakeAuthoritativeTrays).toEqual(expect.any(Number));
+    expect(wakeAuthoritativeBatches).toEqual(expect.any(Number));
+    await expect
+      .poll(() => readDoughCounters(page), {
+        timeout: 10_000,
+        message: "post-wake dough counters did not adopt the received server projection",
+      })
+      .toEqual({
+        trays: wakeAuthoritativeTrays,
+        batches: wakeAuthoritativeBatches,
+      });
+    // Keep watching through form adoption: a late retired browser claim must
+    // not duplicate the authoritative server beat either.
+    page.off("request", recordWakeClaim);
+    expect(
+      wakeClaimChannels,
+      "authoritative wake emitted browser claims",
+    ).toEqual([]);
 
     const snapshot = await readLiveRunSnapshot(page);
     const values = snapshot.values;
@@ -2599,18 +2614,15 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       "the new speed has not reached the freezer exit yet",
     ).toBe(0);
     expect(values.speedAdjustment).toBe(0.5);
-    expect(values.traysOnLine).toBe(authoritativeTrays);
-    expect(values.batchesReady).toBe(authoritativeBatches);
+    expect(values.traysOnLine).toBe(wakeAuthoritativeTrays);
+    expect(values.batchesReady).toBe(wakeAuthoritativeBatches);
     // The final wake adopts a fresh server-time projection without rewinding
     // the fixture clock from its simulated cadence time.
     const postWakeSnapshot = await readLiveRunSnapshot(page);
     const postWakeValues = postWakeSnapshot.values;
-    const wakeProjection =
-      finalWakePayload.operationalProjection ??
-      finalWakePayload.data?.operationalProjection;
     expect(wakeProjection?.runId).toBe(postWakeSnapshot.runId);
-    expect(wakeProjection?.counters?.traysOnLine).toBe(authoritativeTrays);
-    expect(wakeProjection?.counters?.batchesReady).toBe(authoritativeBatches);
+    expect(postWakeValues.traysOnLine).toBe(wakeAuthoritativeTrays);
+    expect(postWakeValues.batchesReady).toBe(wakeAuthoritativeBatches);
     expect(wakeProjection?.counters?.casesCompleted).toBe(
       Number(postWakeValues.skidsCompleted ?? 0) * Number(postWakeValues.casesPerSkid ?? 0) +
         Number(postWakeValues.casesOnCurrentSkid ?? 0),

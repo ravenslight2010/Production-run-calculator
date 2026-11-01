@@ -21,6 +21,19 @@ which could be mistaken for missing browser evidence.
 **How to apply:** Inspect the network schema first, then extract only the
 needed sanitized facts. Do not dump request headers, cookies, or entire bodies.
 
+## Browser frame references
+
+**Rule:** Inspect the screencast event schema before extracting an image. The
+recorder may use `file`, not `sha1`. Resolve that reference against actual archive
+members; use a basename fallback only when it uniquely identifies a resource.
+
+**Why:** A valid archive contained hundreds of JPEG frames while a `sha1`-only
+extractor found none. Recorder metadata and archive paths were not identical.
+
+**How to apply:** Check resource existence and select an available frame from
+the relevant journey. Keep authenticated traces private; an unresolved reference
+does not prove the browser captured no evidence.
+
 ## WebKit fetch access-control wording
 
 **Rule:** Do not diagnose a WebKit “due to access control checks” message from
@@ -218,3 +231,19 @@ the intended request failed. Method, response and preflight evidence matter.
 **How to apply:** Check whether preflight occurred and whether the request
 reached its handler. Preserve real authorization behavior in fixtures; do not
 add permissive CORS headers to conceal an unrelated failure.
+
+## Simulated beats versus foreground display time
+
+Bind a wake display assertion to the projection received for that wake and run,
+not to a fixture tick evaluated at a future simulated time.
+
+**Why:** A controlled beat can be minutes ahead of server wall time. Its
+time-dependent tray projection can differ from the later real-time GET even
+when the screen correctly adopts that GET. Comparing them can falsely suggest
+an application counting defect.
+
+**How to apply:** Keep separate assertions proving that the simulated due
+interval accepted the intended work and changed the relevant stock. Then
+compare the wake form, adopted values and projection with the received
+foreground response. Retain run identity, duplicate-claim and recovery fences;
+do not change production formulas or loosen numeric ranges to match a forecast.
