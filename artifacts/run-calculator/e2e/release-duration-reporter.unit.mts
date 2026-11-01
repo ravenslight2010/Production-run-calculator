@@ -14,6 +14,7 @@ import {
   parsePerFileDurations,
 } from "./release-duration-reporter.ts";
 import ReleaseDurationReporter from "./release-duration-reporter.ts";
+import "./syntheticWorkbookReview.unit.mts";
 import {
   FULL_BROWSER_EXCLUDED_CASE_PATTERN,
   FULL_BROWSER_EXPECTED_CASE_IDENTITIES,
@@ -191,12 +192,6 @@ assert.ok(
   debugIdentities.every((identity) => identity.includes(".spec.ts :: ")),
   "standalone discovery must not collect Node/Vitest helper files",
 );
-assert.equal(
-  createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
-  "d52aaef6fcc989589caab0d1176b0540760c13c6e091fdd61e57f897bbfb83fe",
-  "standalone Chromium project/file/title identities changed; review its own lane selections, not the default suite count",
-);
-
 // Owner-reviewed catch-up, separate from the main 240-case contract. Removing
 // these exact additions must reproduce the original 278-case fingerprint.
 // Keep the baseline fence even if a future review updates the current digest.
@@ -223,7 +218,28 @@ assert.ok(
   standaloneReviewedAdditions.every((identity) => debugIdentities.includes(identity)),
   "every reviewed standalone addition must remain collected",
 );
-const retainedStandaloneBaseline = debugIdentities.filter(
+// The owner separately approved one local synthetic replacement. Restore that
+// exact historical identity before checking the original-set digest; this is
+// preservation evidence, not proof that the blocked real-source audit passed.
+const syntheticWorkbookIdentity =
+  "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: manager gets three synthetic products in review; cancel is read-only";
+const blockedRealWorkbookIdentity =
+  "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: manager gets Mauro's three products in review; source audit calls are read-only";
+assert.ok(debugIdentities.includes(syntheticWorkbookIdentity));
+assert.ok(!debugIdentities.includes(blockedRealWorkbookIdentity));
+const restoredSourceBaseline = debugIdentities.map(
+  (identity) => identity === syntheticWorkbookIdentity ? blockedRealWorkbookIdentity : identity,
+).sort();
+assert.equal(
+  createHash("sha256").update(JSON.stringify(restoredSourceBaseline)).digest("hex"),
+  "d52aaef6fcc989589caab0d1176b0540760c13c6e091fdd61e57f897bbfb83fe",
+  "only the approved synthetic substitution may differ from the preceding standalone set",
+);
+console.log(
+  "Standalone inventory fingerprint (approved synthetic substitution):",
+  createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
+);
+const retainedStandaloneBaseline = restoredSourceBaseline.filter(
   (identity) => !standaloneAdditionSet.has(identity),
 );
 assert.equal(retainedStandaloneBaseline.length, 278);

@@ -65,7 +65,7 @@ export const FULL_BROWSER_EXPECTED_CASE_IDENTITIES: readonly string[] = [
   "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: frontline supply recovers across runs and converges with a second tab",
   "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: measures canonical edit and foreground recovery latency",
   "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: deterministic exported workbook stays model-free",
-  "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: manager gets Mauro's three products in review; source audit calls are read-only",
+  "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: manager gets three synthetic products in review; cancel is read-only",
   "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: profile importer without AI permission sees guidance and sends no parse request",
   "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: provider failure preserves an incomplete review and one retry can recover",
   "artifacts/run-calculator/e2e/dough-correction-resume.spec.ts :: manager Dough corrections resume without a catch-up write",
@@ -248,8 +248,14 @@ export const FULL_BROWSER_EXPECTED_CASE_IDENTITIES: readonly string[] = [
 export const FULL_BROWSER_EXPECTED_CASES =
   FULL_BROWSER_EXPECTED_CASE_IDENTITIES.length;
 
-export const FULL_BROWSER_EXCLUDED_CASE_PATTERN =
-  /@focused-only|@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit (?:recovers after Android Chrome suspension|survives an Android Chrome process restart))|reload preserves a started Run while its Sauce chunk is held in desktop WebKit|PWA update handoff (?!auto-reloads when Home was already safe before update discovery$|preserves unsafe work, then auto-reloads after safe inactivity$|recovers an old HTML-served Home chunk onto the current build once$)/;
+// Owner-approved synthetic local boundary. The retained real-source test also
+// fails closed at entry if another config selects it without authorization.
+export const BLOCKED_REAL_SOURCE_WORKBOOK_CASE_PATTERN =
+  /manager gets Mauro's three products in review; source audit calls are read-only$/;
+export const FULL_BROWSER_EXCLUDED_CASE_PATTERN = new RegExp(
+  `${BLOCKED_REAL_SOURCE_WORKBOOK_CASE_PATTERN.source}|` +
+  /@focused-only|@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit (?:recovers after Android Chrome suspension|survives an Android Chrome process restart))|reload preserves a started Run while its Sauce chunk is held in desktop WebKit|PWA update handoff (?!auto-reloads when Home was already safe before update discovery$|preserves unsafe work, then auto-reloads after safe inactivity$|recovers an old HTML-served Home chunk onto the current build once$)/.source,
+);
 
 export function assertFullBrowserCaseContract(discoveredCases: number): void {
   if (discoveredCases === FULL_BROWSER_EXPECTED_CASES) return;

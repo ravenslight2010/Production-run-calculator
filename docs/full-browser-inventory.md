@@ -105,7 +105,7 @@ existence alone is not a reason to remove default Chromium app regressions.
 | `report-issue-confirmation.spec.ts` | 1 | Failed-report retry retains input; issue reporting |
 | `run-startup-slow-network.spec.ts` | 1 | Run usable before optional panels; startup |
 | `sync-convergence.spec.ts` | 2 | Frontline peer recovery and canonical edit/wake latency; sync |
-| `workbook-auto-ai-fallback.spec.ts` | 4 | Model-free deterministic parse, permission denial, stubbed fallback/retry and read-only source audit; workbook imports |
+| `workbook-auto-ai-fallback.spec.ts` | 4 | Synthetic model-free parse, permission denial, stubbed fallback/retry and three-product review/cancel; real-source/provider audit remains blocked |
 
 These are intended runtime checks, not claims that they have passed at runtime
 as part of this inventory task.
@@ -276,6 +276,46 @@ performed.
 This is collection/reporter verification, not execution of 293 browser journeys.
 The debug harness still cannot retain or replace full-suite runtime evidence;
 its broader inventory includes dedicated and opt-in lanes.
+
+### Approved synthetic local source boundary — 2026-11-01
+
+The owner subsequently selected **synthetic local coverage**. In both default
+and standalone inventories, exactly one identity is replaced:
+
+- Blocked, retained real-source identity:
+  `workbook-auto-ai-fallback.spec.ts :: manager gets Mauro's three products in review; source audit calls are read-only`.
+- Local counterpart:
+  `workbook-auto-ai-fallback.spec.ts :: manager gets three synthetic products in review; cancel is read-only`.
+
+The counts remain **240 default** and **293 standalone**. The current standalone
+SHA-256 is `ef7213cec9eb66a207be3336952fee7d5f5cc08762791b70e8d0365be50563ab`.
+The reporter checks the exact default identities; for standalone it also reverses
+only this approved substitution and requires the preceding full 293-identity
+digest, then removes the fifteen earlier approved additions and requires the
+original 278-identity digest. This preserves both historical fences rather than
+accepting arbitrary same-count changes.
+
+All four local workbook cases now use in-memory invented data. Parse responses
+are mocked or explicitly blocked, with a deny-by-default guard for other AI
+endpoints and service workers blocked so they cannot bypass page routing.
+The original real-source implementation remains present, excluded from both
+local configurations, and fails closed at entry if selected through another
+configuration. Enabling it requires separately reviewed source-use, retention,
+privacy and provider authorization; a new project name or environment flag is
+not an approval.
+
+Initial native checks verified only that the synthetic layout was not a
+supported deterministic export, and that its cited cells contained the invented
+values. That alone did **not** prove AI-fallback eligibility: the focused browser
+attempt passed one case and failed three because the workbook lacked the
+importer's domain signals. The fixture now explicitly identifies itself as
+synthetic pizza recipe specs; the importer and its rejection guard are unchanged.
+Actual web-preparation regression checks cover that separate eligibility gate.
+Collection/reporter checks passed; they are not provider-quality, real-source
+accuracy or physical-device results. This approval does not authorize Gold capture,
+training, provider sends, publishing or production writes. Existing dedicated
+lane ownership is unchanged; the newly blocked real-source case has no active
+authorized runtime lane.
 
 The combined reporter regression passed after the guard update, including fresh
 main and standalone collection and both identity fences. No browser was launched

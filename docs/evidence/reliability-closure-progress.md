@@ -6,6 +6,13 @@ completion certificate or release decision.
 Last refreshed: 2026-11-01 UTC. This checkpoint preserves earlier failed
 attempts; it does not recast a focused rerun as a full-suite pass.
 
+Current source-boundary checkpoint: synthetic local coverage is implemented.
+The actual preparation/snapshot regression file passed 23/23, including the two
+new eligibility checks, and the root workspace typecheck passed. The focused
+browser attempt remains one pass/three failures; its identified fixture cause
+was corrected and checked at the preparation layer, not replayed in a browser.
+The wider task and its unresolved app-wide browser evidence remain open.
+
 ## Intake
 
 - Owner: assigned Replit Agent. One task owns all four internal milestones.
@@ -876,3 +883,75 @@ budgets. The earlier 159.0-second failed attempt remains recorded. Unchanged
 prerequisite checks retain their earlier passes; the entire standard command
 was not rerun. This client result is not browser certification, a production
 performance finding, or completion of the wider task.
+
+### Approved synthetic source boundary — 2026-11-01
+
+The owner approved synthetic local coverage, not customer-source use or provider
+sends. The three-product review/cancel case now uses an invented in-memory
+workbook and a mocked response. The permission-denial and failure/retry cases
+also use that fixture; deterministic export remains synthetic. The real-source
+audit implementation is retained, excluded from both local inventories and
+fails closed at entry if another configuration selects it. No flag or project
+name substitutes for the still-required source-use, retention, privacy and
+provider authorization.
+
+Local AI routes are mocked or blocked, with a deny-by-default route and blocked
+service workers to prevent bypass. Native checks passed for unsupported-layout
+fallback, all three profiles' cited cells, fresh payload objects and the
+fail-closed guards. Read-only discovery/reporter verification passed: 240 main
+and 293 standalone identities, exactly one approved replacement. The previous
+293-set digest and original 278-set digest still match after reversing that
+replacement and the earlier reviewed additions respectively. Current standalone
+digest: `ef7213cec9eb66a207be3336952fee7d5f5cc08762791b70e8d0365be50563ab`.
+
+The first focused follow-up setup failed before starting Playwright or its
+disposable database: its root evidence-directory parent did not exist.
+The correction uses the app's existing generated-artifacts directory, after
+checking that Git and publishing already exclude it. Native checks were not
+repeated on retry. The four changed local cases are the only runtime follow-up
+selected; their result is pending, not assumed to pass. This is not a fresh
+full-suite run or a production/physical-device result.
+
+The disposable browser follow-up then executed all four selected cases:
+**one passed, three failed**, in 2.0 minutes. The deterministic export case
+passed. The other three received the importer's correct unsupported-source
+message instead of entering fallback. The first native check had proved only
+that the layout was not a deterministic export; treating that as full fallback
+eligibility was insufficient.
+
+The fixture header now explicitly says that it is synthetic pizza recipe specs,
+which is the existing content-based eligibility cue. No production parser,
+permission check, rejection rule, assertion, timeout or retry limit was relaxed.
+Two regressions exercise the actual web preparation path with mocked AI and with
+AI disabled, rather than copying the eligibility regex. Their verification is
+pending. The three failed browser outcomes remain unresolved runtime results;
+no unchanged passing flow or fresh complete browser lane is being repeated.
+
+Synthetic evidence writing is now scoped to each Playwright attempt's private
+output directory rather than the retained real-source audit directory's fixed
+filenames. The focused attempt's JSON, failures and traces remain private in the
+app's ignored generated-artifacts area. There were no customer workbook reads,
+provider sends, managed workflow restarts, shared-development data changes,
+production writes or publication.
+
+Corrected-fixture verification completed with exit 0: the native source/citation
+guards passed, all **23** preparation/snapshot tests passed (including the new
+authorized mocked-AI and AI-disabled eligibility cases), and the root workspace
+typecheck passed. This establishes the corrected admission path without
+repeating the unchanged passing browser flow. It does not turn the three
+recorded browser failures into runtime passes.
+
+The preceding complete client timing-gate result (143.5 seconds against 150)
+predates those two additional regressions. Its historical pass remains recorded;
+the expanded whole-client suite's timing was not re-certified in this checkpoint.
+Default/standalone case identities did not change with the fixture-header fix.
+The successful synthetic review paths also explicitly mock the optional
+name-matching endpoint with empty alias results; other AI endpoints remain
+denied. AI-disabled and deterministic cases do not receive that matcher mock.
+The final native guard and 23-test preparation file passed again after adding
+the matcher boundary and exact prepared-brand assertion. Browser-fixture syntax
+and `git diff --check` passed; neither is a browser runtime pass.
+Older relative Playwright artifact paths resolve under the calculator app:
+the original broad-run and selected fixture artifacts were located there, not
+lost or replaced. Final integrated browser/local-release evidence is still
+required before the owning task can be completed.

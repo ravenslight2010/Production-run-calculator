@@ -15,6 +15,12 @@ import * as XLSX from "xlsx";
 import type { ParsedSpecImport, ParsedProfile } from "@workspace/spec-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { Mix } from "@workspace/mixes";
+import {
+  SYNTHETIC_REVIEW_FLAVORS,
+  SYNTHETIC_REVIEW_BRAND,
+  syntheticReviewParse,
+  syntheticReviewWorkbook,
+} from "../e2e/syntheticWorkbookReview";
 
 function fixtureProfile(over: Partial<ParsedProfile> = {}): ParsedProfile {
   return {
@@ -157,6 +163,35 @@ beforeEach(() => {
   fetchSheetsSpy.mockReset();
   fetchSheetsSpy.mockResolvedValue([]);
   aliasesRef.current = [];
+});
+
+describe("synthetic browser workbook fallback eligibility", () => {
+  it("enters actual AI preparation and returns all three invented profiles", async () => {
+    parseSpy.mockImplementation(async () => syntheticReviewParse());
+    const buffer = Uint8Array.from(syntheticReviewWorkbook()).buffer;
+    const prepared = await prepareSpecImportWithAi(buffer, "synthetic-local-review.xlsx");
+    expect(prepared.aiFallbackUnsupported).not.toBe(true);
+    expect(parseSpy).toHaveBeenCalledTimes(1);
+    expect(prepared.parsed.profiles.map((profile) => profile.flavor))
+      .toEqual([...SYNTHETIC_REVIEW_FLAVORS]);
+    expect(prepared.parsed.profiles.every((profile) => profile.brand === SYNTHETIC_REVIEW_BRAND))
+      .toBe(true);
+    expect(applySpy).not.toHaveBeenCalled();
+    expect(saveSheetSpy).not.toHaveBeenCalled();
+  });
+
+  it("retains an eligible unresolved review without sending an AI request", async () => {
+    const { prepareSpecImport } = await import("./specImport");
+    const buffer = Uint8Array.from(syntheticReviewWorkbook()).buffer;
+    const prepared = await prepareSpecImport(buffer, "synthetic-no-permission.xlsx", undefined, {
+      allowAi: false,
+    });
+    expect(prepared.aiFallbackUnsupported).not.toBe(true);
+    expect(prepared.aiFallbackGrids?.length).toBeGreaterThan(0);
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(applySpy).not.toHaveBeenCalled();
+    expect(saveSheetSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("hashSpecImportSource", () => {

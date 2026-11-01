@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolveChromiumExecutable } from "./e2e/chromium";
 import { validateBrowserSpecSyntaxDirectory } from "./e2e/validate-browser-spec-syntax";
+import { BLOCKED_REAL_SOURCE_WORKBOOK_CASE_PATTERN } from "../../scripts/src/full-browser-case-contract.mjs";
 import {
   releaseBrowserBaseUrl,
   releaseBrowserWebServers,
@@ -47,8 +48,10 @@ export default defineConfig({
     },
   },
   testIgnore: ["calendar.spec.ts", "release-webkit-smoke.spec.ts"],
-  grepInvert:
-    /@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit survives an Android Chrome process restart)/,
+  grepInvert: new RegExp(
+    `${BLOCKED_REAL_SOURCE_WORKBOOK_CASE_PATTERN.source}|` +
+    /@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit survives an Android Chrome process restart)/.source,
+  ),
   projects: [
     {
       name: "chromium",

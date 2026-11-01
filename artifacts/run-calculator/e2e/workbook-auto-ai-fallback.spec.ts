@@ -15,6 +15,13 @@ import { buildExportWorkbook } from "../src/specExportWorkbook";
 import { getWorkbookAuditFailureEntries } from "./workbookAuditEvidence.mjs";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
 import { dismissOnboardingIfPresent, signUpAndHandleOnboarding } from "./onboarding";
+import {
+  SYNTHETIC_REVIEW_BRAND,
+  SYNTHETIC_REVIEW_FLAVORS,
+  blockUnapprovedRealSourceAudit,
+  syntheticReviewParse,
+  syntheticReviewWorkbook,
+} from "./syntheticWorkbookReview";
 
 const repoRoot = path.resolve(process.cwd(), "../..");
 const evidenceDir = path.join(repoRoot, ".local/evidence/workbook-import-audit");
@@ -26,8 +33,13 @@ const EXPECTED_MAURO_PRODUCTS = [
   "TOMATO BASIL",
   "ITALIAN BEEF & GIARDINIERA",
 ];
+let unexpectedAiPaths: string[] = [];
 
 type BrowserName = "chromium" | "webkit";
+
+// page.route cannot protect requests handled by a service worker.
+// This spec verifies imports, not PWA behavior; keep the provider guard effective.
+test.use({ serviceWorkers: "block" });
 
 function workbookGrids(buffer: Buffer): SheetGrid[] {
   const workbook = XLSX.read(buffer, { type: "buffer" });
@@ -209,10 +221,31 @@ async function masterDataCounts(page: Page) {
   };
 }
 
+async function mockSyntheticNameMatching(page: Page): Promise<void> {
+  // Assisted preparation may also ask the optional name matcher.
+  // Return no aliases locally; never forward names to a provider.
+  await page.route("**/api/ai/match-import", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        brandMatches: [],
+        flavorMatches: [],
+        ingredientMatches: [],
+        appTypeMatches: [],
+        pepTypeMatches: [],
+      }),
+    });
+  });
+}
+
 async function saveBrowserEvidence(name: string, value: unknown): Promise<void> {
-  await mkdir(evidenceDir, { recursive: true });
+  // Local synthetic evidence belongs to this private attempt, not the retained
+  // real-source audit directory or a previous run's fixed filenames.
+  const destination = test.info().outputPath(name);
+  await mkdir(path.dirname(destination), { recursive: true });
   await writeFile(
-    path.join(evidenceDir, name),
+    destination,
     `${JSON.stringify(value, null, 2)}\n`,
   );
 }
@@ -237,6 +270,24 @@ test.beforeAll(async () => {
   await requireIsolatedTestDatabase("automatic workbook AI fallback browser audit");
 });
 
+test.beforeEach(async ({ page }) => {
+  unexpectedAiPaths = [];
+  // Specific synthetic parse handlers are registered later and take precedence.
+  // Everything else fails closed rather than reaching an actual provider.
+  await page.route("**/api/ai/**", async (route) => {
+    unexpectedAiPaths.push(new URL(route.request().url()).pathname);
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Blocked by synthetic-only browser boundary." }),
+    });
+  });
+});
+
+test.afterEach(() => {
+  expect(unexpectedAiPaths, "No unexpected AI endpoint may reach a provider").toEqual([]);
+});
+
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
   const db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -252,6 +303,9 @@ test("manager gets Mauro's three products in review; source audit calls are read
   page,
   browserName,
 }) => {
+  // Preserved as blocked real-source coverage, not a synthetic/provider pass.
+  // Fail closed even if a different config accidentally selects this case.
+  blockUnapprovedRealSourceAudit();
   test.setTimeout(60 * 60 * 1_000);
   const engine = browserName as BrowserName;
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -715,13 +769,81 @@ test("manager gets Mauro's three products in review; source audit calls are read
   )).toBe(true);
 });
 
+test("manager gets three synthetic products in review; cancel is read-only", async ({
+  page,
+  browserName,
+}) => {
+  await mockSyntheticNameMatching(page);
+  await signInManager(page, true);
+  const before = await masterDataCounts(page);
+  let parserRequests = 0;
+  const commitRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      ["POST", "PUT", "PATCH", "DELETE"].includes(request.method()) &&
+      /\/api\/(brand-profiles|dough-recipes|sauce-recipes|cheese-recipes|mixes)(?:\/|$)/.test(new URL(request.url()).pathname)
+    ) commitRequests.push(request.method());
+  });
+  await page.route("**/api/ai/parse-spec-sheet", async (route) => {
+    parserRequests++;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(syntheticReviewParse()),
+    });
+  });
+  await openWorkbookImport(page);
+  await page.getByTestId("spec-workbook-input").setInputFiles({
+    name: "synthetic-local-review.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: syntheticReviewWorkbook(),
+  });
+  const dialog = page.getByRole("dialog", { name: "Import Spec Sheet" });
+  await expect(dialog.getByText("Step 1 of 2 — products.")).toBeVisible();
+  const viewportChecks = [];
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const flavor of SYNTHETIC_REVIEW_FLAVORS) {
+      await expect(dialog.getByText(`${SYNTHETIC_REVIEW_BRAND} — ${flavor}`, { exact: true })).toBeVisible();
+    }
+    await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+    const width = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(width).toBeLessThanOrEqual(viewport.width + 1);
+    viewportChecks.push({ ...viewport, documentWidth: width });
+  }
+  expect(await dialog.locator('li[data-testid^="spec-profile-"]').count()).toBe(3);
+  expect(parserRequests).toBe(1);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const after = await masterDataCounts(page);
+  expect(after).toEqual(before);
+  expect(commitRequests).toEqual([]);
+  await saveBrowserEvidence(`browser-synthetic-review-${browserName}.json`, {
+    engine: browserName,
+    sourceClass: "synthetic-in-memory",
+    aiEvidence: "mocked-provider",
+    reviewReached: true,
+    canceledWithoutApply: true,
+    masterDataUnchanged: true,
+    masterDataWriteRequests: commitRequests.length,
+    parserRequests,
+    viewportChecks,
+    limitations: "No provider quality, real-source accuracy or physical-device evidence.",
+  });
+});
+
 test("deterministic exported workbook stays model-free", async ({ page, browserName }) => {
   await signInManager(page, true);
   const sourceBytes = deterministicExportBytes();
   let parserRequests = 0;
   await page.route("**/api/ai/parse-spec-sheet", async (route) => {
     parserRequests++;
-    await route.continue();
+    await route.abort("blockedbyclient");
   });
   await openWorkbookImport(page);
   await page.getByTestId("spec-workbook-input").setInputFiles({
@@ -736,6 +858,7 @@ test("deterministic exported workbook stays model-free", async ({ page, browserN
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await saveBrowserEvidence(`browser-deterministic-export-${browserName}.json`, {
     engine: browserName,
+    sourceClass: "synthetic-in-memory",
     modelRequests: parserRequests,
     completeDeterministicReviewReached: true,
     canceledBeforeApply: true,
@@ -751,14 +874,14 @@ test("profile importer without AI permission sees guidance and sends no parse re
   let parserRequests = 0;
   await page.route("**/api/ai/parse-spec-sheet", async (route) => {
     parserRequests++;
-    await route.continue();
+    await route.abort("blockedbyclient");
   });
   await openWorkbookImport(page);
-  const mauroPath = path.join(
-    repoRoot,
-    "attached_assets/0_Mauro's_Pinsa_Pizza_Recipe_Specs_-_01_1791920475343.xlsx",
-  );
-  await chooseWorkbook(page, mauroPath);
+  await page.getByTestId("spec-workbook-input").setInputFiles({
+    name: "synthetic-no-permission.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: syntheticReviewWorkbook(),
+  });
   const dialog = page.getByRole("dialog", { name: "Import Spec Sheet" });
   await expect(dialog.getByTestId("spec-import-unresolved")).toContainText(
     "AI interpretation is unavailable for your account",
@@ -767,6 +890,7 @@ test("profile importer without AI permission sees guidance and sends no parse re
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await saveBrowserEvidence(`browser-no-ai-permission-${browserName}.json`, {
     engine: browserName,
+    sourceClass: "synthetic-in-memory",
     parserRequests,
     unresolvedGuidanceShown: true,
     canceledBeforeApply: true,
@@ -777,6 +901,7 @@ test("provider failure preserves an incomplete review and one retry can recover"
   page,
   browserName,
 }) => {
+  await mockSyntheticNameMatching(page);
   await signInManager(page, true);
   const before = await masterDataCounts(page);
   let parserRequests = 0;
@@ -806,24 +931,15 @@ test("provider failure preserves an incomplete review and one retry can recover"
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        profiles: EXPECTED_MAURO_PRODUCTS.map((flavor) => ({
-          brand: "Mauro's Pinsa",
-          flavor,
-          applicators: [],
-          pepperonis: [],
-        })),
-        recipes: [],
-        generatedAt: Date.now(),
-      }),
+      body: JSON.stringify(syntheticReviewParse()),
     });
   });
   await openWorkbookImport(page);
-  const mauroPath = path.join(
-    repoRoot,
-    "attached_assets/0_Mauro's_Pinsa_Pizza_Recipe_Specs_-_01_1791920475343.xlsx",
-  );
-  await chooseWorkbook(page, mauroPath);
+  await page.getByTestId("spec-workbook-input").setInputFiles({
+    name: "synthetic-retry-review.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: syntheticReviewWorkbook(),
+  });
   const dialog = page.getByRole("dialog", { name: "Import Spec Sheet" });
   await expect(dialog.getByTestId("spec-import-unresolved")).toBeVisible({
     timeout: 8 * 60_000,
@@ -832,8 +948,8 @@ test("provider failure preserves an incomplete review and one retry can recover"
     "Automatic AI interpretation did not resolve all content",
   );
   await dialog.getByRole("button", { name: "Retry AI interpretation", exact: true }).click();
-  for (const flavor of EXPECTED_MAURO_PRODUCTS) {
-    await expect(dialog.getByText(new RegExp(`Mauro's Pinsa — ${flavor}`))).toBeVisible({
+  for (const flavor of SYNTHETIC_REVIEW_FLAVORS) {
+    await expect(dialog.getByText(`${SYNTHETIC_REVIEW_BRAND} — ${flavor}`, { exact: true })).toBeVisible({
       timeout: 8 * 60_000,
     });
   }
@@ -853,7 +969,7 @@ test("provider failure preserves an incomplete review and one retry can recover"
   ]) {
     await page.setViewportSize(viewport);
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(new RegExp(`Mauro's Pinsa — ${EXPECTED_MAURO_PRODUCTS[0]}`)))
+    await expect(dialog.getByText(`${SYNTHETIC_REVIEW_BRAND} — ${SYNTHETIC_REVIEW_FLAVORS[0]}`, { exact: true }))
       .toBeVisible();
     const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(documentWidth).toBeLessThanOrEqual(viewport.width);
@@ -865,6 +981,8 @@ test("provider failure preserves an incomplete review and one retry can recover"
   expect(commitRequests).toEqual([]);
   await saveBrowserEvidence(`browser-provider-retry-${browserName}.json`, {
     engine: browserName,
+    sourceClass: "synthetic-in-memory",
+    aiEvidence: "mocked-provider",
     mockedStatusSequence: mockStatusSequence,
     incompleteReviewShownAfterProviderFailure: true,
     recoveryReviewReached: true,
