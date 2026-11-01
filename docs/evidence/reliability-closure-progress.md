@@ -16,6 +16,158 @@ real-workbook audit skip is retained, not newly added. This clears the current
 client-runtime blocker only. The full-browser failure and remaining app-wide,
 physical-device and publication-bound gaps keep this task **IN PROGRESS**.
 
+### Completion continuation — isolated runtime available
+
+The previous checkpoint's unavailable-app explanation was too broad. The
+existing guarded staging runner can build and serve its own app and PostgreSQL
+cluster; restarting the shared development API is not necessary for local
+verification. The current platform snapshot lists managed workflows as **not
+started**; the earlier ENOENT observations remain historical failed starts.
+
+The existing `isolated-staging.mjs serve` path completed successfully on the
+current source, with **13 recorded PASS checks** and exit **0**, including:
+independent app/cluster/build preflight, synthetic manager/operator setup,
+unauthorized inventory-write denial, invalid-session/validation no-write
+checks, committed manager adjustment, restart/sign-in persistence, empty
+disposable reset, reseeding, and verified app/cluster cleanup. Its retained
+report is
+`.local/isolated-staging/reports/b43d4faefeac572d4fc04a6ad134027f.json`.
+The serving source fingerprint was
+`fc735602b5942897340e468ded7945da5d78a25ad6ed50e38242a1764fe506ac`.
+This is isolated local runtime evidence, not production evidence. A desktop
+screenshot confirmed the unsigned landing page only; anonymous 401 console
+observations do not certify authenticated navigation.
+
+The two previously failed Run Insights cases were then rechecked through the
+existing disposable-database runner and focused diagnostic configuration:
+**2/2 PASS**, no skips/flakes/retries, **51.788 s**, exit **0**. The selection was
+limited to Dismiss persistence and next-run follow-up/Got-it, whose subtle
+reload/context failure needed runtime confirmation after the seed repair.
+Evidence:
+`artifacts/run-calculator/generated-artifacts/insights-reload-runtime.9iyjKq/results.json`
+and its private `run.log`. The unchanged Accept case and passing unrelated
+flows were not repeated. This closes those two focused failures, not the
+interrupted full-browser result.
+
+The canonical isolated API-unit entrypoint also passed **134/134 files,
+1,342/1,342 tests**, in **79.51 s**, exit **0**, on an independently created and
+ownership-checked local cluster. Both its generated API database and outer
+cluster were cleaned up. Evidence:
+`artifacts/run-calculator/generated-artifacts/closure-api-isolated.i7Jnx7/`.
+That entrypoint excludes integration files; it is not by itself a complete API
+suite pass or a replacement for the earlier failed full-API attempt. The
+remaining integration-file partition subsequently passed **59/59 files,
+1,165 tests passed / one skipped**, **338.77 s**, exit **0**, with its independent
+cluster cleaned up. The selected filenames and cleanup receipt are retained at
+`artifacts/run-calculator/generated-artifacts/closure-api-integration.RERE6W/`.
+The one skip is the existing opt-in background-concurrency trial in
+`serverJobs.integration.test.ts`, not a new exclusion. Its earlier isolated
+trial and rejection of the lower-concurrency candidate remain recorded below.
+Together these disjoint partitions provide **2,507 passing API tests and one
+reported opt-in skip across 193 files**. They are two runs, not a single timed
+full-suite certification; the separately owned convergence lane was not
+repeated merely to refresh its passing count.
+
+Evidence reconciliation also located an earlier **PASS** for the exact five-run
+Start/Packaging/End/explicit-none case in the original main attempt's durable
+case ledger. Its original source/test identities are retained at
+`.local/browser-verification-attempts/153ae08f-b3c2-4b8d-8aab-5ef34a71da51/progress.json`.
+This corrects the claim that no five-run evidence exists; it does not establish
+a final-source joined substitution/stock/history journey.
+
+No shared-development/production data, provider configuration, publication,
+test limit, retry policy, inventory contract or visual baseline was changed.
+The task remains **IN_PROGRESS** until required remaining local verification
+and disposition reconciliation are resolved.
+
+The task register now assigns every one of the **43 archived suggestions**
+exactly once to a current disposition/evidence group, retaining all **98**
+original records and their review depth. A native JSON/set/link check passed.
+The 55 merged records remain a distinct outcome-reconciliation gap rather than
+being relabeled complete from their MERGED metadata.
+
+### Supported production observations — access restored, not causal proof
+
+The earlier authenticated-production-read denial no longer reproduces. A
+supported read-only aggregate succeeded and reported `pg_is_in_recovery() =
+true`, one visible/active connection and zero lock waiters. This is a **replica**
+sample, including the observation query, not a measurement of the serving
+application's primary pool, acquisition phases or historical load. The
+three-table diagnostic/health/snapshot metadata result did not expose a
+persisted pool-phase measurement source.
+
+Current deployment metadata reports a successful Autoscale build. A public,
+read-only `/api/build-info` observation returned release build
+`app-build:934ed015-7a94-4db0-a558-0fdbad559c27`, source fingerprint
+`2da695ab03f3d90d3c2fa5c6d90519addbc420701e88445b5df3b986e0629cdb`.
+It differs from the isolated candidate above. No publication or deployed
+candidate verification is claimed.
+
+After supported metric discovery, one aggregate batch for the previously
+recorded **2026-11-01 15:25–15:33 UTC** window returned CPU p95 **2.92%**, memory
+p95 **12.6%**, **5 requests**, and request-latency p95 **365.54 ms**. The 5xx and
+error-log series had **no points**; that is not evidence of zero errors.
+Those host aggregates do not establish the initiating cause of captured
+pool/outbox/queue delays or rule out brief primary-database/runtime stalls.
+No capacity, timeout, retry, concurrency or provider setting changed.
+
+An initial inline probe failed before HTTP because a sandbox URL global was
+unavailable. Explicit `node:url` validation and a TLS-verified bounded shell
+request corrected the probe. That local tooling error is not a deployed outage.
+No raw request, SQL text, user record or credential was retained in this summary.
+
+A subsequent narrowly filtered supported lookup returned **13 pool log
+entries**, no truncation and no next page. Their reported windows include a
+**30,100 ms** acquisition maximum, a **25,417 ms** event-loop-delay maximum and
+up to **20** waiting acquisitions. These are per-window observations, not a
+fleet-wide percentile or a universal failure rate.
+
+Unlike the separate replica query, the application-owned capacity snapshot at
+**15:29:53.181 UTC** explicitly verifies the **primary**, with complete state
+visibility: **450** configured connection slots, **7** client backends,
+**0** active/lock waiters and **439** estimated ordinary slots remaining.
+Its process pool was max **10**, total **5**, idle **2**, waiting **0**, bound to
+published source `2da695…`. This supersedes the claim that no primary observation
+was accessible; it does not prove primary conditions during a different peak.
+
+The supported `background_database_phase` lookup also succeeded. Its first
+**25 entries** are untruncated but **have a next page**, so this is explicitly
+partial coverage. The retrieved entries match the pool capture's one anonymous
+process group. They include connection-timeout acquisition up to **30,100 ms**
+(timeout overrun **29,200 ms**), checkout-timeout acquisition up to **6,601 ms**,
+and successful post-checkout work up to **5,701 ms**. Post-checkout elapsed time
+is not pure SQL time; a connection-timeout outcome does not itself measure exact
+TCP/TLS setup duration. The initiating stall remains unproven. No larger pool,
+deadline, retry or concurrency setting was introduced.
+
+The bounded numeric capture, exact query/window/page boundaries and limitations
+are retained in
+[`reliability-closure-supported-production-observations.json`](reliability-closure-supported-production-observations.json).
+Raw messages, SQL, host/process identities, user records and credentials were
+not copied into that evidence file.
+
+### Saved-copy test instrumentation — initial bootstrap boundary
+
+The preserved saved-copy scenario failed its final API-cancellation guard.
+Its trace places the three reported `/api/me`, QC badge and cursor cancellations
+in the initial document/bootstrap period, before the first explicit reload;
+they must not be described as reload failures or proof that removal failed.
+The test already declared bounded navigation windows for its two reloads but
+omitted the equivalent initial-navigation window.
+
+The initial window now starts before `goto`, closes after Start becomes enabled,
+and closes **before** the first run action. Existing request-identity matching,
+the two cancellation-code checks, HTTP/access-control assertions and cross-origin
+guards remain unchanged. This is fixture instrumentation, not an application
+sync/removal repair or proof of the cancellation initiator.
+
+A new native source-order contract reproduced the missing boundary (**1 FAIL**,
+2.29 s), then passed **1/1**, 2.07 s. An earlier setup-only attempt rejected a
+non-file source URL; package-root filesystem resolution corrected it. The
+configured client compiler subsequently passed, exit **0**. Evidence is retained
+at `artifacts/run-calculator/generated-artifacts/manager-bootstrap-contract.yAqkmx/`.
+These checks do not relabel the original saved-copy browser case as passed.
+
 ### Continued startup repair — concurrent Corepack shim publication
 
 Read-only workflow status inspection found both managed development API and
@@ -154,7 +306,10 @@ logs, final compiler output and exact three-input hashes:
 `artifacts/run-calculator/generated-artifacts/run-insights-seed-followup.mPGXQ8/`.
 
 The original two failed Run Insights browser outcomes remain **unverified**;
-no additional browser run, shared-data operation or managed restart was used.
+no additional browser run, shared-data operation or managed restart was used
+at that checkpoint. The later completion continuation above supersedes this
+runtime gap: both fixed flows subsequently passed **2/2**, with the original
+failure artifacts preserved.
 
 The separate no-install diagnostic reported the running Node matches the source
 pin; its `networkUsed` and `discoveredToolsExecuted` fields are both false.
@@ -683,7 +838,7 @@ data were used in the isolated API tests.
 | Finding | State | Evidence / owner / next action |
 | --- | --- | --- |
 | Manager sync-health uses device selection while shared calculations follow lifecycle | FOCUSED PASS | Shared selector/calculator identity has 12 passing focused tests, including no-mutation checks. Final integrated browser evidence remains separate. Owner: this task. |
-| Production database aggregate measurement unavailable | BLOCKED | Supported production aggregate SELECT rejected with `Production database access requires an authenticated user.` No result or direct-connection workaround. Owner: supported production-access authority; next action is an authenticated read-only session, not credentials in chat. |
+| Production database aggregate measurement unavailable | SUPPORTED READS RESTORED; CAUSAL ATTRIBUTION GAP | The earlier authenticated-user rejection is historical. Replica reads, a verified primary snapshot, host metrics and a partial phase-log page now succeeded. See the bounded current capture above. The ultimate stall cause and full phase-window interpretation remain unresolved; no direct-connection workaround or unsupported capacity change was made. |
 | Published stalls' causal attribution | INVESTIGATING | Read-only SRE investigation running against the supported deployment. Historical pool and loop-delay overlap remains correlation, not root cause. Owner: this task/platform measurement authority. |
 | Required local integrated verification | FAILED MAIN ATTEMPT; REPAIR BATCHES IN PROGRESS | The approved 240-case attempt ended with 187 passed, 43 failed, one interrupted and nine not run. Focused repairs do not replace that result. No full-browser pass, certified duration, retry or duration-gate change is claimed. |
 | Standalone diagnostic inventory | RECONCILED; REPORTER REGRESSION PASS | Owner-approved exact review established 15 additions and zero removals: 13 already-approved main cases plus focused saved-schedule and synthetic-import journeys. Updated 293-case digest retains a second fence for every original 278-case identity. Combined reporter regression exited 0 with fresh main 240 and standalone 293 collections and the original-set fence. No matcher, retry, timeout or browser assertion changed; no browser launched. See `docs/full-browser-inventory.md`. The previous failed attempt remains preserved, not relabeled. |
@@ -693,7 +848,7 @@ data were used in the isolated API tests.
 | Role/Gold API integration rerun | FOCUSED PASS | Role/import-operations rerun 268/268 and API typecheck passed. The later five-file run passed 291/292 before the final route inventory fix; that failure is preserved. |
 | New active run hides eligible ended-run drain | REPAIRED; FOCUSED PASS | Explicit run identity prevents the newer active lifecycle from stealing the bounded case-only drain. Final server-claim/registration rerun: 50/50. No Sauce, applicator, or Dough cadence formula changed. |
 | Missing protected Gold read inventory | REPAIRED; FOCUSED PASS | Approvals/retention use either manage-staff or manage-qc; cleanup uses manage-staff. All remain scoped and retain their existing role middleware. The mounted-router registration test passes. |
-| Full API attempt | FAILED ATTEMPT; AFFECTED FILES RECHECKED | 2,483 passed/16 failed. Synthetic signup code and schema initialization repaired fixture setup; the public-health assertion now preserves privacy. The five-file and final two-file outcomes above are not a full-suite pass. |
+| Full API attempt | HISTORICAL FAILURE; CURRENT DISJOINT PARTITIONS PASS | The earlier 2,483-pass/16-failure attempt remains preserved. Current disposable-cluster unit and integration partitions passed 2,507 tests across 193 files, with the existing opt-in concurrency-trial skip reported separately. This is not one timed full-suite run; unchanged passing convergence evidence remains separate. |
 | Current same-day published-runtime signals | CONTRIBUTING SYMPTOMS OBSERVED; ROOT CAUSE OPEN | Sanitized ten-minute serving-log rollup is appended to `reliability-closure-production-window.md`. Pool pressure, outbox timeouts and long queue snapshots occurred together; initiating workload, database execution time and sync-intent outcome remain unresolved. No capacity or retry setting changed. |
 | Owner policy choices | RECORDED; DELIVERY STILL OWNED HERE | Packaging factual status only; approval-expiry reminders seven days before expiry; verified offline runtime-tool handoff approved for isolated testing. These decisions do not authorize publication, provider sends, real-source Gold, or production trials. |
 | Production trial/publication and real-source Gold | APPROVAL-GATED | No production mutation or real-source permission is inferred from this task. Provider/host measurements and exact device/run correlation remain unavailable. |
@@ -855,9 +1010,9 @@ group share a cause or have been fixed:
   retention gating is repaired; neither full journey is yet reverified.
 - Three PWA update/chunk recovery cases are now reverified **3/3** in the focused
   follow-up above. Two Run Insights cases with destroyed execution contexts
-  remain runtime gaps; their repeated/child-frame seeding defect is independently
-  reproduced and repaired with six native checks above. This is not a proven
-  attribution of those browser failures. No app reload safeguard was weakened.
+  subsequently passed **2/2**, as recorded in the completion continuation.
+  Their independent six-check native fixture reproduction remains separate
+  evidence. No app reload safeguard was weakened.
 - The mix/cheese pending-refresh, Start-time freeze and peer-reload cases
   subsequently passed **2/2**, as recorded in the recipe/Gold follow-up.
   The initial failed full-run outcomes remain preserved; the focused pass does

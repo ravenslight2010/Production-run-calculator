@@ -1,5 +1,141 @@
 {
   "scope": "Recent wave updated since 2026-10-26; captured during planning, not all project history",
+  "assessmentBoundary": {
+    "reviewedOn": "2026-11-01",
+    "meaning": "Current local assessments are not original-task completion certificates. Source/native delivery and integrated runtime acceptance are separate.",
+    "mergedRecords": {
+      "count": 55,
+      "classification": "coverage gap",
+      "reason": "The captured records contain reviewed plans and merged metadata, not 55 independently verified completion outcomes. Preserve their original reviewDepth; do not infer completion from MERGED.",
+      "owner": "current consolidated closure",
+      "nextAction": "Reconcile available outcome artifacts against final-source journey evidence; retain unavailable historical content explicitly."
+    },
+    "archivedRecords": {
+      "count": 43,
+      "meaning": "Each archived suggestion is assigned exactly once below. Archival does not establish rejection or missing implementation."
+    }
+  },
+  "archivedOutcomeAssessments": [
+    {
+      "sources": ["#3702"],
+      "classification": "covered",
+      "outcome": "Packaging uses the owner-approved factual-status policy, not an invented timed fault warning.",
+      "boundary": "Physical/wake tracking behavior is not certified by status presentation.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3704"],
+      "classification": "covered",
+      "outcome": "Read-only device-history comparison is delivered; it neither restores records nor infers ownership.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#read-only-device-history-comparison"
+    },
+    {
+      "sources": ["#3708", "#3716"],
+      "classification": "duplicate",
+      "outcome": "One canonical lifecycle selector owns both reports. Twelve focused checks include read-side no-mutation coverage.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#failure-and-decision-ledger"
+    },
+    {
+      "sources": ["#3710", "#3711"],
+      "classification": "coverage gap",
+      "outcome": "Keep saved-generator/checker verification separate from inspection or repair of actual saved master data.",
+      "owner": "current consolidated closure",
+      "nextAction": "Retain current-source checker evidence and attribute any actual stored-data finding read-only; do not heal shared records without approval.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md"
+    },
+    {
+      "sources": ["#3718", "#3720", "#3721"],
+      "classification": "covered",
+      "outcome": "Endpoint mounting and nested protected-route inventory repairs have focused API checks; no permission bypass or shadow-handler workaround is authorized.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#failure-and-decision-ledger"
+    },
+    {
+      "sources": ["#3723"],
+      "classification": "duplicate",
+      "outcome": "Do not revive the historical release takeover. Required remaining browser verification stays in the owning closure milestone.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md#milestone-4--integrated-verification-and-final-handoff"
+    },
+    {
+      "sources": ["#3733", "#3713"],
+      "classification": "approval-gated",
+      "outcome": "External retained-copy disposal and actual provider push delivery cannot be inferred from local cleanup or atomic alert claims.",
+      "owner": "source/privacy owner and authorized disposable-subscription owner",
+      "nextAction": "Use explicit external-copy or disposable-delivery authorization; no production subscriptions, sends or off-device deletion are authorized.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md#owner-controlled-decisions-and-access"
+    },
+    {
+      "sources": ["#3734", "#3754", "#3786", "#3787"],
+      "classification": "covered",
+      "outcome": "Atomic audit/approval/cleanup and metadata/export privacy protections have focused local coverage. External-copy removal is a separate boundary.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#failure-and-decision-ledger"
+    },
+    {
+      "sources": ["#3763", "#3778", "#3779", "#3784", "#3785", "#3788", "#3789", "#3790"],
+      "classification": "coverage gap",
+      "outcome": "Lookup, bounded navigation, error/empty distinctions and the approved seven-day expiry policy are delivered locally; the recorded reminder/browser gaps are not erased by those repairs.",
+      "owner": "current consolidated closure",
+      "nextAction": "Resolve remaining authenticated reminder/retention runtime dispositions without repeating already passing metadata cases.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#failure-coverage-retained-for-the-interrupted-attempt"
+    },
+    {
+      "sources": ["#3764", "#3765", "#3766", "#3767"],
+      "classification": "coverage gap",
+      "outcome": "Role audit, stale-edit fencing, understandable restrictions and identity refresh have source/API evidence; complete integrated role acceptance remains distinct.",
+      "owner": "current consolidated closure",
+      "nextAction": "Bind create/edit/conflict/assignment/revocation UI outcomes to their final-source evidence; preserve failed drafts and server denials.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md#milestone-2--close-permission-and-audit-gaps"
+    },
+    {
+      "sources": ["#3770", "#3771", "#3775", "#3780", "#3781"],
+      "classification": "coverage gap",
+      "outcome": "Native recovery/session/queue protections do not certify all reported wake, stale-base, two-tab and storage-failure runtime variants.",
+      "owner": "current consolidated closure",
+      "nextAction": "Resolve the retained convergence and Stop/wake failures against accepted-intent and ownership invariants; physical Safari evidence remains outside local emulation.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#failure-coverage-retained-for-the-interrupted-attempt"
+    },
+    {
+      "sources": ["#3772", "#3773"],
+      "classification": "covered",
+      "outcome": "Friendly audit labels and committed server-side event filtering are delivered without removing raw unknown-action fallbacks or export safety.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#audit-event-navigation-repair"
+    },
+    {
+      "sources": ["#3774"],
+      "classification": "unavailable",
+      "outcome": "No physical iPad access/result is established. Emulation is not physical evidence and this is not a new physical-device-only implementation task.",
+      "owner": "authorized physical-device observer",
+      "nextAction": "Retain the agreed external evidence boundary; report NOT RUN until an actual authorized device observation exists.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md#completion-and-continuation-rules"
+    },
+    {
+      "sources": ["#3776", "#3777"],
+      "classification": "covered",
+      "outcome": "Facility retry/details protections have native checks and three focused reconnect runtime passes. This does not settle unrelated operational-intent failures.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#resumed-objective--reconnect-and-gold-fixture-contracts"
+    },
+    {
+      "sources": ["#3782", "#3783"],
+      "classification": "covered",
+      "outcome": "No-install inspection and verified offline runtime-tool handoff passed under the retained pin/trust policy. Packaging remains opt-in; no full-app-offline certification is implied.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#offline-startup-diagnostic--fixture-corrected-cold-version-handoff-passes"
+    },
+    {
+      "sources": ["#3714"],
+      "classification": "coverage gap",
+      "outcome": "Separate local page/worker ownership evidence from provider delivery; neither proves the other.",
+      "owner": "current consolidated closure",
+      "nextAction": "Reconcile atomic claim/reload/generation evidence; do not trigger real notifications as a substitute.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md#milestone-3--finish-bounded-manager-recovery-tools"
+    },
+    {
+      "sources": ["#3792", "#3793"],
+      "classification": "approval-gated",
+      "outcome": "Published causal attribution remains unresolved. The isolated lower-concurrency candidate was rejected when queue age/throughput worsened; defaults were not changed.",
+      "owner": "causal phase-correlation review and production-trial authority",
+      "nextAction": "Supported replica, primary-snapshot, phase-log and host measurements are now available. Review their timing and coverage limits before any separately approved production trial; do not infer primary capacity from the replica or causality from one healthy snapshot.",
+      "evidence": "docs/evidence/reliability-closure-progress.md#supported-production-observations--access-restored-not-causal-proof"
+    }
+  ],
   "records": [
     {
       "taskRef": "#3692",

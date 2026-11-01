@@ -3,11 +3,19 @@ name: CodeExecution network globals
 description: Runtime availability of network globals in the durable CodeExecution sandbox.
 ---
 
-The durable CodeExecution impure sandbox has a limited set of Node-compatible globals: `fetch` may be available while `AbortSignal` and `process.cwd()` are not. Do not assume full Node runtime behavior.
+The durable CodeExecution sandbox has a limited set of Node-compatible globals: `fetch` may be available in impure scope while `URL`, `AbortSignal` and `process.cwd()` are not. Do not assume full Node runtime behavior in either scope.
 
 **Why:** A bounded public-health check failed when the request tried to use `AbortSignal.timeout`; a separate workspace fingerprint attempt failed on `process.cwd()`. The fetch and explicit relative module import worked.
 
 **How to apply:** Before relying on Node globals in an impure call, verify the specific global exists. Use ShellExec for workspace-root discovery and commands, and explicit paths/arguments in impure helpers. Keep public requests limited to the minimum required endpoints.
+
+Import `URL` explicitly from `node:url` inside an impure helper when validating
+an SDK-provided published URL. If a bounded network helper fails, distinguish
+local runtime/global errors from an actual HTTP or connection failure before
+classifying the application as unavailable.
+
+**Why:** Missing URL/timeout globals can fail before any request is sent, and
+a broad catch can misleadingly report that as a deployed-app failure.
 
 Some durable runtime versions disable top-level `Date.now()`, despite general tool guidance describing it as available. Obtain a fresh clock value inside a small impure helper and pass the numeric timestamp back.
 

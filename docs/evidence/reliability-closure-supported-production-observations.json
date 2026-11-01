@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "readOnly": true,
+  "rawMessagesRetained": false,
+  "queryWindow": {
+    "start": "2026-11-01T15:25:00.000Z",
+    "endExclusive": "2026-11-01T15:33:00.000Z"
+  },
+  "publishedSourceFingerprintSha256": "2da695ab03f3d90d3c2fa5c6d90519addbc420701e88445b5df3b986e0629cdb",
+  "isolatedCandidateSourceFingerprintSha256": "fc735602b5942897340e468ded7945da5d78a25ad6ed50e38242a1764fe506ac",
+  "providerAggregates": {
+    "cpuP95Percent": 2.92,
+    "memoryP95Percent": 12.6,
+    "requests": 5,
+    "requestLatencyP95Ms": 365.5424473011968,
+    "http5xxPoints": [],
+    "errorLogPoints": []
+  },
+  "poolLogLookup": {
+    "matchedEntries": 13,
+    "truncated": false,
+    "hasMore": false,
+    "anonymousProcessGroups": 1,
+    "distributionObservedFrom": "2026-11-01T15:24:29.181Z",
+    "distributionObservedUntil": "2026-11-01T15:32:10.182Z",
+    "instantaneousTotalMin": 5,
+    "instantaneousTotalMax": 10,
+    "instantaneousWaitingMax": 7,
+    "reportedWindowWaitingMax": 20,
+    "reportedWindowAcquisitionMaxMs": 30100,
+    "reportedWindowEventLoopDelayMaxMs": 25417
+  },
+  "primarySnapshot": {
+    "capturedAt": "2026-11-01T15:29:53.181Z",
+    "primaryVerified": true,
+    "stateVisibilityComplete": true,
+    "maxConnections": 450,
+    "superuserReservedSlots": 4,
+    "roleReservedSlots": 0,
+    "serverClientBackends": 7,
+    "activeBackends": 1,
+    "idleBackends": 5,
+    "activeWaitingBackends": 0,
+    "lockWaitingBackends": 0,
+    "estimatedOrdinarySlotsRemaining": 439,
+    "processPool": { "max": 10, "total": 5, "idle": 2, "waiting": 0 }
+  },
+  "databasePhaseLookup": {
+    "matchedEntriesOnPage": 25,
+    "truncated": false,
+    "hasMore": true,
+    "completeWindow": false,
+    "anonymousProcessGroups": 1,
+    "matchesPoolCaptureProcess": true,
+    "observedFromMin": "2026-11-01T15:27:23.581Z",
+    "observedUntilMax": "2026-11-01T15:32:59.481Z",
+    "groups": [
+      {
+        "stage": "outbox_cursor_read",
+        "phase": "post_checkout",
+        "outcome": "success",
+        "coverage": "complete",
+        "count": 8,
+        "maxElapsedMs": 5701,
+        "maxAcquisitionMs": 0,
+        "maxPostCheckoutMs": 5701,
+        "maxTimeoutOverrunMs": 0
+      },
+      {
+        "stage": "outbox_scope_list",
+        "phase": "post_checkout",
+        "outcome": "success",
+        "coverage": "complete",
+        "count": 7,
+        "maxElapsedMs": 2900,
+        "maxAcquisitionMs": 99,
+        "maxPostCheckoutMs": 2900,
+        "maxTimeoutOverrunMs": 0
+      },
+      {
+        "stage": "outbox_scope_list",
+        "phase": "acquisition",
+        "outcome": "connection_timeout",
+        "coverage": "complete",
+        "count": 5,
+        "maxElapsedMs": 30101,
+        "maxAcquisitionMs": 30100,
+        "maxPostCheckoutMs": 0,
+        "maxTimeoutOverrunMs": 29200
+      },
+      {
+        "stage": "status_aggregate",
+        "phase": "acquisition",
+        "outcome": "checkout_timeout",
+        "coverage": "complete",
+        "count": 5,
+        "maxElapsedMs": 7200,
+        "maxAcquisitionMs": 6601,
+        "maxPostCheckoutMs": 0,
+        "maxTimeoutOverrunMs": 5701
+      }
+    ]
+  },
+  "limitations": [
+    "Empty provider series mean no returned points, not zero failures.",
+    "Pool distributions describe their own reported windows; the first begins before the query window.",
+    "Reported window maxima are not whole-window or fleet percentiles.",
+    "The phase lookup is one partial page, not a complete-window failure rate.",
+    "Post-checkout elapsed time is not pure SQL execution time.",
+    "Connection timeout classification does not isolate exact TCP/TLS setup duration.",
+    "One healthy primary snapshot does not rule out transient database pressure or locks at other times.",
+    "These observations do not establish the initiating cause of event-loop stalls or certify the unpublished candidate."
+  ]
+}

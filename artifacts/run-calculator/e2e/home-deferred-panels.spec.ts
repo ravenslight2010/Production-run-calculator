@@ -568,6 +568,9 @@ test("manager removes saved copies repeatedly without touching pending or active
   expect(signupResponse.status()).toBe(201);
   await promoteToManager(username);
   startApiCapture();
+  // Initial document/bootstrap requests need the same bounded cancellation
+  // tracking as the explicit reloads below. Close it before any run action.
+  markExpectedNavigation(true);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("tab-run")).toBeAttached({ timeout: 25_000 });
   await dismissOnboardingIfPresent(page);
@@ -576,6 +579,7 @@ test("manager removes saved copies repeatedly without touching pending or active
     "active",
   );
   await expect(page.getByTestId("button-start-run")).toBeEnabled();
+  markExpectedNavigation(false);
   await page.getByTestId("button-start-run").click();
   await expect(page.getByRole("button", { name: /PAUSE RUN/ })).toBeVisible();
 

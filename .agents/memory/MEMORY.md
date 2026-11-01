@@ -151,3 +151,4 @@
 - [Retention pagination](retention-pagination-consistency.md) — shifted offset pages require scoped revision checks and bounded full restarts, not deduplication.
 - [Health and reminders](operational-health-policy.md) — Packaging shows factual status, not timed fault warnings; approval-expiry reminders start seven days before expiry.
 - [Browser inventory preflight](browser-inventory-preflight.md) — reporter startup failures may not stop Playwright; compare exact case identities before expensive execution.
+- [Vitest source-file reads](vitest-source-file-reads.md) — filesystem contracts need an explicit package root; transformed source URLs may not be file URLs.
