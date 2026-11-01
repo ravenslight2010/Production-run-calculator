@@ -1643,3 +1643,21 @@ PASS locally. No host-network entitlement or raw fixture/cache/artifact export.
 - Evidence: standard release41254875823 failed on both; missing retained report
   is a correct consequence, not a gate to waive. No merge until fresh exact-head
   full release/browser/required CI pass.
+
+## PR146 independent reviewed-input CI channel
+
+- Files: `scripts/src/restore-restricted-ci-inputs{,.test}.mjs`, CI, department
+  navigation and release-check workflows.
+- Ordinary PR146 lanes could not build or test against the exact historical
+  source-audit inputs; PR145's merged environment is intentionally unusable for
+  another PR. Add a separate PR146 capability hash and environment, retaining
+  same-repository, exact branch/base/ref and reviewed-head checks before fetch.
+- PR142, PR145 and main policies, the PR145-only Docker/Caddy job, permissions,
+  action pins, fixture hashes, cleanup and no-cache/artifact boundaries remain
+  unchanged. Never copy the capability into source or reuse another channel.
+- Verification: 14 focused authorization/workflow contracts, full pinned root
+  typecheck, static workflow security regression checks and actionlint 1.7.12
+  PASS. The wrapper's initial binary download timed out twice; a checksum-
+  verified official binary supplied through `ACTIONLINT_BIN` completed the same
+  unchanged workflow command. Hosted exact-head provisioning and all required
+  gates remain required before merge.

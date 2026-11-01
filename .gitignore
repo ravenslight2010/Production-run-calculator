@@ -55,6 +55,11 @@ yarn-error.log
 testem.log
 /typings
 
+# .NET host-inspector build and test output
+/scripts/self-host/installer/**/bin/
+/scripts/self-host/installer/**/obj/
+/scripts/self-host/installer/**/TestResults/
+
 # System Files
 .DS_Store
 Thumbs.db
