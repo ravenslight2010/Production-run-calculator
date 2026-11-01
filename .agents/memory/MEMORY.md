@@ -150,3 +150,4 @@
 - [Staging test handoff](staging-test-handoff.md) — owner created a dedicated testing environment; stale isolated copies may lack its setup.
 - [Retention pagination](retention-pagination-consistency.md) — shifted offset pages require scoped revision checks and bounded full restarts, not deduplication.
 - [Health and reminders](operational-health-policy.md) — Packaging shows factual status, not timed fault warnings; approval-expiry reminders start seven days before expiry.
+- [Browser inventory preflight](browser-inventory-preflight.md) — reporter startup failures may not stop Playwright; compare exact case identities before expensive execution.

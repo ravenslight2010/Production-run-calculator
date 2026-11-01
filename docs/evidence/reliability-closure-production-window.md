@@ -90,3 +90,26 @@ client/runtime durations, not primary-database query or lock measurements.
 Production aggregate-query access is still blocked, so no workload or
 primary-versus-replica attribution is available. No database, application,
 provider, or published configuration was changed.
+
+## Subsequent bounded runtime telemetry
+
+A later supported serving-log capture on 2026-10-31, retrieved around 02:02 UTC,
+contained adjacent process-local windows ending around 02:00:37 and 02:01:41
+UTC. Those windows recorded 18 and 23 pool-acquisition errors respectively.
+The configured per-process maximum remained 10 clients. Waiters reached 15;
+acquisition p95 values were approximately 2.5–3.0 seconds and the largest
+reported acquisition was 9.0 seconds. Event-loop-delay p95 values were about
+2.2–2.4 seconds, with maxima around 4.7–5.4 seconds.
+
+During this capture, sync-outbox phases, scheduled-queue sampling, and
+background jobs also reported database timeout/connection failures; some later
+phases recovered. These are bounded aggregate observations, not request bodies,
+SQL text, operational identities, or a correlated trace of the reported phone
+run.
+
+This supports per-process pool pressure and runtime delay as contributors worth
+investigating. It does not identify the initiating workload or prove global
+database exhaustion. The earlier 01:50 database-capacity sample is a different
+point in time and cannot rule out a later database-wide event. Host/provider
+measurements and exact user-run correlation remain missing. No pool size,
+timeout, retry, deployment, or data setting was changed in response.

@@ -34,7 +34,12 @@ function payload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("server auto-track claim builders", () => {
-  it.each([false, true])("continues an ended run's case-only drain after selection advances (next running: %s)", (nextRunning) => {
+  it.each([
+    { nextRunning: false, selectedIndex: 0 },
+    { nextRunning: false, selectedIndex: 1 },
+    { nextRunning: true, selectedIndex: 0 },
+    { nextRunning: true, selectedIndex: 1 },
+  ])("continues an ended run's case-only drain (next running: $nextRunning, selected: $selectedIndex)", ({ nextRunning, selectedIndex }) => {
     const source = payload({ freezerTime: 3 }) as any;
     source.dayState.runs[0] = {
       ...source.dayState.runs[0], startedAt: NOW - 360_000,
@@ -42,7 +47,7 @@ describe("server auto-track claim builders", () => {
     };
     const next = "next-pending-run";
     source.dayState.runs.push({ id: next, metaUpdatedAt: NOW, ...(nextRunning ? { startedAt: NOW } : {}) });
-    source.dayState.currentIndex = 1;
+    source.dayState.currentIndex = selectedIndex;
     source.runValues[next] = {
       ...source.runValues[RUN], casesOnCurrentSkid: 0,
       approxLineSpeed: 0, crustsPerCycle: 0, cycleSpeed: 0,
@@ -58,7 +63,7 @@ describe("server auto-track claim builders", () => {
     const applied = applyAutoTrackClaim(source, claim, NOW + 2_000);
     expect(applied.outcome).toBe("accepted");
     expect((applied.data.packagingProgress as Record<string, { casesOnCurrentSkid: number }>)[RUN].casesOnCurrentSkid).toBeGreaterThan(0);
-    expect((applied.data.dayState as typeof source.dayState).currentIndex).toBe(1);
+    expect((applied.data.dayState as typeof source.dayState).currentIndex).toBe(selectedIndex);
     expect(source.runValues[next].casesOnCurrentSkid).toBe(0);
     expect(applyAutoTrackClaim(applied.data, claim, NOW + 2_000).outcome).toBe("duplicate");
     expect(fitServerWallClockPlans(plans, 0).flatMap((plan) => plan.claims)).toHaveLength(0);

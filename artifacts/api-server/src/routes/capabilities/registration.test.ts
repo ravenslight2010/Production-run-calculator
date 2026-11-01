@@ -64,6 +64,13 @@ describe("capability route registration", () => {
       }),
       expect.objectContaining({
         method: "GET",
+        path: "/import-gold/cleanup-cases",
+        capabilities: ["manage-staff"],
+        capabilityMatch: "all",
+        scope: "scoped",
+      }),
+      expect.objectContaining({
+        method: "GET",
         path: "/import-history",
         capabilities: ["manage-profiles", "manage-inventory"],
         capabilityMatch: "any",
