@@ -137,3 +137,28 @@ test("separate fixture budgets enforce exact lengths and totals without relaxing
   materialize(dir, [opaque], () => bytes, { perFile: bytes.length, total: bytes.length });
   assert.deepEqual(readFileSync(path.join(dir, opaque.path)), bytes); cleanup(dir, [opaque]);
 });
+
+
+test("repair PR145 has its own exact branch, reviewed head and independent default capability", () => {
+  const repairContext = { ...context, GITHUB_REF: "refs/pull/145/merge" };
+  const repairEvent = structuredClone(event);
+  repairEvent.number = 145; repairEvent.pull_request.head.ref = "fix/main-green-pr-audit";
+  assert.doesNotThrow(() => authorize(repairContext, repairEvent, head, cap, sha(cap)));
+  assert.throws(() => authorize(repairContext, repairEvent, head, cap));
+  assert.throws(() => authorize(context, repairEvent, head, cap, sha(cap)));
+  assert.throws(() => authorize(repairContext, event, head, cap, sha(cap)));
+  for (const change of [{ GITHUB_ACTIONS: "false" }, { GITHUB_REPOSITORY: "fork/repo" }, { GITHUB_EVENT_NAME: "push" }, { GITHUB_EVENT_NAME: "pull_request_target" }, { GITHUB_REF: "refs/heads/main" }]) {
+    assert.throws(() => authorize({ ...repairContext, ...change }, repairEvent, head, cap, sha(cap)));
+  }
+  for (const edit of [e => { e.number = 146; }, e => { e.pull_request.head.repo.full_name = "fork/repo"; }, e => { e.pull_request.head.ref = "feat/windows-lan-self-hosting"; }, e => { e.pull_request.base.ref = "other"; }, e => { e.pull_request.head.sha = "b".repeat(40); }]) {
+    const e = structuredClone(repairEvent); edit(e);
+    assert.throws(() => authorize(repairContext, e, head, cap, sha(cap)));
+  }
+  const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const gate = ci.slice(ci.indexOf("  reviewed-docker-caddy-browser:\n"), ci.indexOf("  typecheck:\n"));
+  assert.match(gate, /number == 145/); assert.match(gate, /fix\/main-green-pr-audit/);
+  assert.match(gate, /environment: pr-145-reviewed-test-inputs/);
+  assert.match(gate, /test:e2e:docker-caddy/); assert.match(gate, /permissions:\n      contents: read/);
+  assert.match(gate, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
+  assert.doesNotMatch(gate, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64|cache-to:|cache-from:|pull_request_target|--allow/);
+});

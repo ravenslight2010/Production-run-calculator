@@ -88,9 +88,53 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  reviewed-docker-caddy-browser:
+    name: Reviewed PR Docker/Caddy browser matrix
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main' }}
+    environment: pr-145-reviewed-test-inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+      - name: Restore exact reviewed PR CI inputs
+        id: restricted-inputs
+        env:
+          CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
+          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_PR_HEAD_SHA: ${{ vars.REVIEWED_PR_HEAD_SHA }}
+        run: node scripts/src/restore-restricted-ci-inputs.mjs
+      - name: Install frozen dependencies and real browser engines
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @workspace/run-calculator exec playwright install --with-deps chromium webkit
+      - name: Verify network policy contracts
+        run: node --test scripts/src/docker-caddy-build-context.test.mjs
+      - name: Run real isolated Docker/Caddy browser matrix before merge
+        run: |
+          docker compose version
+          chromium_path="$(cd artifacts/run-calculator && node -e 'const { chromium } = require("@playwright/test"); process.stdout.write(chromium.executablePath())')"
+          if [[ ! -x "$chromium_path" ]]; then
+            echo "Playwright Chromium was not installed at the resolved path." >&2
+            exit 1
+          fi
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$chromium_path" pnpm --filter @workspace/run-calculator run test:e2e:docker-caddy
+      - name: Remove exact reviewed inputs
+        if: always()
+        run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
+
   typecheck:
     name: Typecheck
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -103,9 +147,9 @@ jobs:
         with:
           persist-credentials: false
           lfs: true
-      - name: Restore PR 142 reviewed CI inputs
+      - name: Restore exact reviewed PR CI inputs
         id: restricted-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') }}
         env:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
@@ -154,7 +198,7 @@ jobs:
 
   test:
     name: Unit tests (web + libs)
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -166,9 +210,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Restore PR 142 reviewed CI inputs
+      - name: Restore exact reviewed PR CI inputs
         id: restricted-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') }}
         env:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
@@ -209,7 +253,7 @@ jobs:
 
   reduced-motion-browser:
     name: Reduced-motion browser previews
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -221,9 +265,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Restore PR 142 reviewed CI inputs
+      - name: Restore exact reviewed PR CI inputs
         id: restricted-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') }}
         env:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
@@ -308,7 +352,7 @@ jobs:
 
   test-db:
     name: API tests (Postgres)
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Match the standard release-check job ceiling for the full API suite.
     timeout-minutes: 45
@@ -339,9 +383,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Restore PR 142 reviewed CI inputs
+      - name: Restore exact reviewed PR CI inputs
         id: restricted-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') }}
         env:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
@@ -391,7 +435,7 @@ jobs:
 
   schema-safe-rollback:
     name: Schema-safe application rollback rehearsal
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -402,9 +446,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
-      - name: Restore PR 142 reviewed CI inputs
+      - name: Restore exact reviewed PR CI inputs
         id: restricted-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') }}
         env:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
@@ -478,7 +522,7 @@ jobs:
 
   docker:
     name: Docker image
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Includes cached multi-stage image builds and a disposable Compose startup.
     timeout-minutes: 40
@@ -490,9 +534,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Restore PR 142 reviewed CI inputs
+      - name: Restore exact reviewed PR CI inputs
         id: restricted-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') }}
         env:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
@@ -561,7 +605,7 @@ jobs:
 
   build:
     name: Build (web + API)
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Includes dependency installation and both production bundles.
     timeout-minutes: 20
@@ -578,9 +622,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Restore PR 142 reviewed CI inputs
+      - name: Restore exact reviewed PR CI inputs
         id: restricted-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main' }}
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') }}
         env:
           CI_REVIEWED_INPUT_AUTHORIZATION: ${{ secrets.CI_REVIEWED_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}

@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import https from "node:https";
+import { dockerCaddyBuildContext } from "./docker-caddy-build-context.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const calculatorDir = path.join(repoRoot, "artifacts/run-calculator");
@@ -88,7 +89,7 @@ async function availablePort() {
 function writeIsolatedCompose(httpPort, httpsPort, databasePort) {
   const source = readFileSync(path.join(repoRoot, "docker-compose.yml"), "utf8");
   const replacements = [
-    ["context: .", `context: "${repoRoot}"\n      network: host`],
+    ["context: .", dockerCaddyBuildContext(repoRoot)],
     ["env_file: .env", `env_file: "${envPath}"`],
     [
       "    volumes:\n      - db-data:/var/lib/postgresql/data",

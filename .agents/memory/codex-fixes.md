@@ -1609,3 +1609,37 @@ Complete release-evidence contract exposed API package.json's existing schedule-
 dependency missing from artifacts/api-server/tsconfig.json references. Add that one
 buildable reference; preserve exact graph-completeness assertion and routes-only
 diagnostic config. Full root types/contract rerun required; no dependency changes.
+
+
+Main-green PR audit: inventoried all143open/closed PRs, inspected all open/closed-
+unmerged deltas and selected merged safety/runtime work. Preserve useful fixes
+already present; no bulk stale-branch or dependency merges. Main Docker/Caddy
+41252544790 requested host build networking unconditionally. Extract a tested
+context builder: default isolated networking, CI host opt-in refused, explicit
+local-only Replit workaround retained, YAML-safe JSON path quoting. Four focused
+contracts pass under pinned Node24.21.0. Restored local typecheck initially exited
+127due missing ShellCheck; restore publisher-digest-verified0.11.0 and rerun before
+push. Details/failure ledger: docs/self-host/pr-usefulness-and-main-green.md.
+
+PR145 validation uses a separate independently secreted, owner-reviewed exact-ref
+fixture environment (no change to PR142/main/report environments). Fixed145branch/
+base/ref/head authorization and negative contracts preserve original boundaries.
+A PR145-only real Docker/Caddy job now validates the previously main-only matrix
+before merge; original main-only smoke workflow remains unchanged.32combined
+security/network tests, full root types, actionlint and workflow regression contracts
+PASS locally. No host-network entitlement or raw fixture/cache/artifact export.
+
+## PR145 release closure — reload telemetry budget and cancellation readiness
+
+- `artifacts/run-calculator/src/browserIncidentCapture{,.test}.ts`: module-only
+  four/minute reporting reset on each reload, exceeding the unchanged server
+  per-user quota during the schedule persistence journey. Preserve only validated
+  numeric per-tab budget in sessionStorage; tolerate denied storage/backwards
+  clocks, never retain error payloads. Reload/window/privacy/malformed regressions.
+- `scripts/src/run-release-node{,.test}.sh`: waiting message preceded clock/trap
+  initialization; immediate TERM could skip private history. Announce only after
+  clock/traps/flock PID initialization. Slow the test date call to expose the old
+  race deterministically. Keep owner safety, history modes and recovery assertions.
+- Evidence: standard release41254875823 failed on both; missing retained report
+  is a correct consequence, not a gate to waive. No merge until fresh exact-head
+  full release/browser/required CI pass.

@@ -13,10 +13,52 @@ import {
 afterEach(() => {
   clearBrowserIncidentCaptureForTests();
   reportIncident.mockClear();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   window.history.replaceState({}, "", "/");
 });
 
 describe("browser incident capture", () => {
+  it("retains the numeric reporting budget across document reloads and renews after a minute", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T06:00:00Z"));
+    for (let index = 0; index < 4; index += 1) {
+      await reportBrowserFailure("crash", new Error(`private failure ${index}`));
+    }
+    expect(reportIncident).toHaveBeenCalledTimes(4);
+    const stored = sessionStorage.getItem("run-calc:browser-incident-budget:v1")!;
+    expect(JSON.parse(stored)).toEqual({ startedAt: Date.now(), count: 4 });
+    expect(stored).not.toContain("private");
+    vi.resetModules();
+    const reloaded = await import("./browserIncidentCapture");
+    await reloaded.reportBrowserFailure("crash", new Error("new document"));
+    expect(reportIncident).toHaveBeenCalledTimes(4);
+    vi.advanceTimersByTime(60_000);
+    await reloaded.reportBrowserFailure("crash", new Error("renewed window"));
+    expect(reportIncident).toHaveBeenCalledTimes(5);
+    reloaded.clearBrowserIncidentCaptureForTests();
+  });
+
+  it("bounds malformed stored data and handles denied session storage without throwing", async () => {
+    sessionStorage.setItem("run-calc:browser-incident-budget:v1", '{"startedAt":1,"count":-999}');
+    await reportBrowserFailure("crash", new Error("valid report"));
+    expect(reportIncident).toHaveBeenCalledOnce();
+    clearBrowserIncidentCaptureForTests();
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("denied"); });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("denied"); });
+    await reportBrowserFailure("crash", new Error("storage unavailable"));
+    expect(reportIncident).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reset the cap when the browser wall clock moves backward", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T06:00:00Z"));
+    for (let index = 0; index < 4; index += 1) await reportBrowserFailure("crash", new Error(`failure ${index}`));
+    vi.setSystemTime(new Date("2026-11-01T05:00:00Z"));
+    await reportBrowserFailure("crash", new Error("clock changed"));
+    expect(reportIncident).toHaveBeenCalledTimes(4);
+  });
+
   it("deduplicates repeated failures and bounds distinct signals", async () => {
     await reportBrowserFailure("crash", new Error("same"));
     await reportBrowserFailure("crash", new Error("same"));
