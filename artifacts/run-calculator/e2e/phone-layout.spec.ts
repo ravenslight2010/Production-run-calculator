@@ -1600,7 +1600,16 @@ test.describe("phone layout smoke", () => {
       await scheduleDateTrigger.click();
       const scheduleCalendar = page.locator('[data-slot="calendar"]');
       await expect(scheduleCalendar.getByRole("grid")).toBeVisible();
+      // A month beginning today on Sunday can contain no visible past dates
+      // (for example November 1, 2026). Visit a prior month to test the real
+      // disabled-date rule, then restore the selected month before choosing.
+      await scheduleCalendar.getByRole("button", {
+        name: "Go to the Previous Month",
+      }).click();
       await expect(scheduleCalendar.locator("button[data-day][disabled]").first()).toBeDisabled();
+      await scheduleCalendar.getByRole("button", {
+        name: "Go to the Next Month",
+      }).click();
       const selectedScheduleDay = scheduleCalendar.locator(
         'button[data-selected-single="true"]',
       );

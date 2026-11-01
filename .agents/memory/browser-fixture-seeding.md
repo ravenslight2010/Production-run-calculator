@@ -3,6 +3,17 @@ name: Browser fixture seeding
 description: Reliable ways to seed master data for authenticated browser journeys that reload and hydrate from the server.
 ---
 
+Browser initialization scripts must not become recurring writers of recovered
+fixture state.
+
+**Why:** Playwright reruns an initialization callback after document reloads and
+inside child frames. An unconditional seed can replace acknowledged state,
+including its reset boundary, and produce misleading recovery failures.
+
+**How to apply:** Initialize only the owned top-level scenario once per session,
+mark completion after its writes succeed, and preserve canonical data on reload.
+Do not weaken application reset/conflict fences to accommodate a fixture.
+
 Role fixtures that overwrite a shared built-in role must preserve its full
 canonical capability set, not just the capabilities used by their own journey.
 
@@ -26,6 +37,17 @@ selector made valid calendar controls appear missing and obscured diagnosis.
 **How to apply:** Confirm the actual container before adapting component-demo
 selectors into an operational journey, and bound locator waits so a missing
 wrapper fails before fixture cleanup loses its test-time budget.
+
+Calendar tests must deliberately display a month containing past dates before
+requiring a disabled past-date control.
+
+**Why:** On the first day of a Sunday-first month, the current month can
+legitimately contain no earlier visible dates. Requiring any disabled button
+then reports a fixture failure even though the date restriction is correct.
+
+**How to apply:** Visit the previous month, verify past-date rejection, then
+restore the original month and check selection. Keep the application's date
+limits unchanged and cover month/year boundaries as well as ordinary days.
 
 Full-suite ordering can expose stale fixture epochs that a fresh-database
 standalone browser run cannot.

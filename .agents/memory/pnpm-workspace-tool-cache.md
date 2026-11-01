@@ -1,6 +1,6 @@
 ---
 name: Workspace-local pnpm tool bootstrap
-description: Run local pnpm checks with the exact workspace pin without recursive Corepack installs.
+description: Pinned pnpm bootstrap, startup shim concurrency and cache safety.
 ---
 
 Use the supported release runner for local validation rather than an older
@@ -29,6 +29,30 @@ bypass its lock or TLS guards or count the bootstrap attempts as test failures.
 Ad-hoc external tool links can outlive their temporary targets. Also, a version
 check through a shell or Node launcher is not proof that a direct child-process
 spawn can execute the same entry.
+
+Concurrent app launches must not replace shared package-manager launchers using
+an unprotected remove-then-create sequence.
+
+**Why:** Parallel Corepack enablement can remove a path another launcher already
+observed, producing ENOENT before application code starts. Such a failure is not
+by itself evidence of a sync/database outage or an Agent-storage incident.
+
+**How to apply:** Prepare and validate entry points privately, publish them
+atomically on the same filesystem and preserve relative-link correctness when
+relocating them. Failed preparation must retain the prior launcher and must
+not fall through to an older host manager. Do not serialize entire running
+services to protect this short setup operation.
+
+Negative launcher tests need a denied host fallback and private HOME, XDG and
+package-manager cache locations, not just a temporary project directory.
+
+**Why:** A dangling launcher can be skipped during PATH lookup. Even a version
+probe can then reach the host manager and attempt to bootstrap another native
+binary. Inherited XDG settings can also escape an otherwise disposable HOME.
+
+**How to apply:** Shadow fallback commands with explicit failures, allowlist
+child environment variables and disable network access for synthetic launcher
+fixtures. Keep genuine offline-runtime evidence separate from these mocks.
 
 **Why:** Workspace links and external caches have different lifetimes. A
 plain-text fallback may work through a shell-mediated launcher but fail with
@@ -83,3 +107,19 @@ OS-network-isolated execution with loopback available and actual application
 startup. Warm-cache version checks and archive integrity are necessary evidence,
 not startup certification. Do not enable a startup-cache optimization by default
 before that handoff passes.
+
+Project-aware offline bootstrap needs the complete source lockfile, including
+pnpm 12's leading package-manager bootstrap document.
+
+**Why:** A verified native payload worked outside a project, but a cloned project
+that omitted the lockfile attempted DNS and stalled despite Corepack networking
+being disabled. Adding the byte-unchanged source lockfile made the cold version
+handoff pass under the original deadline without external connect calls. That
+was a fixture omission, not an application fault; the application did not start.
+
+**How to apply:** Include complete project metadata, not only the manifest and
+workspace settings, in startup fixtures. Do not strip the first YAML document,
+regenerate the lockfile at startup, or infer child-network isolation from
+Corepack's flag alone. Keep OS-level isolation and credential-free tracing.
+Distinguish archive integrity, project-aware version handoff, and full application
+startup; a pass at an earlier stage does not certify a later one.

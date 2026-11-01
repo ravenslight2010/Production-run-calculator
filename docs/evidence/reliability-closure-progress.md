@@ -16,6 +16,283 @@ real-workbook audit skip is retained, not newly added. This clears the current
 client-runtime blocker only. The full-browser failure and remaining app-wide,
 physical-device and publication-bound gaps keep this task **IN PROGRESS**.
 
+### Continued startup repair — concurrent Corepack shim publication
+
+Read-only workflow status inspection found both managed development API and
+web workflows failed before app startup. Their bounded output reported ENOENT
+while removing the workspace pnpm/pnpx launchers during Corepack enablement.
+These are development-startup observations, not evidence of a production
+outage, database failure or the cause of historical Agent stalls.
+
+The existing selector invoked Corepack enablement directly against one shared
+shim directory. A deterministic two-launcher fixture reproduced the same
+read/unlink/create ENOENT. The repair prepares each invocation's launchers in
+an owned private staging directory, validates executable targets, resolves
+relative links before relocation and publishes each launcher by atomic
+same-filesystem rename. Failed preparation leaves the previous launcher
+untouched and fails closed. Private staging is cleaned on completion. There
+is no service-lifetime lock, added runtime dependency, pin change, signature
+bypass, registry-policy change or automatic cache-retention rollout.
+
+Verification:
+
+- The initial regression reproduced the shared-directory ENOENT. Its
+  dangling-link failure scenario also exposed a fixture-isolation mistake:
+  a missing test shim could fall through to the host manager and attempt a
+  native download before the bounded child exited. The fixture now has an
+  explicit fallback-denial executable, private HOME/XDG/pnpm/cache paths,
+  networking disabled and an allowlisted child environment. This was a test
+  harness fault, not evidence of an app data write; no API or database was
+  started by the fixture.
+- The coherent focused runtime selection passed **7/7**, covering concurrent
+  launchers, failed preparation, dangling targets, post-merge phase handling,
+  direct/nested pinned calls and unsafe cache rejection. After the fixture
+  environment was tightened, its affected **4/4** cases passed again; unchanged
+  cases were not repeated.
+- The existing runtime-cache integrity/fail-closed suite passed **9/9**.
+  Bash syntax, native module syntax and whitespace checks passed.
+- Two concurrent **real Corepack** preparations passed in a disposable
+  workspace with networking disabled. Both pnpm/pnpx links were executable,
+  absolute after relocation and parseable by the pinned Node. No manager,
+  app or database was executed, and no staging directories remained.
+  Sanitized retained output:
+  `artifacts/run-calculator/generated-artifacts/startup-shim-followup.Yyfh20/real-corepack.log`.
+
+The regressions are registered by the existing runtime test entry point, not
+an unconnected test file. This batch changes startup selection and its test
+support only; the passing client assertion/runtime result above was not
+invalidated or repeated.
+
+Managed workflows were **not restarted**: API startup may run maintenance
+against shared development data, which this task must preserve. Workflow
+recovery and an app-level offline handoff therefore remain unverified. The
+clean-start checker was inspected but not invoked directly because it
+inherits its caller's database configuration; it does not itself provision
+a disposable database. Any subsequent app-level startup check must retain the
+approved isolated-database wrapper. The owning task remains **IN PROGRESS**.
+
+### Focused PWA recovery follow-up — 3/3 runtime passes
+
+The remaining production-fixture correction affects service-worker activation,
+unsaved-work protection and stale-chunk recovery. Its earlier native checks
+cannot establish these browser behaviors. A narrow follow-up is therefore
+limited to the three previously failed Chromium flows; it is not another broad
+browser pass or a repetition of passing journeys.
+
+The dedicated PWA configuration serves its own two-version static fixture and
+has no database/API global setup. Read-only discovery matched all three exact
+identities from the original broad collection, with no collection errors:
+
+- `68653885c13ad33062c9-5525da1780bb477027cf`: preserves unsafe work, then
+  auto-reloads after safe inactivity.
+- `68653885c13ad33062c9-01e6d02deb28827ea8f0`: auto-reloads when Home was already
+  safe before update discovery.
+- `68653885c13ad33062c9-58ccbb40d396d96bf2ad`: recovers an old HTML-served Home
+  chunk onto the current build once.
+
+Private attempt directory:
+`artifacts/run-calculator/generated-artifacts/pwa-recovery-followup.rH8XAZ/`.
+The preserved collection and reviewed identity list remain discovery evidence.
+Execution uses the existing Chromium PWA configuration, its unchanged 120-second
+per-case timeout, zero retries and one worker. No assertion, timeout, inventory
+or cache/update policy is being relaxed. Application and test inputs remain
+unchanged during this follow-up.
+
+The execution finished with exit 0: **3 expected passes, 0 unexpected failures,
+0 skipped and 0 flaky**, in **64.35 seconds**. Each runtime identity matched
+the reviewed three-case list. `results.json` and `command.log` in the same
+private directory preserve the outcome. This closes those three historical
+Chromium update/chunk-recovery failures, not the entire browser lane, other PWA
+variants, physical devices or a published-site check. No API/database, managed
+workflow, customer source or provider send was used.
+
+The file-target check of this task plan and ledger examined 49 distinct local
+references: 48 exist and one is the already-documented historical ignored
+build-identity archive, unavailable in this workspace. This confirms no new
+source-path defect in that bounded set; it is not prose, symbol, remote URL or
+heading-anchor certification. The artifact was not fabricated or replaced.
+The private raw path report is retained beside the startup-shim result.
+
+The complementary startup-guard selection then passed **8/8** in **3.761 s**,
+excluding the already-passing focused selection. This covers the remaining
+runtime-entry-point guards without repeating the seven passing focused
+assertions. The separate retained-cache contract guards remain **9/9 PASS**.
+Private log: `artifacts/run-calculator/generated-artifacts/startup-shim-followup.Yyfh20/complementary-runtime-guards.log`.
+These are launcher/contract checks, not managed-service recovery or a release
+certification; no managed API/web restart was performed.
+
+### Run Insights fixture follow-up — reload preservation, not a browser pass
+
+Source review ruled out a missing button type in the Run Insights actions:
+the shared native Button already defaults to `type="button"`. No component
+button or application reload policy was changed.
+
+The fixture's `addInitScript` callback did contain an independent defect: every
+document initialization rewrote the synthetic day with `resetAt: 0` and cleared
+its saved run values. Playwright also invokes the callback in child frames.
+The callback is now a closure-free test-only helper, scoped to the top-level
+document and initialized once per owned scenario/session. Completion is recorded
+only after all required storage writes succeed. Canonical state and saved run
+bytes survive subsequent callback execution. Initial fixture values, role grants,
+assertions, case names, retry policy and browser budgets are unchanged.
+
+The native serialized-callback regression first reproduced both failures
+(reload overwrote acknowledged bytes; a child frame wrote three local keys):
+**4 PASS / 2 FAIL**. After the repair it passed **6/6** in **11.10 s**, including
+fresh and distinct scenarios, a fresh independent session, and initialization
+failure followed by storage recovery. These are VM/JSDOM checks, not six browser
+journeys or evidence that the old execution-context failures are fully explained.
+
+The configured client compiler subsequently completed with **exit 0**. Earlier
+setup attempts are preserved: the release-wrapper launch timed out before
+Vitest started; an artifact-local compiler-path probe found no compiler; and
+an initial short workspace-compiler diagnostic ended without a result. The
+installed Vitest entry and correct workspace compiler were used directly under
+the unchanged pinned Node version. No source runtime/test limits, dependency
+versions or compiler flags were relaxed. Evidence, including the before/after
+logs, final compiler output and exact three-input hashes:
+`artifacts/run-calculator/generated-artifacts/run-insights-seed-followup.mPGXQ8/`.
+
+The original two failed Run Insights browser outcomes remain **unverified**;
+no additional browser run, shared-data operation or managed restart was used.
+
+The separate no-install diagnostic reported the running Node matches the source
+pin; its `networkUsed` and `discoveredToolsExecuted` fields are both false.
+A parent/child-shell version probe also retained the same pinned Node. Source
+inspection shows the release command dispatcher provisions pinned pnpm through
+private `npm exec` acquisition rather than executing the selected global shim.
+That distinguishes its pre-test setup from the managed-service shim race.
+The exact duration/cause of the interrupted acquisition is not established;
+no cache/trust policy was changed and no test failure is inferred from it.
+
+### Phone calendar follow-up — first-of-month fixture assumption
+
+The preserved failed phone-layout trace identifies `toBeDisabled` on
+`button[data-day][disabled]` as the failed assertion. Its captured calendar
+starts on Sunday, November 1, 2026, with no earlier displayed dates. The real
+Schedule control disables dates before today; it does not promise that the
+currently displayed month contains one. This is an attributed fixture
+assumption, not evidence that the app enabled a prohibited date.
+
+The phone fixture now visits the previous month before checking disabled dates,
+then restores the selected month before the existing selection and dialog
+reachability checks. It retains the disabled-date assertion, selection checks,
+case identity, retry policy and browser time limits. No application date rule,
+production component or visual baseline changed.
+
+The real Calendar component's native file passed **7/7** in **17.30 s**
+(three existing checks and four added regressions). The new coverage demonstrates
+the no-disabled-button boundary and verifies past-date rejection, restored
+selection and an enabled next-date selection across the Sunday month boundary,
+an ordinary mid-month date and a year boundary. It uses the actual component,
+not a mocked calendar. This is **not** a reverified phone touch/overlay journey.
+
+Evidence and the two changed-input hashes are retained beside the Run Insights
+follow-up as `calendar-after.log` and `calendar-input.sha256`. The final combined
+client budget/compiler result is recorded separately in `client-final-checks.log`:
+**PASS / exit 0**, with the cast budget unchanged. Both edited browser files also
+passed syntax transformation in `changed-browser-syntax.log`. These checks do
+not constitute semantic E2E certification or a passing integrated browser run.
+
+**Current boundary:** these two fixture repair batches are locally checked, but
+the owning task remains **IN_PROGRESS**. Final integrated confirmation is not
+available: the original main attempt failed/interrupted, the managed API and web
+workflows are failed, and restarting the shared API can run data heals outside
+this task's synthetic-only boundary. No shared-service restart or fresh broad
+browser pass was used as a workaround. The remaining lifecycle/stock/history,
+break/report/notification journeys and unattributed runtime groups stay open;
+native passing results do not close them or authorize task completion.
+
+### Offline startup diagnostic — fixture corrected, cold version handoff passes
+
+The earlier retained archive/manifest are absent from the current API build
+output, and no retained copy was found in this task's generated-artifact tree.
+That is not proof of a production fault: the retained-tool option is still
+opt-in and ordinary build outputs can be replaced. The original 35-second
+timeout remains a recorded observation with an unattributed cause.
+
+A different diagnostic approach provisioned only the already-approved exact
+signed tool artifact in a disposable project copy, not the real API output.
+It preserves source Node/manager pins and normal checksum/signature verification.
+No build/publish policy, default launcher option or application source changes.
+The copied input-file hashes are recorded with the diagnostic report.
+
+The current command lookup is file-based, so an inherited pnpm/Corepack shell
+function was not established as the cause. Namespace preflight confirmed
+same-UID, loopback-only networking isolation. The `ip` utility is absent; the
+existing Python socket/ioctl interface brought up only that private loopback.
+No system package or kernel/host setting was changed.
+
+Private diagnostic directory:
+`artifacts/run-calculator/generated-artifacts/offline-tool-trace.2TFOcC/`.
+After validated cache-only restoration, the protocol traced the native version
+command outside a project. Only if it succeeds does it trace the retained
+project launcher. Each probe retains the unchanged exploratory 35-second
+deadline and stops at the failing boundary; it is not an app startup test.
+Child environments contain no application credentials, host-manager fallback
+is denied, and traced processes have no external network route. No API,
+database, operational account, provider request or managed service is started.
+
+Initial outcomes without the omitted source lockfile (the JSON phase results,
+not the controller's exit code):
+
+- Signed artifact provisioning **PASS**: pnpm 12.8.1, Node 24.21.0, existing
+  trusted Corepack 0.36.0, Linux x64. No tool or source pin was changed.
+- Verified cache-only restoration **PASS**.
+- Native version command outside a project **PASS**, correct exact pin, no
+  connect calls in its trace.
+- Retained project launcher **FAIL**, exit **124** at the unchanged **35-second**
+  deadline. It restored the cache and executed the native child, which invoked
+  `node --version` and attempted DNS connections; six were unreachable in the
+  isolated namespace. It did not fall back to the host manager or start the app.
+
+This initially narrowed the failure to project-aware native initialization after
+successful restoration. Upstream's [package-manager pin documentation](https://pnpm.io/package_json#devenginespackagemanager)
+explains that pnpm 12 records its legacy pin resolution in a leading lockfile
+bootstrap document. Inspection confirmed that the real source has that document,
+but the disposable copy omitted the entire lockfile.
+
+Only that failed handoff was confirmed after adding the unchanged source
+`pnpm-lock.yaml` to the same disposable workspace. The existing signed archive
+was reused; no manager upgrade, engine-policy change, relaxed verification or
+new timeout was used:
+
+- **PASS**, exact pinned version, exit **0**, **10.645 s / unchanged 35 s**.
+- Source lockfile and fixture lockfile both remained byte-for-byte unchanged.
+- Trace showed **0 AF_INET/AF_INET6 connect calls**, no unreachable calls and
+  only two local **AF_UNIX** socket attempts. OS networking remained isolated.
+- Confirmation: `artifacts/run-calculator/generated-artifacts/offline-tool-trace.2TFOcC/with-source-lockfile.json`.
+  Its added-input hash binds the omitted-lockfile correction to the baseline.
+
+The missing lockfile caused this disposable fixture's version-handoff stall.
+This does not retrospectively certify every old probe, establish a production
+or sync/database cause, or prove actual application startup. Offline application
+startup remains **NOT RUN**; retained tools remain opt-in and not enabled by
+default. Private input hashes, verified artifact metadata, per-phase JSON,
+bounded stdout/stderr and syscall traces remain retained above.
+
+A regression first demonstrated that missing/symlinked root lockfiles reached
+the verifier instead of stopping early. The optional retained-tools launcher now
+rejects those inputs with actionable guidance before any restoration/bootstrap.
+The focused guard check passed **4/4** (missing, symlink, regular-file delegation
+and the parent check). The regular-file case intentionally delegates to a
+stopping verifier stub; it is not an archive/app-start certification. Default
+launcher behavior and archive verification are unchanged. Bash syntax,
+ShellCheck and whitespace checks passed for this change. The earlier real
+cold-version pass is bound to its recorded pre-guard wrapper input; the new
+positive-delegation check covers the added early guard without repeating the
+unchanged archive extraction and manager execution.
+
+Follow-on harness inspection did not start another suite. The existing isolated
+browser wrapper provisions its owned Postgres instance but unconditionally ends
+in Playwright execution; it has no app-start-only mode. The plain clean-start
+checker does not provision its own database and must not be pointed at shared
+development data. The approved startup item calls for a verified **tool**
+handoff, not a new full-app-offline certification gate. That distinction is
+preserved: the tool-version result cannot establish application health or close
+the remaining integrated operational journeys. No extra startup-only feature
+was added merely to expand this item.
+
 Current source-boundary checkpoint: synthetic local coverage is implemented.
 The actual preparation/snapshot regression file passed 23/23, including the two
 new eligibility checks, and the root workspace typecheck passed. The focused
@@ -568,14 +845,23 @@ group share a cause or have been fixed:
   match; target identity must remain exact rather than selecting an arbitrary row.
 - Five Mix Plan previous-run navigation cases: their preview/Prev ambiguity is
   corrected in locators only, with browser evidence still failed.
-- Phone operational calendar disabled-date expectation and premade-crust Start
-  availability. Neither business rules nor date limits were changed.
+- Phone operational calendar: the disabled-date expectation is now attributed
+  to the captured first-of-month fixture assumption and repaired with seven
+  native component checks above. Its full phone journey remains unverified.
+- The premade-crust Start fixture received its own canonical day/full-manager
+  isolation repair and its focused follow-up passed **1/1**, as recorded above.
+  That does not close the separate calendar or remaining lifecycle journeys.
 - Prior-run drain and daily allergen-report unexpected retention 403s. Client
   retention gating is repaired; neither full journey is yet reverified.
-- Three PWA update/chunk recovery cases; two Run Insights cases with destroyed
-  execution contexts. No reload policy or update safeguards were weakened.
-- Shared mix/cheese recipe component-refresh expectations. Actual versus
-  fixture-only refresh behavior remains unresolved.
+- Three PWA update/chunk recovery cases are now reverified **3/3** in the focused
+  follow-up above. Two Run Insights cases with destroyed execution contexts
+  remain runtime gaps; their repeated/child-frame seeding defect is independently
+  reproduced and repaired with six native checks above. This is not a proven
+  attribution of those browser failures. No app reload safeguard was weakened.
+- The mix/cheese pending-refresh, Start-time freeze and peer-reload cases
+  subsequently passed **2/2**, as recorded in the recipe/Gold follow-up.
+  The initial failed full-run outcomes remain preserved; the focused pass does
+  not certify every shared-recipe variant or replace the full-run result.
 - Two wake cases described above, and stale-base recovery/no-op snapshot
   assertions in sync convergence. No snapshot/acknowledgement fence was removed.
 - Visual regression mismatch and Warehouse staging persistence. No baseline
@@ -770,8 +1056,12 @@ The revised cold-runtime handoff timed out at its unchanged exploratory
 the workspace configuration; that attempt also exited **124** at 35 seconds.
 The latter trace reached the launcher's `pnpm --version` after restoration and
 selection of pin 12.8.1. Loopback alone did not resolve the failure. The cause of
-that native CLI stall remains unattributed; no app or database was started by
-these probes. No further retry of this probe was launched.
+that native CLI stall remained unattributed at that checkpoint; no app or
+database was started by these probes. No further retry was launched at that
+checkpoint. The later differential investigation recorded above corrected an
+omitted source lockfile in its disposable copy and passed the version-only
+handoff under the same deadline. Actual offline application startup is still
+not established by either checkpoint.
 
 The helper and launcher option remain **explicitly opt-in**. The tentative
 automatic build hook was removed before any rollout, and the normal Publish
@@ -1077,6 +1367,9 @@ typecheck these excluded test files.
 
 The three selected PWA cases subsequently collected without errors. This
 validated fixture imports and test discovery only; no browser was launched.
+The later focused follow-up above then executed all three exact historical
+Chromium identities successfully; its runtime result supersedes this checkpoint's
+open status for those cases only.
 
 ### Run Insights navigation/readiness repair — runtime recheck open
 

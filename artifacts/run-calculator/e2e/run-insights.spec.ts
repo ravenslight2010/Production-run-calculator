@@ -32,6 +32,7 @@
 
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { Client } from "pg";
+import { seedRunInsightsBrowserState } from "../src/test/runInsightsBrowserSeed";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -60,25 +61,7 @@ async function signIn(
   // This fixture creates a synthetic server profile without mutating the shared
   // factory brand list. Skip the one-time legacy orphan-profile cleanup so it
   // does not delete that deliberately isolated record during startup.
-  await page.addInitScript(({ brand, flavor, runId }) => {
-    localStorage.setItem("run-calc-purge-orphaned-profiles-v1", "1");
-    localStorage.setItem("run-calc-day", JSON.stringify({
-      runs: [{ id: runId, brand, flavor, seeded: false }],
-      currentIndex: 0,
-      date: new Date().toISOString().slice(0, 10),
-      resetAt: 0,
-      substitutions: [],
-      substitutionLog: [],
-      stagedItems: {},
-      prepPhase: {
-        prepStartedAt: null,
-        prepBatchesDough: 0,
-        prepBatchesSauce: 0,
-        prepCarriedOver: false,
-      },
-    }));
-    localStorage.setItem(`run-calc-run-${runId}`, JSON.stringify({}));
-  }, {
+  await page.addInitScript(seedRunInsightsBrowserState, {
     brand: product.brand,
     flavor: product.flavor,
     runId: `run-insights-${username}`,

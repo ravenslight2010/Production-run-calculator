@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { registerProjectPnpmShimTests } from "./test-helpers/project-pnpm-shims.mjs";
 import {
   groupManagedProcesses,
   parseManagedProcessLine,
@@ -16,6 +17,8 @@ const pinnedNodeVersion = fs.readFileSync(path.join(root, ".nvmrc"), "utf8").tri
 const pinnedPnpmVersion = JSON.parse(
   fs.readFileSync(path.join(root, "package.json"), "utf8"),
 ).packageManager.slice("pnpm@".length);
+
+registerProjectPnpmShimTests(root, pinnedPnpmVersion);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

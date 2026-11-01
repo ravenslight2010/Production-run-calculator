@@ -17,6 +17,12 @@ if (( $# == 0 )); then
 fi
 
 if (( use_retained_startup_tools )); then
+  # pnpm 12 reads its bootstrap resolution from the source lockfile even for
+  # --version. Without it, a cached native executable can still attempt DNS.
+  if [[ ! -f "${REPO_ROOT}/pnpm-lock.yaml" || -L "${REPO_ROOT}/pnpm-lock.yaml" ]]; then
+    printf 'Retained startup requires a regular root pnpm-lock.yaml, including its package-manager bootstrap metadata. Restore the complete build input; do not regenerate it during startup.\n' >&2
+    exit 1
+  fi
   retained_corepack_home=$(node "${SCRIPT_DIR}/runtime-tool-cache.mjs" restore) || exit $?
   export COREPACK_HOME="$retained_corepack_home"
   export COREPACK_ENABLE_NETWORK=0

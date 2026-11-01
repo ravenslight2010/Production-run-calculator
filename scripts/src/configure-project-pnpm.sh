@@ -99,7 +99,52 @@ configure_project_pnpm() {
   export COREPACK_DEFAULT_TO_LATEST=0
   export COREPACK_NETWORK_TIMEOUT=30000
 
-  if ! "$corepack_bin" enable --install-directory "$shim_dir" pnpm; then
+  # Corepack replaces existing links with read/unlink/create. Parallel API/web
+  # startup must not run that sequence against the same published entry points.
+  # Prepare privately, resolve relative links before moving them, then publish
+  # each launcher with same-filesystem atomic rename. No service-lifetime lock
+  # or extra runtime dependency is needed.
+  if ! node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const { spawnSync } = require("node:child_process");
+    const [corepack, destination] = process.argv.slice(1);
+    let staging;
+    try {
+      staging = fs.mkdtempSync(path.join(destination, ".corepack-shims-"));
+      const result = spawnSync(corepack,
+        ["enable", "--install-directory", staging, "pnpm"],
+        { stdio: "inherit" });
+      if (result.error) throw result.error;
+      if (result.status !== 0) throw new Error("Corepack enable did not complete successfully");
+      const names = ["pnpm", "pnpx"].filter(name => {
+        try { fs.lstatSync(path.join(staging, name)); return true; }
+        catch (error) {
+          if (name === "pnpx" && error.code === "ENOENT") return false;
+          throw error;
+        }
+      });
+      // Validate every generated entry before replacing any existing launcher.
+      for (const name of names) {
+        const file = path.join(staging, name);
+        if (fs.lstatSync(file).isSymbolicLink()) {
+          const target = fs.realpathSync(file);
+          fs.unlinkSync(file);
+          fs.symlinkSync(target, file);
+        }
+        if (!fs.statSync(file).isFile()) throw new Error("Invalid Corepack launcher");
+        fs.accessSync(file, fs.constants.X_OK);
+      }
+      for (const name of names) {
+        fs.renameSync(path.join(staging, name), path.join(destination, name));
+      }
+    } catch (error) {
+      console.error("Corepack shim preparation failed: " + error.message);
+      process.exitCode = 1;
+    } finally {
+      if (staging) fs.rmSync(staging, { recursive: true, force: true });
+    }
+  ' "$corepack_bin" "$shim_dir"; then
     printf 'Cannot prepare the Corepack pnpm shim for project pin %s; verify the Node runtime and workspace permissions.\n' \
       "$pnpm_version" >&2
     return 1
