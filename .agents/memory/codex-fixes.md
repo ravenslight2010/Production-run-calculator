@@ -1620,3 +1620,11 @@ local-only Replit workaround retained, YAML-safe JSON path quoting. Four focused
 contracts pass under pinned Node24.21.0. Restored local typecheck initially exited
 127due missing ShellCheck; restore publisher-digest-verified0.11.0 and rerun before
 push. Details/failure ledger: docs/self-host/pr-usefulness-and-main-green.md.
+
+PR145 validation uses a separate independently secreted, owner-reviewed exact-ref
+fixture environment (no change to PR142/main/report environments). Fixed145branch/
+base/ref/head authorization and negative contracts preserve original boundaries.
+A PR145-only real Docker/Caddy job now validates the previously main-only matrix
+before merge; original main-only smoke workflow remains unchanged.32combined
+security/network tests, full root types, actionlint and workflow regression contracts
+PASS locally. No host-network entitlement or raw fixture/cache/artifact export.

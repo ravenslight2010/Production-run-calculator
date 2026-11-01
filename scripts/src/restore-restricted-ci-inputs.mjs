@@ -7,6 +7,7 @@ import { restoreReviewedBuildInputsFromDirectory } from "./restore-reviewed-buil
 
 const repository = "ravenslight2010/Production-run-calculator";
 const capabilityHash = "b1675a82fb76e091811eaa336642a70e7695f57a5c7f54d8551084c47b233ed3";
+const repairCapabilityHash = "1d9b93feec30fd89b2e1443f82d9062a676fd5305dc1bc08fb542994b1c40e9a";
 const mainCapabilityHash = "837ccd959aa818cdb163e6a1763bdc37ede875d56965437f6c3f27110d6aa279";
 export const manifest = JSON.parse(readFileSync(new URL("./reviewed-ci-input-manifest.json", import.meta.url), "utf8"));
 export const archiveManifest = JSON.parse(readFileSync(new URL("./reviewed-ci-archive-manifest.json", import.meta.url), "utf8"));
@@ -15,12 +16,17 @@ const ARCHIVE_BUDGET = { perFile: 140 * 1024 * 1024, total: 290 * 1024 * 1024 };
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const reportDirectory = "attached_assets/source-library/audits";
 
-export function authorize(context, event, approvedHead, capability, expectedCapabilityHash = capabilityHash) {
-  if (context.GITHUB_ACTIONS !== "true" || context.GITHUB_REPOSITORY !== repository ||
-      digest(capability ?? "") !== expectedCapabilityHash) throw new Error("Restricted input authorization missing.");
+export function authorize(context, event, approvedHead, capability, expectedCapabilityHash) {
+  const policy = event?.number === 142
+    ? { number: 142, branch: "feat/windows-lan-self-hosting", hash: capabilityHash }
+    : event?.number === 145
+      ? { number: 145, branch: "fix/main-green-pr-audit", hash: repairCapabilityHash }
+      : undefined;
+  if (!policy || context.GITHUB_ACTIONS !== "true" || context.GITHUB_REPOSITORY !== repository ||
+      digest(capability ?? "") !== (expectedCapabilityHash ?? policy.hash)) throw new Error("Restricted input authorization missing.");
   const pr = event?.pull_request;
-  if (context.GITHUB_EVENT_NAME !== "pull_request" || context.GITHUB_REF !== "refs/pull/142/merge" ||
-      event.number !== 142 || pr?.head?.repo?.full_name !== repository || pr?.head?.ref !== "feat/windows-lan-self-hosting" ||
+  if (context.GITHUB_EVENT_NAME !== "pull_request" || context.GITHUB_REF !== `refs/pull/${policy.number}/merge` ||
+      pr?.head?.repo?.full_name !== repository || pr?.head?.ref !== policy.branch ||
       pr?.base?.ref !== "main" || !/^[a-f0-9]{40}$/.test(approvedHead ?? "") || pr?.head?.sha !== approvedHead) {
     throw new Error("Only the explicitly reviewed same-repository PR revision is authorized.");
   }

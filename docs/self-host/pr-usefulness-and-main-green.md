@@ -240,3 +240,33 @@ contract PASS; complete authoritative root typecheck PASS after restoring ShellC
 The feature PR is initially draft to obtain its actual immutable PR number before
 provisioning an exact-PR, exact-branch, exact-reviewed-head input environment. Initial
 unprivileged setup runs are not acceptance evidence; no secrets available to them.
+
+## Exact repair PR145 validation boundary
+
+The actual repair PR is145, branch fix/main-green-pr-audit. It receives a NEW
+independent capability in pr-145-reviewed-test-inputs, restricted to precisely
+refs/pull/145/merge, owner review and disabled admin bypass. Original PR142, main
+and Docker/Caddy report environment policies/secrets are snapshotted and unchanged.
+The transport permits145only with its exact same-repository branch/base/ref and
+reviewed40hexhead; separate default capability hash. Forks, other PRs/branches,
+wrong heads, main/target events and unknown callers fail before fetch. All58source/
+9opaque archive hashes, byte budgets,600file modes and allowlisted cleanup remain.
+
+CI now has a real additional Docker/Caddy browser job ONLY for reviewed PR145;
+it receives only that independent fixture capability, contents-read transport and
+no cache/build-record/raw-artifact export. Original protected main-only Docker/Caddy
+workflow/secret remain unchanged. The prior main-only failure must be reproduced
+and closed before merging, not deferred until after merge. Other unreviewed PRs
+and forks remain unprivileged. Setup draft runs on the initial authorization-free
+head were cancelled as superseded, never counted as passes.
+
+32combined fixture/network security contracts PASS locally, including exact145
+positive/negative cases and preserved142/main boundaries. One invocation used the
+computer default directory and found no tests; rerun from repo root passed all32.
+Final root typecheck/workflow lint and exact-head hosted checks remain required.
+
+Final pre-push local validation:32fixture/network contracts PASS, full authoritative
+root typecheck PASS, actionlint across15workflows PASS, workflow negative permission/
+cache/artifact regressions PASS, test-command registration and whitespace checks PASS.
+Original3environment configurations/policies/secrets and branch protections must
+remain byte-for-byte unchanged; verify before granting exact-head PR145input review.
