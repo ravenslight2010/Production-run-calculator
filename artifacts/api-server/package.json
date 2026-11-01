@@ -32,7 +32,7 @@
     "benchmark:second-pass-reviewer-live": "../../scripts/node_modules/.bin/tsx scripts/benchmark-second-pass-reviewer-live.mts"
   },
   "dependencies": {
-    "@google/genai": "^2.29.1",
+    "@google/genai": "^2.31.0",
     "@workspace/ai-memory": "workspace:*",
     "@workspace/anomaly": "workspace:*",
     "@workspace/api-zod": "workspace:*",

@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@google/genai": "^2.29.1",
+    "@google/genai": "^2.31.0",
     "openai": "^7.15.0",
     "p-limit": "^7.3.3",
     "p-retry": "^8.0.1"
