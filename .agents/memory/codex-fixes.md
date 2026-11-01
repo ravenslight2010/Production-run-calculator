@@ -1628,3 +1628,18 @@ A PR145-only real Docker/Caddy job now validates the previously main-only matrix
 before merge; original main-only smoke workflow remains unchanged.32combined
 security/network tests, full root types, actionlint and workflow regression contracts
 PASS locally. No host-network entitlement or raw fixture/cache/artifact export.
+
+## PR145 release closure — reload telemetry budget and cancellation readiness
+
+- `artifacts/run-calculator/src/browserIncidentCapture{,.test}.ts`: module-only
+  four/minute reporting reset on each reload, exceeding the unchanged server
+  per-user quota during the schedule persistence journey. Preserve only validated
+  numeric per-tab budget in sessionStorage; tolerate denied storage/backwards
+  clocks, never retain error payloads. Reload/window/privacy/malformed regressions.
+- `scripts/src/run-release-node{,.test}.sh`: waiting message preceded clock/trap
+  initialization; immediate TERM could skip private history. Announce only after
+  clock/traps/flock PID initialization. Slow the test date call to expose the old
+  race deterministically. Keep owner safety, history modes and recovery assertions.
+- Evidence: standard release41254875823 failed on both; missing retained report
+  is a correct consequence, not a gate to waive. No merge until fresh exact-head
+  full release/browser/required CI pass.

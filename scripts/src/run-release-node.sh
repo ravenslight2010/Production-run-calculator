@@ -213,10 +213,6 @@ if [[ "${RELEASE_RUNNER_LOCK_KEY:-}" != "$lock_key" ]]; then
         lock_owner_started_at="unknown"
     fi
 
-    printf \
-      'Release runner is waiting for the workspace validation lock (owner_pid=%s owner_started_at=%s owner_state=%s wait_limit=%ss).\n' \
-      "$lock_owner_pid" "$lock_owner_started_at" "$lock_owner_state" \
-      "$lock_wait_seconds" >&2
     lock_wait_started_epoch=$(date +%s)
     trap 'handle_lock_wait_signal HUP 129' HUP
     trap 'handle_lock_wait_signal INT 130' INT
@@ -224,6 +220,12 @@ if [[ "${RELEASE_RUNNER_LOCK_KEY:-}" != "$lock_key" ]]; then
     flock --exclusive --timeout "$lock_wait_seconds" \
       --conflict-exit-code 75 "$release_runner_lock_fd" &
     lock_wait_flock_pid=$!
+    # Announce readiness only after timing, signal traps and the child PID are
+    # initialized. Callers may cancel immediately after observing this line.
+    printf \
+      'Release runner is waiting for the workspace validation lock (owner_pid=%s owner_started_at=%s owner_state=%s wait_limit=%ss).\n' \
+      "$lock_owner_pid" "$lock_owner_started_at" "$lock_owner_state" \
+      "$lock_wait_seconds" >&2
     if wait "$lock_wait_flock_pid"; then
       lock_status=0
     else

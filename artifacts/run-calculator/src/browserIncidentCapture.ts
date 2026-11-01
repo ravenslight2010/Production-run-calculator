@@ -12,6 +12,37 @@ const recent = new Map<string, number>();
 let windowStartedAt = 0;
 let windowCount = 0;
 
+// A reload resets module memory, not the server's per-user reporting quota.
+// Persist only the bounded numeric budget in this tab: no errors, fingerprints,
+// account identifiers or diagnostic payloads are written to browser storage.
+const RATE_BUDGET_KEY = "run-calc:browser-incident-budget:v1";
+
+function restoreRateBudget(now: number): void {
+  if (windowStartedAt !== 0) return;
+  try {
+    const raw = sessionStorage.getItem(RATE_BUDGET_KEY);
+    if (raw === null || raw.length > 160) return;
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== "object" || value === null) return;
+    const { startedAt, count } = value as { startedAt?: unknown; count?: unknown };
+    if (typeof startedAt !== "number" || !Number.isFinite(startedAt) || startedAt <= 0
+      || typeof count !== "number" || !Number.isInteger(count)
+      || count < 0 || count > MAX_REPORTS_PER_WINDOW) return;
+    windowStartedAt = Math.min(startedAt, now);
+    windowCount = count;
+  } catch {
+    // Storage can be unavailable (privacy policy/quota); in-memory bounds remain.
+  }
+}
+
+function persistRateBudget(): void {
+  try {
+    sessionStorage.setItem(RATE_BUDGET_KEY, JSON.stringify({ startedAt: windowStartedAt, count: windowCount }));
+  } catch {
+    // Best-effort diagnostics must never block the action being observed.
+  }
+}
+
 function fingerprint(kind: string, message: string): string {
   return `${kind}|${WEB_BUILD_ID}|${location.pathname}|${message.slice(0, 160)}`;
 }
@@ -28,6 +59,8 @@ export function reportBrowserFailure(
     return Promise.resolve(undefined);
   }
   const now = Date.now();
+  restoreRateBudget(now);
+  if (now < windowStartedAt) windowStartedAt = now;
   if (now - windowStartedAt >= DEDUPE_WINDOW_MS) {
     windowStartedAt = now;
     windowCount = 0;
@@ -40,6 +73,7 @@ export function reportBrowserFailure(
   }
   recent.set(key, now);
   windowCount += 1;
+  persistRateBudget();
   return reportIncident({
     source: "auto_crash",
     screen: location.pathname,
@@ -114,4 +148,5 @@ export function clearBrowserIncidentCaptureForTests(): void {
   recent.clear();
   windowStartedAt = 0;
   windowCount = 0;
+  try { sessionStorage.removeItem(RATE_BUDGET_KEY); } catch { /* Storage may be disabled. */ }
 }

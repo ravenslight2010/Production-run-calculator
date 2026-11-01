@@ -3847,6 +3847,19 @@ test_release_runner_lock_wait_interruption_is_recorded() {
   waiter_output="${workspace}/waiter-output"
   write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
   write_failing_npx "${workspace}/bin/npx"
+  # Make the former announcement-before-trap race deterministic: a waiter
+  # killed during its initial date call must not have announced readiness yet.
+  local real_date
+  real_date=$(command -v date)
+  cat >"${workspace}/bin/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${SLOW_LOCK_WAIT_DATE:-}" == "1" && "$*" == "+%s" ]]; then
+  sleep 0.3
+fi
+exec "$REAL_DATE" "$@"
+EOF
+  chmod +x "${workspace}/bin/date"
+  export REAL_DATE="$real_date"
   cat >"${workspace}/bin/interrupt-holder" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -3880,7 +3893,7 @@ EOF
   }
 
   set +e
-  RELEASE_RUNNER_LOCK_WAIT_SECONDS=30 \
+  SLOW_LOCK_WAIT_DATE=1 RELEASE_RUNNER_LOCK_WAIT_SECONDS=30 \
     INTERRUPTED_CHILD_MARKER="$timeout_child_marker" \
     RUN_LOG="${workspace}/waiter-events" PATH="${workspace}/bin:${PATH}" \
     bash "${workspace}/scripts/src/run-release-node.sh" interrupted-child \

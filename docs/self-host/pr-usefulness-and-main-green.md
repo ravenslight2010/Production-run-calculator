@@ -270,3 +270,39 @@ root typecheck PASS, actionlint across15workflows PASS, workflow negative permis
 cache/artifact regressions PASS, test-command registration and whitespace checks PASS.
 Original3environment configurations/policies/secrets and branch protections must
 remain byte-for-byte unchanged; verify before granting exact-head PR145input review.
+
+## Release closure discovered on the reviewed repair head
+
+Hosted head3c14e24 passed all required CI, actual reviewed-PR Docker/Caddy matrix,
+Windows and Node compatibility. Standard release41254875823 FAILED, so no merge.
+Its model-bump lane failed in the routine shell suite: the lock waiter announced
+readiness before initializing its timer/signal traps, so immediate cancellation
+could exit without recording history. Initialize traps/PID before readiness and
+make the existing regression deterministic by slowing the initial date call.
+
+The accessibility schedule journey failed in all four Chromium viewports because
+POST /api/incidents returned429. Automatic capture had a four-report per-module
+budget, but each reload reset it while the per-user server quota remained10/min.
+Persist only the numeric per-tab budget across reloads (guard malformed/denied
+storage and backwards clocks). Keep server limits, actual HTTP error assertions,
+journey actions and diagnostic-ingestion failure isolation unchanged. No ignored
+429, test-only rate bypass, delayed retry, or arbitrary quota increase. This also
+bounds real reload/startup failure loops. Nine focused browser-capture tests PASS.
+
+The evidence verifier's missing release-check-report.md is consequential: failed
+gates correctly produced only an INCOMPLETE/NO-GO checkpoint, not retained success.
+Do not relax its allowlist or fabricate a report. A new full uninterrupted release
+run on the repaired head must close both original failures and produce evidence.
+
+Closure validation before the next push: the deterministic interruption regression
+FAILS with the old launcher and PASSES with the repaired launcher. The reload-budget
+regression FAILS with the old capture module and all9 capture tests PASS with the
+repair. Complete release-runner shell regressions, authoritative root typecheck,
+workflow/actionlint and32fixture/network security contracts PASS.
+
+Local full shell verification initially hit a setup-only TLS-fixture404: the
+computer's global pnpm10 shim tried acquiring repo-pinned12 from the intentionally
+minimal loopback fixture registry. A first symlink targeted a non-executable ESM
+wrapper and did not replace that shim. Use the already installed native12.8.1 binary
+on PATH directly; the complete HTTPS-positive/negative and shell suite then PASS.
+No TLS, registry guard, fixture, or package-manager verification was weakened.
