@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createEnvironment, initialize, validateSetup } from './config.mjs';
 import { planUpdate, validateRelease, localClock } from './update-policy.mjs';
 const setup = { site: 'runcalc.factory.lan', timeZone: 'America/Chicago', manager: 'manager1' };
@@ -117,4 +119,41 @@ test('compose startup does not require a schema push, model download or exposed 
   assert.ok(!text.includes('5432:5432') && !text.includes('11434:11434'));
   const caddy = await readFile(new URL('../../docker/Caddyfile.self-host', import.meta.url), 'utf8');
   assert.ok(caddy.includes('tls internal')); assert.ok(!caddy.includes('googleapis.com'));
+});
+
+test('.NET host inspector passes tests and emits a native read-only Windows report', { timeout: 300_000 }, () => {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const installer = join(root, 'scripts', 'self-host', 'installer');
+  const environment = {
+    ...process.env,
+    DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+    DOTNET_NOLOGO: '1',
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1',
+  };
+  const execute = (args) => spawnSync('dotnet', args, {
+    cwd: root,
+    encoding: 'utf8',
+    env: environment,
+    timeout: 240_000,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const sdks = execute(['--list-sdks']);
+  assert.equal(sdks.status, 0, 'The self-host safety runner must provide the .NET 8 SDK');
+  assert.match(sdks.stdout, /^8\./mu, 'The self-host safety runner must provide the .NET 8 SDK');
+
+  const tests = execute(['test', join(installer, 'RunCalculator.Installer.sln'), '--configuration', 'Release', '--verbosity', 'minimal']);
+  assert.equal(tests.status, 0, `Host inspector tests failed with exit ${tests.status}; signal ${tests.signal ?? 'none'}`);
+
+  if (process.platform !== 'win32') return;
+  const inspection = execute([
+    'run', '--project', join(installer, 'src', 'RunCalculator.HostInspector', 'RunCalculator.HostInspector.csproj'),
+    '--configuration', 'Release', '--no-build', '--', '--json',
+  ]);
+  assert.equal(inspection.status, 0, `Native Windows inspection failed with exit ${inspection.status}; signal ${inspection.signal ?? 'none'}`);
+  const report = JSON.parse(inspection.stdout);
+  assert.equal(report.inspectionOnly, true);
+  assert.equal(report.host.isWindows, true);
+  assert.ok(report.checks.length >= 10);
+  assert.equal(typeof report.ai.status, 'string');
 });
