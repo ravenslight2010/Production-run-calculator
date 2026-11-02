@@ -199,6 +199,7 @@ export const FULL_BROWSER_EXPECTED_CASE_IDENTITIES: readonly string[] = [
   "artifacts/run-calculator/e2e/screen-off-wake.spec.ts :: screen-off / wake — case counter lifecycle › responsive display matches shared line occupancy while running, paused, and draining",
   "artifacts/run-calculator/e2e/screen-off-wake.spec.ts :: screen-off / wake — case counter lifecycle › speed adjustment during a dough run stays aligned across screen wake",
   "artifacts/run-calculator/e2e/screen-off-wake.spec.ts :: screen-off / wake — case counter lifecycle › two live sessions converge through visible retry after an offline wake",
+  "artifacts/run-calculator/e2e/screen-off-wake.spec.ts :: screen-off / wake — case counter lifecycle › wake recovery queues one Resume tap and applies it to the same run",
   "artifacts/run-calculator/e2e/screen-off-wake.spec.ts :: screen-off / wake — case counter lifecycle › wake recovery queues one Stop tap and applies it to the same run",
   "artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts :: a manager can replace a missing formula result and only redacted source evidence is retained",
   "artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts :: shows amount advisories and recipe unit provenance without rescaling or blocking Apply",

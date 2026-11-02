@@ -2367,7 +2367,62 @@ compares normally against the reviewed baselines. This does not replace the
 integrated 240-case run or demonstrate physical Android/iOS wake behavior.
 No shared development or production data was changed.
 
-Next milestone: run the integrated 240-case browser suite on the current test
-identity, then classify any repeated failures against the existing failure
-ledger. Production publication and physical-device evidence remain outside this
-local verification lane.
+The suite inventory is now reconciled at 241 identities. Next milestone: run
+the integrated suite against the exact 241-case contract, then classify its
+results. Production publication and physical-device evidence remain outside
+this local verification lane.
+
+### 2026-11-02 — new owner observations and browser-inventory preflight
+
+The owner-provided Chrome screenshot, shown as captured at about 4:23 PM
+America/Chicago on November 2, displays the Sync conflict monitor with 7
+conflicts today (19 Run-value fields and 2 Run-list fields) and the note that
+fields were kept from a safer merged state. A separate visible Data health
+panel marks “Canonical sync self-check” as **Failing**; its text says the check
+is read-only and did not repair anything. The displayed peer-update telemetry
+reports 1 partial frame and 0 complete frames over a 41-second window. The
+specific failed invariant is below the visible portion and is not identified
+by this capture. Screenshot environment and build identity are unknown; these
+images prove only the visible state, not a server request or a persistent
+repair. Run identifiers were not retained in this summary.
+
+A separate phone notification at about 4:16 PM says “Restart Agent to
+continue.” That is a workspace-agent interruption, not evidence of an app
+failure. No user data was removed or changed.
+
+Later deployment-log telemetry, around 22:41–22:43 UTC, shows another
+production database-pressure interval: a one-minute sample recorded 34 pool
+acquisition errors, p95 acquisition 11.4 seconds, up to 18 waiters, and event
+loop delay up to 4.7 seconds. The following sample recorded 18 acquisition
+errors, p95 2.3 seconds, and event-loop delay up to 3.2 seconds. During the
+same later interval the log recorded sync-outbox retry events, one unavailable
+queue-monitor sample, a web-push scheduling failure, and a daily-rollover
+failure. This is a later recurrence, roughly 18 minutes after the screenshot;
+the logs do not identify the screenshot's request, device, run, or build, so
+they do not establish its cause. No production change was made.
+
+The client test workflow completed against the current workspace: 398 files,
+3,900 tests passed, 0 failed, and 1 intentionally skipped (87.1 seconds).
+This is unit/component evidence, not full browser coverage.
+
+The attempted integrated browser rerun started a disposable PostgreSQL
+instance and built the local test server, but Playwright discovered 241 cases
+against the reviewed 240-case contract. The release reporter rejected the
+inventory and subsequent per-case callbacks emitted “Unknown browser attempt
+case.” Three accessibility tests printed pass before the fourth started; the
+run was stopped and is incomplete, not a pass. No final report was produced,
+and the isolated database is no longer present. The earlier report remains
+untouched.
+
+An initial direct Playwright `--list` command then failed while importing
+fixture modules because it bypassed the isolated runner and lacked
+`PLAYWRIGHT_API_BASE_URL`; it listed zero tests and executed none. The
+documented isolated `--list` path subsequently discovered 241 unique cases.
+The first comparison parser expected a different path format and returned zero;
+re-parsing the saved listing in Playwright's actual format produced an exact
+241/241 identity match after the contract update. There were no missing or
+duplicate cases, and list mode executed no browser tests. The disposable
+database was cleaned. The `release:standard` workflow separately stopped
+before running any release gate because published release evidence is missing;
+it is not evidence of a product failure or a local-test result. No publish was
+initiated.

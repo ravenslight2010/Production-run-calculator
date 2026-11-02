@@ -184,7 +184,7 @@ assert.deepEqual(
 const debugIdentities = collectPlaywrightCaseIdentities(debugReport.suites);
 assert.equal(
   debugIdentities.length,
-  293,
+  294,
   "the owner-approved standalone Chromium inventory must keep its reviewed case count",
 );
 assert.equal(debugIdentities.length, new Set(debugIdentities).size);
@@ -192,9 +192,11 @@ assert.ok(
   debugIdentities.every((identity) => identity.includes(".spec.ts :: ")),
   "standalone discovery must not collect Node/Vitest helper files",
 );
-// Owner-reviewed catch-up, separate from the main 240-case contract. Removing
+// Owner-reviewed catch-up, separate from the main 241-case contract. Removing
 // these exact additions must reproduce the original 278-case fingerprint.
 // Keep the baseline fence even if a future review updates the current digest.
+const wakeResumeIdentity =
+  "artifacts/run-calculator/e2e/screen-off-wake.spec.ts :: screen-off / wake — case counter lifecycle › wake recovery queues one Resume tap and applies it to the same run";
 const standaloneReviewedAdditions = [
   "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › independent facility edit progresses after a malformed acknowledgment on reconnect",
   "artifacts/run-calculator/e2e/home-deferred-panels.spec.ts :: facility reconnect delivery › independent facility edit progresses after a stale acknowledgment on reconnect",
@@ -211,9 +213,10 @@ const standaloneReviewedAdditions = [
   "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's explicit empty first daily baseline removes stale local day state",
   "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's first daily baseline is adopted after a stream interruption",
   "artifacts/run-calculator/e2e/sync-convergence.spec.ts :: first daily baseline adoption › server's first daily baseline replaces stale local day state before recovery push",
+  wakeResumeIdentity,
 ];
 const standaloneAdditionSet = new Set(standaloneReviewedAdditions);
-assert.equal(standaloneAdditionSet.size, 15);
+assert.equal(standaloneAdditionSet.size, 16);
 assert.ok(
   standaloneReviewedAdditions.every((identity) => debugIdentities.includes(identity)),
   "every reviewed standalone addition must remain collected",
@@ -234,7 +237,12 @@ assert.ok(debugIdentities.includes(syntheticWorkbookIdentity));
 assert.ok(!debugIdentities.includes(blockedRealWorkbookIdentity));
 assert.ok(debugIdentities.includes(warehouseCheckUncheckIdentity));
 assert.ok(!debugIdentities.includes(priorWarehouseIdentity));
-const restoredSourceBaseline = debugIdentities.map(
+assert.ok(debugIdentities.includes(wakeResumeIdentity));
+const priorStandaloneIdentities = debugIdentities.filter(
+  (identity) => identity !== wakeResumeIdentity,
+);
+assert.equal(priorStandaloneIdentities.length, 293);
+const restoredSourceBaseline = priorStandaloneIdentities.map(
   (identity) => {
     if (identity === syntheticWorkbookIdentity) return blockedRealWorkbookIdentity;
     if (identity === warehouseCheckUncheckIdentity) return priorWarehouseIdentity;
@@ -249,6 +257,11 @@ assert.equal(
 console.log(
   "Standalone inventory fingerprint (current reviewed identities):",
   createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
+);
+assert.equal(
+  createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
+  "f98cda9068cc6fc61e348527e3f3a995cfd7769826008cc714057fa1acfd3dc2",
+  "the current standalone inventory must match the reviewed 294-case fingerprint",
 );
 const retainedStandaloneBaseline = restoredSourceBaseline.filter(
   (identity) => !standaloneAdditionSet.has(identity),

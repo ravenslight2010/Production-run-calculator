@@ -23,12 +23,21 @@ recorded in the linked contract. This is inventory approval only; no browser
 tests were run, and #3692 retains ownership of the full runtime suite.
 
 On 2026-11-01, the owner approved including all **13 additional cases** in the
-main suite, bringing the current reviewed inventory to **240**. Read-only
+main suite, bringing the reviewed inventory at that checkpoint to **240**. Read-only
 collection found no missing prior identities. The additions cover six
 sync/reconnect/first-baseline journeys, one repeated saved-copy-removal journey,
 five Gold approval/retention journeys, and one Schedule dialog journey.
 Every prior identity remains required. The single Chromium worker, zero retries,
 80-minute warning, and 90-minute hard limit are unchanged.
+
+On 2026-11-02, under the owner's task-level authorization to add reliability
+coverage, the isolated default-suite listing found **241** selected identities.
+It exposed one already-selected wake/Resume regression absent from the contract:
+`screen-off-wake.spec.ts :: screen-off / wake — case counter lifecycle › wake recovery queues one Resume tap and applies it to the same run`.
+That case directly covers the reported wake/Resume failure. The exact-set
+contract now records it. This reconciles the existing selection; no filter,
+skip, retry, worker, or timeout changed, and no browser test ran during listing.
+This is not a runtime pass or release approval.
 
 The preceding runtime attempt was stopped because the reporter rejected the
 240-case collection against the then-approved 227-case contract. Its partial
@@ -58,7 +67,8 @@ No browser cases were deleted or skipped to meet a numeric target.
 | Dedicated-only additions | 36 | Explicit harness/engine/opt-in decisions below, not deletion |
 | Previously approved default (2026-10-23) | **216** | `171 + 1 + 44`; equivalently `252 - 36` |
 | Previously approved default (2026-10-30) | **227** | Fresh listing: 12 added, 1 retired from the prior contract |
-| Current owner-approved default (2026-11-01) | **240** | 13 approved additions; all 227 previous identities retained |
+| Owner-approved default at 2026-11-01 checkpoint | **240** | 13 approved additions; all 227 previous identities retained |
+| Current task-scoped default (2026-11-02) | **241** | Existing selected wake/Resume case reconciled into the exact contract |
 
 The historical 249-case observation and 252-case collection are not reused as
 current discovery evidence. The 252-case discovery above was read-only, using the pinned release runner
@@ -234,13 +244,14 @@ to manufacture a 216-case result.
 
 ## Owner-approved standalone inventory reconciliation — 2026-11-01
 
-The separate standalone diagnostic inventory is now **293** unique Chromium
-project/file/title identities, not the main suite's **240**. The owner approved
-reviewing and including valid standalone additions. No config matcher, exclusion,
-retry, worker, timeout, or browser-test assertion was changed by this reconciliation.
+At the 2026-11-01 checkpoint, the separate standalone diagnostic inventory had
+**293** unique Chromium project/file/title identities, not the main suite's
+**240**. The owner approved reviewing and including valid standalone additions.
+No config matcher, exclusion, retry, worker, timeout, or browser-test assertion
+was changed by this reconciliation.
 
-The exact delta from the original frozen standalone inventory is **15 additions,
-zero removals**:
+The exact delta at that checkpoint from the original frozen standalone
+inventory was **15 additions, zero removals**:
 
 | Area | Added cases | Review |
 | --- | ---: | --- |
@@ -257,8 +268,9 @@ and ordinary synthetic-import journeys remain outside the main contract. The
 ordinary import case already exists in the historical source reference; this
 review does not assume that every added inventory identity is newly written code.
 
-The reporter regression records all fifteen exact identities. Removing them from
-the current sorted collection must reproduce **278** identities and SHA-256
+The reporter regression records all fifteen exact identities from that
+checkpoint. Removing them from the sorted collection must reproduce **278**
+identities and SHA-256
 `95096de5dc942ddd1afd9c2eb5aa4e41cf3ec2ad55cfc4b387ef653542766562`.
 The full 293-identity SHA-256 is
 `d52aaef6fcc989589caab0d1176b0540760c13c6e091fdd61e57f897bbfb83fe`.
@@ -287,8 +299,8 @@ and standalone inventories, exactly one identity is replaced:
 - Local counterpart:
   `workbook-auto-ai-fallback.spec.ts :: manager gets three synthetic products in review; cancel is read-only`.
 
-The counts remain **240 default** and **293 standalone**. The current standalone
-SHA-256 is `ef7213cec9eb66a207be3336952fee7d5f5cc08762791b70e8d0365be50563ab`.
+At this checkpoint, the counts were **240 default** and **293 standalone**.
+The standalone SHA-256 was `ef7213cec9eb66a207be3336952fee7d5f5cc08762791b70e8d0365be50563ab`.
 The reporter checks the exact default identities; for standalone it also reverses
 only this approved substitution and requires the preceding full 293-identity
 digest, then removes the fifteen earlier approved additions and requires the
@@ -375,14 +387,14 @@ contract. Its reviewed identity SHA-256 is
 `95096de5dc942ddd1afd9c2eb5aa4e41cf3ec2ad55cfc4b387ef653542766562`.
 The reporter regression now locks both the 278 count and the exact identities.
 
-On 2026-11-01, the same standalone discovery assertion found **293** cases and
-failed against the approved 278-case guard. The main suite's separate expansion
-to 240 cases does not authorize changing this count or its identity digest.
-Standalone reconciliation remains open in the reliability-closure ledger; no
-standalone runtime result or replacement approval is claimed.
-This was listing-only evidence: no browser tests, server startup, database
-setup, or production access occurred. The prior 264-case result remains
-historical; the full release runtime remains owned by #3692.
+Before the separate owner review recorded above, the 2026-11-01 standalone
+discovery found **293** cases and failed against the then-approved 278-case
+guard. The main suite's expansion alone did not authorize changing that count;
+the later standalone review separately approved the valid additions. No
+standalone runtime result is claimed. This was listing-only evidence: no browser
+tests, server startup, database setup, or production access occurred. The prior
+264-case result remains historical; the full release runtime remains owned by
+#3692.
 
 Each discovery subprocess has a 60-second timeout, explicit local origins and
 `RELEASE_BROWSER_LOCAL_SERVERS=0`, regardless of inherited caller settings.
@@ -425,8 +437,9 @@ main-suite case was expanded and renamed from
 `warehouse-coverage.spec.ts :: operator staging check persists for a canonical per-run material across reload`
 to
 `warehouse-coverage.spec.ts :: operator staging check and uncheck converge across devices and reload`.
-This is a one-for-one identity replacement: the approved main inventory remains
-240 cases, and the standalone inventory remains 293. No filter, retry policy,
+This is a one-for-one identity replacement: at that reconciliation the main
+inventory remained 240 cases, and the standalone inventory remained 293. The
+later 241-case reconciliation is documented below. No filter, retry policy,
 timeout, worker limit, or physical-device claim changed.
 
 The canonical isolated `--list` collection found all 240 main-suite identities
@@ -438,3 +451,28 @@ The current 293-identity standalone fingerprint is
 The prior 293-identity and original 278-identity hashes remain historical
 integrity anchors, not current-set fingerprints. The focused Warehouse runtime
 case passed 1/1 separately; the required full Chromium run remains pending.
+
+## Wake/Resume inventory reconciliation — 2026-11-02
+
+The isolated Playwright listing found 241 unique default Chromium identities
+and no missing identities. The only difference from the 240-case contract was
+the already-selected `screen-off-wake.spec.ts` case “wake recovery queues one
+Resume tap and applies it to the same run.” The task-level reliability scope
+includes the reported wake/Resume failure, so the exact-set contract now tracks
+this existing case. The listing executed no browser cases; the integrated
+runtime suite remains pending. No selection or runtime policy changed.
+
+The same case is selected by the separate diagnostic configuration. Its
+discovery found 294 unique identities, one above the previous 293-case
+fingerprint. Removing only this Resume identity reproduced the prior 293-case
+fingerprint exactly:
+`96ac8d7014625decfd50420deb057f0c288edb4204fee4d83a792c0e557b0391`.
+Following the owner's approval to review valid additions, the diagnostic
+inventory now records this in-scope case as its sixteenth reviewed addition.
+The current 294-identity fingerprint is
+`f98cda9068cc6fc61e348527e3f3a995cfd7769826008cc714057fa1acfd3dc2`.
+Removing this case and restoring the previously reviewed workbook and
+Warehouse identities reproduces the prior 293-case fingerprint
+`d52aaef6fcc989589caab0d1176b0540760c13c6e091fdd61e57f897bbfb83fe`;
+removing the reviewed additions still reproduces the original 278-case
+fingerprint. These are list/identity checks only, not browser execution.
