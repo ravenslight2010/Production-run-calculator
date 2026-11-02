@@ -54,7 +54,7 @@ export function hasUnsavedFormValueChanges(
 export function freshDayState(): DayState {
   return {
     runs: [{ id: genId(), brand: "", flavor: "", seeded: true }],
-    currentIndex: 0, date: todayStr(), substitutions: [], substitutionLog: [], stagedItems: {},
+    currentIndex: 0, date: todayStr(), substitutions: [], substitutionLog: [], stagedItems: {}, stagedItemVersions: {},
     prepPhase: { prepStartedAt: null, prepBatchesDough: 0, prepBatchesSauce: 0, prepCarriedOver: false },
     breaks: defaultDayBreaks(),
   };
@@ -115,6 +115,12 @@ export function removeRunByIdFromDayState(
     dayState: {
       ...dayState,
       runs,
+      stagedItems: Object.fromEntries(
+        Object.entries(dayState.stagedItems ?? {}).filter(([key]) => !key.startsWith(`${id}::`)),
+      ),
+      stagedItemVersions: Object.fromEntries(
+        Object.entries(dayState.stagedItemVersions ?? {}).filter(([key]) => !key.startsWith(`${id}::`)),
+      ),
       currentIndex: removedCurrent
         ? Math.max(0, index - 1)
         : Math.max(0, runs.findIndex((run) => run.id === currentId)),

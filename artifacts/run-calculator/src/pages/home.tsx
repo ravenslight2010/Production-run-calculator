@@ -678,7 +678,12 @@ import {
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
 import { captureOperationalIdentityFence, capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, getOperationalDeviceId, operationalIntentBlocksLifecycle, operationalIntentBlocksLifecycleAdoption, queueOperationalIntent, reportRejectedManualSectionErrors, retainOperationalSnapshotReview, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
-import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
+import {
+  MANUAL_SECTION_FIELDS,
+  isStagedItemVersion,
+  manualSectionForField,
+  mergeStagedItemsFromPeer,
+} from "@workspace/sync-contract";
 import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
@@ -4629,6 +4634,21 @@ export default function Home() {
     setSyncDiagnostics((current) => [...current, event].slice(-20));
     if (kind === "ack") setLastAcknowledgedAt(event.at);
   };
+  const reportStagedItemConflicts = (response: Response) => {
+    const count = Number(response.headers.get("X-Sync-Staging-Conflicts"));
+    if (!Number.isSafeInteger(count) || count <= 0) return;
+    const boundedCount = Math.min(count, 500);
+    recordSyncEvent(
+      "failure",
+      `${boundedCount} Warehouse staging change${boundedCount === 1 ? "" : "s"} conflicted; the shared status was kept.`,
+      "staging-conflict",
+      currentRunId,
+    );
+    toast({
+      title: "Warehouse status changed on another device",
+      description: "The newer shared checkbox status was kept. Review it before changing that row again.",
+    });
+  };
 
   const exportSyncDiagnostics = () => {
     // The app can remain mounted while the local calendar date changes. Read
@@ -8346,25 +8366,17 @@ export default function Home() {
           const newIndex = foundIdx >= 0
             ? foundIdx
             : Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
-          // A true daily reset bumps resetAt strictly forward: adopt the remote
-          // day's overlays wholesale so the reset's empty maps clear ours. When
-          // resetAt is EQUAL (normal same-day concurrent editing across devices)
-          // we additively merge the staging checklist and substitution overlay
-          // per key/id instead of clobbering, so two devices each ticking a
-          // different item (or adding a different substitution) both survive —
-          // the same convergence model as the master-data list unions. An
-          // un-check / removal won't cross devices (the accepted union tradeoff,
-          // and these reset daily anyway).
-          const remoteStaged = payload.dayState.stagedItems ?? {};
-          const mergedStaged: Record<string, boolean> = isReset
-            ? remoteStaged
-            : (() => {
-                const out: Record<string, boolean> = { ...(prev.stagedItems ?? {}) };
-                for (const [k, val] of Object.entries(remoteStaged)) {
-                  out[k] = !!out[k] || !!val;
-                }
-                return out;
-              })();
+          // Staging is a per-row desired-state register. Versioned false values
+          // are explicit unchecks, and stale branches lose rather than being
+          // OR-merged back into a checked state. A reset adopts the remote maps
+          // wholesale so it clears all prior-day staging decisions.
+          const mergedStaging = isReset
+            ? {
+                stagedItems: payload.dayState.stagedItems ?? {},
+                stagedItemVersions: payload.dayState.stagedItemVersions ?? {},
+                conflictCount: 0,
+              }
+            : mergeStagedItemsFromPeer(prev, payload.dayState);
           const unionById = <T extends { id: string }>(a: readonly T[], b: readonly T[]): T[] => {
             const byId = new Map<string, T>();
             for (const x of a) byId.set(x.id, x);
@@ -8410,7 +8422,8 @@ export default function Home() {
             resetAt: remoteResetAt > 0 ? remoteResetAt : prev.resetAt,
             substitutions: mergedSubs,
             substitutionLog: mergedSubLog,
-            stagedItems: mergedStaged,
+            stagedItems: mergedStaging.stagedItems,
+            stagedItemVersions: mergedStaging.stagedItemVersions,
             prepPhase: mergedPrepPhase,
             breaks: mergedBreaks,
             ...(mergedBreaksUpdatedAt ? { breaksUpdatedAt: mergedBreaksUpdatedAt } : {}),
@@ -8452,6 +8465,7 @@ export default function Home() {
             substitutions: payload.dayState.substitutions ?? [],
             substitutionLog: payload.dayState.substitutionLog ?? [],
             stagedItems: payload.dayState.stagedItems ?? {},
+            stagedItemVersions: payload.dayState.stagedItemVersions ?? {},
             prepPhase: ((payload.dayState as Record<string, unknown>).prepPhase as PrepPhase | undefined) ?? FRESH_PREP_PHASE,
           };
           formHandoffRef.current = false;
@@ -10117,6 +10131,7 @@ export default function Home() {
       );
       recoverableConflictResponse = canonicalResult.recoverableConflict;
       if (!deliveryIsCurrent()) return;
+      reportStagedItemConflicts(res);
       if (!res.ok && !canonicalResult.recoverableConflict) {
         throw new Error(`Sync write failed: ${res.status}`);
       }
@@ -10127,10 +10142,8 @@ export default function Home() {
         | { partialFallback?: boolean; operationalUpdateRequired?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
         | null
         | undefined;
-      let replayedAfterPartialFallback = false;
       let recoveredWithoutReplay = false;
       if (shouldReplaySyncWrite(partialFallbackBody, checkOperationalSnapshotRecovery(work, partialFallbackBody))) {
-        replayedAfterPartialFallback = true;
         if (!partialFallbackBody?.data) {
           work.recoveryBlocked = true;
           throw new Error("Stale sync response omitted its canonical data");
@@ -10162,6 +10175,7 @@ export default function Home() {
           );
           recoverableConflictResponse = canonicalResult.recoverableConflict;
           if (!deliveryIsCurrent()) return;
+          reportStagedItemConflicts(res);
           if (!res.ok && !canonicalResult.recoverableConflict) {
             throw new Error(`Sync recovery write failed: ${res.status}`);
           }
@@ -10214,7 +10228,10 @@ export default function Home() {
               freshSig,
               syncPushGenerationRef.current,
               false,
-              queued,
+              {
+                ...queued,
+                baseSnapshot: adoptedCanonicalSnapshotRef.current ?? undefined,
+              },
             );
           } else {
             recordSyncEvent(
@@ -10304,34 +10321,26 @@ export default function Home() {
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
       if (queued) {
-        // A missing-row fallback may have queued several partial payloads
-        // before its complete seed finished. Those payloads all target the
-        // pre-seed snapshot and can recreate the fallback loop. Rebuild from
-        // the current ref against the newly adopted snapshot instead, and
-        // keep lifecycle actions behind this replacement write.
-        if (replayedAfterPartialFallback) {
-          const freshPayload = buildSyncPayload(dayStateRef.current);
-          const freshSig = JSON.stringify(freshPayload);
-          if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
-            pushAcknowledgedRef.current = false;
-            doFetch(
-              freshPayload,
-              3,
-              freshSig,
-              syncPushGenerationRef.current,
-              false,
-              queued,
-            );
-          } else {
-            recordSyncEvent(
-              "merge",
-              "Queued change already matches the confirmed server state; no duplicate write was sent",
-              "duplicate-suppressed",
-              currentRunId,
-            );
-          }
-        } else if (shouldSendDistinctQueuedSyncWork(queued.sig, work.sig)) {
-          doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        // A queued payload was built against the snapshot that existed when it
+        // entered the queue. Its predecessor may have advanced the canonical
+        // snapshot before this write starts, so never send that stale envelope
+        // verbatim. Rebuild from the now-adopted local state and bind recovery
+        // to the same canonical baseline that the new payload names.
+        const freshPayload = buildSyncPayload(dayStateRef.current);
+        const freshSig = JSON.stringify(freshPayload);
+        if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
+          pushAcknowledgedRef.current = false;
+          doFetch(
+            freshPayload,
+            3,
+            freshSig,
+            syncPushGenerationRef.current,
+            false,
+            {
+              ...queued,
+              baseSnapshot: adoptedCanonicalSnapshotRef.current ?? undefined,
+            },
+          );
         } else {
           recordSyncEvent(
             "merge",
@@ -10515,7 +10524,7 @@ export default function Home() {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       baseSnapshotId: syncSnapshotIdRef.current,
-      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks), breaksUpdatedAt: ds.breaksUpdatedAt },
+      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, stagedItemVersions: ds.stagedItemVersions ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks), breaksUpdatedAt: ds.breaksUpdatedAt },
       runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,
       ...(() => {
@@ -12069,17 +12078,46 @@ export default function Home() {
 
   // ── Warehouse staging checklist (day-state overlay) ────────────────────────
   // Warehouse staff tick off per-run need rows as they pull/stage them. Like
-  // substitutions, these live in the synced day-state (NOT master data) and clear
-  // at the daily reset. Only checked rows are stored (true); unchecking deletes
-  // the key. Keyed by `${runId}::${label}__${unit}` so it lines up across web +
-  // mobile and survives row re-renders.
+  // substitutions, these live in synced day-state (NOT master data) and clear
+  // at the daily reset. Each click records an explicit desired state and a
+  // revision based on the last row version this device adopted.
   const toggleStagedItem = useEvent((runId: string, rowKey: string) => {
     const key = `${runId}::${rowKey}`;
-    const prev = dayStateRef.current.stagedItems ?? {};
-    const next = { ...prev };
-    if (next[key]) delete next[key];
-    else next[key] = true;
-    const newDs = { ...dayStateRef.current, stagedItems: next };
+    const currentDay = dayStateRef.current;
+    const currentItems = currentDay.stagedItems ?? {};
+    const currentVersions = currentDay.stagedItemVersions ?? {};
+    const currentVersion = isStagedItemVersion(currentVersions[key])
+      ? currentVersions[key]
+      : undefined;
+    const adoptedVersion = adoptedCanonicalSnapshotRef.current?.dayState.stagedItemVersions?.[key];
+    const localVersionIsAdopted = !!currentVersion
+      && isStagedItemVersion(adoptedVersion)
+      && adoptedVersion.operationId === currentVersion.operationId;
+    const baseRevision = currentVersion?.revision ?? 0;
+    const checked = !currentItems[key];
+    const operationId = genId();
+    const newDs = {
+      ...currentDay,
+      stagedItems: { ...currentItems, [key]: checked },
+      stagedItemVersions: {
+        ...currentVersions,
+        [key]: {
+          baseRevision,
+          revision: baseRevision + 1,
+          baseOperationId: currentVersion?.operationId ?? "",
+          rootRevision: currentVersion
+            ? localVersionIsAdopted ? currentVersion.revision : currentVersion.rootRevision
+            : 0,
+          rootOperationId: currentVersion
+            ? localVersionIsAdopted ? currentVersion.operationId : currentVersion.rootOperationId
+            : "",
+          chainId: currentVersion && !localVersionIsAdopted
+            ? currentVersion.chainId
+            : operationId,
+          operationId,
+        },
+      },
+    };
     // Do not let the acknowledged old snapshot suppress this edit, or let a
     // second click before the render build its overlay from the previous map.
     dayStateRef.current = newDs;
@@ -12132,7 +12170,17 @@ export default function Home() {
     // resurrect it from a peer that still has it.
     tombstoneDeleted("runs", run.id);
     const newIndex = Math.max(0, idx - 1);
-    const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+    const newDs = {
+      ...dayState,
+      runs: newRuns,
+      currentIndex: newIndex,
+      stagedItems: Object.fromEntries(
+        Object.entries(dayState.stagedItems ?? {}).filter(([key]) => !key.startsWith(`${run.id}::`)),
+      ),
+      stagedItemVersions: Object.fromEntries(
+        Object.entries(dayState.stagedItemVersions ?? {}).filter(([key]) => !key.startsWith(`${run.id}::`)),
+      ),
+    };
     setDayState(newDs);
     saveDayState(newDs);
     const removedVals = loadRunValues(newRuns[newIndex].id);
@@ -12174,7 +12222,22 @@ export default function Home() {
     if (newRuns.length === 0) return; // never leave the day with 0 runs
     blankIds.forEach((id) => tombstoneDeleted("runs", id));
     const newIndex = Math.max(0, newRuns.findIndex((r) => r.id === curId));
-    const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+    const removedBlankIds = [...blankIds];
+    const newDs = {
+      ...dayState,
+      runs: newRuns,
+      currentIndex: newIndex,
+      stagedItems: Object.fromEntries(
+        Object.entries(dayState.stagedItems ?? {}).filter(
+          ([key]) => !removedBlankIds.some((id) => key.startsWith(`${id}::`)),
+        ),
+      ),
+      stagedItemVersions: Object.fromEntries(
+        Object.entries(dayState.stagedItemVersions ?? {}).filter(
+          ([key]) => !removedBlankIds.some((id) => key.startsWith(`${id}::`)),
+        ),
+      ),
+    };
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);

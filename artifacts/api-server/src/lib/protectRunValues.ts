@@ -2,6 +2,10 @@ import {
   FACTORY_SPEED_ADJUSTMENT_BASELINE,
   FACTORY_TIMING_DEFAULTS,
 } from "@workspace/factory-constants";
+import {
+  isStagedItemVersion,
+  mergeStagedItemsOnServer,
+} from "@workspace/sync-contract";
 import { fenceOperationalSnapshot } from "./operationalSnapshotAuthority";
 
 // Per-run + run-list protective merge AND payload sanitization for the shared
@@ -679,6 +683,22 @@ export function protectRunValues(
   // already sanitized by the route, but still canonicalize the legacy
   // runValues pair from packagingProgress before storing/returning it.
   if (!isPlainObject(existing)) {
+    const incomingDay = isPlainObject(incoming.dayState) ? incoming.dayState : undefined;
+    if (incomingDay) {
+      // Keep the staging section's shape stable from the very first accepted
+      // snapshot. Otherwise the first retry adds empty maps, changes the
+      // snapshot ID, and needlessly advances the canonical revision.
+      incoming = {
+        ...incoming,
+        dayState: {
+          ...incomingDay,
+          stagedItems: isPlainObject(incomingDay.stagedItems) ? incomingDay.stagedItems : {},
+          stagedItemVersions: isPlainObject(incomingDay.stagedItemVersions)
+            ? incomingDay.stagedItemVersions
+            : {},
+        },
+      };
+    }
     const progress = mergePackagingProgress(
       incoming.packagingProgress,
       undefined,
@@ -1008,10 +1028,15 @@ export function protectRunValues(
       prepCarriedOver: !!(i.prepCarriedOver || e.prepCarriedOver),
     };
   })();
+  const stagedItems = mergeStagedItemsOnServer(inDay ?? {}, exDay ?? {}, {
+    acceptCurrentBaseSnapshot: options.acceptCurrentBaseRunValueEdits,
+  });
   const outDay = base
     ? {
       ...base,
       runs: mergedRuns,
+      stagedItems: stagedItems.stagedItems,
+      stagedItemVersions: stagedItems.stagedItemVersions,
       ...(mergedPrepPhase ? { prepPhase: mergedPrepPhase } : {}),
       // Live payloads may omit this cold section.  Never let that omission
       // erase an operator's configured break schedule.
@@ -1385,6 +1410,7 @@ const KNOWN_DAYSTATE_KEYS = new Set<string>([
   "substitutions",
   "substitutionLog",
   "stagedItems",
+  "stagedItemVersions",
   "prepPhase",
   "breaks",
   "breaksUpdatedAt",
@@ -1496,6 +1522,31 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
             // untrusted payload to win the schedule register.
             if (stamp > 0 && stamp <= Date.now() + MAX_BREAK_STAMP_SKEW_MS) {
               ds[dsk] = Math.min(stamp, Date.now() + MAX_BREAK_STAMP_SKEW_MS);
+            }
+          } else if (dsk === "stagedItems") {
+            if (isPlainObject(val[dsk])) {
+              const items: Record<string, boolean> = {};
+              for (const [rowKey, checked] of Object.entries(val[dsk] as Record<string, unknown>)) {
+                if (!rowKey || rowKey.length > 512 || typeof checked !== "boolean") continue;
+                items[rowKey] = checked;
+                if (Object.keys(items).length >= MAX_LIST_ENTRIES) break;
+              }
+              ds[dsk] = items;
+            }
+          } else if (dsk === "stagedItemVersions") {
+            if (isPlainObject(val[dsk])) {
+              const rowItems = isPlainObject(val.stagedItems) ? val.stagedItems : {};
+              const versions: Record<string, unknown> = {};
+              for (const [rowKey, revision] of Object.entries(val[dsk] as Record<string, unknown>)) {
+                if (
+                  rowKey.length > 512
+                  || typeof rowItems[rowKey] !== "boolean"
+                  || !isStagedItemVersion(revision)
+                ) continue;
+                versions[rowKey] = revision;
+                if (Object.keys(versions).length >= MAX_LIST_ENTRIES) break;
+              }
+              ds[dsk] = versions;
             }
           } else {
             ds[dsk] = val[dsk];
@@ -1784,6 +1835,12 @@ export function capMergedResult(merged: unknown): unknown {
     for (const k of DROPPABLE_DAYSTATE_KEYS) {
       if (!overBudget()) break;
       // Need to re-stringify with each drop; reassign out.dayState so overBudget() sees it.
+      if (k === "stagedItems") {
+        delete ds.stagedItems;
+        delete ds.stagedItemVersions;
+        out.dayState = ds;
+        continue;
+      }
       delete ds[k];
       out.dayState = ds;
     }

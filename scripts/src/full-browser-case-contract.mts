@@ -226,7 +226,7 @@ export const FULL_BROWSER_EXPECTED_CASE_IDENTITIES: readonly string[] = [
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: explains restricted inventory actions to non-managers",
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: keeps capped offsite transfer guidance readable on a phone",
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: keeps capped offsite transfer guidance readable on a tablet",
-  "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: operator staging check persists for a canonical per-run material across reload",
+  "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: operator staging check and uncheck converge across devices and reload",
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: shows capped offsite transfer guidance and hides it when onsite stock covers demand",
   "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: shows the Warehouse switchover handoff through real tab navigation",
   // Owner-approved additions, 2026-11-01: retain every prior identity.

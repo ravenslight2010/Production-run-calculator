@@ -1,6 +1,7 @@
 import * as z from "zod";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 import type { OperationalProjection } from "@workspace/live-calc";
+import type { StagedItemRevision } from "@workspace/sync-contract";
 import {
   FACTORY_SPEED_ADJUSTMENT_BASELINE,
   FACTORY_TIMING_DEFAULTS,
@@ -528,10 +529,12 @@ export type DayState = {
   // handoffs and end-of-day review. Synced alongside substitutions; cleared at
   // the daily reset. Never feeds the calc — purely an audit log.
   substitutionLog?: SubstitutionLogEntry[];
-  // Warehouse staging checklist: which per-run need rows have been pulled/staged.
-  // Keyed by `${runId}::${label}__${unit}` (only checked items stored as true).
+  // Warehouse staging desired state, keyed by `${runId}::${label}__${unit}`.
+  // False entries are explicit cross-device unchecks; the companion per-row
+  // revision map prevents stale devices from restoring an older check.
   // Lives in synced day-state, NOT master data; cleared at the daily reset.
   stagedItems?: Record<string, boolean>;
+  stagedItemVersions?: Record<string, StagedItemRevision>;
   // Shift prep phase (before production start). Synced so all tablets track
   // the same prep progress. Reset with the daily reset.
   prepPhase?: PrepPhase;
@@ -555,7 +558,7 @@ export type SyncPayload = {
   /** Server-owned wake recovery metadata; transported beside the persisted snapshot. */
   resetEpoch?: number;
   rollover?: boolean;
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase; breaks?: DayBreaks; breaksUpdatedAt?: number };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; stagedItemVersions?: Record<string, StagedItemRevision>; prepPhase?: PrepPhase; breaks?: DayBreaks; breaksUpdatedAt?: number };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a
   // stale remote that would clobber a fresher local edit (the "click away and my

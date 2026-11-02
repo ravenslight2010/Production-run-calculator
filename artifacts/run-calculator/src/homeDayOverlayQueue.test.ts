@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import ts from "@workspace/typescript-api-v6";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isStagedItemVersion } from "@workspace/sync-contract";
 
 // Execute the production handlers and queue, not a copied implementation.
 // React's eventual ref effect is deliberately absent: an event must publish
@@ -88,8 +89,10 @@ function harness() {
   const setActiveSubstitutions = vi.fn();
   const doFetch = vi.fn();
   const pending = vi.fn();
+  let operationSequence = 0;
   const bindings: Record<string, unknown> = {
     dayStateRef,
+    adoptedCanonicalSnapshotRef: { current: null },
     setDayState,
     saveDayState,
     setActiveSubstitutions,
@@ -103,6 +106,8 @@ function harness() {
     syncApplyPushPendingRef: { current: false },
     formHandoffRef: { current: false },
     requestBaselinePush: () => true,
+    isStagedItemVersion,
+    genId: () => `stage-operation-${++operationSequence}`,
     // Payload construction is a separate boundary; preserve the complete day
     // here so the real queue compares and dispatches the selected snapshot.
     buildSyncPayload: (day: typeof initial) => structuredClone(day),
@@ -392,15 +397,24 @@ describe("Run-order edits and order-only Undo use the current snapshot", () => {
   );
 });
 
-  it("a rapid local check/uncheck cancels a genuine net-zero change", () => {
+  it("publishes an explicit unchecked tombstone after a rapid local check/uncheck", () => {
     const h = harness();
     h.toggle("run-a", "Material__lbs");
     h.toggle("run-a", "Material__lbs");
     vi.runAllTimers();
-    expect(h.setDayState.mock.lastCall?.[0].stagedItems).toEqual(h.initial.stagedItems);
-    expect(h.dayStateRef.current.stagedItems).toEqual(h.initial.stagedItems);
-    expect(h.doFetch).not.toHaveBeenCalled();
-    // This proves local queue behavior, not server-side union/uncheck policy.
+    expect(h.setDayState.mock.lastCall?.[0].stagedItems).toEqual({
+      ...h.initial.stagedItems,
+      "run-a::Material__lbs": false,
+    });
+    expect(h.dayStateRef.current.stagedItemVersions["run-a::Material__lbs"]).toMatchObject({
+      revision: 2,
+      baseRevision: 1,
+      rootRevision: 0,
+      chainId: "stage-operation-1",
+      operationId: "stage-operation-2",
+    });
+    expect(h.doFetch).toHaveBeenCalledTimes(1);
+    expect(h.doFetch.mock.calls[0][0].stagedItems["run-a::Material__lbs"]).toBe(false);
   });
 
   it("dispatches a substitution and its activity evidence without another edit", () => {

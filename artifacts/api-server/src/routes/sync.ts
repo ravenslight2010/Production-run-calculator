@@ -57,6 +57,7 @@ import {
   swapDateScopedScheduleState,
 } from "@workspace/schedule-move";
 import { protectRunValues, preserveAndInvalidateAutoTrackCoordination, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
+import { mergeStagedItemsOnServer } from "@workspace/sync-contract";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
@@ -99,6 +100,7 @@ import {
   type SyncPutMode,
 } from "../lib/capacityTelemetry";
 import {
+  classifyBackgroundFailure,
   createBackgroundOperationBackoff,
   persistAutoTrackDeferredDiagnostic,
   recordAutoTrackDeferredRetries,
@@ -243,6 +245,7 @@ type ProtectedUpsertResult = {
   data: unknown;
   wrote: boolean;
   inventoryChanged?: boolean;
+  stagedItemConflictCount?: number;
   partialFallback: boolean;
   retries: number;
   canonicalRevision: number;
@@ -1647,6 +1650,23 @@ async function upsertProtected(
         // must never erase other operators' scheduled or live runs.
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
         const operationalRejected = hasOperationalSnapshotMutation(serverOwnedPayload, canonicalExisting);
+        const incomingDay = isSyncRecord(serverOwnedPayload)
+          && isSyncRecord(serverOwnedPayload.dayState)
+          ? serverOwnedPayload.dayState
+          : {};
+        const existingDay = isSyncRecord(canonicalExisting)
+          && isSyncRecord(canonicalExisting.dayState)
+          ? canonicalExisting.dayState
+          : {};
+        const resetMarker = (value: unknown) =>
+          typeof value === "number" && Number.isFinite(value) ? value : 0;
+        const replacesFutureDay = date > clientTodayDate
+          && resetMarker(incomingDay.resetAt) > resetMarker(existingDay.resetAt);
+        const stagedItemConflictCount = replacesFutureDay
+          ? 0
+          : mergeStagedItemsOnServer(incomingDay, existingDay, {
+              acceptCurrentBaseSnapshot: currentBaseSnapshotValidated,
+            }).conflictCount;
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
           // The exact locked snapshot is the causal ordering signal for
@@ -1712,6 +1732,7 @@ async function upsertProtected(
           // behavior remain intact; canonicalRevision advances only on change.
           wrote: true,
           inventoryChanged,
+          stagedItemConflictCount,
           operationalRejected,
           partialFallback: false,
           retries: attempt,
@@ -1900,6 +1921,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     });
     sendLegacySyncRecovery(res, result);
     return;
+  }
+  if ((result.stagedItemConflictCount ?? 0) > 0) {
+    res.setHeader("X-Sync-Staging-Conflicts", String(Math.min(result.stagedItemConflictCount!, 500)));
   }
   const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
@@ -3132,14 +3156,6 @@ router.post(
         }
         const destinationRuns = rawDestinationRuns as Array<Record<string, unknown> & { id: string }>;
         const moved = moveEntries(sourceRuns, destinationRuns, movingIds, () => randomUUID());
-        if (moved.idMap.some(({ from, to }) => from !== to)) {
-          if (createdDestination) {
-            await tx.delete(dailySyncTable).where(and(
-              eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
-            ));
-          }
-          return { kind: "run-id-collision" as const };
-        }
 
         const relocateMap = (
           left: Record<string, unknown>,
@@ -3208,18 +3224,34 @@ router.post(
         const destinationStaged = isSyncRecord(destinationDay.stagedItems)
           ? destinationDay.stagedItems as Record<string, unknown>
           : {};
+        const sourceStagedVersions = isSyncRecord(sourceDay.stagedItemVersions)
+          ? sourceDay.stagedItemVersions as Record<string, unknown>
+          : {};
+        const destinationStagedVersions = isSyncRecord(destinationDay.stagedItemVersions)
+          ? destinationDay.stagedItemVersions as Record<string, unknown>
+          : {};
         const sourceStagedNext = { ...sourceStaged };
         const destinationStagedNext = { ...destinationStaged };
-        for (const [key, value] of Object.entries(sourceStaged)) {
-          if (movingIds.some((id) => key.startsWith(`${id}::`))) {
+        const sourceStagedVersionsNext = { ...sourceStagedVersions };
+        const destinationStagedVersionsNext = { ...destinationStagedVersions };
+        for (const { from, to } of moved.idMap) {
+          const sourcePrefix = `${from}::`;
+          for (const [key, value] of Object.entries(sourceStaged)) {
+            if (!key.startsWith(sourcePrefix)) continue;
             delete sourceStagedNext[key];
-            destinationStagedNext[key] = value;
+            destinationStagedNext[`${to}::${key.slice(sourcePrefix.length)}`] = value;
+          }
+          for (const [key, value] of Object.entries(sourceStagedVersions)) {
+            if (!key.startsWith(sourcePrefix)) continue;
+            delete sourceStagedVersionsNext[key];
+            destinationStagedVersionsNext[`${to}::${key.slice(sourcePrefix.length)}`] = value;
           }
         }
         const sourceDayNext = {
           ...sourceDay,
           runs: moved.source,
           stagedItems: sourceStagedNext,
+          stagedItemVersions: sourceStagedVersionsNext,
         };
         const destinationDayBase = destinationRuns.length > 0 || !createdDestination
           ? destinationDay
@@ -3230,6 +3262,7 @@ router.post(
           runs: moved.target,
           date: destinationDate,
           stagedItems: destinationStagedNext,
+          stagedItemVersions: destinationStagedVersionsNext,
         };
 
         const sourceRemoved = moved.source.length === 0;
@@ -3286,8 +3319,6 @@ router.post(
         res.status(409).json({ error: "One or more selected runs are no longer on the source day", code: "SCHEDULE_RUN_SELECTION_CHANGED" });
       } else if (result.kind === "started-run") {
         res.status(409).json({ error: "A run that has started cannot be moved", code: "SCHEDULE_RUN_ALREADY_STARTED" });
-      } else if (result.kind === "run-id-collision") {
-        res.status(409).json({ error: "A run ID already exists on the destination date", code: "SCHEDULE_RUN_ID_COLLISION" });
       } else {
         res.json({
           moved: true,
@@ -3634,6 +3665,9 @@ router.put(
     sendLegacySyncRecovery(res, result);
     return;
   }
+  if ((result.stagedItemConflictCount ?? 0) > 0) {
+    res.setHeader("X-Sync-Staging-Conflicts", String(Math.min(result.stagedItemConflictCount!, 500)));
+  }
   const merged = result.data;
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
@@ -3902,6 +3936,7 @@ export async function runAutoTrackServerTicks(opts: {
       passComplete = false;
       continue;
     }
+    let failureStage: "date-transaction" | "peer-broadcast" = "date-transaction";
     try {
       // A transaction retry must keep the same event identity. If the database
       // committed but its reply was lost, the ledger then fences the rebuilt
@@ -4081,11 +4116,18 @@ export async function runAutoTrackServerTicks(opts: {
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
       if (result.accepted) {
+        failureStage = "peer-broadcast";
         await broadcast(result.data, "server:tick", scope, row.date, result);
       }
     } catch (err) {
       backoff.recordFailure(nowMs);
-      logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
+      logger.error({
+        err,
+        event: "server_auto_track_tick",
+        date: row.date,
+        failureStage,
+        failureReason: classifyBackgroundFailure(err, { assumeDatabase: failureStage === "date-transaction" }),
+      }, "Server auto-track tick failed");
       outcomes.error = (outcomes.error ?? 0) + 1;
       passComplete = false;
     }
@@ -4128,7 +4170,12 @@ export function startAutoTrackServerTicks(): NodeJS.Timeout {
     if (running) return;
     running = true;
     void runAutoTrackServerTicks().catch((err) => {
-      logger.error({ err, event: "server_auto_track_tick" }, "Server auto-track tick pass failed");
+      logger.error({
+        err,
+        event: "server_auto_track_tick",
+        failureStage: "tick-pass",
+        failureReason: classifyBackgroundFailure(err, { assumeDatabase: true }),
+      }, "Server auto-track tick pass failed");
     }).finally(() => { running = false; });
   }, intervalMs);
   timer.unref();

@@ -83,8 +83,9 @@ and disposition reconciliation are resolved.
 The task register now assigns every one of the **43 archived suggestions**
 exactly once to a current disposition/evidence group, retaining all **98**
 original records and their review depth. A native JSON/set/link check passed.
-The 55 merged records remain a distinct outcome-reconciliation gap rather than
-being relabeled complete from their MERGED metadata.
+Of the **55 merged records**, **43** still have metadata-only review and need
+outcome reconciliation; the other **12** have plan-content review but no
+completion certificate. None is treated as verified solely from MERGED status.
 
 ### Supported production observations — access restored, not causal proof
 
@@ -863,6 +864,7 @@ data were used in the isolated API tests.
 | Dough speed-change/wake fixture | CLOCK-DOMAIN ASSERTION REPAIR; RUNTIME RECHECK OPEN | The failed trace's simulated tick projected 8 trays about 159 seconds ahead of wall time; both subsequent wake GETs and the form showed 9. The test now binds adoption to that received wake projection and separately requires the simulated consumption interval to reduce batch stock. Exact one-case collection passed; this is not a browser pass or a production counter-formula repair. |
 | Role/Gold API integration rerun | FOCUSED PASS | Role/import-operations rerun 268/268 and API typecheck passed. The later five-file run passed 291/292 before the final route inventory fix; that failure is preserved. |
 | New active run hides eligible ended-run drain | REPAIRED; FOCUSED PASS | Explicit run identity prevents the newer active lifecycle from stealing the bounded case-only drain. Final server-claim/registration rerun: 50/50. No Sauce, applicator, or Dough cadence formula changed. |
+| Two-account live-authority browser journey | TEST BASELINE/DRAIN FIXTURES REPAIRED; DESKTOP PASS; MATRIX PENDING | The initial Dough edit returned a safe 409 `section_changed` while both clients were tracking. The visible and pre-click canonical tray counts were both 40; the mismatching full-section field was not captured, so this is not classified as a product defect. The test now waits for an acknowledged Dough pause and confirms tray/batch parity on both clients before expecting acceptance; its later stale-409 check remains. The next attempt exposed an invalid drain fixture (`freezerTime=0`), so its expected panel could never be eligible. Setting the synthetic drain window to one minute made the corrected Chromium desktop journey pass 1/1 (36.8 s). Remaining viewport variants and the final full suite are still required; no app runtime code changed. |
 | Missing protected Gold read inventory | REPAIRED; FOCUSED PASS | Approvals/retention use either manage-staff or manage-qc; cleanup uses manage-staff. All remain scoped and retain their existing role middleware. The mounted-router registration test passes. |
 | Full API attempt | HISTORICAL FAILURE; CURRENT DISJOINT PARTITIONS PASS | The earlier 2,483-pass/16-failure attempt remains preserved. Current disposable-cluster unit and integration partitions passed 2,507 tests across 193 files, with the existing opt-in concurrency-trial skip reported separately. This is not one timed full-suite run; unchanged passing convergence evidence remains separate. |
 | Current same-day published-runtime signals | CONTRIBUTING SYMPTOMS OBSERVED; ROOT CAUSE OPEN | Sanitized ten-minute serving-log rollup is appended to `reliability-closure-production-window.md`. Pool pressure, outbox timeouts and long queue snapshots occurred together; initiating workload, database execution time and sync-intent outcome remain unresolved. No capacity or retry setting changed. |
@@ -1952,3 +1954,42 @@ toggle; an older project note describes whole-map replacement. The intended
 cross-device uncheck contract remains unclear, so no Warehouse runtime behavior
 has changed pending the owner's decision. A new 240-case rerun is being
 recorded separately; the earlier full-run result remains FAIL.
+
+### 2026-11-02 — revision-bound production connection-pressure window
+
+A read-only SRE review scoped logs and aggregate telemetry to serving build
+`42763954-0c35-47c4-8b4b-6ea38c26deb1` (successful build created 2026-10-30
+15:38 UTC). No deployment occurred during the sampled window. Structured
+`INFO`/`WARN` events—not `ERROR` severity—showed background-job dependency
+connection failures and sync-outbox scope-list database-connection retries.
+The adjacent ~61-second windows had 39 acquisition errors before, 44 during,
+6 immediately after, and 18 in the next window. Acquisition p95/p99 were
+5.4s/9.4s before, 6.5s/9.6s during, and 0.62s/4.9s immediately after. The
+event-loop p95 was already elevated before the window and did not increase
+during it.
+
+Readiness succeeded in 245ms with database `ok` and `backgroundWorkers=warning`;
+the reported sync-outbox lag was zero. Endpoint metrics had only two successful
+readiness samples and no 4xx/5xx in the interval, with no adjacent user-route
+samples. Therefore these records support **intermittent database-connection
+acquisition pressure as a proximate mechanism** (moderate confidence), but do
+not establish an operator-facing outage or identify whether the underlying
+source is the database service, application pool, network, or runtime. No
+production setting or retry policy was changed. The best remaining
+measurement—time-aligned database-side session/connection-failure metrics at
+one-minute resolution—is not available in this capture; production impact and
+root cause remain open.
+
+An incremental read-only review confirmed the same serving build through
+13:50–13:52 UTC. That window added 17 acquisition errors in about 60 seconds
+(p95 4.1s, p99 6.2s, max 7.6s; pool total reached 10; wait p99 13), acquisition
+timeouts in scheduled-evaluation status and outbox scope-list work, and
+6.3–6.7s post-checkout durations for other database-path operations. Readiness
+again succeeded (109ms; database `ok`, `backgroundWorkers=warning`); sync-outbox
+lag remained zero and its latest drain succeeded. This raises confidence to
+moderate-high in recurring database-path pressure, but does not separate
+database-service, application-pool, and runtime causes or prove user-facing
+impact. No new build was published in these windows; a deployment regression
+is not supported by the sampled timeline. The next useful evidence remains
+time-aligned database-side session, connection-failure, wait, and query/lock
+latency telemetry.

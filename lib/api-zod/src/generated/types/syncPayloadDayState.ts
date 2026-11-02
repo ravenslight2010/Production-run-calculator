@@ -5,5 +5,13 @@
  * API specification. Canonical shared-record GET responses expose X-Master-Data-Epoch. Shared-record mutations retain their original read epoch and return 409 after a guarded change if it is missing or stale. A fresh GET does not rebase an older queued intent.
  * OpenAPI spec version: 0.1.0
  */
+import type { SyncPayloadDayStateStagedItems } from './syncPayloadDayStateStagedItems';
+import type { SyncPayloadDayStateStagedItemVersions } from './syncPayloadDayStateStagedItemVersions';
 
-export type SyncPayloadDayState = { [key: string]: unknown };
+export type SyncPayloadDayState = {
+  /** Desired checked state by stable run and material-row key; false is an explicit uncheck. */
+  stagedItems?: SyncPayloadDayStateStagedItems;
+  /** Per-row revision metadata used to reject stale same-row edits. */
+  stagedItemVersions?: SyncPayloadDayStateStagedItemVersions;
+  [key: string]: unknown;
+ };

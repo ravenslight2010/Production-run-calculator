@@ -185,6 +185,110 @@ const CURRENT_BLANK = {
 };
 
 describe("protectRunValues", () => {
+  it("keeps a canonical per-row uncheck against a stale checked branch while merging another row", () => {
+    const currentVersion = {
+      revision: 2,
+      baseRevision: 1,
+      baseOperationId: "device-a:1",
+      rootRevision: 0,
+      rootOperationId: "",
+      chainId: "device-a:1",
+      operationId: "device-a:2",
+    };
+    const staleVersion = {
+      revision: 2,
+      baseRevision: 1,
+      baseOperationId: "device-b:1",
+      rootRevision: 0,
+      rootOperationId: "",
+      chainId: "device-b:1",
+      operationId: "device-b:2",
+    };
+    const incomingVersion = {
+      revision: 1,
+      baseRevision: 0,
+      baseOperationId: "",
+      rootRevision: 0,
+      rootOperationId: "",
+      chainId: "device-b:sauce",
+      operationId: "device-b:sauce",
+    };
+    const current = {
+      dayState: {
+        runs: [{ id: "r1" }],
+        stagedItems: { "r1::cheese": false },
+        stagedItemVersions: { "r1::cheese": currentVersion },
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    };
+    const incoming = {
+      dayState: {
+        runs: [{ id: "r1" }],
+        stagedItems: {
+          "r1::cheese": true,
+          "r1::sauce": true,
+        },
+        stagedItemVersions: {
+          "r1::cheese": staleVersion,
+          "r1::sauce": incomingVersion,
+        },
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    };
+
+    const output = protectRunValues(incoming, current) as {
+      dayState: {
+        stagedItems: Record<string, boolean>;
+        stagedItemVersions: Record<string, unknown>;
+      };
+    };
+
+    expect(output.dayState.stagedItems).toEqual({
+      "r1::cheese": false,
+      "r1::sauce": true,
+    });
+    expect(output.dayState.stagedItemVersions["r1::cheese"]).toEqual(currentVersion);
+    expect(output.dayState.stagedItemVersions["r1::sauce"]).toEqual(incomingVersion);
+  });
+
+  it("does not let a legacy boolean-only checked value revive a versioned uncheck", () => {
+    const current = {
+      dayState: {
+        runs: [{ id: "r1" }],
+        stagedItems: { "r1::cheese": false },
+        stagedItemVersions: {
+          "r1::cheese": {
+            revision: 2,
+            baseRevision: 1,
+            baseOperationId: "device-a:1",
+            rootRevision: 0,
+            rootOperationId: "",
+            chainId: "device-a:1",
+            operationId: "device-a:2",
+          },
+        },
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    };
+    const legacyIncoming = {
+      dayState: {
+        runs: [{ id: "r1" }],
+        stagedItems: { "r1::cheese": true },
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    };
+
+    const output = protectRunValues(legacyIncoming, current) as {
+      dayState: { stagedItems: Record<string, boolean> };
+    };
+
+    expect(output.dayState.stagedItems["r1::cheese"]).toBe(false);
+  });
+
   it.each([
     ["omitted", undefined, "stored"],
     ["stale", 1000, "stored"],

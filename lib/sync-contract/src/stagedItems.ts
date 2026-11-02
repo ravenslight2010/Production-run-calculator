@@ -1,6 +1,10 @@
 export type StagedItemRevision = {
   revision: number;
   baseRevision: number;
+  baseOperationId: string;
+  rootRevision: number;
+  rootOperationId: string;
+  chainId: string;
   operationId: string;
 };
 
@@ -24,6 +28,22 @@ export function isStagedItemVersion(value: unknown): value is StagedItemRevision
     && Number.isSafeInteger(item.baseRevision)
     && Number(item.baseRevision) >= 0
     && Number(item.revision) === Number(item.baseRevision) + 1
+    && typeof item.baseOperationId === "string"
+    && item.baseOperationId.length <= MAX_OPERATION_ID_LENGTH
+    && (item.baseOperationId === "" || /^[A-Za-z0-9:_-]+$/.test(item.baseOperationId))
+    && Number.isSafeInteger(item.rootRevision)
+    && Number(item.rootRevision) >= 0
+    && Number(item.rootRevision) <= Number(item.baseRevision)
+    && typeof item.rootOperationId === "string"
+    && item.rootOperationId.length <= MAX_OPERATION_ID_LENGTH
+    && (
+      (Number(item.rootRevision) === 0 && item.rootOperationId === "")
+      || (Number(item.rootRevision) > 0 && /^[A-Za-z0-9:_-]+$/.test(item.rootOperationId))
+    )
+    && typeof item.chainId === "string"
+    && item.chainId.length > 0
+    && item.chainId.length <= MAX_OPERATION_ID_LENGTH
+    && /^[A-Za-z0-9:_-]+$/.test(item.chainId)
     && typeof item.operationId === "string"
     && item.operationId.length > 0
     && item.operationId.length <= MAX_OPERATION_ID_LENGTH
@@ -115,36 +135,61 @@ export function mergeStagedItemsFromPeer(
 
     const local = localVersion!;
     const remote = remoteVersion!;
-    const localRevision = local.revision;
-    const remoteRevision = remote.revision;
-    let remoteWins: boolean;
-    if (local.operationId === remote.operationId && localRevision === remoteRevision) {
-      remoteWins = true;
-    } else if (
-      localRevision === remoteRevision
-      && local.baseRevision === remote.baseRevision
-    ) {
-      // Concurrent edits to one row from the same base converge deterministically.
-      remoteWins = compareOperationIds(remote.operationId, local.operationId) < 0;
-    } else if (remote.baseRevision >= localRevision) {
-      remoteWins = true;
-    } else if (local.baseRevision >= remoteRevision) {
-      remoteWins = false;
-    } else if (remoteRevision !== localRevision) {
-      // A higher revision whose base is older than the other copy is a stale
-      // branch, not a descendant. Prefer the causally current state.
-      remoteWins = remoteRevision < localRevision;
-    } else {
-      remoteWins = compareOperationIds(remote.operationId, local.operationId) < 0;
-    }
+    const sameOperation =
+      local.revision === remote.revision
+      && local.operationId === remote.operationId
+      && localItems[key] === remoteItems[key];
+    const sameBase =
+      local.baseRevision === remote.baseRevision
+      && local.baseOperationId === remote.baseOperationId
+      && local.rootRevision === remote.rootRevision
+      && local.rootOperationId === remote.rootOperationId;
+    const sameChain =
+      local.chainId === remote.chainId
+      && local.rootRevision === remote.rootRevision
+      && local.rootOperationId === remote.rootOperationId;
+    const localDescendsFromRemote =
+      local.baseRevision === remote.revision
+      && local.baseOperationId === remote.operationId;
+    const remoteDescendsFromLocal =
+      remote.baseRevision === local.revision
+      && remote.baseOperationId === local.operationId;
+    const localRootMatchesRemote =
+      local.rootRevision === remote.revision
+      && local.rootOperationId === remote.operationId;
+    const remoteRootMatchesLocal =
+      remote.rootRevision === local.revision
+      && remote.rootOperationId === local.operationId;
 
-    copyState(
-      key,
-      remoteWins ? remoteItems : localItems,
-      remoteWins ? remoteVersions : localVersions,
-      stagedItems,
-      stagedItemVersions,
-    );
+    if (sameOperation) {
+      copyState(key, remoteItems, remoteVersions, stagedItems, stagedItemVersions);
+    } else if (sameBase && local.revision === remote.revision) {
+      // Concurrent edits to one row from the same base converge deterministically.
+      const remoteWins = compareOperationIds(remote.operationId, local.operationId) < 0;
+      copyState(
+        key,
+        remoteWins ? remoteItems : localItems,
+        remoteWins ? remoteVersions : localVersions,
+        stagedItems,
+        stagedItemVersions,
+      );
+    } else if (
+      (sameChain && local.revision > remote.revision)
+      || localDescendsFromRemote
+      || localRootMatchesRemote
+    ) {
+      copyState(key, localItems, localVersions, stagedItems, stagedItemVersions);
+    } else if (
+      (sameChain && remote.revision > local.revision)
+      || remoteDescendsFromLocal
+      || remoteRootMatchesLocal
+    ) {
+      copyState(key, remoteItems, remoteVersions, stagedItems, stagedItemVersions);
+    } else {
+      // Different branches are resolved to canonical peer state rather than
+      // replaying a same-row operation whose ancestry is unknown.
+      copyState(key, remoteItems, remoteVersions, stagedItems, stagedItemVersions);
+    }
   }
 
   return { stagedItems, stagedItemVersions, conflictCount: 0 };
@@ -153,12 +198,14 @@ export function mergeStagedItemsFromPeer(
 /**
  * Merge a full sync write under the daily-row lock. Only a new operation based
  * on the stored per-row revision is accepted; retrying the same operation is
- * idempotent. Simultaneous edits from one base use a deterministic operation-id
- * tie-break, and stale operations are returned as canonical conflicts.
+ * idempotent. A full write against the current canonical snapshot may contain
+ * an offline chain only when its recorded root still matches that row.
+ * Simultaneous edits from one base use a deterministic operation-id tie-break.
  */
 export function mergeStagedItemsOnServer(
   incomingInput: StagedInputs,
   existingInput: StagedInputs,
+  options: { acceptCurrentBaseSnapshot?: boolean } = {},
 ): StagedItemSnapshot {
   const incomingItems = asBooleanMap(incomingInput.stagedItems);
   const incomingVersions = asVersionMap(incomingInput.stagedItemVersions);
@@ -180,9 +227,11 @@ export function mergeStagedItemsOnServer(
     const hasIncomingValue = Object.prototype.hasOwnProperty.call(incomingItems, key);
     const hasExistingValue = Object.prototype.hasOwnProperty.call(existingItems, key);
     let incomingWins = false;
+    let conflict = false;
 
     if (incomingVersion && hasIncomingValue) {
       const currentRevision = existingVersion?.revision ?? 0;
+      const currentOperationId = existingVersion?.operationId ?? "";
       const sameOperation = existingVersion?.operationId === incomingVersion.operationId
         && existingVersion.revision === incomingVersion.revision
         && hasExistingValue
@@ -191,20 +240,39 @@ export function mergeStagedItemsOnServer(
         incomingWins = false;
       } else if (
         incomingVersion.baseRevision === currentRevision
+        && incomingVersion.baseOperationId === currentOperationId
         && incomingVersion.revision === currentRevision + 1
+      ) {
+        incomingWins = true;
+      } else if (
+        options.acceptCurrentBaseSnapshot
+        && incomingVersion.rootRevision === currentRevision
+        && incomingVersion.rootOperationId === currentOperationId
+      ) {
+        // The locked snapshot proves the whole row is unchanged since this
+        // offline chain's recorded canonical root.
+        incomingWins = true;
+      } else if (
+        options.acceptCurrentBaseSnapshot
+        && existingVersion
+        && incomingVersion.chainId === existingVersion.chainId
+        && incomingVersion.rootRevision === existingVersion.rootRevision
+        && incomingVersion.rootOperationId === existingVersion.rootOperationId
+        && incomingVersion.revision > existingVersion.revision
       ) {
         incomingWins = true;
       } else if (
         existingVersion
         && incomingVersion.revision === existingVersion.revision
         && incomingVersion.baseRevision === existingVersion.baseRevision
-        && compareOperationIds(incomingVersion.operationId, existingVersion.operationId) < 0
+        && incomingVersion.baseOperationId === existingVersion.baseOperationId
+        && incomingVersion.rootRevision === existingVersion.rootRevision
+        && incomingVersion.rootOperationId === existingVersion.rootOperationId
       ) {
-        incomingWins = true;
-        conflictCount++;
+        incomingWins = compareOperationIds(incomingVersion.operationId, existingVersion.operationId) < 0;
+        conflict = true;
       } else {
-        // Count this rejected operation once, below, after the canonical value
-        // is copied into the result.
+        conflict = true;
       }
     } else if (
       incomingItems[key] === true
@@ -213,6 +281,8 @@ export function mergeStagedItemsOnServer(
       // Legacy clients can still add a checked row. Once a versioned decision
       // exists, a boolean-only stale snapshot cannot resurrect or clear it.
       incomingWins = true;
+    } else if (incomingItems[key] === true && existingVersion && existingItems[key] === false) {
+      conflict = true;
     }
 
     if (incomingWins) {
@@ -220,18 +290,8 @@ export function mergeStagedItemsOnServer(
       if (incomingVersion) stagedItemVersions[key] = incomingVersion;
     } else {
       copyState(key, existingItems, existingVersions, stagedItems, stagedItemVersions);
-      if (
-        incomingVersion
-        && !(
-          existingVersion?.operationId === incomingVersion.operationId
-          && existingVersion.revision === incomingVersion.revision
-          && hasExistingValue
-          && existingItems[key] === incomingItems[key]
-        )
-      ) {
-        conflictCount++;
-      }
     }
+    if (conflict) conflictCount++;
   }
 
   return { stagedItems, stagedItemVersions, conflictCount };

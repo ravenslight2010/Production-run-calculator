@@ -26,11 +26,20 @@ describe("removeRunById", () => {
       { id: "run-2", brand: "Bravo", flavor: "Spicy" },
       { id: "run-3", brand: "Charlie", flavor: "Classic" },
     ], 1);
+    state.stagedItems = { "run-1::cheese": true, "run-2::sauce": false };
+    state.stagedItemVersions = {
+      "run-1::cheese": { revision: 1, baseRevision: 0, operationId: "device:1" },
+      "run-2::sauce": { revision: 1, baseRevision: 0, operationId: "device:2" },
+    };
 
     const result = removeRunByIdFromDayState(state, "run-1");
     expect(result).not.toBeNull();
     expect(result?.dayState.runs.map((run) => run.id)).toEqual(["run-2", "run-3"]);
     expect(result?.dayState.currentIndex).toBe(0);
+    expect(result?.dayState.stagedItems).toEqual({ "run-2::sauce": false });
+    expect(result?.dayState.stagedItemVersions).toEqual({
+      "run-2::sauce": { revision: 1, baseRevision: 0, operationId: "device:2" },
+    });
 
     tombstoneDeleted("runs", result!.removedRun.id);
     expect(loadDeletedItems().runs).toEqual(["run-1"]);

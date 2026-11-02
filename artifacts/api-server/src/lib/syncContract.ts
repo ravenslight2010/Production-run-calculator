@@ -15,7 +15,7 @@ export function syncSnapshotId(data: unknown): string {
 
 export function emptySyncData(date: string): Record<string, unknown> {
   return {
-    dayState: { date, runs: [] },
+    dayState: { date, runs: [], stagedItems: {}, stagedItemVersions: {} },
     runValues: {},
     runValuesUpdatedAt: {},
   };

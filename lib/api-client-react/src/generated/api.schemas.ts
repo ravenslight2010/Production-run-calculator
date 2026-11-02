@@ -1959,7 +1959,54 @@ export const AutoTrackClaimResponseOutcome = {
 
 export type AutoTrackClaimResponseValues = { [key: string]: unknown };
 
-export type SyncPayloadDayState = { [key: string]: unknown };
+export interface StagedItemRevision {
+  /** @minimum 1 */
+  revision: number;
+  /** @minimum 0 */
+  baseRevision: number;
+  /**
+     * @maxLength 120
+     * @pattern ^[A-Za-z0-9:_-]*$
+     */
+  baseOperationId: string;
+  /** @minimum 0 */
+  rootRevision: number;
+  /**
+     * @maxLength 120
+     * @pattern ^[A-Za-z0-9:_-]*$
+     */
+  rootOperationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  chainId: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  operationId: string;
+}
+
+/**
+ * Desired checked state by stable run and material-row key; false is an explicit uncheck.
+ */
+export type SyncPayloadDayStateStagedItems = {[key: string]: boolean};
+
+/**
+ * Per-row revision metadata used to reject stale same-row edits.
+ */
+export type SyncPayloadDayStateStagedItemVersions = {[key: string]: StagedItemRevision};
+
+export type SyncPayloadDayState = {
+  /** Desired checked state by stable run and material-row key; false is an explicit uncheck. */
+  stagedItems?: SyncPayloadDayStateStagedItems;
+  /** Per-row revision metadata used to reject stale same-row edits. */
+  stagedItemVersions?: SyncPayloadDayStateStagedItemVersions;
+  [key: string]: unknown;
+ };
 
 export type SyncPayloadRunValues = { [key: string]: unknown };
 

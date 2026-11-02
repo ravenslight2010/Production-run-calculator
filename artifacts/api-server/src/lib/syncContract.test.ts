@@ -19,7 +19,12 @@ describe("sync contract", () => {
 
   it("provides the canonical empty day-state document", () => {
     expect(emptySyncData("2026-09-06")).toEqual({
-      dayState: { date: "2026-09-06", runs: [] },
+      dayState: {
+        date: "2026-09-06",
+        runs: [],
+        stagedItems: {},
+        stagedItemVersions: {},
+      },
       runValues: {},
       runValuesUpdatedAt: {},
     });

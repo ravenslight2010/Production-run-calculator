@@ -10,6 +10,7 @@ import pg from "pg";
 import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
+import { logger } from "../lib/logger";
 import {
   clearCapacityTelemetryForTests,
   legacySyncReadinessSnapshot,
@@ -19,7 +20,7 @@ import type { AutoTrackClaim } from "../lib/autoTrackCoordination";
 import type { AutoTrackClaimServiceDependencies } from "../lib/autoTrackClaimService";
 
 const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
-  dayState: { date, runs: [] },
+  dayState: { date, runs: [], stagedItems: {}, stagedItemVersions: {} },
   runValues: {},
   runValuesUpdatedAt: {},
   syncVersion: 1,
@@ -2741,6 +2742,7 @@ describe("server auto-track tick recovery under database pressure", () => {
 
   it("keeps persistent failures visible even when another date succeeds", async () => {
     await clearBackgroundOperationDiagnosticsForTests();
+    const tickErrorLog = vi.spyOn(logger, "error");
     await db.insert(dailySyncTable).values({
       ...dayRow(TICK_DATE),
       scope: "sandbox",
@@ -2766,6 +2768,15 @@ describe("server auto-track tick recovery under database pressure", () => {
         nowMs: TICK_NOW, maxClaims: 8,
       });
       expect(firstFailure.outcomes.error).toBe(1);
+      expect(tickErrorLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "server_auto_track_tick",
+          date: TICK_DATE,
+          failureStage: "date-transaction",
+          failureReason: "database-connection",
+        }),
+        "Server auto-track tick failed",
+      );
       const firstDeferred = getAutoTrackDeferredDiagnostic(TICK_NOW);
       expect(firstDeferred).toMatchObject({
         deferredDateCount: 1,
@@ -2839,6 +2850,7 @@ describe("server auto-track tick recovery under database pressure", () => {
         .toMatchObject({ status: "warning", recentFailureCount: 3 });
     } finally {
       await removeTickFailureTrigger();
+      tickErrorLog.mockRestore();
     }
 
     try {
@@ -4516,6 +4528,26 @@ describe("POST /sync/schedule-move — atomic run relocation", () => {
       ],
       breaks: { break1: 20 },
       stagedItems: { "move-run::Flour__lbs": true, "stay-run::Cheese__lbs": true },
+      stagedItemVersions: {
+        "move-run::Flour__lbs": {
+          revision: 1,
+          baseRevision: 0,
+          baseOperationId: "",
+          rootRevision: 0,
+          rootOperationId: "",
+          chainId: "move-stage:1",
+          operationId: "move-stage:1",
+        },
+        "stay-run::Cheese__lbs": {
+          revision: 1,
+          baseRevision: 0,
+          baseOperationId: "",
+          rootRevision: 0,
+          rootOperationId: "",
+          chainId: "stay-stage:1",
+          operationId: "stay-stage:1",
+        },
+      },
     },
     runValues: {
       "move-run": { casesNeeded: 18 },
@@ -4581,6 +4613,7 @@ describe("POST /sync/schedule-move — atomic run relocation", () => {
     expect((source.data as any).dayState.runs.map((run: any) => run.id)).toEqual(["stay-run"]);
     expect((source.data as any).runValues).toEqual({ "stay-run": { casesNeeded: 7 } });
     expect((source.data as any).dayState.stagedItems).toEqual({ "stay-run::Cheese__lbs": true });
+    expect(Object.keys((source.data as any).dayState.stagedItemVersions)).toEqual(["stay-run::Cheese__lbs"]);
     expect((source.data as any).autoTrackServerState.wallClockBookkeeping).toEqual({
       "stay-run": { lifecycleGeneration: "stay-run:1", caseNextDueMs: 1_900_000_000_100 },
     });
@@ -4595,6 +4628,9 @@ describe("POST /sync/schedule-move — atomic run relocation", () => {
       caseNextDueMs: 1_900_000_000_000,
     });
     expect((destination.data as any).dayState.stagedItems).toEqual({ "move-run::Flour__lbs": true });
+    expect((destination.data as any).dayState.stagedItemVersions).toEqual({
+      "move-run::Flour__lbs": sourceData.dayState.stagedItemVersions["move-run::Flour__lbs"],
+    });
     expect((source.data as any).brands).toEqual(sourceData.brands);
     expect((destination.data as any).brands).toEqual(destinationData.brands);
     expect(source.canonicalRevision).toBe(5);
@@ -4603,6 +4639,41 @@ describe("POST /sync/schedule-move — atomic run relocation", () => {
       .where(eq(syncOutboxEventsTable.scope, "live"));
     expect(events.filter((event) => event.kind === "day-state").map((event) => event.date).sort())
       .toEqual([sourceDate, destinationDate]);
+  });
+
+  it("relocates staging keys with a run when the destination assigns a new run ID", async () => {
+    const collidingDestination = {
+      ...destinationData,
+      dayState: {
+        ...destinationData.dayState,
+        runs: [
+          ...destinationData.dayState.runs,
+          { id: "move-run", brand: "Existing collision" },
+        ],
+      },
+      runValues: {
+        ...destinationData.runValues,
+        "move-run": { casesNeeded: 3 },
+      },
+    };
+    await seedCanonicalSync(sourceDate, sourceData, 4);
+    await seedCanonicalSync(destinationDate, collidingDestination, 8);
+
+    const response = await moveRequest();
+    expect(response.status).toBe(200);
+
+    const [destination] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, destinationDate),
+    ));
+    const data = destination.data as any;
+    const movedRun = data.dayState.runs.find((run: any) => run.brand === "Move");
+    expect(movedRun).toBeTruthy();
+    expect(movedRun.id).not.toBe("move-run");
+    expect(data.dayState.stagedItems[`${movedRun.id}::Flour__lbs`]).toBe(true);
+    expect(data.dayState.stagedItemVersions[`${movedRun.id}::Flour__lbs`])
+      .toEqual(sourceData.dayState.stagedItemVersions["move-run::Flour__lbs"]);
+    expect(data.dayState.stagedItems["move-run::Flour__lbs"]).toBeUndefined();
+    expect(data.dayState.stagedItemVersions["move-run::Flour__lbs"]).toBeUndefined();
   });
 
   it("rolls back stale requests and does not leave an empty destination row", async () => {
@@ -4694,7 +4765,7 @@ describe("/sync/today — client-local-date keying", () => {
     expect(await res.json()).toEqual({
       syncVersion: 1,
       completeness: "complete",
-      dayState: { date, runs: [] },
+      dayState: { date, runs: [], stagedItems: {}, stagedItemVersions: {} },
       runValues: {},
       runValuesUpdatedAt: {},
       resetEpoch: 0,
@@ -5658,6 +5729,7 @@ describe("/sync large-day complete versus partial measurements", () => {
         substitutions: [],
         substitutionLog: [],
         stagedItems: {},
+        stagedItemVersions: {},
         prepPhase: {
           prepStartedAt: null,
           prepBatchesDough: 0,
@@ -5709,6 +5781,8 @@ describe("/sync large-day complete versus partial measurements", () => {
 
   it("compares complete and one-run partial writes on a representative large day", async () => {
     const completeFixture = largeDayFixture();
+    const { baseSnapshotId: _staleBaseSnapshotId, ...seededCompleteFixture } = completeFixture;
+    completeFixture.baseSnapshotId = syncSnapshotId(seededCompleteFixture);
     await seedCanonicalSync(DATE, completeFixture);
     const baseline = await measuredPut(completeFixture, "large-day-complete");
     expect(baseline.response.status).toBe(200);
@@ -5855,6 +5929,114 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
     } | null;
   }
   const meta = { dayState: { runs: [{ id: "r1", brand: "Acme", flavor: "Pep" }] } };
+
+  it("persists explicit unchecked rows, rejects stale same-row writes, and merges other rows", async () => {
+    await seedCanonicalSync(DATE, {
+      dayState: {
+        ...meta.dayState,
+        date: DATE,
+        resetAt: 1,
+        stagedItems: {},
+        stagedItemVersions: {},
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    });
+    const checked = await put({
+      ...meta,
+      dayState: {
+        ...meta.dayState,
+        date: DATE,
+        resetAt: 1,
+        stagedItems: { "r1::cheese__lbs": true },
+        stagedItemVersions: {
+          "r1::cheese__lbs": {
+            revision: 1,
+            baseRevision: 0,
+            baseOperationId: "",
+            rootRevision: 0,
+            rootOperationId: "",
+            chainId: "device-a:check",
+            operationId: "device-a:check",
+          },
+        },
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    });
+    expect(checked.status).toBe(200);
+
+    const unchecked = await put({
+      ...meta,
+      dayState: {
+        ...meta.dayState,
+        date: DATE,
+        resetAt: 1,
+        stagedItems: { "r1::cheese__lbs": false },
+        stagedItemVersions: {
+          "r1::cheese__lbs": {
+            revision: 2,
+            baseRevision: 1,
+            baseOperationId: "device-a:check",
+            rootRevision: 1,
+            rootOperationId: "device-a:check",
+            chainId: "device-a:uncheck",
+            operationId: "device-a:uncheck",
+          },
+        },
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    });
+    expect(unchecked.status).toBe(200);
+    expect(unchecked.headers.get("x-sync-staging-conflicts")).toBeNull();
+
+    const staleAndIndependent = await put({
+      ...meta,
+      dayState: {
+        ...meta.dayState,
+        date: DATE,
+        resetAt: 1,
+        stagedItems: {
+          "r1::cheese__lbs": true,
+          "r1::sauce__lbs": true,
+        },
+        stagedItemVersions: {
+          "r1::cheese__lbs": {
+            revision: 1,
+            baseRevision: 0,
+            baseOperationId: "",
+            rootRevision: 0,
+            rootOperationId: "",
+            chainId: "device-b:cheese",
+            operationId: "device-b:cheese",
+          },
+          "r1::sauce__lbs": {
+            revision: 1,
+            baseRevision: 0,
+            baseOperationId: "",
+            rootRevision: 0,
+            rootOperationId: "",
+            chainId: "device-b:sauce",
+            operationId: "device-b:sauce",
+          },
+        },
+      },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    });
+    expect(staleAndIndependent.status).toBe(200);
+    expect(staleAndIndependent.headers.get("x-sync-staging-conflicts")).toBe("1");
+    const canonical = await staleAndIndependent.json() as {
+      data?: {
+        dayState?: { stagedItems?: Record<string, boolean> };
+      };
+    };
+    expect(canonical.data?.dayState?.stagedItems).toMatchObject({
+      "r1::cheese__lbs": false,
+      "r1::sauce__lbs": true,
+    });
+  });
 
   it("rejects an empty value with an EQUAL stamp over a populated stored value", async () => {
     await put({ ...meta, runValues: { r1: { casesNeeded: 240 } }, runValuesUpdatedAt: { r1: 1000 } });
@@ -7790,10 +7972,18 @@ describe("/sync/events — date-scoped broadcasts", () => {
       syncVersion: 1,
       completeness: "complete",
       baseSnapshotId: emptyCompleteSnapshotId(date),
-      dayState: { date, runs, shiftNotes: "Synthetic full-shift soak fixture" },
+      dayState: {
+        date,
+        runs,
+        shiftNotes: "Synthetic full-shift soak fixture",
+        stagedItems: {},
+        stagedItemVersions: {},
+      },
       runValues,
       runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 10_000 + index])),
     };
+    const { baseSnapshotId: _emptyBaseSnapshotId, ...seededCanonical } = canonical;
+    canonical.baseSnapshotId = syncSnapshotId(seededCanonical);
     await seedCanonicalSync(date, canonical);
     const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",

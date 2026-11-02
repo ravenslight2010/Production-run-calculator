@@ -218,25 +218,36 @@ assert.ok(
   standaloneReviewedAdditions.every((identity) => debugIdentities.includes(identity)),
   "every reviewed standalone addition must remain collected",
 );
-// The owner separately approved one local synthetic replacement. Restore that
-// exact historical identity before checking the original-set digest; this is
-// preservation evidence, not proof that the blocked real-source audit passed.
+// Restore the exact historical identities for the approved synthetic source
+// boundary and the owner-approved Warehouse cross-device check/uncheck
+// expansion before checking the original-set digest. This is preservation
+// evidence, not proof that the blocked real-source audit passed.
 const syntheticWorkbookIdentity =
   "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: manager gets three synthetic products in review; cancel is read-only";
 const blockedRealWorkbookIdentity =
   "artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts :: manager gets Mauro's three products in review; source audit calls are read-only";
+const warehouseCheckUncheckIdentity =
+  "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: operator staging check and uncheck converge across devices and reload";
+const priorWarehouseIdentity =
+  "artifacts/run-calculator/e2e/warehouse-coverage.spec.ts :: operator staging check persists for a canonical per-run material across reload";
 assert.ok(debugIdentities.includes(syntheticWorkbookIdentity));
 assert.ok(!debugIdentities.includes(blockedRealWorkbookIdentity));
+assert.ok(debugIdentities.includes(warehouseCheckUncheckIdentity));
+assert.ok(!debugIdentities.includes(priorWarehouseIdentity));
 const restoredSourceBaseline = debugIdentities.map(
-  (identity) => identity === syntheticWorkbookIdentity ? blockedRealWorkbookIdentity : identity,
+  (identity) => {
+    if (identity === syntheticWorkbookIdentity) return blockedRealWorkbookIdentity;
+    if (identity === warehouseCheckUncheckIdentity) return priorWarehouseIdentity;
+    return identity;
+  },
 ).sort();
 assert.equal(
   createHash("sha256").update(JSON.stringify(restoredSourceBaseline)).digest("hex"),
   "d52aaef6fcc989589caab0d1176b0540760c13c6e091fdd61e57f897bbfb83fe",
-  "only the approved synthetic substitution may differ from the preceding standalone set",
+  "restoring only the two reviewed identity changes must reproduce the preceding standalone set",
 );
 console.log(
-  "Standalone inventory fingerprint (approved synthetic substitution):",
+  "Standalone inventory fingerprint (current reviewed identities):",
   createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
 );
 const retainedStandaloneBaseline = restoredSourceBaseline.filter(

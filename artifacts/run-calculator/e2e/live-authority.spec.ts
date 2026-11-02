@@ -17,6 +17,20 @@ import {
 
 const PASSWORD = "FixturePass123!";
 const usernames = new Set<string>();
+const SAFE_PAGE_ERROR_NAMES = new Set([
+  "AbortError",
+  "AggregateError",
+  "Error",
+  "EvalError",
+  "InvalidStateError",
+  "NetworkError",
+  "RangeError",
+  "ReferenceError",
+  "SecurityError",
+  "SyntaxError",
+  "TypeError",
+  "URIError",
+]);
 
 function nanoid(size = 21): string {
   const alphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_G5";
@@ -78,7 +92,8 @@ async function seedPendingRuns(
     crustsPerCycle: 1,
     cycleSpeed: 60,
     approxLineSpeed: 60,
-    freezerTime: 0,
+    // End/drain coverage below requires a real, still-open drain window.
+    freezerTime: 1,
     pizzasPerCase: 1,
     casesPerSkid: 10,
     casesPerLayer: 10,
@@ -206,7 +221,10 @@ async function addSanitizedDiagnostics(
   errors: string[],
   consoleErrorCounts: { value: number },
 ): Promise<void> {
-  page.on("pageerror", () => errors.push("pageerror"));
+  page.on("pageerror", (error) => {
+    const name = SAFE_PAGE_ERROR_NAMES.has(error.name) ? error.name : "Other";
+    errors.push(`pageerror:${name}`);
+  });
   page.on("console", (message) => {
     // Offline recovery intentionally causes browser network-console errors.
     // Keep only a count; never retain raw messages or URLs.
@@ -275,13 +293,50 @@ test("server-authoritative live controls converge across two accounts, stale/off
     await pageA.getByTestId("tab-dough").click();
     await expect.poll(async () => Number((await canonical(pageA, date)).runValues[runIds[0]]?.traysOnLine))
       .toBeGreaterThan(0);
+    // Both open clients can produce Dough claims. Pause the canonical timer
+    // first so this manual-section acceptance check has a stable baseline;
+    // the dedicated correction/resume journey covers editing during live
+    // tracking and its timed re-arm behavior.
+    const doughTimerPauseResponse = pageA.waitForResponse((response) =>
+      response.url().includes("/api/sync/operational-intents")
+      && response.request().method() === "POST", { timeout: 15_000 });
+    await pageA.getByTestId("btn-pause-dough-timers").click();
+    await expect(pageA.getByTestId("dough-timers-paused-banner")).toBeVisible();
+    expect((await doughTimerPauseResponse).status(), "Dough timer pause must be server-acknowledged").toBe(200);
+    await pageB.getByTestId("tab-dough").click();
+    await expect(pageB.getByTestId("dough-timers-paused-banner")).toBeVisible();
+    await expect.poll(async () => {
+      const state = await canonical(pageA, date);
+      const values = state.runValues[runIds[0]] ?? {};
+      const aTrays = Number(await pageA.getByTestId("input-traysOnLine").inputValue());
+      const aBatches = Number(await pageA.getByTestId("input-batchesReady").inputValue());
+      const bTrays = Number(await pageB.getByTestId("input-traysOnLine").inputValue());
+      const bBatches = Number(await pageB.getByTestId("input-batchesReady").inputValue());
+      return aTrays === Number(values.traysOnLine)
+        && aBatches === Number(values.batchesReady)
+        && bTrays === Number(values.traysOnLine)
+        && bBatches === Number(values.batchesReady);
+    }, { timeout: 15_000 }).toBe(true);
     const priorTrays = Number((await canonical(pageA, date)).runValues[runIds[0]]?.traysOnLine);
+    const displayedTrays = Number(await pageA.getByTestId("input-traysOnLine").inputValue());
+    const priorBatches = Number((await canonical(pageA, date)).runValues[runIds[0]]?.batchesReady);
+    const displayedBatches = Number(await pageA.getByTestId("input-batchesReady").inputValue());
+    expect(displayedTrays).toBe(priorTrays);
+    expect(displayedBatches).toBe(priorBatches);
+    await pageB.getByTestId("tab-run").click();
     const firstDoughCorrection = pageA.waitForResponse((response) =>
       response.url().includes("/api/sync/manual-section")
       && response.request().method() === "POST", { timeout: 15_000 });
     await pageA.getByTestId("btn-dec-traysOnLine").click();
     const firstCorrectionResponse = await firstDoughCorrection;
-    expect(firstCorrectionResponse.status(), "real Dough correction response").toBe(200);
+    const rejectionBody = firstCorrectionResponse.status() === 409
+      ? await firstCorrectionResponse.json().catch(() => null) as { code?: unknown } | null
+      : null;
+    const rejectionCode = typeof rejectionBody?.code === "string" ? rejectionBody.code : "none";
+    expect(
+      firstCorrectionResponse.status(),
+      `real Dough correction response (reason=${rejectionCode}; displayed=${displayedTrays}; canonical=${priorTrays})`,
+    ).toBe(200);
     const acceptedDough = await canonical(pageA, date);
     const acceptedTrays = Number(acceptedDough.runValues[runIds[0]]?.traysOnLine);
     expect(acceptedTrays).toBe(priorTrays - 1);
@@ -291,6 +346,15 @@ test("server-authoritative live controls converge across two accounts, stale/off
       const state = await canonical(pageB, date);
       return Number(state.runValues[runIds[0]]?.traysOnLine);
     }).toBe(acceptedTrays);
+    await pageB.getByTestId("tab-dough").click();
+    await expect(pageB.getByTestId("input-traysOnLine")).toHaveValue(String(acceptedTrays));
+    const doughTimerResumeResponse = pageA.waitForResponse((response) =>
+      response.url().includes("/api/sync/operational-intents")
+      && response.request().method() === "POST", { timeout: 15_000 });
+    await pageA.getByTestId("btn-resume-dough-timers").click();
+    await expect(pageA.getByTestId("dough-timers-paused-banner")).toBeHidden();
+    expect((await doughTimerResumeResponse).status(), "Dough timer resume must be server-acknowledged").toBe(200);
+    await pageB.getByTestId("tab-run").click();
 
     // Global Pause/Resume must use canonical lifecycle anchors on both contexts.
     await pageA.getByTestId("tab-run").click();
@@ -307,21 +371,6 @@ test("server-authoritative live controls converge across two accounts, stale/off
     expect(Number(resumed.dayState.runs[0]?.startedAt)).toBeGreaterThanOrEqual(primaryStartedAt);
     await expect.poll(async () => Boolean((await canonical(pageB, date)).dayState.runs[0]?.pausedAt))
       .toBe(false);
-
-    // Exercise the real Dough-only timer hold and explicit Resume control.
-    await pageA.getByTestId("tab-dough").click();
-    const doughTimerPauseResponse = pageA.waitForResponse((response) =>
-      response.url().includes("/api/sync/operational-intents")
-      && response.request().method() === "POST", { timeout: 15_000 });
-    await pageA.getByTestId("btn-pause-dough-timers").click();
-    await expect(pageA.getByTestId("dough-timers-paused-banner")).toBeVisible();
-    expect((await doughTimerPauseResponse).status(), "Dough timer pause must be server-acknowledged").toBe(200);
-    const doughTimerResumeResponse = pageA.waitForResponse((response) =>
-      response.url().includes("/api/sync/operational-intents")
-      && response.request().method() === "POST", { timeout: 15_000 });
-    await pageA.getByTestId("btn-resume-dough-timers").click();
-    await expect(pageA.getByTestId("dough-timers-paused-banner")).toBeHidden();
-    expect((await doughTimerResumeResponse).status(), "Dough timer resume must be server-acknowledged").toBe(200);
 
     // Packaging correction and its acknowledged "Resume auto tracking" action.
     await pageA.getByTestId("tab-packaging").click();
@@ -389,7 +438,23 @@ test("server-authoritative live controls converge across two accounts, stale/off
     // the response is delayed, and require a genuine server rejection/review.
     await installManualFetchGate(pageB);
     await pageB.getByTestId("tab-dough").click();
-    await expect(pageB.getByTestId("input-traysOnLine")).toHaveValue(String(newerTrayTotal));
+    try {
+      await expect(pageB.getByTestId("input-traysOnLine")).toHaveValue(String(newerTrayTotal));
+    } catch (error) {
+      const peerState = await canonical(pageB, date).catch(() => null);
+      const displayedTrays = await pageB.getByTestId("input-traysOnLine").inputValue().catch(() => "unavailable");
+      await testInfo.attach("peer-convergence-diagnostic.json", {
+        body: JSON.stringify({
+          project: testInfo.project.name,
+          expectedTrays: newerTrayTotal,
+          displayedTrays,
+          canonicalTrays: Number(peerState?.runValues[runIds[0]]?.traysOnLine),
+          canonicalRevision: peerState?.canonicalRevision ?? null,
+        }),
+        contentType: "application/json",
+      });
+      throw error;
+    }
     const bRequested = Number(await pageB.getByTestId("input-traysOnLine").inputValue()) + 1;
     await pageB.getByTestId("btn-inc-traysOnLine").click();
     await capturedManualRequest(pageB);
@@ -432,6 +497,9 @@ test("server-authoritative live controls converge across two accounts, stale/off
     await expect(pageA.getByText("Offline actions", { exact: true })).toBeVisible();
     await expect.poll(async () => (await canonical(pageB, date)).dayState.runs[0]?.pausedAt)
       .toBeFalsy();
+    await pageA.getByTestId("sync-status-button").click();
+    await expect(pageA.getByTestId("sync-status-button")).toHaveAttribute("aria-expanded", "false");
+    await expect(pageA.getByText("Offline actions", { exact: true })).toBeHidden();
     if (testInfo.project.name === "chromium-desktop") {
       await pageA.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
       await pageA.getByTestId("tab-run").waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
@@ -456,20 +524,20 @@ test("server-authoritative live controls converge across two accounts, stale/off
 
     if (testInfo.project.name === "chromium-desktop") {
       await pageA.screenshot({ path: testInfo.outputPath("authenticated-after-canonical-recovery.png"), fullPage: true });
-      await testInfo.attach("allowlisted-diagnostics.json", {
-        body: JSON.stringify({
-          project: testInfo.project.name,
-          browserErrors: errors,
-          acceptedDoughTotal: acceptedTrays,
-          newerCanonicalDoughTotal: newerTrayTotal,
-          staleSnapshotStatus: deliveredSnapshot.status(),
-          staleManualStatus: rejectedManual!.status(),
-          serverRevision: afterReconnect.canonicalRevision ?? null,
-          consoleErrorCount: consoleErrorCounts.value,
-        }),
-        contentType: "application/json",
-      });
     }
+    await testInfo.attach("allowlisted-diagnostics.json", {
+      body: JSON.stringify({
+        project: testInfo.project.name,
+        browserErrors: errors,
+        acceptedDoughTotal: acceptedTrays,
+        newerCanonicalDoughTotal: newerTrayTotal,
+        staleSnapshotStatus: deliveredSnapshot.status(),
+        staleManualStatus: rejectedManual!.status(),
+        serverRevision: afterReconnect.canonicalRevision ?? null,
+        consoleErrorCount: consoleErrorCounts.value,
+      }),
+      contentType: "application/json",
+    });
     expect(errors, "page errors and HTTP 5xx must be absent").toEqual([]);
   } finally {
     if (b) await releaseManualFetchGate(b.page).catch(() => {});

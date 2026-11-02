@@ -892,6 +892,16 @@ export const swapSyncScheduleDaysResponseDestinationRevisionMin = 0;
 export const swapSyncScheduleDaysResponseSourceSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const swapSyncScheduleDaysResponseDestinationSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsBaseRevisionMin = 0;
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsBaseOperationIdMax = 120;
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsBaseOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsRootRevisionMin = 0;
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsRootOperationIdMax = 120;
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsRootOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsChainIdMax = 120;
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsChainIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsOperationIdMax = 120;
+export const getSyncTodayResponseOneOneDayStateStagedItemVersionsOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
 export const getSyncTodayResponseOneTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayResponseTwoResetEpochMin = 0;
@@ -900,7 +910,27 @@ export const getSyncTodayResponseTwoServerTimeMin = 0;
 export const getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin = 0;
 export const putSyncTodayQueryEpochMin = 0;
 export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsBaseRevisionMin = 0;
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsBaseOperationIdMax = 120;
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsBaseOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsRootRevisionMin = 0;
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsRootOperationIdMax = 120;
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsRootOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsChainIdMax = 120;
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsChainIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsOperationIdMax = 120;
+export const putSyncTodayBodyPayloadOneDayStateStagedItemVersionsOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
 export const putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const putSyncTodayResponseDataDayStateStagedItemVersionsBaseRevisionMin = 0;
+export const putSyncTodayResponseDataDayStateStagedItemVersionsBaseOperationIdMax = 120;
+export const putSyncTodayResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const putSyncTodayResponseDataDayStateStagedItemVersionsRootRevisionMin = 0;
+export const putSyncTodayResponseDataDayStateStagedItemVersionsRootOperationIdMax = 120;
+export const putSyncTodayResponseDataDayStateStagedItemVersionsRootOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const putSyncTodayResponseDataDayStateStagedItemVersionsChainIdMax = 120;
+export const putSyncTodayResponseDataDayStateStagedItemVersionsChainIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const putSyncTodayResponseDataDayStateStagedItemVersionsOperationIdMax = 120;
+export const putSyncTodayResponseDataDayStateStagedItemVersionsOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
 export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const putSyncTodayResponseCanonicalRevisionMin = 0;
 export const putSyncTodayResponseServerTimeMin = 0;
@@ -920,6 +950,16 @@ export const claimAutoTrackEventBodyClaimMutationsItemToMin = 0;
 export const claimAutoTrackEventBodyClaimMutationsItemToMax = 1000000;
 export const claimAutoTrackEventBodyClaimMutationsMax = 3;
 export const claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin = 0;
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsBaseRevisionMin = 0;
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsBaseOperationIdMax = 120;
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsRootRevisionMin = 0;
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsRootOperationIdMax = 120;
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsRootOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsChainIdMax = 120;
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsChainIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsOperationIdMax = 120;
+export const claimAutoTrackEventResponseDataDayStateStagedItemVersionsOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
 export const claimAutoTrackEventResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const claimAutoTrackEventResponseCanonicalRevisionMin = 0;
 export const claimAutoTrackEventResponseServerTimeMin = 0;
@@ -1013,6 +1053,16 @@ export const submitManualSectionEditBodyOneoneDeviceIdMax = 160;
 export const submitManualSectionEditBodyOneoneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditResponseCanonicalRevisionMin = 0;
 export const submitManualSectionEditResponseServerTimeMin = 0;
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsBaseRevisionMin = 0;
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsBaseOperationIdMax = 120;
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsRootRevisionMin = 0;
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsRootOperationIdMax = 120;
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsRootOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsChainIdMax = 120;
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsChainIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsOperationIdMax = 120;
+export const submitManualSectionEditResponseDataDayStateStagedItemVersionsOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
 export const submitManualSectionEditResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const submitOperationalIntentQueryEpochMin = 0;
 export const submitOperationalIntentBodySenderIdMax = 160;
@@ -1043,11 +1093,31 @@ export const submitOperationalIntentBodyIntentInventoryLinesItemQtyMax = 1000000
 export const submitOperationalIntentBodyIntentInventoryLinesMax = 200;
 export const submitOperationalIntentResponseCanonicalRevisionMin = 0;
 export const submitOperationalIntentResponseServerTimeMin = 0;
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsBaseRevisionMin = 0;
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsBaseOperationIdMax = 120;
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsRootRevisionMin = 0;
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsRootOperationIdMax = 120;
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsRootOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsChainIdMax = 120;
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsChainIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsOperationIdMax = 120;
+export const submitOperationalIntentResponseDataDayStateStagedItemVersionsOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
 export const submitOperationalIntentResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const listOperationalIntentReceiptsQueryAfterMin = 0;
 export const listOperationalIntentReceiptsResponseCursorMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsBaseRevisionMin = 0;
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsBaseOperationIdMax = 120;
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsBaseOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsRootRevisionMin = 0;
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsRootOperationIdMax = 120;
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsRootOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]*$');
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsChainIdMax = 120;
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsChainIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsOperationIdMax = 120;
+export const listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
 export const listImportGoldApprovalsQueryRecordRefMax = 128;
 export const listImportGoldApprovalsQueryRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
 export const listImportGoldApprovalsResponseExpiryRemindersExpiringCountMin = 0;
@@ -9532,7 +9602,18 @@ export const GetSyncTodayQueryParams = zod.object({
 })
 
 export const GetSyncTodayResponse = zod.union([zod.looseObject({
-  "dayState": zod.record(zod.string(), zod.unknown()),
+  "dayState": zod.looseObject({
+  "stagedItems": zod.record(zod.string(), zod.boolean()).optional().describe('Desired checked state by stable run and material-row key; false is an explicit uncheck.'),
+  "stagedItemVersions": zod.record(zod.string(), zod.object({
+  "revision": zod.int().min(1),
+  "baseRevision": zod.int().min(getSyncTodayResponseOneOneDayStateStagedItemVersionsBaseRevisionMin),
+  "baseOperationId": zod.string().max(getSyncTodayResponseOneOneDayStateStagedItemVersionsBaseOperationIdMax).regex(getSyncTodayResponseOneOneDayStateStagedItemVersionsBaseOperationIdRegExp),
+  "rootRevision": zod.int().min(getSyncTodayResponseOneOneDayStateStagedItemVersionsRootRevisionMin),
+  "rootOperationId": zod.string().max(getSyncTodayResponseOneOneDayStateStagedItemVersionsRootOperationIdMax).regex(getSyncTodayResponseOneOneDayStateStagedItemVersionsRootOperationIdRegExp),
+  "chainId": zod.string().min(1).max(getSyncTodayResponseOneOneDayStateStagedItemVersionsChainIdMax).regex(getSyncTodayResponseOneOneDayStateStagedItemVersionsChainIdRegExp),
+  "operationId": zod.string().min(1).max(getSyncTodayResponseOneOneDayStateStagedItemVersionsOperationIdMax).regex(getSyncTodayResponseOneOneDayStateStagedItemVersionsOperationIdRegExp)
+})).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
+}),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
   "resetEpoch": zod.int().min(getSyncTodayResponseOneTwoResetEpochMin),
@@ -9645,7 +9726,18 @@ export const PutSyncTodayBody = zod.object({
   "senderId": zod.string().optional(),
   "snapshotId": zod.string().regex(putSyncTodayBodySnapshotIdRegExp).optional(),
   "payload": zod.looseObject({
-  "dayState": zod.record(zod.string(), zod.unknown()),
+  "dayState": zod.looseObject({
+  "stagedItems": zod.record(zod.string(), zod.boolean()).optional().describe('Desired checked state by stable run and material-row key; false is an explicit uncheck.'),
+  "stagedItemVersions": zod.record(zod.string(), zod.object({
+  "revision": zod.int().min(1),
+  "baseRevision": zod.int().min(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsBaseRevisionMin),
+  "baseOperationId": zod.string().max(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsBaseOperationIdMax).regex(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsBaseOperationIdRegExp),
+  "rootRevision": zod.int().min(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsRootRevisionMin),
+  "rootOperationId": zod.string().max(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsRootOperationIdMax).regex(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsRootOperationIdRegExp),
+  "chainId": zod.string().min(1).max(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsChainIdMax).regex(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsChainIdRegExp),
+  "operationId": zod.string().min(1).max(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsOperationIdMax).regex(putSyncTodayBodyPayloadOneDayStateStagedItemVersionsOperationIdRegExp)
+})).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
+}),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
   "syncVersion": zod.literal(1).optional(),
@@ -9657,7 +9749,18 @@ export const PutSyncTodayBody = zod.object({
 export const PutSyncTodayResponse = zod.object({
   "ok": zod.boolean().optional(),
   "data": zod.looseObject({
-  "dayState": zod.record(zod.string(), zod.unknown()),
+  "dayState": zod.looseObject({
+  "stagedItems": zod.record(zod.string(), zod.boolean()).optional().describe('Desired checked state by stable run and material-row key; false is an explicit uncheck.'),
+  "stagedItemVersions": zod.record(zod.string(), zod.object({
+  "revision": zod.int().min(1),
+  "baseRevision": zod.int().min(putSyncTodayResponseDataDayStateStagedItemVersionsBaseRevisionMin),
+  "baseOperationId": zod.string().max(putSyncTodayResponseDataDayStateStagedItemVersionsBaseOperationIdMax).regex(putSyncTodayResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp),
+  "rootRevision": zod.int().min(putSyncTodayResponseDataDayStateStagedItemVersionsRootRevisionMin),
+  "rootOperationId": zod.string().max(putSyncTodayResponseDataDayStateStagedItemVersionsRootOperationIdMax).regex(putSyncTodayResponseDataDayStateStagedItemVersionsRootOperationIdRegExp),
+  "chainId": zod.string().min(1).max(putSyncTodayResponseDataDayStateStagedItemVersionsChainIdMax).regex(putSyncTodayResponseDataDayStateStagedItemVersionsChainIdRegExp),
+  "operationId": zod.string().min(1).max(putSyncTodayResponseDataDayStateStagedItemVersionsOperationIdMax).regex(putSyncTodayResponseDataDayStateStagedItemVersionsOperationIdRegExp)
+})).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
+}),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).optional().describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
   "unchanged": zod.boolean().optional(),
@@ -9811,7 +9914,18 @@ export const ClaimAutoTrackEventResponse = zod.object({
 }),
   "values": zod.record(zod.string(), zod.unknown()),
   "data": zod.looseObject({
-  "dayState": zod.record(zod.string(), zod.unknown()),
+  "dayState": zod.looseObject({
+  "stagedItems": zod.record(zod.string(), zod.boolean()).optional().describe('Desired checked state by stable run and material-row key; false is an explicit uncheck.'),
+  "stagedItemVersions": zod.record(zod.string(), zod.object({
+  "revision": zod.int().min(1),
+  "baseRevision": zod.int().min(claimAutoTrackEventResponseDataDayStateStagedItemVersionsBaseRevisionMin),
+  "baseOperationId": zod.string().max(claimAutoTrackEventResponseDataDayStateStagedItemVersionsBaseOperationIdMax).regex(claimAutoTrackEventResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp),
+  "rootRevision": zod.int().min(claimAutoTrackEventResponseDataDayStateStagedItemVersionsRootRevisionMin),
+  "rootOperationId": zod.string().max(claimAutoTrackEventResponseDataDayStateStagedItemVersionsRootOperationIdMax).regex(claimAutoTrackEventResponseDataDayStateStagedItemVersionsRootOperationIdRegExp),
+  "chainId": zod.string().min(1).max(claimAutoTrackEventResponseDataDayStateStagedItemVersionsChainIdMax).regex(claimAutoTrackEventResponseDataDayStateStagedItemVersionsChainIdRegExp),
+  "operationId": zod.string().min(1).max(claimAutoTrackEventResponseDataDayStateStagedItemVersionsOperationIdMax).regex(claimAutoTrackEventResponseDataDayStateStagedItemVersionsOperationIdRegExp)
+})).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
+}),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
   "snapshotId": zod.string().regex(claimAutoTrackEventResponseSnapshotIdRegExp),
@@ -10202,7 +10316,18 @@ export const SubmitManualSectionEditResponse = zod.object({
   "canonicalRevision": zod.int().min(submitManualSectionEditResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitManualSectionEditResponseServerTimeMin),
   "data": zod.looseObject({
-  "dayState": zod.record(zod.string(), zod.unknown()),
+  "dayState": zod.looseObject({
+  "stagedItems": zod.record(zod.string(), zod.boolean()).optional().describe('Desired checked state by stable run and material-row key; false is an explicit uncheck.'),
+  "stagedItemVersions": zod.record(zod.string(), zod.object({
+  "revision": zod.int().min(1),
+  "baseRevision": zod.int().min(submitManualSectionEditResponseDataDayStateStagedItemVersionsBaseRevisionMin),
+  "baseOperationId": zod.string().max(submitManualSectionEditResponseDataDayStateStagedItemVersionsBaseOperationIdMax).regex(submitManualSectionEditResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp),
+  "rootRevision": zod.int().min(submitManualSectionEditResponseDataDayStateStagedItemVersionsRootRevisionMin),
+  "rootOperationId": zod.string().max(submitManualSectionEditResponseDataDayStateStagedItemVersionsRootOperationIdMax).regex(submitManualSectionEditResponseDataDayStateStagedItemVersionsRootOperationIdRegExp),
+  "chainId": zod.string().min(1).max(submitManualSectionEditResponseDataDayStateStagedItemVersionsChainIdMax).regex(submitManualSectionEditResponseDataDayStateStagedItemVersionsChainIdRegExp),
+  "operationId": zod.string().min(1).max(submitManualSectionEditResponseDataDayStateStagedItemVersionsOperationIdMax).regex(submitManualSectionEditResponseDataDayStateStagedItemVersionsOperationIdRegExp)
+})).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
+}),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
   "snapshotId": zod.string().regex(submitManualSectionEditResponseSnapshotIdRegExp)
@@ -10272,7 +10397,18 @@ export const SubmitOperationalIntentResponse = zod.object({
   "canonicalRevision": zod.int().min(submitOperationalIntentResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitOperationalIntentResponseServerTimeMin),
   "data": zod.looseObject({
-  "dayState": zod.record(zod.string(), zod.unknown()),
+  "dayState": zod.looseObject({
+  "stagedItems": zod.record(zod.string(), zod.boolean()).optional().describe('Desired checked state by stable run and material-row key; false is an explicit uncheck.'),
+  "stagedItemVersions": zod.record(zod.string(), zod.object({
+  "revision": zod.int().min(1),
+  "baseRevision": zod.int().min(submitOperationalIntentResponseDataDayStateStagedItemVersionsBaseRevisionMin),
+  "baseOperationId": zod.string().max(submitOperationalIntentResponseDataDayStateStagedItemVersionsBaseOperationIdMax).regex(submitOperationalIntentResponseDataDayStateStagedItemVersionsBaseOperationIdRegExp),
+  "rootRevision": zod.int().min(submitOperationalIntentResponseDataDayStateStagedItemVersionsRootRevisionMin),
+  "rootOperationId": zod.string().max(submitOperationalIntentResponseDataDayStateStagedItemVersionsRootOperationIdMax).regex(submitOperationalIntentResponseDataDayStateStagedItemVersionsRootOperationIdRegExp),
+  "chainId": zod.string().min(1).max(submitOperationalIntentResponseDataDayStateStagedItemVersionsChainIdMax).regex(submitOperationalIntentResponseDataDayStateStagedItemVersionsChainIdRegExp),
+  "operationId": zod.string().min(1).max(submitOperationalIntentResponseDataDayStateStagedItemVersionsOperationIdMax).regex(submitOperationalIntentResponseDataDayStateStagedItemVersionsOperationIdRegExp)
+})).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
+}),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
   "snapshotId": zod.string().regex(submitOperationalIntentResponseSnapshotIdRegExp)
@@ -10301,7 +10437,18 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
   "serverReceivedAt": zod.coerce.date().optional(),
   "createdAt": zod.coerce.date(),
   "snapshot": zod.union([zod.looseObject({
-  "dayState": zod.record(zod.string(), zod.unknown()),
+  "dayState": zod.looseObject({
+  "stagedItems": zod.record(zod.string(), zod.boolean()).optional().describe('Desired checked state by stable run and material-row key; false is an explicit uncheck.'),
+  "stagedItemVersions": zod.record(zod.string(), zod.object({
+  "revision": zod.int().min(1),
+  "baseRevision": zod.int().min(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsBaseRevisionMin),
+  "baseOperationId": zod.string().max(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsBaseOperationIdMax).regex(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsBaseOperationIdRegExp),
+  "rootRevision": zod.int().min(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsRootRevisionMin),
+  "rootOperationId": zod.string().max(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsRootOperationIdMax).regex(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsRootOperationIdRegExp),
+  "chainId": zod.string().min(1).max(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsChainIdMax).regex(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsChainIdRegExp),
+  "operationId": zod.string().min(1).max(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsOperationIdMax).regex(listOperationalIntentReceiptsResponseMutationsItemSnapshotOneDayStateStagedItemVersionsOperationIdRegExp)
+})).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
+}),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.null()]).optional()
 }))

@@ -10,7 +10,16 @@ const version = (
   revision: number,
   baseRevision: number,
   operationId: string,
-): StagedItemRevision => ({ revision, baseRevision, operationId });
+  options: Partial<StagedItemRevision> = {},
+): StagedItemRevision => ({
+  revision,
+  baseRevision,
+  baseOperationId: options.baseOperationId ?? (baseRevision > 0 ? `parent:${baseRevision}` : ""),
+  rootRevision: options.rootRevision ?? 0,
+  rootOperationId: options.rootOperationId ?? "",
+  chainId: options.chainId ?? operationId,
+  operationId,
+});
 
 describe("staged item sync", () => {
   it("validates one-step row revisions and bounded operation identities", () => {
@@ -38,7 +47,12 @@ describe("staged item sync", () => {
     const result = mergeStagedItemsOnServer(
       {
         stagedItems: { "run-a::cheese": true },
-        stagedItemVersions: { "run-a::cheese": version(2, 0, "sleeping-device:2") },
+        stagedItemVersions: {
+          "run-a::cheese": version(2, 1, "sleeping-device:2", {
+            baseOperationId: "sleeping-device:1",
+            chainId: "sleeping-device:1",
+          }),
+        },
       },
       {
         stagedItems: { "run-a::cheese": false },
@@ -77,6 +91,40 @@ describe("staged item sync", () => {
     expect(retry.conflictCount).toBe(0);
   });
 
+  it("accepts an offline chain only when it descends from the canonical row", () => {
+    const existing = {
+      stagedItems: { "run-a::cheese": true },
+      stagedItemVersions: {
+        "run-a::cheese": version(1, 0, "phone:1", { chainId: "phone:1" }),
+      },
+    };
+    const sameChain = {
+      stagedItems: { "run-a::cheese": false },
+      stagedItemVersions: {
+        "run-a::cheese": version(3, 2, "phone:3", {
+          baseOperationId: "phone:2",
+          rootRevision: 0,
+          rootOperationId: "",
+          chainId: "phone:1",
+        }),
+      },
+    };
+    const staleBranch = {
+      stagedItems: { "run-a::cheese": false },
+      stagedItemVersions: {
+        "run-a::cheese": version(3, 2, "other:3", {
+          baseOperationId: "other:2",
+          chainId: "other:1",
+        }),
+      },
+    };
+
+    expect(mergeStagedItemsOnServer(sameChain, existing, { acceptCurrentBaseSnapshot: true })
+      .stagedItems["run-a::cheese"]).toBe(false);
+    expect(mergeStagedItemsOnServer(staleBranch, existing, { acceptCurrentBaseSnapshot: true })
+      .stagedItems["run-a::cheese"]).toBe(true);
+  });
+
   it("converges concurrent same-row decisions deterministically", () => {
     const checked = {
       stagedItems: { "run-a::cheese": true },
@@ -98,16 +146,46 @@ describe("staged item sync", () => {
     const result = mergeStagedItemsFromPeer(
       {
         stagedItems: { "run-a::cheese": true },
-        stagedItemVersions: { "run-a::cheese": version(4, 2, "offline-device:4") },
+      stagedItemVersions: {
+        "run-a::cheese": version(4, 3, "offline-device:4", {
+          baseOperationId: "offline-device:3",
+          chainId: "offline-device:1",
+        }),
+      },
       },
       {
         stagedItems: { "run-a::cheese": false },
-        stagedItemVersions: { "run-a::cheese": version(3, 2, "server:3") },
+        stagedItemVersions: { "run-a::cheese": version(3, 2, "server:3", { baseOperationId: "server:2" }) },
       },
     );
 
     expect(result.stagedItems["run-a::cheese"]).toBe(false);
-    expect(result.stagedItemVersions["run-a::cheese"]).toEqual(version(3, 2, "server:3"));
+    expect(result.stagedItemVersions["run-a::cheese"]).toEqual(
+      version(3, 2, "server:3", { baseOperationId: "server:2" }),
+    );
+  });
+
+  it("preserves a queued local chain only when the canonical peer is its parent", () => {
+    const queued = {
+      stagedItems: { "run-a::cheese": false },
+      stagedItemVersions: {
+        "run-a::cheese": version(2, 1, "phone:2", {
+          baseOperationId: "phone:1",
+          chainId: "phone:1",
+        }),
+      },
+    };
+    const ownParent = {
+      stagedItems: { "run-a::cheese": true },
+      stagedItemVersions: { "run-a::cheese": version(1, 0, "phone:1") },
+    };
+    const otherDevice = {
+      stagedItems: { "run-a::cheese": true },
+      stagedItemVersions: { "run-a::cheese": version(1, 0, "tablet:1") },
+    };
+
+    expect(mergeStagedItemsFromPeer(queued, ownParent).stagedItems["run-a::cheese"]).toBe(false);
+    expect(mergeStagedItemsFromPeer(queued, otherDevice).stagedItems["run-a::cheese"]).toBe(true);
   });
 
   it("preserves legacy checked rows but never lets them override a versioned uncheck", () => {

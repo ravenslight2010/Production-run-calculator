@@ -6661,6 +6661,9 @@ paths:
             Server-Timing:
               description: Optional bounded numeric sync acquisition, lock-read, transaction, and handler durations in milliseconds. Acquisition includes BEGIN; lock-read includes SQL round trips, not pure lock wait.
               schema: { type: string }
+            X-Sync-Staging-Conflicts:
+              description: Bounded count of Warehouse staging row edits rejected as stale; the canonical response contains the retained row states.
+              schema: { type: integer, minimum: 1, maximum: 500 }
           content:
             application/json:
               schema:
@@ -8962,9 +8965,33 @@ components:
       description: Existing canonical day-state payload; additional fields are preserved for forward compatibility.
       required: [dayState, runValues]
       properties:
-        dayState: { type: object, additionalProperties: true }
+        dayState:
+          type: object
+          additionalProperties: true
+          properties:
+            stagedItems:
+              type: object
+              description: Desired checked state by stable run and material-row key; false is an explicit uncheck.
+              additionalProperties: { type: boolean }
+            stagedItemVersions:
+              type: object
+              description: Per-row revision metadata used to reject stale same-row edits.
+              additionalProperties:
+                $ref: "#/components/schemas/StagedItemRevision"
         runValues: { type: object, additionalProperties: true }
       additionalProperties: true
+
+    StagedItemRevision:
+      type: object
+      required: [revision, baseRevision, baseOperationId, rootRevision, rootOperationId, chainId, operationId]
+      properties:
+        revision: { type: integer, minimum: 1 }
+        baseRevision: { type: integer, minimum: 0 }
+        baseOperationId: { type: string, maxLength: 120, pattern: "^[A-Za-z0-9:_-]*$" }
+        rootRevision: { type: integer, minimum: 0 }
+        rootOperationId: { type: string, maxLength: 120, pattern: "^[A-Za-z0-9:_-]*$" }
+        chainId: { type: string, minLength: 1, maxLength: 120, pattern: "^[A-Za-z0-9:_-]+$" }
+        operationId: { type: string, minLength: 1, maxLength: 120, pattern: "^[A-Za-z0-9:_-]+$" }
 
     SyncPeerFrame:
       type: object

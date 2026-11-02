@@ -416,3 +416,25 @@ and workflow restarts are not applicable: no application runtime code or service
 commands changed. Release certification, publishing and production writes remain
 out of scope. The separately owned full-browser runtime verification already
 covers the next release step; no overlapping follow-up is proposed.
+
+## Warehouse staging convergence identity update — 2026-11-02
+
+The owner-approved per-row staging contract now verifies both check and
+uncheck convergence between browser contexts, including reload. Its existing
+main-suite case was expanded and renamed from
+`warehouse-coverage.spec.ts :: operator staging check persists for a canonical per-run material across reload`
+to
+`warehouse-coverage.spec.ts :: operator staging check and uncheck converge across devices and reload`.
+This is a one-for-one identity replacement: the approved main inventory remains
+240 cases, and the standalone inventory remains 293. No filter, retry policy,
+timeout, worker limit, or physical-device claim changed.
+
+The canonical isolated `--list` collection found all 240 main-suite identities
+in 57 files, with no runtime cases executed. The reporter unit verifies the
+expanded identity and preserves both historical standalone fingerprints by
+reversing this rename together with the approved synthetic-source replacement.
+The current 293-identity standalone fingerprint is
+`96ac8d7014625decfd50420deb057f0c288edb4204fee4d83a792c0e557b0391`.
+The prior 293-identity and original 278-identity hashes remain historical
+integrity anchors, not current-set fingerprints. The focused Warehouse runtime
+case passed 1/1 separately; the required full Chromium run remains pending.

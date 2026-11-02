@@ -52,10 +52,34 @@ describe("Home sync manager boundary", () => {
       /recordSyncEvent\(\s*"merge",\s*"Queued change already matches the confirmed server state; no duplicate write was sent",\s*"duplicate-suppressed"/g,
     );
 
-    expect(duplicateSuppressionEvents).toHaveLength(3);
+    expect(duplicateSuppressionEvents).toHaveLength(2);
     expect(home).not.toMatch(
       /recordSyncEvent\(\s*"ack",\s*"Queued change already matches the confirmed server state; no duplicate write was sent",\s*"duplicate-suppressed"/,
     );
+  });
+
+  it("rebuilds queued writes against the newly adopted canonical snapshot", () => {
+    const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
+    const fallbackStart = home.indexOf("if (recoveredWithoutReplay && !stale)");
+    const fallbackEnd = home.indexOf("return;", fallbackStart);
+    const fallbackDrain = home.slice(fallbackStart, fallbackEnd);
+    const acknowledgedStart = home.indexOf(
+      "// A queued payload was built against the snapshot that existed when it",
+    );
+    const acknowledgedEnd = home.indexOf("}).catch(() => {", acknowledgedStart);
+    const acknowledgedDrain = home.slice(acknowledgedStart, acknowledgedEnd);
+
+    expect(fallbackStart).toBeGreaterThanOrEqual(0);
+    expect(fallbackEnd).toBeGreaterThan(fallbackStart);
+    expect(acknowledgedStart).toBeGreaterThanOrEqual(0);
+    expect(acknowledgedEnd).toBeGreaterThan(acknowledgedStart);
+    for (const drain of [fallbackDrain, acknowledgedDrain]) {
+      expect(drain).toContain("const freshPayload = buildSyncPayload(dayStateRef.current)");
+      expect(drain).toContain(
+        "baseSnapshot: adoptedCanonicalSnapshotRef.current ?? undefined",
+      );
+      expect(drain).not.toContain("doFetch(queued.payload");
+    }
   });
 
   it("keeps scheduled profile propagation on the causally fenced write contract", () => {

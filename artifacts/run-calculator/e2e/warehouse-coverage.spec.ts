@@ -404,8 +404,9 @@ test.afterEach(async () => {
   }
 });
 
-test("operator staging check persists for a canonical per-run material across reload", async ({
+test("operator staging check and uncheck converge across devices and reload", async ({
   page,
+  browser,
 }, testInfo) => {
   const runId = uniqueTestId("warehouse_staging_run");
   const brand = `Warehouse E2E ${uniqueTestId("brand")}`;
@@ -458,18 +459,37 @@ test("operator staging check persists for a canonical per-run material across re
   const syncDiagnostics: Array<Record<string, string | number | boolean | null>> = [];
   const stageValueByRequest = new WeakMap<
     object,
-    { present: boolean; value: boolean | null }
+    {
+      present: boolean;
+      value: boolean | null;
+      versionPresent: boolean;
+      completeness: string | null;
+      baseSnapshotPresent: boolean;
+      responseEventsBeforeRequest: number;
+      syncMetaPresent: boolean;
+    }
   >();
+  let completedSyncResponseEvents = 0;
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (url.pathname !== "/api/sync/today" || request.method() !== "PUT") return;
     let stageValue: boolean | null = null;
     let stagePresent = false;
+    let stageVersionPresent = false;
+    let completeness: string | null = null;
+    let baseSnapshotPresent = false;
+    let syncMetaPresent = false;
     try {
       const body = request.postDataJSON() as {
+        syncMeta?: unknown;
         payload?: {
-          dayState?: { stagedItems?: Record<string, unknown> };
+          completeness?: unknown;
+          baseSnapshotId?: unknown;
+          dayState?: {
+            stagedItems?: Record<string, unknown>;
+            stagedItemVersions?: Record<string, unknown>;
+          };
         };
       };
       const stagedItems = body.payload?.dayState?.stagedItems;
@@ -477,14 +497,31 @@ test("operator staging check persists for a canonical per-run material across re
         stagePresent = true;
         stageValue = Boolean(stagedItems[stagedKey]);
       }
+      const stagedItemVersions = body.payload?.dayState?.stagedItemVersions;
+      stageVersionPresent = !!stagedItemVersions
+        && Object.prototype.hasOwnProperty.call(stagedItemVersions, stagedKey);
+      completeness = typeof body.payload?.completeness === "string"
+        ? body.payload.completeness
+        : null;
+      syncMetaPresent = !!body.syncMeta;
+      baseSnapshotPresent = typeof body.payload?.baseSnapshotId === "string";
     } catch {
       // Record only safe request metadata when the body is not JSON.
     }
-    stageValueByRequest.set(request, { present: stagePresent, value: stageValue });
+    stageValueByRequest.set(request, {
+      present: stagePresent,
+      value: stageValue,
+      versionPresent: stageVersionPresent,
+      completeness,
+      baseSnapshotPresent,
+      responseEventsBeforeRequest: completedSyncResponseEvents,
+      syncMetaPresent,
+    });
   });
   page.on("response", async (response) => {
     const url = new URL(response.url());
     if (url.pathname !== "/api/sync/today" || response.request().method() !== "PUT") return;
+    completedSyncResponseEvents += 1;
     let reasonCode: string | null = null;
     let partialFallback: boolean | null = null;
     let stale: boolean | null = null;
@@ -516,12 +553,18 @@ test("operator staging check persists for a canonical per-run material across re
         event: "sync-write",
         requestStagePresent: requestStage?.present ?? false,
         requestStageValue: requestStage?.value ?? null,
+        requestStageVersionPresent: requestStage?.versionPresent ?? false,
+        requestCompleteness: requestStage?.completeness ?? null,
+        requestBaseSnapshotPresent: requestStage?.baseSnapshotPresent ?? false,
+        requestResponseEventsBeforeSend: requestStage?.responseEventsBeforeRequest ?? 0,
+        requestSyncMetaPresent: requestStage?.syncMetaPresent ?? false,
         status: response.status(),
         syncResponse: await response.headerValue("x-sync-response"),
         convergence: await response.headerValue("x-sync-convergence"),
         reasonCode,
         partialFallback,
         stale,
+        stagingConflicts: await response.headerValue("x-sync-staging-conflicts"),
         serverStagePresent,
         serverStageValue,
       });
@@ -563,6 +606,18 @@ test("operator staging check persists for a canonical per-run material across re
   };
   try {
     await expect.poll(readSavedStage, { timeout: 20_000 }).toBe("true");
+    await expect.poll(
+      () => syncDiagnostics.some((entry) =>
+        entry.requestStagePresent === true
+        && entry.requestStageValue === true
+        && entry.requestStageVersionPresent === true
+      ),
+      { timeout: 20_000 },
+    ).toBe(true);
+    expect(syncDiagnostics.some((entry) =>
+      entry.requestStagePresent === true
+      && entry.syncResponse === "partial-fallback"
+    )).toBe(false);
   } catch (error) {
     const syncStatus = await page.getByTestId("sync-status-button")
       .getAttribute("title").catch(() => null);
@@ -570,6 +625,30 @@ test("operator staging check persists for a canonical per-run material across re
       `${error instanceof Error ? error.message : String(error)}\n`
       + `Sanitized sync evidence: ${JSON.stringify({ syncStatus, syncDiagnostics })}`,
     );
+  }
+
+  const peerContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const peerPage = await peerContext.newPage();
+    await openAuthenticated(peerPage, staffToken);
+    await peerPage.getByTestId("tab-warehouse").click();
+    const peerDetails = peerPage.getByTestId("warehouse-run-details");
+    await expect(peerDetails).toBeVisible();
+    await peerDetails.locator("summary").click();
+    const peerStageButton = peerPage.getByTestId(`stage-${runId}-${material}__lbs`);
+    await expect(peerStageButton).toHaveAttribute("aria-pressed", "true");
+
+    await peerStageButton.click();
+    await expect(peerStageButton).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(readSavedStage, { timeout: 20_000 }).toBe("false");
+    await expect(stageButton).toHaveAttribute("aria-pressed", "false");
+
+    await stageButton.click();
+    await expect(stageButton).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(readSavedStage, { timeout: 20_000 }).toBe("true");
+    await expect(peerStageButton).toHaveAttribute("aria-pressed", "true");
+  } finally {
+    await peerContext.close();
   }
 
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -606,7 +685,14 @@ test("operator staging check persists for a canonical per-run material across re
   try {
     await reloadedStageButton.click();
     await expect(reloadedStageButton).toHaveAttribute("aria-pressed", "false");
-    await expect.poll(readSavedStage, { timeout: 20_000 }).toBeNull();
+    await expect.poll(readSavedStage, { timeout: 20_000 }).toBe("false");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.getByTestId("tab-warehouse").click();
+    await expect(details).toBeVisible();
+    await details.locator("summary").click();
+    await expect(page.getByTestId(`stage-${runId}-${material}__lbs`))
+      .toHaveAttribute("aria-pressed", "false");
   } catch (error) {
     const syncStatus = await page.getByTestId("sync-status-button")
       .getAttribute("title").catch(() => null);
