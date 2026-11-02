@@ -181,9 +181,8 @@ test("manager reviews a staff issue report and retains the review after reload",
       .getByRole("menuitem", { name: "Reported issues", exact: true })
       .click();
     const incident = managerPage
-      .getByTestId("incident-row")
-      .filter({ hasText: staff.username })
-      .filter({ hasText: report.correlationId });
+      .locator(`[data-incident-header="${report.incidentId}"]`)
+      .locator("xpath=..");
     await expect(incident).toBeVisible();
     await expect(incident).toContainText(report.correlationId);
     const reviewResponse = managerPage.waitForResponse(
@@ -210,9 +209,8 @@ test("manager reviews a staff issue report and retains the review after reload",
       .getByRole("menuitem", { name: "Reported issues", exact: true })
       .click();
     const reloadedIncident = managerPage
-      .getByTestId("incident-row")
-      .filter({ hasText: staff.username })
-      .filter({ hasText: report.correlationId });
+      .locator(`[data-incident-header="${report.incidentId}"]`)
+      .locator("xpath=..");
     await expect(reloadedIncident).toBeVisible();
     await expect(
       reloadedIncident.getByText("Reviewed", { exact: true }),
@@ -221,6 +219,7 @@ test("manager reviews a staff issue report and retains the review after reload",
       .getByRole("button")
       .first()
       .click();
+    await expect(reloadedIncident).toContainText(report.correlationId);
     await expect(reloadedIncident).toContainText(description);
     await expect(reloadedIncident).toContainText(report.correlationId);
     await expect(

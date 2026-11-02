@@ -419,6 +419,7 @@ test("operator staging check persists for a canonical per-run material across re
     ].join("-");
   });
   const seededAt = Date.now();
+  const stagedKey = `${runId}::${material}__lbs`;
   const payload = {
     dayState: {
       date,
@@ -454,7 +455,78 @@ test("operator staging check persists for a canonical per-run material across re
   });
 
   const browserErrors: string[] = [];
+  const syncDiagnostics: Array<Record<string, string | number | boolean | null>> = [];
+  const stageValueByRequest = new WeakMap<
+    object,
+    { present: boolean; value: boolean | null }
+  >();
   page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname !== "/api/sync/today" || request.method() !== "PUT") return;
+    let stageValue: boolean | null = null;
+    let stagePresent = false;
+    try {
+      const body = request.postDataJSON() as {
+        payload?: {
+          dayState?: { stagedItems?: Record<string, unknown> };
+        };
+      };
+      const stagedItems = body.payload?.dayState?.stagedItems;
+      if (stagedItems && Object.prototype.hasOwnProperty.call(stagedItems, stagedKey)) {
+        stagePresent = true;
+        stageValue = Boolean(stagedItems[stagedKey]);
+      }
+    } catch {
+      // Record only safe request metadata when the body is not JSON.
+    }
+    stageValueByRequest.set(request, { present: stagePresent, value: stageValue });
+  });
+  page.on("response", async (response) => {
+    const url = new URL(response.url());
+    if (url.pathname !== "/api/sync/today" || response.request().method() !== "PUT") return;
+    let reasonCode: string | null = null;
+    let partialFallback: boolean | null = null;
+    let stale: boolean | null = null;
+    let serverStageValue: boolean | null = null;
+    let serverStagePresent = false;
+    try {
+      const body = await response.json() as {
+        reasonCode?: unknown;
+        code?: unknown;
+        partialFallback?: unknown;
+        stale?: unknown;
+        data?: { dayState?: { stagedItems?: Record<string, unknown> } };
+      };
+      const code = body.reasonCode ?? body.code;
+      if (typeof code === "string") reasonCode = code;
+      if (typeof body.partialFallback === "boolean") partialFallback = body.partialFallback;
+      if (typeof body.stale === "boolean") stale = body.stale;
+      const stagedItems = body.data?.dayState?.stagedItems;
+      if (stagedItems && Object.prototype.hasOwnProperty.call(stagedItems, stagedKey)) {
+        serverStagePresent = true;
+        serverStageValue = Boolean(stagedItems[stagedKey]);
+      }
+    } catch {
+      // Omit response payloads; status and protocol headers are sufficient.
+    }
+    if (syncDiagnostics.length < 20) {
+      const requestStage = stageValueByRequest.get(response.request());
+      syncDiagnostics.push({
+        event: "sync-write",
+        requestStagePresent: requestStage?.present ?? false,
+        requestStageValue: requestStage?.value ?? null,
+        status: response.status(),
+        syncResponse: await response.headerValue("x-sync-response"),
+        convergence: await response.headerValue("x-sync-convergence"),
+        reasonCode,
+        partialFallback,
+        stale,
+        serverStagePresent,
+        serverStageValue,
+      });
+    }
+  });
   page.on("response", (response) => {
     if (response.status() >= 500) {
       browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
@@ -482,14 +554,23 @@ test("operator staging check persists for a canonical per-run material across re
       const result = await db.query<{ staged: string | null }>(
         `SELECT data->'dayState'->'stagedItems'->>$1 AS staged
          FROM daily_sync WHERE date = $2 AND scope = 'live'`,
-        [`${runId}::${material}__lbs`, date],
+        [stagedKey, date],
       );
       return result.rows[0]?.staged ?? null;
     } finally {
       await db.end().catch(() => {});
     }
   };
-  await expect.poll(readSavedStage, { timeout: 20_000 }).toBe("true");
+  try {
+    await expect.poll(readSavedStage, { timeout: 20_000 }).toBe("true");
+  } catch (error) {
+    const syncStatus = await page.getByTestId("sync-status-button")
+      .getAttribute("title").catch(() => null);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n`
+      + `Sanitized sync evidence: ${JSON.stringify({ syncStatus, syncDiagnostics })}`,
+    );
+  }
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
@@ -522,9 +603,26 @@ test("operator staging check persists for a canonical per-run material across re
     );
   }
 
-  await reloadedStageButton.click();
-  await expect(reloadedStageButton).toHaveAttribute("aria-pressed", "false");
-  await expect.poll(readSavedStage, { timeout: 20_000 }).toBeNull();
+  try {
+    await reloadedStageButton.click();
+    await expect(reloadedStageButton).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(readSavedStage, { timeout: 20_000 }).toBeNull();
+  } catch (error) {
+    const syncStatus = await page.getByTestId("sync-status-button")
+      .getAttribute("title").catch(() => null);
+    const pressed = await reloadedStageButton
+      .getAttribute("aria-pressed").catch(() => null);
+    const persistedStage = await readSavedStage().catch(() => "unavailable");
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n`
+      + `Sanitized uncheck evidence: ${JSON.stringify({
+        syncStatus,
+        pressed,
+        persistedStage,
+        syncDiagnostics,
+      })}`,
+    );
+  }
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-warehouse").click();

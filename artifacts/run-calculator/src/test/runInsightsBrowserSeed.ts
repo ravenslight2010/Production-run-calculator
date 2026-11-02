@@ -3,6 +3,7 @@ export interface RunInsightsBrowserSeed {
   brand: string;
   flavor: string;
   runId: string;
+  date?: string;
 }
 
 /** Must remain closure-free: Playwright serializes this function into a page. */
@@ -10,6 +11,7 @@ export function seedRunInsightsBrowserState({
   brand,
   flavor,
   runId,
+  date,
 }: RunInsightsBrowserSeed): void {
   // addInitScript also runs after reload and inside child frames. Neither may
   // overwrite state that this owned scenario has already saved or recovered.
@@ -21,7 +23,7 @@ export function seedRunInsightsBrowserState({
   localStorage.setItem("run-calc-day", JSON.stringify({
     runs: [{ id: runId, brand, flavor, seeded: false }],
     currentIndex: 0,
-    date: new Date().toISOString().slice(0, 10),
+    date: date ?? new Date().toISOString().slice(0, 10),
     resetAt: 0,
     substitutions: [],
     substitutionLog: [],

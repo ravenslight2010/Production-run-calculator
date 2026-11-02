@@ -54,17 +54,48 @@ const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLI
  */
 async function signIn(
   page: Page,
+  fixtures: AuthorizedBrowserFixtures,
+  token: string,
   username: string,
   password: string,
   product: { brand: string; flavor: string },
 ): Promise<void> {
+  const runId = `run-insights-${username}`;
+  const date = await page.evaluate(() => {
+    const now = new Date();
+    return [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+  });
+  // The sync snapshot is authoritative after sign-in. Seed the same synthetic
+  // run on the isolated server before opening the app so sync cannot replace
+  // the browser-only seed with its default unnamed run.
+  await fixtures.seedTodaySync({
+    token,
+    senderId: runId,
+    date,
+    payload: {
+      dayState: {
+        date,
+        runs: [{ id: runId, brand: product.brand, flavor: product.flavor, seeded: false }],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+      },
+    },
+  });
   // This fixture creates a synthetic server profile without mutating the shared
   // factory brand list. Skip the one-time legacy orphan-profile cleanup so it
   // does not delete that deliberately isolated record during startup.
   await page.addInitScript(seedRunInsightsBrowserState, {
     brand: product.brand,
     flavor: product.flavor,
-    runId: `run-insights-${username}`,
+    runId,
+    date,
   });
   await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
@@ -165,10 +196,9 @@ async function goToSetup(page: Page): Promise<void> {
   const setupItem = page.getByRole("menuitem", { name: /^setup$/i });
   await setupItem.waitFor({ state: "visible", timeout: 5_000 });
   await setupItem.click();
-  // Wait for the Setup view to mount instead of a fixed pause. Every caller
-  // works with the Run Insights card, whose refresh button is the Setup
-  // screen's stable anchor.
-  await page.locator('[data-testid="button-run-insights-refresh"]').waitFor({
+  // Wait for the Setup view itself. The insights card is conditional on the
+  // selected run having a product identity and a visible suggestion.
+  await page.getByTestId("setup-header").waitFor({
     state: "attached",
     timeout: 10_000,
   });
@@ -280,7 +310,7 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     );
 
     // Step 2: Browser sign-in — the startup sync reads the server profile into localStorage
-    await signIn(page, username, "TestPass123!", ACCEPT_PRODUCT);
+    await signIn(page, authorizedFixtures, token, username, "TestPass123!", ACCEPT_PRODUCT);
 
     // Step 3: Navigate to Setup tab and refresh the Insights card
     await goToSetup(page);
@@ -360,7 +390,7 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
       CONFIGURED_SPEED,
       RECOMMENDED_SPEED,
     );
-    await signIn(page, username, "TestPass123!", DISMISS_PRODUCT);
+    await signIn(page, authorizedFixtures, token, username, "TestPass123!", DISMISS_PRODUCT);
 
     await goToSetup(page);
     const refreshBtn = page.locator('[data-testid="button-run-insights-refresh"]');
@@ -433,7 +463,7 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
       CONFIGURED_SPEED,
       RECOMMENDED_SPEED,
     );
-    await signIn(page, username, "TestPass123!", FOLLOW_UP_PRODUCT);
+    await signIn(page, authorizedFixtures, token, username, "TestPass123!", FOLLOW_UP_PRODUCT);
 
     // Accept the suggestion first so it moves to "accepted" status
     await goToSetup(page);

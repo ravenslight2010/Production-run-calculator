@@ -1,0 +1,397 @@
+{
+  "schemaVersion": 1,
+  "readOnly": true,
+  "rawMessagesRetained": false,
+  "environment": "production",
+  "capturedAtDate": "2026-11-02",
+  "timeZone": "UTC",
+  "deploymentType": "autoscale",
+  "evidenceType": "sanitized aggregate operational telemetry",
+  "producedBy": "read-only deployment telemetry and SRE investigation",
+  "sanitization": "Aggregate counts, bounded timing summaries, and build identities only; raw logs, request bodies, SQL, host/process identifiers, and personal data omitted.",
+  "queryWindow": {
+    "start": "2026-11-02T02:32:32.082Z",
+    "endExclusive": "2026-11-02T02:36:00.082Z"
+  },
+  "deploymentRevisionId": "42763954-0c35-47c4-8b4b-6ea38c26deb1",
+  "appBuildId": "app-build:934ed015-7a94-4db0-a558-0fdbad559c27",
+  "latestSuccessfulBuildCreatedAt": "2026-10-30T15:38:15Z",
+  "buildDuringIncidentWindow": false,
+  "poolPressureWindows": [
+    {
+      "start": "2026-11-02T02:32:32.082Z",
+      "endExclusive": "2026-11-02T02:33:33.582Z",
+      "acquisitionErrorCount": 23,
+      "eventLoopDelayMaxMs": 28605
+    },
+    {
+      "start": "2026-11-02T02:33:33.782Z",
+      "endExclusive": "2026-11-02T02:34:35.281Z",
+      "acquisitionErrorCount": 23,
+      "acquisitionLatencyMs": {
+        "p95": 6300,
+        "p99": 9500,
+        "max": 9500
+      },
+      "pool": {
+        "total": 10,
+        "configuredMaximum": 10,
+        "idleP95": 0,
+        "waitingP95": 16,
+        "waitingMax": 19
+      },
+      "eventLoopDelayMs": {
+        "p95": 4400,
+        "p99": 27213,
+        "max": 27213
+      }
+    }
+  ],
+  "queueMonitor": {
+    "databaseTimeoutAtApprox": "2026-11-02T02:33:40Z",
+    "recoveredAt": "2026-11-02T02:34:39.757Z",
+    "databaseTimeoutRecurrenceAt": "2026-11-02T02:35:46.881Z",
+    "sampledAcquisitionRecoveredAt": "2026-11-02T02:36:00.082Z",
+    "sampledAcquisitionMs": 99
+  },
+  "readiness": {
+    "checkedAt": "2026-11-02T02:34:39.836Z",
+    "outcome": "success",
+    "database": "ok",
+    "backgroundWorkers": "ok"
+  },
+  "laterDatabaseCapacitySample": {
+    "capturedAt": "2026-11-02T02:34:50.382Z",
+    "clientBackends": 13,
+    "activeBackends": 1,
+    "activeOrLockWaiters": 0,
+    "estimatedOrdinarySlotsRemaining": 433
+  },
+  "providerMetricsCoverage": {
+    "windowStart": "2026-11-02T02:32:30.000Z",
+    "windowEndExclusive": "2026-11-02T02:35:30.000Z",
+    "readinessRequests": 2,
+    "observedAvailabilityPercent": 100,
+    "observedServerErrors": 0,
+    "averageCpuMemory": "low per aggregate provider metrics; exact values not retained",
+    "reportedInstanceCount": 0,
+    "limitations": "Only two readiness requests were returned; these aggregates do not establish user-request impact, active instance count, or absence of unobserved load."
+  },
+  "followUpSample": {
+    "queryWindow": {
+      "start": "2026-11-02T04:18:00Z",
+      "endExclusive": "2026-11-02T04:21:00Z"
+    },
+    "servingBuildUnchanged": true,
+    "poolPressureWindows": [
+      {
+        "start": "2026-11-02T04:18:25.782Z",
+        "endExclusive": "2026-11-02T04:19:26.782Z",
+        "acquisitionErrorCount": 23,
+        "acquisitionLatencyMs": {
+          "p99": 9700
+        },
+        "eventLoopDelayMs": {
+          "p99": 9504
+        }
+      },
+      {
+        "start": "2026-11-02T04:19:26.782Z",
+        "endExclusive": "2026-11-02T04:20:31.182Z",
+        "acquisitionErrorCount": 16,
+        "acquisitionLatencyMs": {
+          "p95": 3200,
+          "p99": 5500,
+          "max": 5699
+        },
+        "pool": {
+          "totalP95": 10,
+          "totalP99": 10,
+          "totalMax": 10,
+          "waitingMax": 9
+        },
+        "eventLoopDelayMs": {
+          "p99": 3102,
+          "max": 4500
+        }
+      }
+    ],
+    "queueMonitorTimeouts": [
+      {
+        "approxAt": "2026-11-02T04:18:26Z",
+        "durationApproxMs": 6000
+      },
+      {
+        "approxAt": "2026-11-02T04:19:26Z",
+        "durationApproxMs": 6000
+      },
+      {
+        "start": "2026-11-02T04:20:31.382Z",
+        "endExclusive": "2026-11-02T04:20:38.282Z",
+        "acquisitionMs": 6600,
+        "elapsedMs": 6899,
+        "timeoutOverrunMs": 5700
+      }
+    ],
+    "webPushEnqueueFailures": [
+      {
+        "at": "2026-11-02T04:18:46Z",
+        "reason": "database-timeout"
+      },
+      {
+        "at": "2026-11-02T04:20:48Z",
+        "reason": "database-timeout"
+      }
+    ],
+    "readiness": {
+      "checkedAt": "2026-11-02T04:20:20.432Z",
+      "outcome": "success",
+      "backgroundWorkers": "warning",
+      "scheduledEvaluationQueue": {
+        "terminalFailedJobsInLastWindow": 5,
+        "monitorSample": "unavailable"
+      },
+      "syncOutboxLag": {
+        "pendingEvents": 0,
+        "lagMs": 0
+      }
+    },
+    "providerMetrics": {
+      "windowStart": "2026-11-02T04:18:00Z",
+      "windowEndExclusive": "2026-11-02T04:21:00Z",
+      "requests": 3,
+      "observedHttp5xxPoints": 0,
+      "p95LatencyAt2026-11-02T04:20ZMsApprox": 371,
+      "readinessEndpointRequests": 3,
+      "readiness4xxPoints": 0,
+      "readiness5xxPoints": 0,
+      "readinessP95LatencyMs": 462,
+      "instanceCountSeries": [
+        1,
+        0,
+        1
+      ],
+      "limitations": "Only three requests were returned and all observed endpoint samples were readiness probes; zero 5xx points do not prove zero user-facing failures. The instance-count series is inconsistent."
+    },
+    "reportedIdleWindows": {
+      "ownerObservation": "The owner reports no noticed downtime during active use; noticed interruptions occur while the app is idle or unused.",
+      "correlationMethod": "Read-only log and metric samples around ±5 minutes of each reported time; this is temporal correlation, not request-level tracing.",
+      "windows": [
+        {
+          "ownerReportedLocal": "2026-10-15T21:23:00-05:00",
+          "utcAnchor": "2026-10-16T02:23:00Z",
+          "sampleWindow": {
+            "start": "2026-10-16T02:18:00Z",
+            "endExclusive": "2026-10-16T02:28:00Z"
+          },
+          "pool": {
+            "totalMax": 10,
+            "waitingP95": 9,
+            "waitingMax": 9,
+            "acquisitionP99Ms": 26300,
+            "acquisitionMaxMs": 26300,
+            "eventLoopMaxMs": 22200
+          },
+          "backgroundEvents": [
+            {
+              "at": "2026-10-16T02:23:00Z",
+              "event": "sync-outbox retry"
+            },
+            {
+              "at": "2026-10-16T02:23:04Z",
+              "event": "queue-monitor sample unavailable"
+            },
+            {
+              "at": "2026-10-16T02:23:39Z",
+              "event": "server-job claim failed"
+            },
+            {
+              "at": "2026-10-16T02:25:52Z",
+              "event": "daily rollover failed"
+            }
+          ],
+          "readiness": {
+            "probesApprox": "02:24–02:25Z",
+            "coreChecks": "passed",
+            "backgroundWorkers": "ok",
+            "terminalFailuresInQueueSnapshots": "3–4"
+          }
+        },
+        {
+          "ownerReportedLocal": "2026-10-20T11:15:00-05:00",
+          "utcAnchor": "2026-10-20T16:15:00Z",
+          "sampleWindow": {
+            "start": "2026-10-20T16:10:00Z",
+            "endExclusive": "2026-10-20T16:20:00Z"
+          },
+          "pool": {
+            "waitingMax": 20,
+            "acquisitionMaxMs": 18100,
+            "eventLoopMaxMs": 30100
+          },
+          "backgroundEvents": {
+            "queueMonitor": "repeated timeouts",
+            "webPushEnqueueFailures": 6,
+            "serverJobFailures": 3,
+            "syncOutboxRetryAt": "2026-10-20T16:14:06Z",
+            "dailyRolloverFailureAt": "2026-10-20T16:16:57Z"
+          },
+          "readiness": {
+            "successAt": "2026-10-20T16:15:20Z",
+            "backgroundWorkersWarningAt": "2026-10-20T16:19:39Z"
+          }
+        },
+        {
+          "ownerReportedLocal": "2026-10-20T14:59:00-05:00",
+          "utcAnchor": "2026-10-20T19:59:00Z",
+          "sampleWindow": {
+            "start": "2026-10-20T19:54:00Z",
+            "endExclusive": "2026-10-20T20:04:00Z"
+          },
+          "pool": {
+            "waitingMax": 19,
+            "acquisitionMaxMs": 26900,
+            "eventLoopMaxMs": 23800
+          },
+          "backgroundEvents": {
+            "queueMonitor": "repeated timeouts",
+            "syncOutboxRetries": 5,
+            "webPushEnqueueFailures": 3,
+            "serverJobFailures": 5,
+            "dailyRollover": "succeeded"
+          },
+          "readiness": {
+            "workerWarningAt": [
+              "2026-10-20T19:59:39Z",
+              "2026-10-20T20:00:20Z"
+            ],
+            "syncOutboxLag": "zero in both snapshots"
+          }
+        }
+      ],
+      "providerCoverage": {
+        "aggregateRequestsPerWindow": [
+          11,
+          6,
+          7
+        ],
+        "readinessProbeCountPerWindow": "5–6",
+        "observed5xxPoints": 0,
+        "availabilityPercentAtThirdWindow": 83.3,
+        "limitations": "Endpoint metrics contained readiness probes only, not ordinary-user traffic. Zero observed 5xx points do not establish that user requests succeeded."
+      },
+      "historicalSearchDiscrepancy": "An Oct 21 exact-window search returned no records; the Nov 2 unrevision-filtered ±5-minute query found samples around these anchors. The reader/window discrepancy remains unresolved."
+    },
+    "serverJobFailureReview": {
+      "queryWindow": {
+        "start": "2026-11-02T04:17:00Z",
+        "endExclusive": "2026-11-02T04:21:00Z"
+      },
+      "queryScope": "Read-only production replica; live scope; failed scheduled-evaluation jobs completed in the interval. Selected only static job type, status, error codes, attempt counts/outcomes, and timestamps; actor IDs, input payloads, result data, and raw error messages were not returned.",
+      "distinctFailedJobs": 2,
+      "attemptReceipts": 6,
+      "jobs": [
+        {
+          "createdAt": "2026-11-02T04:16:17.591Z",
+          "startedAt": "2026-11-02T04:16:18.282Z",
+          "finishedAt": "2026-11-02T04:17:00.781Z",
+          "attempts": [
+            {
+              "attempt": 1,
+              "outcome": "retrying",
+              "errorCode": "handler_failed"
+            },
+            {
+              "attempt": 2,
+              "outcome": "retrying",
+              "errorCode": "handler_failed"
+            },
+            {
+              "attempt": 3,
+              "outcome": "failed",
+              "errorCode": "handler_failed"
+            }
+          ]
+        },
+        {
+          "createdAt": "2026-11-02T04:19:33.292Z",
+          "startedAt": "2026-11-02T04:19:33.481Z",
+          "finishedAt": "2026-11-02T04:20:49.682Z",
+          "attempts": [
+            {
+              "attempt": 1,
+              "outcome": "retrying",
+              "errorCode": "lease_expired"
+            },
+            {
+              "attempt": 2,
+              "outcome": "retrying",
+              "errorCode": "handler_failed"
+            },
+            {
+              "attempt": 3,
+              "outcome": "failed",
+              "errorCode": "handler_failed"
+            }
+          ]
+        }
+      ],
+      "boundedErrorMessageClassification": {
+        "method": "A SQL CASE expression inspected error-message text but returned only coarse category labels; raw messages were not selected or returned.",
+        "pushDeliverySignalRows": 2,
+        "databaseLockTimeoutSignalRows": 0,
+        "unclassifiedRows": 4,
+        "limitation": "Text-token classification is heuristic. Generic handler_failed codes and unclassified messages do not rule out database, provider, or application causes."
+      },
+      "readinessWindowCheck": {
+        "windowStart": "2026-11-02T04:15:20.432Z",
+        "windowEndExclusive": "2026-11-02T04:20:20.432Z",
+        "readReplicaStatusCounts": {
+          "failed": 3,
+          "cancelled": 1
+        },
+        "readinessReportedTerminalFailures": 5
+      },
+      "sourceReview": {
+        "scheduledEvaluation": {
+          "maxAttempts": 3,
+          "handlerTimeoutMs": 60000,
+          "defaultWorkerLeaseMs": 30000,
+          "defaultWorkerConcurrency": 2
+        },
+        "executionPath": "The handler iterates dates for a scope and wraps each date's runWebPushAlerts call in the protected commit boundary. That path performs database work and serial external push sends before the boundary returns.",
+        "risk": "A protected per-date operation can keep its job-row transaction/lock open while database calls and external push delivery run. This is a plausible pool/worker-pressure contributor, not a proven cause of the observed degradation.",
+        "errorBoundary": "Provider send exceptions are caught and recorded by delivery handling; generic handler_failed receipts do not identify whether an uncaught database, cancellation, or other application error triggered the retry.",
+        "nextValidation": "Use a synthetic slow-send test with pool acquisition and lease timing to measure the protected boundary. Do not change the production job boundary solely from temporal correlation."
+      },
+      "reconciliation": "The narrower 04:17–04:21Z query found two distinct failed jobs with six attempt receipts. A query matching the readiness sample's five-minute window found three failed and one cancelled job on the production read replica, versus five terminal failures reported by readiness. The time/window or telemetry-versus-replica discrepancy remains unresolved."
+    },
+    "counterScope": {
+      "poolCounters": "Process-local pool measurements, not an Autoscale fleet aggregate.",
+      "instanceMapping": "No retained instance identity is available to map the process to one Autoscale instance."
+    },
+    "assessment": {
+      "finding": "Production telemetry around the owner-reported idle windows and two Nov 2 periods shows recurring process-local pool contention overlapping with background-job, queue-monitor, rollover, outbox, and push-enqueue failures.",
+      "confidence": "High that pool contention and worker failures recurred; moderate that they align with low-traffic/idle periods; low that they caused the reported interruptions or identify the initiating cause.",
+      "causeBoundary": "Aggregated telemetry does not identify whether slow database work, event-loop stalls, or another upstream condition initiated the pressure, and cannot correlate an individual failed user request. Readiness success after an incident does not prove uninterrupted service."
+    },
+    "nextDiagnostic": {
+      "owner": "Engineering/operations",
+      "action": "Correlate primary-database query and connection waits, per-instance pool/event-loop samples, request outcomes, and the five terminal scheduled-job failure details for 2026-11-02 04:17–04:21 UTC before changing configuration or infrastructure.",
+      "productionChangesMade": false,
+      "publicationPerformed": false
+    }
+  },
+  "assessment": {
+    "finding": "Read-only telemetry shows recurring short-lived application-side, process-local database-pool contention on the serving build, with pool saturation, queued checkouts, acquisition errors, event-loop delay, and database-timeout warnings.",
+    "confidence": "High that pool contention recurred; low that it caused user-visible downtime or identifies the initiating mechanism.",
+    "causeBoundary": "Available aggregate telemetry cannot determine whether event-loop stalls, slow database work, or another upstream condition initiated the pressure, and cannot assign request-level causality.",
+    "impactBoundary": "Provider metrics returned only a few readiness requests in the sampled windows and cannot establish ordinary-user impact or prove there were no failures."
+  },
+  "nextDiagnostic": {
+    "owner": "Engineering/operations",
+    "action": "Capture synchronized primary-database query/connection/lock waits, per-instance pool and event-loop intervals, request outcomes, and terminal-job failure details; first reconcile the Oct 21 versus Nov 2 historical log-query discrepancy.",
+    "productionChangesMade": false,
+    "publicationPerformed": false
+  }
+}

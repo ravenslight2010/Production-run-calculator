@@ -2,12 +2,32 @@
   "schemaVersion": 1,
   "readOnly": true,
   "rawMessagesRetained": false,
+  "environment": "production",
+  "capturedAtDate": "2026-11-02",
+  "timeZone": "UTC",
+  "deploymentType": "autoscale",
+  "evidenceType": "sanitized aggregate operational telemetry",
+  "producedBy": "read-only deployment metrics/log callbacks and revision-bound SRE review",
+  "sanitization": "Retains aggregate counts, bounded timing summaries, and build identities only; raw logs, request bodies, SQL, host/process identifiers, and personal data omitted.",
   "queryWindow": {
     "start": "2026-11-01T15:25:00.000Z",
     "endExclusive": "2026-11-01T15:33:00.000Z"
   },
-  "publishedSourceFingerprintSha256": "2da695ab03f3d90d3c2fa5c6d90519addbc420701e88445b5df3b986e0629cdb",
+  "deploymentRevisionId": "42763954-0c35-47c4-8b4b-6ea38c26deb1",
+  "primarySnapshotSourceFingerprintSha256": "2da695ab03f3d90d3c2fa5c6d90519addbc420701e88445b5df3b986e0629cdb",
   "isolatedCandidateSourceFingerprintSha256": "fc735602b5942897340e468ded7945da5d78a25ad6ed50e38242a1764fe506ac",
+  "buildComparison": {
+    "current": {
+      "id": "42763954-0c35-47c4-8b4b-6ea38c26deb1",
+      "status": "success",
+      "createdAt": "2026-10-30T15:38:15.271Z"
+    },
+    "previousSuccessful": {
+      "id": "fc0cae68-6711-46ff-8c01-9fa5d3fdfa87",
+      "createdAt": "2026-10-30T15:22:28.836Z"
+    },
+    "buildDuringEitherWindow": false
+  },
   "providerAggregates": {
     "cpuP95Percent": 2.92,
     "memoryP95Percent": 12.6,
@@ -46,12 +66,16 @@
     "processPool": { "max": 10, "total": 5, "idle": 2, "waiting": 0 }
   },
   "databasePhaseLookup": {
-    "matchedEntriesOnPage": 25,
+    "originalUnfilteredPageCounts": [25, 13],
+    "phaseEntries": 38,
+    "currentRevisionFilteredQueryEntries": 45,
+    "priorRevisionFilteredQueryEntries": 41,
     "truncated": false,
-    "hasMore": true,
-    "completeWindow": false,
-    "anonymousProcessGroups": 1,
-    "matchesPoolCaptureProcess": true,
+    "hasMore": false,
+    "queryPagesExhausted": true,
+    "sampledTelemetry": true,
+    "revisionFilter": "42763954-0c35-47c4-8b4b-6ea38c26deb1",
+    "completeWindowCensus": false,
     "observedFromMin": "2026-11-01T15:27:23.581Z",
     "observedUntilMax": "2026-11-01T15:32:59.481Z",
     "groups": [
@@ -60,10 +84,10 @@
         "phase": "post_checkout",
         "outcome": "success",
         "coverage": "complete",
-        "count": 8,
-        "maxElapsedMs": 5701,
+        "count": 13,
+        "maxElapsedMs": 5859,
         "maxAcquisitionMs": 0,
-        "maxPostCheckoutMs": 5701,
+        "maxPostCheckoutMs": 5859,
         "maxTimeoutOverrunMs": 0
       },
       {
@@ -71,10 +95,10 @@
         "phase": "post_checkout",
         "outcome": "success",
         "coverage": "complete",
-        "count": 7,
-        "maxElapsedMs": 2900,
+        "count": 10,
+        "maxElapsedMs": 4800,
         "maxAcquisitionMs": 99,
-        "maxPostCheckoutMs": 2900,
+        "maxPostCheckoutMs": 4800,
         "maxTimeoutOverrunMs": 0
       },
       {
@@ -82,7 +106,7 @@
         "phase": "acquisition",
         "outcome": "connection_timeout",
         "coverage": "complete",
-        "count": 5,
+        "count": 7,
         "maxElapsedMs": 30101,
         "maxAcquisitionMs": 30100,
         "maxPostCheckoutMs": 0,
@@ -93,19 +117,105 @@
         "phase": "acquisition",
         "outcome": "checkout_timeout",
         "coverage": "complete",
-        "count": 5,
+        "count": 6,
         "maxElapsedMs": 7200,
         "maxAcquisitionMs": 6601,
         "maxPostCheckoutMs": 0,
         "maxTimeoutOverrunMs": 5701
+      },
+      {
+        "stage": "duplicate_group_scan",
+        "phase": "acquisition",
+        "outcome": "checkout_timeout",
+        "coverage": "complete",
+        "count": 1,
+        "maxElapsedMs": 3400,
+        "maxAcquisitionMs": 3400,
+        "maxPostCheckoutMs": 0,
+        "maxTimeoutOverrunMs": 2500
+      },
+      {
+        "stage": "status_aggregate",
+        "phase": "post_checkout",
+        "outcome": "success",
+        "coverage": "complete",
+        "count": 1,
+        "maxElapsedMs": 5000,
+        "maxAcquisitionMs": 2499,
+        "maxPostCheckoutMs": 2500,
+        "maxTimeoutOverrunMs": 0
       }
     ]
+  },
+  "sameRevisionComparison": {
+    "current": {
+      "requests": 5,
+      "requestLatencyP95Ms": 365.5424473011968,
+      "cpuP95Percent": 2.92,
+      "memoryP95Percent": 12.6,
+      "http5xxMetricPoints": [],
+      "errorLogMetricPoints": [],
+      "errorSeverityLogEntries": 0
+    },
+    "prior": {
+      "start": "2026-11-01T15:17:00.000Z",
+      "endExclusive": "2026-11-01T15:25:00.000Z",
+      "requests": 5,
+      "requestLatencyP95Ms": 402.0967,
+      "cpuP95Percent": 2.9,
+      "memoryP95Percent": 11.95,
+      "http5xxMetricPoints": [],
+      "errorLogMetricPoints": [],
+      "errorSeverityLogEntries": 0,
+      "outboxScopeList": {
+        "connectionTimeouts": 3,
+        "maxAcquisitionMs": 35900,
+        "checkoutTimeouts": 2,
+        "maxCheckoutAcquisitionMs": 3200,
+        "postCheckoutSuccesses": 10,
+        "maxPostCheckoutMs": 3500
+      },
+      "statusAggregate": {
+        "checkoutTimeouts": 8,
+        "maxAcquisitionMs": 9100,
+        "postCheckoutSuccesses": 0
+      },
+      "outboxCursorRead": {
+        "postCheckoutSuccesses": 9,
+        "maxPostCheckoutMs": 4501,
+        "maxAcquisitionMs": 0
+      }
+    },
+    "rootCause": "Inconclusive: these sampled background acquisition delays existed in the preceding window and were not worse in the selected window. No request timestamp links them to the reported phone sync or recovery."
+  },
+  "syncPutTelemetry": {
+    "revisionFilter": "42763954-0c35-47c4-8b4b-6ea38c26deb1",
+    "current": {
+      "matchingLogEntries": 12,
+      "hasNextPage": false,
+      "truncated": false,
+      "syncPutCounters": "absent",
+      "syncPutDurationDistribution": "absent",
+      "syncTransactionDurationDistribution": "absent"
+    },
+    "prior": {
+      "matchingLogEntries": 13,
+      "hasNextPage": false,
+      "truncated": false,
+      "syncPutCounters": "absent",
+      "syncPutDurationDistribution": "absent",
+      "syncTransactionDurationDistribution": "absent"
+    },
+    "interpretation": "No sync writes, durations, or failure rate can be inferred from these sparse matching logs."
   },
   "limitations": [
     "Empty provider series mean no returned points, not zero failures.",
     "Pool distributions describe their own reported windows; the first begins before the query window.",
     "Reported window maxima are not whole-window or fleet percentiles.",
-    "The phase lookup is one partial page, not a complete-window failure rate.",
+    "The phase query was revision-filtered and exhausted its pages but is sampled telemetry, not a complete-window failure rate.",
+    "The separately retrieved pool-log query was not revision-filtered; do not attribute its pool or event-loop maxima to the pinned build.",
+    "The prior window had no duplicate-group-scan phase entries in its query.",
+    "Sync-specific counters and duration distributions were absent in both sparse capacity-telemetry queries; absence is not proof of zero sync writes.",
     "Post-checkout elapsed time is not pure SQL execution time.",
     "Connection timeout classification does not isolate exact TCP/TLS setup duration.",
     "One healthy primary snapshot does not rule out transient database pressure or locks at other times.",

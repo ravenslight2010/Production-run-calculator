@@ -75,11 +75,13 @@ source-use decision document. All verification uses synthetic data only.
   This matrix covers that narrow subflow, not a claim that the full lifecycle
   was rerun eight times. Lifecycle browser evidence is desktop Chromium, with
   scoped persistence independently covered by API integration.
-- Eight synthetic-only screenshots are retained locally under
+- The original run recorded eight synthetic-only screenshots under
   `artifacts/run-calculator/generated-artifacts/import-gold-approvals-interrupted/`.
-  These ignored artifacts show visible portions of a scrollable settings panel;
-  assertions cover metadata outside the screenshot viewport too. They are
-  development evidence, not production evidence or physical-device proof.
+  That ignored directory is not present in the current workspace, so the images
+  are not currently available for re-review. The recorded screenshots showed
+  visible portions of a scrollable settings panel; assertions also covered
+  metadata outside the screenshot viewport. This is development evidence, not
+  production evidence or physical-device proof.
 - Final focused rendered suite: PASS, 16 tests, including no truncation of
   overlong digest input. Physical Android Chrome and iOS Safari/PWA remain
   NOT RUN (no physical-device service); native mobile remains not applicable.

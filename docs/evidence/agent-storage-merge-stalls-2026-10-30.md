@@ -123,7 +123,7 @@ any cleanup change.
 
 ### Sources
 
-- Incident facts and source revision: `.local/tasks/task-3745.md`.
+- Incident facts and source revision: `.local/tasks/diagnose-agent-storage-merge-stalls.md`.
 - Prior investigation baseline: `docs/evidence/agent-stalls-investigation-2026-10-23.md`.
 - Replit storage guidance:
   <https://docs.replit.com/teams/observability> and

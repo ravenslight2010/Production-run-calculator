@@ -2157,6 +2157,25 @@ test(
     expect(first.responseStatus).toBe(200);
     const firstSnapshot = first.body.snapshotId;
     expect(typeof firstSnapshot).toBe("string");
+    const acceptedPayload = first.body.data as SyncPayload | undefined;
+    expect(
+      acceptedPayload?.dayState.runs.some((run) => run.id === runId),
+      "the first write should return the canonical run snapshot",
+    ).toBe(true);
+    if (!acceptedPayload) {
+      throw new Error("the first sync write did not return its canonical snapshot");
+    }
+    // Re-send the accepted canonical document. The server may either return a
+    // refreshed canonical payload after normalization or acknowledge an exact
+    // no-op with only its snapshot identity.
+    const normalized = await putToday(page, acceptedPayload);
+    expect(normalized.responseStatus).toBe(200);
+    const returnedCanonical = normalized.body.data as SyncPayload | undefined;
+    const persistedCanonical = await getToday(page) as SyncPayload;
+    const normalizedPayload = returnedCanonical ?? persistedCanonical;
+    expect(normalizedPayload.dayState.runs.some((run) => run.id === runId)).toBe(true);
+    const stableSnapshot = normalized.body.snapshotId;
+    expect(typeof stableSnapshot).toBe("string");
 
     // Assert the no-op before opening the second context. A newly booted peer
     // can still finish its initial hydration and issue a legitimate background
@@ -2175,11 +2194,29 @@ test(
       return { status: response.status, body: await response.json() as Record<string, unknown> };
     }, {
       date: today(),
-      payload: { ...seeded, baseSnapshotId: firstSnapshot },
-      snapshotId: firstSnapshot,
+      // Re-send the server's accepted canonical document. The server may add
+      // lifecycle stamps while normalizing a new run; reusing the raw fixture
+      // would test repeat-normalization instead of the unchanged-write contract.
+      payload: normalizedPayload,
+      snapshotId: stableSnapshot,
+    });
+    const returnedPayload = unchanged.body.data as SyncPayload | undefined;
+    const unchangedDiagnostic = JSON.stringify({
+      responseKeys: Object.keys(unchanged.body).sort(),
+      expectedSnapshotId: stableSnapshot,
+      responseSnapshotId: unchanged.body.snapshotId,
+      acceptedRuns: normalizedPayload.dayState.runs,
+      returnedRuns: returnedPayload?.dayState.runs,
+      acceptedRunValues: normalizedPayload.runValues,
+      returnedRunValues: returnedPayload?.runValues,
+      acceptedValueStamps: normalizedPayload.runValuesUpdatedAt,
+      returnedValueStamps: returnedPayload?.runValuesUpdatedAt,
     });
     expect(unchanged.status).toBe(200);
-    expect(unchanged.body).toMatchObject({ unchanged: true, snapshotId: firstSnapshot });
+    expect(
+      unchanged.body,
+      `An unchanged canonical write must preserve the snapshot: ${unchangedDiagnostic}`,
+    ).toMatchObject({ unchanged: true, snapshotId: stableSnapshot });
     expect(unchanged.body.data).toBeUndefined();
 
     const peerContext = await browser.newContext({
@@ -2362,15 +2399,17 @@ test(
             containsTestRun: runs.some((run) => run.id === targetRunId),
           };
         }, runId).catch(() => ({ pageUnavailable: true }));
+        const diagnostics = {
+          localState,
+          postResetBaselineReceived,
+          syncRequests: peerSyncRequests,
+        };
         await testInfo.attach("peer-reset-diagnostics.json", {
-          body: JSON.stringify({
-            localState,
-            postResetBaselineReceived,
-            syncRequests: peerSyncRequests,
-          }),
+          body: JSON.stringify(diagnostics),
           contentType: "application/json",
         }).catch(() => {});
-        throw error;
+        const failure = error instanceof Error ? error.message : String(error);
+        throw new Error(`${failure}\nReset recovery diagnostics: ${JSON.stringify(diagnostics)}`);
       }
       await peer.reload({ waitUntil: "domcontentloaded" });
       await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });

@@ -152,6 +152,17 @@ async function waitForSavedFlashToSettle(page: Page): Promise<void> {
   await expect(savedFlash).toHaveCSS("opacity", "0");
 }
 
+async function resetScreenshotScroll(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.documentElement.style.scrollBehavior = "auto";
+    window.scrollTo(0, 0);
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY), {
+    timeout: 3_000,
+  }).toBe(0);
+}
+
 function dynamicMask(page: Page) {
   return [
     // The Replit preview banner is injected by the local preview host, not
@@ -377,7 +388,7 @@ test.describe("intentional visual regression baselines", () => {
       await syncOutcome.getByRole("button", { name: "Dismiss", exact: true }).click();
       await expect(syncOutcome).toBeHidden();
     }
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await resetScreenshotScroll(page);
     await expect(page).toHaveScreenshot("run-overview-phone.png", {
       fullPage: false,
       mask: dynamicMask(page),
@@ -426,6 +437,7 @@ test.describe("intentional visual regression baselines", () => {
 
     await page.setViewportSize({ width: 768, height: 1024 });
     await waitForSavedFlashToSettle(page);
+    await resetScreenshotScroll(page);
     await expect(page).toHaveScreenshot("run-overview-tablet-portrait.png", {
       fullPage: false,
       mask: dynamicMask(page),
@@ -435,6 +447,7 @@ test.describe("intentional visual regression baselines", () => {
 
     await page.setViewportSize({ width: 1024, height: 768 });
     await waitForSavedFlashToSettle(page);
+    await resetScreenshotScroll(page);
     await expect(page).toHaveScreenshot("run-overview-tablet-landscape.png", {
       fullPage: false,
       mask: dynamicMask(page),

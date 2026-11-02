@@ -58,10 +58,11 @@ Git binding. The source HEAD is context only. Production still serves
 `app-build:934ed015-7a94-4db0-a558-0fdbad559c27` and its earlier fingerprint;
 the refreshed staging source must not be described as published.
 
-Sanitized stage report:
+Sanitized stage report recorded at capture time:
 `.local/isolated-staging/reports/1ac018f8ed914e7998a4a74b30857653.json`,
 SHA-256 `ace78fd809f1561499b0ecc9bff757b8a271ba1b7529e8e16cb9dcc05c096c87`.
-A durable minimized summary is retained
+That local report is not present in the current workspace, so its digest cannot
+be rechecked here. A durable minimized summary is retained
 [alongside this report](published-inventory-staging-2026-10-30.json).
 No credential-bearing runtime files were retained or committed.
 
