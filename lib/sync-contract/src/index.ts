@@ -1,5 +1,12 @@
 export const SYNC_SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
 export { isOperationalControl, type OperationalControl } from "./operationalControl";
+export {
+  isStagedItemVersion,
+  mergeStagedItemsFromPeer,
+  mergeStagedItemsOnServer,
+  type StagedItemRevision,
+  type StagedItemSnapshot,
+} from "./stagedItems";
 
 export const SYNC_DELTA_MAP_SECTIONS = [
   "runValues",
