@@ -21166,7 +21166,7 @@ function OperationalStateBadge({
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, currentRun, doughSubTab,
-    endRun, endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    endRun, endStop, form, pauseDecisionRunId, pauseRun, pendingForegroundRunControl, resumeRun, runStatus,
     persistManualPackagingProgress,
     setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,

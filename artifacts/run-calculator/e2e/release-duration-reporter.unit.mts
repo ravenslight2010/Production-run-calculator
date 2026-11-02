@@ -238,6 +238,8 @@ assert.ok(!debugIdentities.includes(blockedRealWorkbookIdentity));
 assert.ok(debugIdentities.includes(warehouseCheckUncheckIdentity));
 assert.ok(!debugIdentities.includes(priorWarehouseIdentity));
 assert.ok(debugIdentities.includes(wakeResumeIdentity));
+// The wake/Resume identity was already selected by both configs but was absent
+// from the prior standalone ledger. Remove only it to recheck that exact set.
 const priorStandaloneIdentities = debugIdentities.filter(
   (identity) => identity !== wakeResumeIdentity,
 );

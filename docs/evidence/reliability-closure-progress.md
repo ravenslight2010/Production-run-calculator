@@ -2426,3 +2426,80 @@ database was cleaned. The `release:standard` workflow separately stopped
 before running any release gate because published release evidence is missing;
 it is not evidence of a product failure or a local-test result. No publish was
 initiated.
+
+### 2026-11-02 — same-minute sync-health, warm-resume, and inventory update
+
+The owner adds a warm-versus-cold observation: after the app has been
+backgrounded for a while, returning can leave it unhealthy; fully closing and
+reopening appears to work. This is a distinct reported lifecycle condition,
+not yet reproduced and not proof that retained client state is the cause.
+
+A read-only production SRE review confirmed that the serving build was unchanged
+during 22:15–22:50 UTC and matched the previously recorded October 30 serving
+build. At 22:23:35 UTC, production `/api/sync/health` returned HTTP 200 in
+525 ms, but its `command-history` check was failing; `canonical-document`,
+`snapshot-revision`, and `operational-projection` were healthy. Two
+`/api/sync/today` writes at 22:23:25 and :55 succeeded in 208 and 249 ms. A
+separate 22:23:54 telemetry sample recorded two peer partial-frame sends and
+two unchanged sync PUTs; it did not report a complete-frame count. Pool and
+event-loop samples in that minute were normal (pool acquisition p95 1 ms,
+maximum 228 ms; event-loop p95 21 ms, maximum 92 ms).
+
+These observations overlap the screenshot's displayed 4:23 PM
+America/Chicago minute, but the screenshot's environment, build, request,
+device, and run are unknown. No correlation was found. The safe
+`command-history` summary, next action, and scanned/truncated counts were not
+retained; no production row query or write was made. The check can fail on an
+invalid bounded command receipt or a completed-history snapshot/hash mismatch,
+but there is no evidence to choose between them.
+
+The broader 22:15–22:50 UTC aggregate contained 357 requests, one 4xx, p95
+latency 756 ms, and reported 100% availability; the 5xx and error-log-count
+series returned no points, which is not proof of zero. Later pool and queue
+degradation started around 22:25 and became severe around 22:41–22:49 UTC.
+That later pressure may explain separate stalls, but does not explain the
+22:23 screenshot on its own. No cause for ignored touch or stopped
+auto-tracking is established.
+
+The exact default browser inventory now matches at 241 cases. The separate
+debug inventory matches at 294; removing the wake/Resume identity reproduces
+the prior 293-case fingerprint exactly. The reporter regression passes 1/1
+with the updated contracts; the paired progress-reporter tests passed 2/2.
+An initial plain-Node invocation lacked the generated `.mjs` workspace link
+and failed before assertions; the project `tsx` runner was used for the
+successful check. These are inventory/reporter checks only, not browser
+journeys. The integrated 241-case suite remains pending.
+
+### 2026-11-02 — later production pool recurrence and typecheck repair
+
+A read-only SRE review of deployment logs from 23:08:18–23:11:22 UTC found
+three successive roughly one-minute windows with 35, 32, and 10 database-pool
+acquisition errors. The first window reached 24.2 seconds maximum acquisition
+wait and 25.3 seconds maximum event-loop delay. Queue monitoring and outbox
+operations timed out; server-job and push-scheduling work failed, and the
+outbox retained its cursor for retry. Monitoring and outbox work recovered at
+23:10:21, but additional 7.2-second acquisition and four-second query timeouts
+followed. This is intermittent recovery, not a sustained all-clear.
+
+A point-in-time diagnostic recorded 13 database backends against 450
+configured connections and estimated 433 ordinary slots remaining. Provider
+reserved slots and autoscale instance counts were unavailable. The evidence
+supports application-pool acquisition pressure as a proximate cause of
+background and monitoring failures, but does not establish why the pool was
+starved or link the events to the owner's device, request, or run. No
+production rows or payloads were queried, and no production setting changed.
+
+The current root typecheck first failed on four unresolved
+`pendingForegroundRunControl` references in `FloorModeView`. The value was
+already present in `HomeCtx`; the component had omitted it from its local
+context destructuring. Adding that binding fixed the compile error, and the
+root typecheck then finished successfully in 41 seconds. This does not prove
+the compile-time issue caused the reported production warm-return behavior;
+the local source has not been published.
+
+The owner's warm-return versus cold-reopen observation remains a reported
+reproduction clue. Existing automated coverage exercises failed wake reads,
+visible retries, two-session adoption, and Packaging correction through wake
+and reload, but browser simulation cannot reproduce Android process
+suspension. The final integrated 241-case local release/browser run remains
+pending; no publishing or production mutation is authorized.
