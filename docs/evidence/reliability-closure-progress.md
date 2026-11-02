@@ -2031,22 +2031,48 @@ handlers return without visible feedback while it is active, while Start is
 deferred. This can explain some ignored actions, but not a whole page that
 cannot accept touch input.
 
-The owner supplied two further browser-observed failures from 2026-11-02, both
-marked as backgrounded: an authentication wait of 8,608 ms and a network wait
-of 1,480,032 ms (about 24.7 minutes). The second report did not identify a
-support route. These are client elapsed waits, not server processing time, and
-neither has a request correlation that ties it to a server trace.
+Two owner-supplied failures from 2026-11-02 are now matched to production field
+check observations by exact timestamp, device category, build, and measured
+duration. At 08:58:48 America/Chicago (14:58:48.970Z), mobile Chrome recorded
+an authentication request timeout at 8,608 ms while backgrounded; it was
+received by the server 339 ms later. At 09:26:51 (15:26:51.521Z), the same
+device/build recorded a network transport failure during another app request
+at 1,480,032 ms (about 24.7 minutes), also while backgrounded; it was received
+1.149 seconds later. The screenshot's incident references do not equal the
+field-check observation IDs, so this is timestamp/build/category correlation,
+not a request-ID join.
 
-A read-only aggregate of the production replica showed 1,802 diagnostic
-observations retained over 30 days, 276 received in the previous 24 hours, and
-206 performance observations in that 24-hour period, all under one facility
-scope. The report API returns at most five recent failures per category, and
-the screen renders at most three per category; the visible card list is
-therefore bounded. The report builder does read all observations in its
-30-day window to calculate issue counts, but current volume is modest and does
-not by itself explain a page-wide freeze. Concurrent wake-time requests or
-database pressure remain possible; exact incident-to-server correlation is
-unavailable.
+Read-only production runtime review found an `incident_captured` log for the
+first authentication timeout at 14:58:49.366Z and its diagnostic POST was
+accepted in 210 ms. `/api/me` had succeeded shortly before, and the 14:58
+capacity sample was near-normal (pool acquisition p95/p99 16/36 ms; event-loop
+p95/p99 21/25 ms). There had been earlier intermittent pressure: 29 database
+acquisition errors in 14:52–14:54 (p95 7.4 s; event-loop p95 5.1 s) and 23 more
+in 14:54–14:55 (p99 8.6 s, max 12.6 s). This is not a matching server trace for
+the authentication request.
+
+For the second failure, the closest server-side signal was a scheduled-queue
+monitor database checkout timeout at 15:26:03.882Z, after a 3.4 s acquisition.
+The preceding two one-minute windows contained 30 and 16 pool acquisition
+errors; event-loop p99 reached 3.2 s and p95 2.7 s. Readiness checks succeeded
+but reported `backgroundWorkers` as warning. Immediately after the client
+failure, production recorded foreground-recovery success, then an incomplete
+sync cancellation, followed by successful startup, reload-persistence, sync,
+and convergence observations. No server log identifies the exact failed
+request; endpoint metrics showed no relevant 5xx, and deployment metric queries
+were unavailable. Later capacity samples improved. These signals support
+intermittent server database/runtime pressure as a possible contributor, not
+as a proven cause of either client failure.
+
+Both observations used app build `934ed015-7a94-4db0-a558-0fdbad559c27`, which
+matches the latest successful deployment build listed for October 30; no new
+deployment build was created during the incident window. Production has
+performance check version 4 observations through November 2, but no version 5
+long-task/slow-interaction observations in the checked period. The new
+responsiveness probes therefore still need a later publish before they can add
+live evidence. A read-only aggregate showed 1,802 observations retained over 30
+days and 276 received in the previous 24 hours. Report queries and visible
+cards are bounded; current volume does not by itself explain a page-wide freeze.
 
 Added browser-supported `PerformanceObserver` measurements for long tasks and
 slow interaction events above 250 ms. They retain only duration and fixed
@@ -2059,6 +2085,18 @@ Focused verification after this addition: the run-calculator field-check and
 auto-track wake tests passed (33 tests), API field-check validation passed
 (13 tests), the API field-check route integration passed (20 tests), API
 generated-contract checks passed, and root workspace typecheck passed.
-Physical Android touch behavior remains unverified. Root cause remains
+Physical Android touch behavior remains unverified. The incident now has
+production timestamp/build/diagnostic correlation, but its root cause remains
 **UNCONFIRMED**; no wake/recovery behavior or production configuration was
 changed.
+
+### QC import-review badge navigation
+
+The count-only Import QC badge is now a keyboard-accessible button. Tapping it
+switches to QC/Quality and opens the existing Import review section for users
+with both QC workflow access and QC review permission. Other users receive an
+access-required message; the badge still exposes counts only. The badge event
+and the QC section opening are covered by focused component tests. Root
+typecheck passed. A signed-in browser screenshot check was not possible in the
+unauthenticated preview, so the complete Home-to-review journey remains
+unverified in an authenticated browser.
