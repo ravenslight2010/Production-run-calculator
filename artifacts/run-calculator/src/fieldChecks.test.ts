@@ -9,6 +9,7 @@ import {
   FIELD_CHECK_CATALOG,
   productionRunSaveFailureLabel,
   PRODUCTION_RUN_SAVE_FAILURE_CODES,
+  PERFORMANCE_SOURCE_CODES,
   SYNC_ACK_FAILURE_CODES,
   fieldCheckDiagnosticLabel,
 } from "./fieldChecks";
@@ -440,6 +441,42 @@ describe("field-check observer", () => {
     expect(fieldCheckDiagnosticLabel("performance", {})).toContain("older evidence");
     expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 2 })).toContain("out of date or came after a reset");
     expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 4 })).toContain("rejected the sync request");
+  });
+
+  it("queues bounded responsiveness outliers without retaining interaction details", async () => {
+    const created: Array<(entries: Array<{ duration: number }>) => void> = [];
+    class FakePerformanceObserver {
+      static supportedEntryTypes = ["longtask", "event"];
+      callback: (list: { getEntries: () => Array<{ duration: number }> }) => void;
+      observe = vi.fn();
+      disconnect = vi.fn();
+      constructor(callback: (list: { getEntries: () => Array<{ duration: number }> }) => void) {
+        this.callback = callback;
+        created.push((entries) => this.callback({ getEntries: () => entries }));
+      }
+    }
+    vi.stubGlobal("PerformanceObserver", FakePerformanceObserver);
+    const stop = createFieldCheckObserver("responsiveness-build", TEST_SCOPE);
+    try {
+      created[0]?.([{ duration: 400 }, { duration: 800 }]);
+      created[1]?.([{ duration: 300 }]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
+
+    const samples = submit.mock.calls.flatMap((call) => call[0])
+      .filter((item: { checkName: string }) => item.checkName === "performance");
+    expect(samples.map((item: { checkVersion: string; outcome: string; metrics: unknown }) => [
+      item.checkVersion,
+      item.outcome,
+      item.metrics,
+    ])).toEqual([
+      ["5", "failure", { durationMs: 400, sourceCode: PERFORMANCE_SOURCE_CODES.mainThreadLongTask }],
+      ["5", "failure", { durationMs: 300, sourceCode: PERFORMANCE_SOURCE_CODES.slowInteraction }],
+    ]);
+    expect(JSON.stringify(samples)).not.toMatch(/target|selector|input|eventName|control/);
   });
 
   it("queues a quick HTTP 500 with operation, elapsed time, observation, background and correlation evidence", async () => {

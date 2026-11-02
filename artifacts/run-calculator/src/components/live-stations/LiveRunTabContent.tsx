@@ -1041,6 +1041,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                       pauseStopsTunnel: true,
                       lastPauseStopsTunnel: true,
                       runStatus: "ended",
+                      isCrust: lastEndedRun?.subTab === "crusts",
                       preTunnelMin: preTun2,
                       pressOvenMin: ve.pressOvenMin,
                       frontlineMin: ve.frontlineMin,
@@ -1227,7 +1228,11 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                               </div>
                               <div className="flex items-baseline gap-2">
                                 <span className="text-4xl font-black text-foreground tabular-nums tracking-tight">{calc.ppm}</span>
-                                <span className="text-sm text-muted-foreground font-bold">pizzas/min · {fmtNum(calc.ppm / 2, 1)} pairs/min at Press / Oven</span>
+                                <span className="text-sm text-muted-foreground font-bold">
+                                  {currentRun?.subTab === "crusts"
+                                    ? "pizzas/min at Frontline"
+                                    : `pizzas/min · ${fmtNum(calc.ppm / 2, 1)} pairs/min at Press / Oven`}
+                                </span>
                               </div>
                               {calc.catchUpPpm !== null && (
                                 <div className="text-xs font-medium text-muted-foreground mt-2">

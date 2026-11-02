@@ -49,6 +49,55 @@ describe("four-section split timing and pizza units", () => {
     })).toMatchObject({ totalMin: 6, pressOvenMin: 2.4, frontlineMin: 2.4, postTunnelMin: 1.2 });
   });
 
+  it("starts crust-mode timing at Frontline and ignores Press/Oven transit", () => {
+    expect(resolveLineTiming({
+      freezerTime: 10,
+      preTunnelMin: 2.5,
+      pressOvenMin: 3,
+      isCrust: true,
+    })).toMatchObject({
+      pressOvenMin: 0,
+      frontlineMin: 2.5,
+      preTunnelMin: 2.5,
+    });
+
+    expect(resolveLineTiming({
+      freezerTime: 10,
+      preTunnelMin: 2.5,
+      postTunnelMin: 1,
+      pressOvenMin: 3,
+      frontlineMin: 1.5,
+      isCrust: true,
+    })).toMatchObject({
+      pressOvenMin: 0,
+      frontlineMin: 1.5,
+      preTunnelMin: 1.5,
+      tunnelMin: 7.5,
+      postTunnelMin: 1,
+    });
+
+    const phases = computeLinePhases({
+      elapsedBatchSec: 1,
+      pausedAt: null,
+      lastResumeWallMs: 0,
+      lastPauseStartWallMs: 0,
+      runStatus: "running",
+      pressOvenMin: 3,
+      frontlineMin: 1.5,
+      preTunnelMin: 2.5,
+      postTunnelMin: 1,
+      freezerTime: 10,
+      isCrust: true,
+      nowMs: T0,
+    });
+    expect(phases.sections).toMatchObject({
+      pressOven: { state: "empty", remainMs: 0 },
+      frontline: { state: "filling", remainMs: 89_000 },
+      freezeTunnel: { state: "empty" },
+    });
+    expect(phases.stage1).toMatchObject({ state: "filling", remainMs: 89_000 });
+  });
+
   it("counts paired positions at half the pizza rate without changing pizza counts", () => {
     expect(lineThroughput(72)).toEqual({ pizzasPerMinute: 72, pairsPerMinute: 36 });
     expect(lineThroughput(-1)).toEqual({ pizzasPerMinute: 0, pairsPerMinute: 0 });

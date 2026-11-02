@@ -25,7 +25,7 @@ type Lifecycle = "pending" | "running" | "paused" | "ended";
 function renderLineMap(
   runStatus: Lifecycle,
   options: {
-    currentRun?: { id?: string; brand?: string; flavor?: string } | null;
+    currentRun?: { id?: string; brand?: string; flavor?: string; subTab?: "dough" | "crusts" } | null;
     active?: boolean;
     scheduledDays?: ScheduledDay[];
     configuredApplicator?: 3 | 4;
@@ -180,6 +180,19 @@ describe("LineMapDashboard current product identity", () => {
     expect(screen.getByTestId("line-map-current-product").textContent).toBe(
       "Acme – Supreme",
     );
+  });
+
+  it("shows Press/Oven as bypassed for premade-crust runs", () => {
+    renderLineMap("running", {
+      active: true,
+      currentRun: { id: "run-1", subTab: "crusts" },
+    });
+
+    const press = getZoneNavigationButton(/Press \/ Oven/);
+    expect(within(press).getByText("Bypassed for premade crust")).toBeTruthy();
+    expect(within(press).queryByText(/Cases left|Pair rate|Pizza rate/)).toBeNull();
+    const frontline = getZoneNavigationButton(/Frontline/);
+    expect(within(frontline).getByText(/Single pizzas/)).toBeTruthy();
   });
 
   it.each([

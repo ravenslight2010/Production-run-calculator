@@ -1993,3 +1993,49 @@ impact. No new build was published in these windows; a deployment regression
 is not supported by the sampled timeline. The next useful evidence remains
 time-aligned database-side session, connection-failure, wait, and query/lock
 latency telemetry.
+
+### 2026-11-02 — crust-run phase timing and wake responsiveness investigation
+
+Source review confirmed that all runs previously used the same Press/Oven +
+Frontline split. Crust runs now bypass Press/Oven in the shared timing
+calculation; missing Frontline timing allocates the old combined pre-tunnel
+window to Frontline. This mode is passed through the client fallback, server
+operational projections, ended-run drain calculation, and Line Map display.
+The Line Map now labels Press/Oven as bypassed and omits its dough-specific
+case/pair metrics for crust runs. Dough timing and stored setup values are
+unchanged. The OpenAPI `linePhasesVersion` enum and generated clients now include
+version 3. No database schema or production change was made.
+
+Focused evidence:
+
+- **PASS**: `@workspace/live-calc` canonical projection and run-view tests,
+  22 tests.
+- **PASS**: `@workspace/api-server` server auto-track tick tests, 43 tests.
+- **PASS**: `@workspace/run-calculator` selected line-phase, Line Map,
+  lifecycle, wake-snapshot, foreground-recovery, and screen-sync tests: 7 files,
+  156 tests.
+- **PASS**: API generated-contract check and root workspace typecheck. The first
+  typecheck caught the old provenance-version union; the OpenAPI source was
+  updated, generated clients refreshed through Orval, and the rerun passed.
+- **PASS**: the web and API workflows restarted; the API reported startup
+  readiness success. A 402×874 development-preview capture rendered the signed-
+  out sign-in screen. Its 401 auth requests are expected for the unauthenticated
+  preview browser; the signed-in Line Map was not visually verified.
+
+The reported wake-time unresponsiveness is not yet reproduced. Source review
+found no page-wide recovery overlay, `inert` state, or recovery-scoped
+`pointer-events:none`; `ForegroundRecoveryStatus` is an in-flow status banner.
+Recovery does raise a synchronous barrier before fetching and reconciliation.
+That barrier intentionally blocks sync-dependent writes; Pause and Resume
+handlers return without visible feedback while it is active, while Start is
+deferred. This can explain some ignored actions, but not a whole page that
+cannot accept touch input.
+
+Current browser diagnostics record request, load, render, calculation, and
+storage durations, but do not observe long tasks or interaction latency.
+Therefore the evidence cannot distinguish a main-thread stall from the
+recovery barrier or device/browser wake behavior. Existing local recovery,
+lifecycle, wake-snapshot, and screen-sync tests passed, but they do not
+establish physical Android touch responsiveness. Root cause remains
+**UNCONFIRMED**; physical-device reproduction or approved responsiveness
+measurement is still needed. No wake/recovery behavior was changed.

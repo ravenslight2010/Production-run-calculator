@@ -206,6 +206,12 @@ describe("shared live calculation boundary", () => {
     });
     expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000 }, 6_000)).observed.status).toBe("running");
     expect(deriveOperationalRunView(args({
+      id: "run-1", startedAt: 1_000, subTab: "crusts",
+    }, 6_000)).elapsed.phase.sections).toMatchObject({
+      pressOven: { state: "empty", remainMs: 0 },
+      frontline: { state: "filling", remainMs: 145_000 },
+    });
+    expect(deriveOperationalRunView(args({
       id: "run-1", startedAt: 1_000, pausedAt: 2_000,
       stoppages: [{ type: "pause", startedAt: 2_000, stopTunnel: true }],
     }, 3_000)).elapsed.phase.stage1.state).toBe("draining");
@@ -240,7 +246,7 @@ describe("shared live calculation boundary", () => {
       policy: "operational-run-view",
       policyVersion: 1,
       calculatorVersion: 1,
-      linePhasesVersion: 2,
+      linePhasesVersion: 3,
     });
     expect(view.observed.temporaryOverrides.cycleSpeed).toBe(true);
     expect(view.observed.substitutionsApplied).toBe(1);

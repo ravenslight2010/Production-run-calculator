@@ -95,7 +95,7 @@ export interface OperationalRunViewV1 {
     temporaryOverrides: "applyTemporaryOverrides";
     inventory: ["computeCasesOnLine", "computeCasesInFreezer"];
     linePhases: "computeLinePhases";
-    linePhasesVersion: 1 | 2;
+    linePhasesVersion: 1 | 2 | 3;
   };
 }
 
@@ -190,6 +190,7 @@ export function deriveOperationalRunView(
     elapsedBatchSec: elapsed, pausedAt: run.pausedAt, lastResumeWallMs: latestClosedPause?.endedAt ?? 0,
     lastPauseStartWallMs: latestClosedPause?.startedAt ?? 0, pauseStopsTunnel: latestPause?.stopTunnel,
     lastPauseStopsTunnel: latestClosedPause?.stopTunnel,
+    isCrust: (run as CalcRunMeta & { subTab?: string }).subTab === "crusts",
     pressOvenMin: typeof effective.pressOvenMin === "number" ? effective.pressOvenMin : undefined,
     frontlineMin: typeof effective.frontlineMin === "number" ? effective.frontlineMin : undefined,
     preTunnelMin: typeof effective.preTunnelMin === "number" ? effective.preTunnelMin : FACTORY_TIMING_DEFAULTS.preTunnelMin,
@@ -228,7 +229,7 @@ export function deriveOperationalRunView(
       temporaryOverrides: "applyTemporaryOverrides",
       inventory: ["computeCasesOnLine", "computeCasesInFreezer"],
       linePhases: "computeLinePhases",
-      linePhasesVersion: 2,
+      linePhasesVersion: 3,
     },
   };
 }

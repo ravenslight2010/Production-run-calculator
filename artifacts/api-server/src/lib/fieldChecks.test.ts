@@ -81,6 +81,12 @@ describe("field-check contract", () => {
     expect(accepts("stale-deployment-recovery", {}, "incomplete")).toBe(true);
     expect(accepts("stale-deployment-recovery", { durationMs: 1 }, "success")).toBe(false);
     for (const sourceCode of [1, 2, 3, 4]) expect(accepts("performance", { sourceCode, durationMs: 1501 })).toBe(true);
+    for (const sourceCode of [7, 8]) {
+      expect(accepts("performance", { sourceCode, durationMs: 251 }, "failure", "5")).toBe(true);
+      expect(accepts("performance", { sourceCode, durationMs: 250 }, "failure", "5")).toBe(false);
+      expect(accepts("performance", { sourceCode, durationMs: 251 }, "success", "5")).toBe(false);
+      expect(accepts("performance", { sourceCode, durationMs: 251, target: 1 }, "failure", "5")).toBe(false);
+    }
     const invalidMetrics: Array<Record<string, number>> = [
       { sourceCode: 99, durationMs: 1 }, { sourceCode: 1 }, { sourceCode: 1, durationMs: -1 },
       { sourceCode: 1, durationMs: 10_000_001 }, { sourceCode: 1, durationMs: 1, url: 1 },

@@ -76,6 +76,10 @@ describe("canonical shared live-run calculations", () => {
     expect(projection.runId).toBe("live");
     expect(projection.facts.runStatus).toBe("running");
     expect(projection.effectiveElapsedSec).toBe(30);
+    expect(projection.linePhases.sections).toMatchObject({
+      pressOven: { state: "empty", remainMs: 0 },
+      frontline: { state: "filling", remainMs: 120_000 },
+    });
     expect(projection.timers.freezerElapsedSec + projection.timers.freezerRemainingSec).toBe(9 * 60);
     expect(projection.lifecycleGeneration).toBe(schedule.generation);
     expect(projection.calc).toEqual(serverCalc.calc);

@@ -163,6 +163,7 @@ export function buildOperationalProjection(args: {
     pauseStopsTunnel: openPause?.stopTunnel !== false,
     lastPauseStopsTunnel: lastClosedPause?.stopTunnel !== false,
     runStatus: runStatus(run),
+    isCrust: (run as CalcRunMeta & { subTab?: string }).subTab === "crusts",
     pressOvenMin: typeof v.pressOvenMin === "number" ? v.pressOvenMin : undefined,
     frontlineMin: typeof v.frontlineMin === "number" ? v.frontlineMin : undefined,
     preTunnelMin: typeof v.preTunnelMin === "number" ? v.preTunnelMin : PRE_POST_TUNNEL_DEFAULT_MIN,

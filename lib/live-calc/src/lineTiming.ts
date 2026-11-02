@@ -6,6 +6,8 @@ export interface LineTimingInput {
   postTunnelMin?: unknown;
   pressOvenMin?: unknown;
   frontlineMin?: unknown;
+  /** Premade-crust runs bypass Press/Oven and begin at Frontline. */
+  isCrust?: boolean;
 }
 
 /** Missing/invalid values are compatibility allocations, never measurements. */
@@ -16,7 +18,7 @@ export function resolveLineTiming(input: LineTimingInput) {
   const totalMin = duration(input.freezerTime) ?? 0;
   const legacyPre = duration(input.preTunnelMin) ?? FACTORY_TIMING_DEFAULTS.preTunnelMin;
   let postTunnelMin = duration(input.postTunnelMin) ?? FACTORY_TIMING_DEFAULTS.postTunnelMin;
-  const press = duration(input.pressOvenMin);
+  const press = input.isCrust ? 0 : duration(input.pressOvenMin);
   const frontline = duration(input.frontlineMin);
   // A partial split allocates the unassigned part of the old combined window.
   // A fully explicit split controls that window; tunnel time is the remainder.

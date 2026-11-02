@@ -94,6 +94,7 @@ function pausedPackagingDrain(
     pauseStopsTunnel,
     lastPauseStopsTunnel: true,
     runStatus: "paused",
+    isCrust: run.subTab === "crusts",
     pressOvenMin: typeof values.pressOvenMin === "number" ? values.pressOvenMin : undefined,
     frontlineMin: typeof values.frontlineMin === "number" ? values.frontlineMin : undefined,
     preTunnelMin: typeof values.preTunnelMin === "number"

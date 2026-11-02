@@ -106,7 +106,7 @@ export const FIELD_CHECK_CATALOG = [
     name: "performance",
     label: "Performance",
     observedBy: "browser",
-    evidence: "Records home-bundle load, page-navigation load, and API timeout/network timings against their reviewed budgets.",
+      evidence: "Records bounded load and API failure timings plus browser-supported long-task and slow-interaction outliers. Responsiveness samples contain duration and a fixed source code only; page content, controls, targets, and input values are not retained.",
     expiresHours: 72,
   },
   {
@@ -203,7 +203,10 @@ const observationSchema = z.object({
   if (!catalogByName.has(value.checkName as FieldCheckName)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkName"], message: "Unsupported field check" });
   }
-  if (["sync-acknowledgment", "performance"].includes(value.checkName) && !["1", "2", "3", "4"].includes(value.checkVersion)) {
+  if (value.checkName === "sync-acknowledgment" && !["1", "2", "3", "4"].includes(value.checkVersion)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkVersion"], message: "Unsupported diagnostic observation version" });
+  }
+  if (value.checkName === "performance" && !["1", "2", "3", "4", "5"].includes(value.checkVersion)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkVersion"], message: "Unsupported diagnostic observation version" });
   }
   if (value.metrics && Object.keys(value.metrics).length > FIELD_CHECK_MAX_METRICS) {
@@ -278,6 +281,22 @@ const observationSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ["metrics"],
         message: "Expected bounded performance data and an approved request outcome, operation and lifecycle category",
+      });
+    }
+  }
+  if (value.checkVersion === "5" && value.checkName === "performance") {
+    const metrics = value.metrics;
+    const valid = value.outcome === "failure" &&
+      Object.keys(metrics).length === 2 &&
+      Object.hasOwn(metrics, "durationMs") &&
+      Number.isInteger(metrics.sourceCode) &&
+      [7, 8].includes(metrics.sourceCode!) &&
+      metrics.durationMs! > 250;
+    if (!valid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["metrics"],
+        message: "Responsiveness observations require only an approved source and duration above 250ms",
       });
     }
   }

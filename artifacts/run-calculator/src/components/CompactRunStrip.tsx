@@ -202,6 +202,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
             pauseStopsTunnel: pauseStopsTunnel(openPause),
             lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
             runStatus: runStatus as string,
+            isCrust: currentRun?.subTab === "crusts",
             pressOvenMin: ve.pressOvenMin,
             frontlineMin: ve.frontlineMin,
             preTunnelMin: preTun,

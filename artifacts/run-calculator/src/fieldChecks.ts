@@ -152,7 +152,7 @@ function safeMetrics(
   if (checkName === "performance") {
     if (!Number.isFinite(metrics.durationMs) || metrics.durationMs! < 0 ||
       !Number.isInteger(metrics.sourceCode) ||
-      !Object.values(PERFORMANCE_SOURCE_CODES).includes(metrics.sourceCode as 1 | 2 | 3 | 4 | 5 | 6)) return {};
+      !Object.values(PERFORMANCE_SOURCE_CODES).includes(metrics.sourceCode as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8)) return {};
     // Preserve very slow failures as a saturated measurement, not a missing sample.
     const safe: Record<string, number> = {
       durationMs: Math.round(Math.min(metrics.durationMs!, 10_000_000) * 100) / 100,
@@ -162,7 +162,11 @@ function safeMetrics(
       Object.hasOwn(metrics, key),
     );
     if (!hasRequestMetadata) {
-      return metrics.sourceCode! <= PERFORMANCE_SOURCE_CODES.navigationLoad ? safe : {};
+      const pageLoadTiming = metrics.sourceCode! <= PERFORMANCE_SOURCE_CODES.navigationLoad;
+      const responsivenessFailure = [PERFORMANCE_SOURCE_CODES.mainThreadLongTask, PERFORMANCE_SOURCE_CODES.slowInteraction]
+        .includes(metrics.sourceCode as 7 | 8) &&
+        outcome === "failure" && metrics.durationMs! > 250;
+      return pageLoadTiming || responsivenessFailure ? safe : {};
     }
     if (!Number.isInteger(metrics.outcomeCode) ||
       !Object.values(API_REQUEST_OUTCOME_CODES).includes(metrics.outcomeCode as 1 | 2 | 3 | 4 | 5 | 6 | 7) ||
@@ -379,7 +383,11 @@ function queueSignal(signal: Signal, appBuild: string, originScope: string): voi
   const previous = dedup.find((item) => item.bucket === bucket);
   if (previous?.state === state) return;
   const sequence = (previous?.sequence ?? -1) + 1;
-  const id = `${localClientId()}:${hashScope(originScope)}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${(buildHash >>> 0).toString(16)}:${Math.floor(now / bucketMs)}:${signal.outcome}:${category}:${sequence}`;
+  const checkVersion = signal.checkName === "performance" &&
+    [PERFORMANCE_SOURCE_CODES.mainThreadLongTask, PERFORMANCE_SOURCE_CODES.slowInteraction].includes(metrics.sourceCode as 7 | 8)
+    ? "5"
+    : FIELD_CHECK_VERSION;
+  const id = `${localClientId()}:${hashScope(originScope)}:${signal.checkName}:v${checkVersion}:${(buildHash >>> 0).toString(16)}:${Math.floor(now / bucketMs)}:${signal.outcome}:${category}:${sequence}`;
   const queue = loadQueue();
   if (queue.some((item) => item.observationId === id)) return;
   if (queue.length >= maxQueue) recordQueueDisplacement();
@@ -387,7 +395,7 @@ function queueSignal(signal: Signal, appBuild: string, originScope: string): voi
     observationId: id,
     originScope,
     checkName: signal.checkName,
-    checkVersion: FIELD_CHECK_VERSION,
+    checkVersion,
     outcome: signal.outcome,
     observedAt: new Date(now).toISOString(),
     appBuild: appBuild.slice(0, 100) || "local",
@@ -539,6 +547,42 @@ export function createFieldCheckObserver(appBuild: string, originScope: string):
   window.addEventListener("offline", onOffline);
   window.addEventListener("calculator-performance", onPerformance);
   window.addEventListener("app:api-failure", onApiFailure);
+
+  // Collect only severe, browser-supported responsiveness outliers. The event
+  // type, target, selector, input value, and page content are intentionally
+  // discarded; only duration and a fixed source code enter the diagnostic queue.
+  const responsivenessObservers: PerformanceObserver[] = [];
+  let responsivenessSamples = 0;
+  const maxResponsivenessSamples = 10;
+  const responsivenessThresholdMs = 250;
+  const observeResponsiveness = (entryType: "longtask" | "event", sourceCode: number) => {
+    if (typeof PerformanceObserver === "undefined") return;
+    try {
+      const supportedTypes = PerformanceObserver.supportedEntryTypes;
+      if (!Array.isArray(supportedTypes) || !supportedTypes.includes(entryType)) return;
+      const observer = new PerformanceObserver((list) => {
+        if (stopped || document.visibilityState !== "visible") return;
+        for (const entry of list.getEntries()) {
+          if (responsivenessSamples >= maxResponsivenessSamples) break;
+          if (!Number.isFinite(entry.duration) || entry.duration <= responsivenessThresholdMs) continue;
+          responsivenessSamples += 1;
+          emitFieldCheckSignal("performance", "failure", {
+            durationMs: entry.duration,
+            sourceCode,
+          });
+        }
+      });
+      observer.observe(entryType === "event"
+        ? { type: "event", durationThreshold: responsivenessThresholdMs } as PerformanceObserverInit
+        : { type: "longtask" } as PerformanceObserverInit);
+      responsivenessObservers.push(observer);
+    } catch {
+      // Unsupported or restricted browser APIs simply leave this measurement unavailable.
+    }
+  };
+  observeResponsiveness("longtask", PERFORMANCE_SOURCE_CODES.mainThreadLongTask);
+  observeResponsiveness("event", PERFORMANCE_SOURCE_CODES.slowInteraction);
+
   queueSignal({ checkName: "startup", outcome: "success" }, appBuild, originScope);
   if (consumeStaleAssetRecoveryAttempt(appBuild)) {
     queueSignal({ checkName: "stale-deployment-recovery", outcome: "success" }, appBuild, originScope);
@@ -558,6 +602,7 @@ export function createFieldCheckObserver(appBuild: string, originScope: string):
     window.removeEventListener("offline", onOffline);
     window.removeEventListener("calculator-performance", onPerformance);
     window.removeEventListener("app:api-failure", onApiFailure);
+    for (const observer of responsivenessObservers) observer.disconnect();
   };
 }
 

@@ -50,6 +50,7 @@ const SERVER_PHASES: LinePhases = {
 
 type FakeRun = {
   id: string;
+  subTab?: "dough" | "crusts";
   startedAt?: number;
   pausedAt?: number;
   endedAt?: number;
@@ -271,6 +272,26 @@ describe("LiveRunProvider — line-phase model adoption", () => {
     expect(phaseProbe.current?.sections?.pressOven.state).toBe("active");
     expect(phaseProbe.current?.sections?.frontline.state).toBe("filling");
     expect(phaseProbe.current?.sections?.frontline.remainMs).toBe(60_000);
+  });
+
+  it("uses Frontline timing for a crust run in the local fallback", () => {
+    render(
+      <TestProvider
+        currentRun={{ ...fakeRun, subTab: "crusts" }}
+        values={{
+          ...DEFAULT_VALUES,
+          freezerTime: 10,
+          preTunnelMin: 2,
+          postTunnelMin: 1,
+          pressOvenMin: 0.5,
+          frontlineMin: 1.5,
+        }}
+      >
+        <Probe probeRef={phaseProbe} />
+      </TestProvider>,
+    );
+    expect(phaseProbe.current?.sections?.pressOven).toMatchObject({ state: "empty", remainMs: 0 });
+    expect(phaseProbe.current?.sections?.frontline).toMatchObject({ state: "filling", remainMs: 30_000 });
   });
 
   it("falls back to local derivation when the projection lifecycle differs", () => {

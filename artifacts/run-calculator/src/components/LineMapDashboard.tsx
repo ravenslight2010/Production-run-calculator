@@ -210,7 +210,8 @@ export default function LineMapDashboard() {
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Press/Oven (derived from calc — cases left / completed)
-    const timing = resolveLineTiming(ve);
+    const isCrustRun = currentRun?.subTab === "crusts";
+    const timing = resolveLineTiming({ ...ve, isCrust: isCrustRun });
     const sections = liveSections;
     const sectionStatus = (phase: PhaseInfo | undefined, fallback: ZoneStatus["status"]): ZoneStatus["status"] => {
       if (!phase) return fallback;
@@ -219,7 +220,7 @@ export default function LineMapDashboard() {
       return runStatus === "ended" ? "stopped" : runStatus === "pending" ? "upstream" : "idle";
     };
     const pressStatus = sectionStatus(sections?.pressOven, deriveStationStatus(runStatus, hasRun, isRunning && calc.pressCasesLeft > 0));
-    const pressMetrics = [
+    const pressMetrics = isCrustRun ? [] : [
       calc.pressCasesLeft > 0 ? { label: "Cases left", value: String(calc.pressCasesLeft) } : null,
       calc.casesCompleted > 0 ? { label: "Cases done", value: `${fmtNum(calc.casesCompleted)} / ${fmtNum(v.casesNeeded)}` } : null,
       calc.ppm > 0 ? { label: "Pair rate", value: `${fmtNum(calc.ppm / 2)} pairs/min` } : null,
@@ -287,7 +288,7 @@ export default function LineMapDashboard() {
     const stationZones: ZoneStatus[] = [
       { id: "dough" as ZoneId, label: "Dough", icon: <Layers className="w-5 h-5" />, navTab: "dough", status: doughStatus, metrics: doughMetrics, sub: "Mix · Form · Stage" },
       { id: "sauce" as ZoneId, label: "Sauce", icon: <Droplets className="w-5 h-5" />, navTab: "sauce", status: sauceStatus, metrics: sauceMetrics, sub: "Mix · Barrel" },
-      { id: "press" as ZoneId, label: "Press / Oven", icon: <Flame className="w-5 h-5" />, navTab: "run", status: pressStatus, metrics: pressMetrics, sub: `Pairs · ${fmtNum(timing.pressOvenMin)} min · ${sections?.pressOven.state ?? pressStatus}` },
+      { id: "press" as ZoneId, label: "Press / Oven", icon: <Flame className="w-5 h-5" />, navTab: "run", status: pressStatus, metrics: pressMetrics, sub: isCrustRun ? "Bypassed for premade crust" : `Pairs · ${fmtNum(timing.pressOvenMin)} min · ${sections?.pressOven.state ?? pressStatus}` },
       { id: "frontline" as ZoneId, label: "Frontline", icon: <Boxes className="w-5 h-5" />, navTab: "frontline", status: frontlineStatus, metrics: frontlineMetrics, sub: `Single pizzas · ${fmtNum(timing.frontlineMin)} min · ${fmtNum(calc.ppm)} pizzas/min · ${sections?.frontline.state ?? frontlineStatus}` },
       { id: "freezeTunnel" as ZoneId, label: "Freeze Tunnel", icon: <Snowflake className="w-5 h-5" />, navTab: "run", status: tunnelStatus, metrics: tunnelMetrics, sub: `Total ${fmtNum(ve.freezerTime)} min` },
       { id: "packaging" as ZoneId, label: "Packaging", icon: <Package className="w-5 h-5" />, navTab: "packaging", status: packStatus, metrics: packMetrics, sub: `Post-tunnel ${fmtNum(v.postTunnelMin || 2.5)} min` },

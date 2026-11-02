@@ -115,6 +115,8 @@ export function isPackagingDrainComplete(args: StationDrainCompletionArgs): bool
 export interface ComputeLinePhasesArgs {
   pressOvenMin?: number;
   frontlineMin?: number;
+  /** Premade-crust runs start at Frontline and bypass Press/Oven. */
+  isCrust?: boolean;
   /** Virtual elapsed time (pause-excluded), in seconds. */
   elapsedBatchSec: number;
   /** Wall-clock ms when the run was paused; null/undefined if not paused. */
@@ -130,7 +132,7 @@ export interface ComputeLinePhasesArgs {
   /** Most recent closed pause policy. Missing legacy values default to stop tunnel. */
   lastPauseStopsTunnel?: boolean;
   runStatus: "running" | "paused" | "ended" | string;
-  /** Duration of Stage 1 (press/oven/frontline), in minutes. */
+  /** Duration of Stage 1: Press/Oven then Frontline for dough, Frontline for crusts. */
   preTunnelMin: number;
   /** Duration of Stage 3 (wrapper/packaging), in minutes. */
   postTunnelMin: number;

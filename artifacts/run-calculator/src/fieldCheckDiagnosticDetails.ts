@@ -13,6 +13,8 @@ export const PERFORMANCE_SOURCE_CODES = {
   apiNetwork: 4,
   apiHttpFailure: 5,
   apiCancelled: 6,
+  mainThreadLongTask: 7,
+  slowInteraction: 8,
 } as const;
 export const API_REQUEST_OUTCOME_CODES = {
   httpServerError: 1,
@@ -43,6 +45,12 @@ export function fieldCheckDiagnosticLabel(checkName: string, metrics: Record<str
     } as Record<number, string>)[metrics.failureCode!] ?? "Failure category unavailable (older evidence)";
   }
   if (checkName === "performance") {
+    if (metrics.sourceCode === PERFORMANCE_SOURCE_CODES.mainThreadLongTask) {
+      return `The page was blocked by a long task for ${Math.round(metrics.durationMs ?? 0)} ms. No page content or control details were recorded.`;
+    }
+    if (metrics.sourceCode === PERFORMANCE_SOURCE_CODES.slowInteraction) {
+      return `A tap or keyboard response took ${Math.round(metrics.durationMs ?? 0)} ms. No input value or control details were recorded.`;
+    }
     const source = ({
       1: "Home screen did not load",
       2: "Page did not open",
