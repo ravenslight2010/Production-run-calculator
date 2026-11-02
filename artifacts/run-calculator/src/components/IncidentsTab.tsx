@@ -676,7 +676,7 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
         Evidence coverage: {FIELD_COVERAGE_LABEL[check.coverage]}
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground">
-        Failures: {check.failureCount} · Incomplete: {check.incompleteCount} · {check.issueStatus === "recovered" ? "Recovered" : check.issueStatus === "open" ? "Open" : "No issue recorded"}
+        Accumulated totals (not daily): {check.failureCount} failed · {check.incompleteCount} incomplete · {check.issueStatus === "recovered" ? "Recovered" : check.issueStatus === "open" ? "Open" : "No issue recorded"}
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground">
         Server receipt delay estimate: {check.lastReceiptDelayMs === null
@@ -705,7 +705,7 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
       )}
       {check.status === "needs-review" && (
         <p className="mt-1 text-[11px] text-amber-300">
-          {check.failureCount > 0 ? `${check.failureCount} failure${check.failureCount === 1 ? "" : "s"}` : "Repeated incomplete observations"} · review below
+          Review the recent non-successes below.
         </p>
       )}
     </div>

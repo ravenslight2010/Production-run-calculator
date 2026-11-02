@@ -271,6 +271,10 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page.getByTestId("operational-state-badge")).toHaveText(
       "Confirmed server baseline",
     );
+    await expect(page.locator('button[title="Sync connected"]')).toHaveText(
+      "Synchronized",
+      { timeout: 15_000 },
+    );
     // Foreground reconciliation can display an outcome notice after Start.
     // Dismiss that transient state rather than recording it in the baseline.
     const syncOutcome = page.getByTestId("foreground-recovery-status");
@@ -291,6 +295,7 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page.getByTestId("text-qc-import-badge-rejected")).toBeVisible();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await waitForSavedFlashToSettle(page);
+    await resetScreenshotScroll(page);
 
     await expect(page).toHaveScreenshot("live-run-desktop.png", {
       fullPage: false,
@@ -366,6 +371,10 @@ test.describe("intentional visual regression baselines", () => {
     });
     await expect(page.getByTestId("operational-state-badge")).toHaveText(
       "Confirmed server baseline",
+      { timeout: 15_000 },
+    );
+    await expect(page.locator('button[title="Sync connected"]')).toHaveText(
+      "Synchronized",
       { timeout: 15_000 },
     );
     await expect(page.getByTestId("operational-state-badge")).toBeVisible();

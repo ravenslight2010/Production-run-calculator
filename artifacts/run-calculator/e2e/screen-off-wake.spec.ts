@@ -516,7 +516,7 @@ async function mockDateNow(
 async function tickServerWithoutAdvancingBrowserClock(
   page: Page,
   fakeMs: number,
-): Promise<void> {
+): Promise<Record<string, unknown>> {
   await page.waitForTimeout(750);
   const fixtureDate = await page.evaluate(() => {
     const configured = (window as unknown as Record<string, unknown>).__testFixtureDate;
@@ -532,7 +532,9 @@ async function tickServerWithoutAdvancingBrowserClock(
     response.ok(),
     `authoritative auto-track fixture tick failed: ${response.status()}`,
   ).toBe(true);
+  const summary = await response.json() as Record<string, unknown>;
   await page.waitForTimeout(300);
+  return summary;
 }
 
 async function followRealDateNow(page: Page): Promise<void> {
@@ -3055,6 +3057,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   };
   let counterSnapshots: Record<string, CounterSnapshot> | null = null;
   let syncMetadataDiagnostics: Record<string, unknown> | null = null;
+  let releaseOnlineWakePull: (() => void) | undefined;
+  let canonicalResumeDiagnostics: Record<string, unknown> | null = null;
+  let serverAutoTrackScheduleSeedDiagnostics: Record<string, unknown> | null = null;
+  let serverAutoTrackTickDiagnostics: Record<string, unknown> | null = null;
+    let serverAutoTrackRetryTickDiagnostics: Record<string, unknown> | null = null;
   const readCounterSnapshot = (
     values: Record<string, number | string | boolean | null | undefined>,
   ): CounterSnapshot => ({
@@ -3138,6 +3145,52 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         batchesReady: stale.values.batchesReady,
       };
       sleepingPage.on("request", recordClaim);
+
+      // Keep the foreground client active while its peer wakes online. A
+      // lifecycle edit from the foreground client must be included in the
+      // sleeping peer's canonical recovery, not overwritten by its wake state.
+      let heldOnlineWakePulls = 0;
+      const onlineWakePullReleased = new Promise<void>((resolve) => {
+        releaseOnlineWakePull = resolve;
+      });
+      await sleepingPage.route("**/api/sync/today**", async (route) => {
+        if (route.request().method() === "GET" && heldOnlineWakePulls === 0) {
+          heldOnlineWakePulls += 1;
+          await onlineWakePullReleased;
+        }
+        await route.continue();
+      });
+      await simulateScreenOff(sleepingPage);
+      await mockDateNow(sleepingPage, safeBaseMs + 30_000);
+      await simulateWake(sleepingPage);
+      await expect
+        .poll(() => heldOnlineWakePulls, { timeout: 8_000 })
+        .toBe(1);
+      await expect(activeStatus).not.toContainText("Still recovering");
+      await expect(page.getByTestId("pause-run")).toBeEnabled();
+      await page.getByTestId("pause-run").click();
+      await chooseRunningTunnelIfPrompted(page);
+      await expect(page.getByTestId("resume-run")).toBeVisible();
+
+      releaseOnlineWakePull();
+      await expect(sleepingPage.getByTestId("foreground-recovery-status"))
+        .toContainText("Latest production snapshot received.", { timeout: 15_000 });
+      await expect(sleepingPage.getByTestId("resume-run"))
+        .toBeVisible({ timeout: 15_000 });
+      await expect(activeStatus).not.toContainText("Still recovering");
+      await page.getByTestId("resume-run").click();
+      await expect(page.getByTestId("pause-run")).toBeVisible();
+      await expect.poll(
+        async () => (await readLiveRunMeta(page)).pausedAt ?? 0,
+        {
+          timeout: 15_000,
+          message: "foreground Resume did not reach the canonical server run",
+        },
+      ).toBe(0);
+      await sleepingPage.unroute("**/api/sync/today**");
+      releaseOnlineWakePull();
+      observedClaims.length = 0;
+
       await simulateScreenOff(sleepingPage);
       await peer.setOffline(true);
       const persistedBeforeOfflineRecovery = await readPersistedRunValues(
@@ -3151,12 +3204,23 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         batchesReady: persistedBeforeOfflineRecovery.batchesReady,
       };
 
-      const advancedAt = safeBaseMs + 16 * 60_000;
-      // Advance canonical state on the server without making the active
-      // browser replay 16 minutes of local auto-track claims. This case tests
-      // sync convergence and the sleeping peer's visible retry; client-side
-      // catch-up is covered by the dedicated auto-track cases.
-      await tickServerWithoutAdvancingBrowserClock(page, advancedAt);
+      const resumedMeta = await readLiveRunMeta(page);
+      canonicalResumeDiagnostics = resumedMeta;
+      const resumeScheduleStartMs = Number(
+        resumedMeta.metaUpdatedAt ?? resumedMeta.startedAt ?? safeBaseMs,
+      );
+      const advancedAt = Math.max(safeBaseMs, resumeScheduleStartMs) + 16 * 60_000;
+      // Seed due times for the new lifecycle generation, then advance
+      // canonical state without making the active browser replay 16 minutes
+      // of local claims. Client-side catch-up is covered by dedicated cases.
+      serverAutoTrackScheduleSeedDiagnostics =
+        await tickServerWithoutAdvancingBrowserClock(page, resumeScheduleStartMs);
+      serverAutoTrackTickDiagnostics =
+        await tickServerWithoutAdvancingBrowserClock(page, advancedAt);
+      expect(
+        Number(serverAutoTrackTickDiagnostics.builtClaims ?? 0),
+        "the resumed server schedule did not build any due claims",
+      ).toBeGreaterThan(0);
       await simulateOnlineWake(page);
       await expect
         .poll(
@@ -3202,6 +3266,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
               };
             }, stale.runId);
             syncMetadataDiagnostics = {
+              canonicalResume: canonicalResumeDiagnostics,
+              serverAutoTrackScheduleSeed: serverAutoTrackScheduleSeedDiagnostics,
+              serverAutoTrackTick: serverAutoTrackTickDiagnostics,
+              syntheticAdvancedAt: advancedAt,
               serverRunValuesUpdatedAt: snapshot.runValuesUpdatedAt,
               serverPackagingProgress: snapshot.packagingProgress,
               ...localMetadata,
@@ -3287,9 +3355,28 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await sleepingPage.unroute("**/api/sync/today**");
         // Do not click Retry. A visible app must recover on the fixed five-second
         // cadence even when the browser's online signal was false or premature.
-        // Advance only the proxied browser clock past the retry deadline; real
-        // timers remain active and no authoritative server tick is triggered.
-        await mockDateNow(sleepingPage, advancedAt + 6_000, { tick: false });
+        // Advance the active client and authoritative fixture to the same retry
+        // instant before waking the peer, so the test does not compare clients
+        // whose synthetic clocks are six seconds apart.
+        const retryAt = advancedAt + 6_000;
+        serverAutoTrackRetryTickDiagnostics = await mockDateNow(page, retryAt);
+        const canonicalAtRetry = await readLiveRunSnapshot(page);
+        counterSnapshots = {
+          ...(counterSnapshots ?? {}),
+          canonicalAtRetry: readCounterSnapshot(canonicalAtRetry.values),
+        };
+        syncMetadataDiagnostics = {
+          ...(syncMetadataDiagnostics ?? {}),
+          serverAutoTrackRetryTick: serverAutoTrackRetryTickDiagnostics,
+        };
+        await expect.poll(
+          async () => readCounterSnapshot(await readPersistedRunValues(page, stale.runId)),
+          {
+            timeout: 10_000,
+            message: "foreground client did not adopt the canonical retry-time counters",
+          },
+        ).toEqual(readCounterSnapshot(canonicalAtRetry.values));
+        await mockDateNow(sleepingPage, retryAt, { tick: false });
         await expect(sleepingStatus).toHaveAttribute(
           "data-foreground-recovery-state",
           "outcome",
@@ -3301,24 +3388,27 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           Number(await sleepingStatus.getAttribute("data-foreground-sync-ack")),
         { timeout: 20_000 }).toBeGreaterThan(failedAck);
 
-        const expected = {
-          skidsCompleted: canonicalAfterAdvance.values.skidsCompleted,
-          casesOnCurrentSkid: canonicalAfterAdvance.values.casesOnCurrentSkid,
-          traysOnLine: canonicalAfterAdvance.values.traysOnLine,
-          batchesReady: canonicalAfterAdvance.values.batchesReady,
-        };
         await expect.poll(async () => {
-          const values = await readPersistedRunValues(sleepingPage, stale.runId);
-          return {
-            skidsCompleted: values.skidsCompleted,
-            casesOnCurrentSkid: values.casesOnCurrentSkid,
-            traysOnLine: values.traysOnLine,
-            batchesReady: values.batchesReady,
+          const [server, active, sleeping] = await Promise.all([
+            readLiveRunSnapshot(page),
+            readPersistedRunValues(page, stale.runId),
+            readPersistedRunValues(sleepingPage, stale.runId),
+          ]);
+          const serverCounters = readCounterSnapshot(server.values);
+          const activeCounters = readCounterSnapshot(active);
+          const sleepingCounters = readCounterSnapshot(sleeping);
+          counterSnapshots = {
+            ...(counterSnapshots ?? {}),
+            serverAtConvergence: serverCounters,
+            activeAtConvergence: activeCounters,
+            sleepingAtConvergence: sleepingCounters,
           };
+          return JSON.stringify(serverCounters) === JSON.stringify(activeCounters)
+            && JSON.stringify(serverCounters) === JSON.stringify(sleepingCounters);
         }, {
           timeout: 15_000,
-          message: "visible retry did not adopt the active session's canonical state",
-        }).toEqual(expected);
+          message: "visible retry did not converge the foreground, peer, and canonical server counters",
+        }).toBe(true);
         expect(
           observedClaims.filter((channel) =>
             channel === "sauce-barrel" || /^app[1-4]-batch$/.test(channel)
@@ -3378,6 +3468,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         "[offline-wake-sync-metadata-diagnostics]",
         JSON.stringify(syncMetadataDiagnostics),
       );
+        console.info(
+          "[offline-wake-retry-server-tick-diagnostics]",
+          JSON.stringify(serverAutoTrackRetryTickDiagnostics),
+        );
       await testInfo.attach("offline-wake-retry-failure-diagnostics.json", {
         body: JSON.stringify(
           {
@@ -3399,6 +3493,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       throw error;
     } finally {
       sleepingPage.off("request", recordClaim);
+      releaseOnlineWakePull?.();
       await peer.setOffline(false).catch(() => {});
       await peer.close();
     }
@@ -3770,7 +3865,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     // Reproduce the operator's paired correction while auto tracking is live:
     // subtract one completed skid, then add fifteen cases to that same skid.
     // 1/30 -> 0/30 -> 0/45. The 48-case maximum permits the full correction.
-    const correctionClaimStartIndex = caseClaimResponses.length;
     await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
     for (let i = 0; i < 15; i++) {
       await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
@@ -3841,13 +3935,60 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     ).not.toBe("");
     await waitForSyncWritesToDrain(page);
 
-    // Let the active line run briefly, then put this only device to sleep.
-    // The manual hold is intentionally still active, so wake cannot replace
-    // the acknowledged pair with an automatic baseline.
+    // Reproduce the operator's explicit Resume after the paired correction.
+    // The action must be acknowledged before the device is backgrounded.
+    const resumeAuto = page.getByTestId("btn-resume-now");
+    await expect(resumeAuto).toBeVisible();
+    const resumeClaimStartIndex = caseClaimResponses.length;
+    const resumeResponsePromise = page.waitForResponse((response) => {
+      if (
+        !response.url().includes("/api/sync/manual-section")
+        || response.request().method() !== "POST"
+      ) return false;
+      try {
+        const body = response.request().postDataJSON() as { operation?: string };
+        return body.operation === "resume-packaging";
+      } catch {
+        return false;
+      }
+    }, { timeout: 15_000 });
+    await resumeAuto.click();
+    const resumeResponse = await resumeResponsePromise;
+    expect(
+      resumeResponse.status(),
+      "Packaging Resume must be accepted by the server",
+    ).toBe(200);
+    const resumeBody = await resumeResponse.json() as {
+      serverTime?: number;
+      data?: {
+        packagingProgress?: Record<string, {
+          skidsCompleted?: number;
+          casesOnCurrentSkid?: number;
+          manualOverrideUntil?: number;
+        }>;
+      };
+    };
+    const resumeServerTime = Number(resumeBody.serverTime);
+    expect(resumeServerTime, "Resume response must include canonical server time")
+      .toBeGreaterThan(0);
+    const acceptedResume = resumeBody.data?.packagingProgress?.[canonicalRunId];
+    expect(acceptedResume).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(acceptedResume?.manualOverrideUntil ?? 0)
+      .toBeLessThanOrEqual(resumeServerTime);
+    const resumeAt = Date.now();
+    await expect(resumeAuto).toBeHidden({ timeout: 15_000 });
+    await expect(skids).toContainText("0");
+    await expect(cases).toHaveText("45");
+
+    // The manual correction remains the canonical base through a screen wake.
     await page.waitForTimeout(1_500);
     await simulateScreenOff(page);
     const firstWakeNowMs = Date.now();
     await mockDateNow(page, firstWakeNowMs, { tick: false });
+    const wakeStartedAt = Date.now();
     await simulateOnlineWake(page);
     await expect(cases).toHaveText("45", { timeout: 15_000 });
     await expect(skids).toContainText("0");
@@ -3901,70 +4042,54 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       correctionGeneration: canonicalCorrectionGeneration,
     });
 
-    const holdDeadlines = await page.evaluate(async (runId) => {
+    const resumedPackaging = await page.evaluate(async (runId) => {
       const today = new Date().toISOString().slice(0, 10);
       const response = await fetch(`/api/sync/today?today=${today}`, {
         cache: "no-store",
       });
       const body = (await response.json()) as {
-        packagingProgress?: Record<string, { manualOverrideUntil?: number }>;
+        runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+        packagingProgress?: Record<string, {
+          skidsCompleted?: number;
+          casesOnCurrentSkid?: number;
+          manualOverrideUntil?: number;
+        }>;
       };
-      const localProgress = JSON.parse(
-        localStorage.getItem("run-calc-packaging-progress") ?? "{}",
-      ) as Record<string, { manualOverrideUntil?: number }>;
+      const localProgress = JSON.parse(localStorage.getItem("run-calc-packaging-progress") ?? "{}") as
+        Record<string, { manualOverrideUntil?: number }>;
       return {
-        server: body.packagingProgress?.[runId]?.manualOverrideUntil ?? 0,
-        local: localProgress[runId]?.manualOverrideUntil ?? 0,
+        server: body.packagingProgress?.[runId] ?? null,
+        serverValues: body.runValues?.[runId] ?? null,
+        local: localProgress[runId] ?? null,
       };
     }, canonicalRunId);
-    const serverHold = holdDeadlines.server;
-    const holdUntil = Math.max(serverHold, holdDeadlines.local);
-    const holdRemaining = Math.max(0, holdUntil - Date.now() + 150);
-    expect(holdRemaining, "canonical manual correction hold")
-      .toBeLessThanOrEqual(60_500);
+    expect(resumedPackaging.server?.manualOverrideUntil ?? 0)
+      .toBeLessThanOrEqual(resumeServerTime);
+    const localNow = await page.evaluate(() => Date.now());
+    expect(resumedPackaging.local?.manualOverrideUntil ?? 0)
+      .toBeLessThanOrEqual(localNow);
+    expect(resumedPackaging.serverValues).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
     let dueNowMs = 0;
     let clientCaseClaim: { outcome?: string } | null = null;
-    await simulateScreenOff(page);
-    await page.waitForTimeout(holdRemaining);
-    // Keep the browser clock moving with real time while it is screen-off so
-    // the local manual hold and the server's canonical hold expire together.
-    const resumeNowMs = Date.now();
-    await mockDateNow(page, resumeNowMs, { tick: false });
-    const afterHold = await page.evaluate(async (runId) => {
-      const response = await fetch(
-        `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) throw new Error(`canonical post-hold read failed: ${response.status}`);
-      const body = (await response.json()) as {
-        packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-      };
-      return {
-        cases: body.packagingProgress?.[runId]?.casesOnCurrentSkid,
-        skids: body.packagingProgress?.[runId]?.skidsCompleted,
-      };
-    }, canonicalRunId);
-    expect(afterHold.skids).toBe(0);
-    expect([45, 46]).toContain(afterHold.cases);
-    // A read-only snapshot avoids injecting a synthetic remote write while the
-    // client-owned claim is pending; that would raise the foreground sync fence.
-    const postCorrectionClaims = () =>
-      caseClaimResponses.slice(correctionClaimStartIndex);
+    const postResumeClaims = () =>
+      caseClaimResponses.slice(resumeClaimStartIndex);
     expect(
-      postCorrectionClaims().filter(
-        (claim) => claim.outcome === "accepted" && claim.receivedAt < holdUntil,
+      postResumeClaims().filter(
+        (claim) => claim.outcome === "accepted" && claim.receivedAt < wakeStartedAt,
       ),
-      "manual suppression must not accept a client case claim before expiry",
+      "the next case must not be claimed before wake recovery completes",
     ).toHaveLength(0);
-    await simulateOnlineWake(page);
     await waitForSyncWritesToDrain(page);
     try {
       await expect
         .poll(
-          () => postCorrectionClaims().some(
+          () => postResumeClaims().some(
             (claim) => claim.status === 200
               && claim.outcome === "accepted"
-              && claim.receivedAt >= holdUntil,
+              && claim.receivedAt >= wakeStartedAt,
           ),
           { timeout: 15_000 },
         )
@@ -3993,16 +4118,16 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         };
       }, canonicalRunId);
       throw new Error([
-        `No post-hold client case claim: ${String(error)}`,
-        `holdUntil=${holdUntil}, claims=${JSON.stringify(postCorrectionClaims())}`,
+        `No post-Resume wake case claim: ${String(error)}`,
+        `resumeAt=${resumeAt}, wakeStartedAt=${wakeStartedAt}, claims=${JSON.stringify(postResumeClaims())}`,
         `channels=${JSON.stringify(autoTrackClaimChannels)}`,
         `browser=${JSON.stringify(browserState)}`,
       ].join("\n"));
     }
-    clientCaseClaim = postCorrectionClaims().find(
+    clientCaseClaim = postResumeClaims().find(
       (claim) => claim.status === 200
         && claim.outcome === "accepted"
-        && claim.receivedAt >= holdUntil,
+        && claim.receivedAt >= wakeStartedAt,
     ) ?? null;
     expect(clientCaseClaim?.outcome).toBe("accepted");
     dueNowMs = Date.now();
@@ -4029,12 +4154,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     }, canonicalRunId);
     const afterDueBeat = await readAfterDueBeat();
     expect(afterDueBeat.progress?.casesOnCurrentSkid, JSON.stringify({
-      afterHold,
-      holdUntil,
-      resumeNowMs,
+      resumedPackaging,
+      resumeAt,
+      wakeStartedAt,
       clientCaseClaim,
       dueOffset: dueNowMs - baselineAt,
-      holdOffset: serverHold - baselineAt,
       nextDueOffset: (afterDueBeat.book?.caseNextDueMs ?? 0) - baselineAt,
       expected: afterDueBeat.book?.lastExpectedCases,
       value: afterDueBeat.value,

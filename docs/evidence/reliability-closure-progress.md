@@ -2291,3 +2291,83 @@ was unavailable. This is lower sampled pressure than the severe 19:29–19:32Z
 window, not proof of recovery. No request/run/device correlation exists, so
 the metrics cannot attribute the calls to the owner or prove the edits were
 acknowledged.
+
+### 2026-11-02 — idle and peer-wake follow-up
+
+The owner reports that the app works while foregrounded but remains impaired
+after background/idle time, including on non-production days. The owner also
+reports that when one app remains foregrounded and another wakes, the first
+app can develop similar symptoms after the waking app settles. Reported
+symptoms include tab navigation responding while controls inside tabs do not,
+timers continuing, and auto-tracking stopping. These are owner observations,
+not a controlled physical-device reproduction and not proof of a cross-client
+write or server fault.
+
+Source review confirmed that browser request diagnostics mark a request when
+the document was hidden during its lifetime and measure elapsed wall-clock
+time, which can include OS/browser suspension. Field-check totals are scoped
+to the current facility and check. Each failure or incomplete observation
+increments its stored counter; a later success updates the recovery status but
+does not reset those counters. Individual observation rows are retention-
+limited, while the counters persist. Therefore the displayed totals are
+accumulated history, not a daily count, run count, or device-only count. The
+UI now says “Accumulated totals (not daily)” and directs managers to the recent
+non-successes list. Focused component and lifecycle tests passed 45/45.
+
+The existing two-session browser journey was extended with an online wake
+while a second client remains active. It holds the waking client’s canonical
+read, exercises Pause on the foreground client, then checks the waking client
+adopts that state and the foreground client remains usable. The first browser
+attempt failed before execution because the prepared build identity was stale.
+After preparing a fresh local identity, a later attempt exposed a synthetic
+clock mismatch: the peer advanced beyond the canonical server time. The test
+now advances the foreground client, waking peer, and isolated server to the
+same retry timestamp. That corrected case passed 1/1 in 26.9 seconds; it is
+emulated-browser evidence only.
+
+The paired Packaging journey now explicitly clicks Resume after the manual
+correction, waits for the exact `resume-packaging` response, wakes the same
+client, and checks the correction plus the next accepted case through reload.
+Its first isolated attempt received HTTP 200 but stopped at a test assertion
+that incorrectly required `manualOverrideUntil` to equal zero. The existing
+API contract permits an expired timestamp at or before server time. The test
+now asserts the server/client expiry boundary rather than exact zero and
+filters for the exact Resume operation. The corrected run passed 1/1 (30.1
+seconds overall; 15.6 seconds for the case) on an isolated disposable
+database. It verified the correction through wake, one accepted post-wake
+case, and reload persistence. The failed assertion attempt did not reach the
+wake/case checks. These are local synthetic Chromium results, not physical
+device or published-app proof. No production write, deployment restart, or
+publish was performed.
+
+### 2026-11-02 — responsive visual baseline closure
+
+The first post-update desktop comparison failed again because the screenshot
+was taken below the page's update toolbar. The page scroll was not reset after
+the run-control interaction; that mismatch covered 99,241 pixels (9%), rather
+than showing that the toolbar itself was intermittent. The desktop case now
+resets scroll before capture. Desktop and phone also wait for the confirmed
+“Synchronized” state so screenshots cannot preserve a transient sync warning;
+the tablet case already had that assertion.
+
+After comparing the actual images with their stored baselines, the reviewed
+updates cover `live-run-desktop`, `mix-plan-desktop`, `import-review-desktop`,
+`compact-run-tablet`, `run-overview-phone`, and tablet portrait/landscape. The
+phone baseline had captured an old red sync indicator, while the current
+canonical run is synchronized. The tablet and phone layouts also show a
+consistent current header-spacing difference from their older captures. No
+separate product defect was established by those image differences. The
+earlier 43,110-pixel (4%) desktop difference remains a historical result; its
+preliminary attribution to a “Development preview” notice is unconfirmed.
+
+The focused normal visual suite passed **3/3** in 36.6 seconds: desktop live
+run/Mix Plan/import review, phone run view, and tablet portrait/landscape. It
+ran in Chromium against a fresh disposable database. The visual file now
+compares normally against the reviewed baselines. This does not replace the
+integrated 240-case run or demonstrate physical Android/iOS wake behavior.
+No shared development or production data was changed.
+
+Next milestone: run the integrated 240-case browser suite on the current test
+identity, then classify any repeated failures against the existing failure
+ledger. Production publication and physical-device evidence remain outside this
+local verification lane.

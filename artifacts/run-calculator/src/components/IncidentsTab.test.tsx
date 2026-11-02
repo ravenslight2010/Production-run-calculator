@@ -188,3 +188,46 @@ describe("manager incident cancellation guidance", () => {
     await assertPlainLanguageStatus(409, "The shared value changed before this save reached the server");
   });
 });
+
+describe("field-check count clarity", () => {
+  it("identifies failure totals as accumulated rather than daily", async () => {
+    mocks.fetchIncidents.mockResolvedValue([]);
+    mocks.fetchFieldChecks.mockResolvedValue({
+      version: "test",
+      scope: "current facility",
+      generatedAt: new Date().toISOString(),
+      checks: [{
+        name: "performance",
+        label: "Performance",
+        status: "needs-review",
+        coverage: "current",
+        observedBy: "browser",
+        evidence: "Browser-observed measurements only.",
+        expiresHours: 24,
+        lastSuccessfulAt: new Date().toISOString(),
+        lastSuccessfulMetrics: null,
+        lastObservedAt: new Date().toISOString(),
+        lastReceiptDelayMs: null,
+        recentFailures: [],
+        failureCount: 1134,
+        incompleteCount: 74,
+        actionable: true,
+        issueStatus: "open",
+      }],
+      overallStatus: "needs-review",
+      actionableCount: 1,
+      population: {},
+    });
+    mocks.fetchIncidentAssignees.mockResolvedValue([]);
+
+    renderIncidents();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Field checks" }));
+    const totals = await screen.findAllByText(
+      "Accumulated totals (not daily): 1134 failed · 74 incomplete · Open",
+    );
+    expect(totals.length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Review the recent non-successes below.").length)
+      .toBeGreaterThan(0);
+  });
+});
