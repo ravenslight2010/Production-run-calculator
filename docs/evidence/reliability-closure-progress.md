@@ -2100,3 +2100,24 @@ and the QC section opening are covered by focused component tests. Root
 typecheck passed. A signed-in browser screenshot check was not possible in the
 unauthenticated preview, so the complete Home-to-review journey remains
 unverified in an authenticated browser.
+
+### 2026-11-02 — browser inventory preflight and interrupted attempt
+
+An initial isolated full-suite attempt was stopped after 17 cases passed and the
+18th began. It is an interrupted attempt, not complete-suite evidence; the
+partial browser artifacts were retained and its disposable database was stopped
+and removed. The stop was procedural, not a test failure.
+
+Before retrying, a no-server Playwright listing was compared by exact
+project/file/title identity with the owner-approved contract. It found 240 cases
+in 57 files, with zero additions, removals, or duplicates. This matches the
+approved Nov. 1 inventory and the Nov. 2 inventory record in
+`docs/full-browser-inventory.md`; no browser tests ran during collection.
+
+The existing QC import-review reload/badge browser case now starts from Run,
+clicks the global badge, and requires the Import review section to open. This
+extends one approved identity without adding or removing a case. Its focused
+isolated browser check must pass before the complete Chromium rerun. The
+workflow's historical `browser-full-159` label does not describe the currently
+approved 240-case inventory; the actual isolated runner and exact contract are
+used here.

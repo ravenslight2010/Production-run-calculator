@@ -321,8 +321,12 @@ test("retained import QC reload and badge deltas", async ({ browser, playwright,
     }]);
     const managerPage = await managerContext.newPage();
     observePage(managerPage);
-    browserPhase = "manager fresh navigation";
-    await openImportReview(managerPage, origin);
+    browserPhase = "manager badge navigation to import review";
+    await managerPage.goto(origin, { waitUntil: "domcontentloaded" });
+    await managerPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await expect(managerPage.getByTestId("badge-qc-import-review")).toBeVisible();
+    await managerPage.getByTestId("badge-qc-import-review").click();
+    await expect(managerPage.getByTestId("section-qc-import-review")).toBeVisible();
     const queue = managerPage.getByTestId("section-qc-import-review");
     // The facility queue is shared and may contain unrelated pending work.
     // These two operations were resolved above, so neither should appear in
