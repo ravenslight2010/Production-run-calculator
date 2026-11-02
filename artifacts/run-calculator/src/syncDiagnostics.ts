@@ -10,6 +10,7 @@ export type SyncDiagnosticKind =
   | "local"
   | "push"
   | "ack"
+  | "recovery"
   | "peer"
   | "merge"
   | "stale"
@@ -34,6 +35,7 @@ export type SyncDiagnostic = {
 
 export type WakeRecoveryTrigger = "foreground" | "online" | "sse-reconnect" | "manual" | "retry";
 export type WakeRecoveryOutcome =
+  | "in-progress"
   | "success"
   | "connectivity-retry"
   | "non-retryable-http"
@@ -59,7 +61,10 @@ function readableWakeRecoveryDuration(durationMs: number): string {
 
 export function formatWakeRecoveryDiagnostic(diagnostic: WakeRecoveryDiagnostic): string {
   const attemptLabel = diagnostic.attempts === 1 ? "attempt" : "attempts";
-  return `${diagnostic.attempts} ${attemptLabel} · ${readableWakeRecoveryDuration(diagnostic.durationMs)} · ${readableWakeRecoveryLabel(diagnostic.trigger)} · ${readableWakeRecoveryLabel(diagnostic.outcome)}`;
+  const duration = diagnostic.outcome === "in-progress"
+    ? ""
+    : ` · ${readableWakeRecoveryDuration(diagnostic.durationMs)}`;
+  return `${diagnostic.attempts} ${attemptLabel}${duration} · ${readableWakeRecoveryLabel(diagnostic.trigger)} · ${readableWakeRecoveryLabel(diagnostic.outcome)}`;
 }
 
 export type SyncMeasurementPath = "complete" | "partial";
@@ -190,6 +195,12 @@ export function loadSyncDiagnostics(date: string): SyncDiagnostic[] {
       (item.fieldCheck === undefined ||
         (item.fieldCheck && item.fieldCheck.checkName === "sync-acknowledgment" &&
           (item.fieldCheck.outcome === "success" || item.fieldCheck.outcome === "failure"))),
+    ).map((item) =>
+      typeof item.response === "string" &&
+      item.response.startsWith("wake-recovery:") &&
+      (item.kind === "ack" || item.kind === "failure")
+        ? { ...item, kind: "recovery" as const }
+        : item,
     ).slice(-MAX_EVENTS) : null,
   }).read();
 }
@@ -225,10 +236,12 @@ export function recordWakeRecoveryDiagnostic(input: {
     outcome: input.outcome,
   };
   return recordSyncDiagnostic({
-    kind: wakeRecovery.outcome === "success" ? "ack" : "failure",
+    kind: "recovery",
     at: input.at ?? Date.now(),
     date: input.date,
-    message: "Foreground wake recovery completed",
+    message: wakeRecovery.outcome === "in-progress"
+      ? "Foreground wake recovery attempt started"
+      : "Foreground wake recovery completed",
     response: `wake-recovery:${wakeRecovery.outcome}`,
     wakeRecovery,
   });

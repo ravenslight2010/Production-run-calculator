@@ -388,9 +388,462 @@
     "causeBoundary": "Available aggregate telemetry cannot determine whether event-loop stalls, slow database work, or another upstream condition initiated the pressure, and cannot assign request-level causality.",
     "impactBoundary": "Provider metrics returned only a few readiness requests in the sampled windows and cannot establish ordinary-user impact or prove there were no failures."
   },
+  "latestLogSnapshot": {
+    "environment": "production",
+    "capturedAt": "2026-11-02T18:53:20.982Z",
+    "captureMethod": "Read-only deployment-log refresh; not a dedicated telemetry query",
+    "revisionIdentity": "unknown in this snapshot",
+    "rawMessagesRetained": false,
+    "sanitization": "Retained only aggregate counts, bounded timings, operation categories, and timestamps; omitted process/host identifiers, raw messages, payloads, and request records.",
+    "sampleWindow": {
+      "start": "2026-11-02T18:51:02.082Z",
+      "endExclusive": "2026-11-02T18:53:20.982Z"
+    },
+    "capacityWindows": [
+      {
+        "start": "2026-11-02T18:51:02.082Z",
+        "endExclusive": "2026-11-02T18:52:03.381Z",
+        "poolAcquisitionErrors": 15,
+        "acquisitionLatencyMs": {
+          "p95": 1100,
+          "p99": 2577,
+          "max": 6300
+        },
+        "pool": {
+          "totalMax": 10,
+          "idleP95": 4,
+          "waitingP95": 5,
+          "waitingMax": 10
+        },
+        "eventLoopDelayMs": {
+          "p95": 3001,
+          "p99": 3402,
+          "max": 8003
+        }
+      },
+      {
+        "start": "2026-11-02T18:52:03.381Z",
+        "endExclusive": "2026-11-02T18:53:04.181Z",
+        "poolAcquisitionErrors": 19,
+        "acquisitionLatencyMs": {
+          "p50": 2300,
+          "p95": 11300,
+          "p99": 31601,
+          "max": 31601
+        },
+        "pool": {
+          "totalMax": 10,
+          "idleP95": 3,
+          "waitingP50": 1,
+          "waitingP95": 16,
+          "waitingMax": 18
+        },
+        "eventLoopDelayMs": {
+          "p95": 8707,
+          "p99": 32716,
+          "max": 32716
+        }
+      }
+    ],
+    "slowDatabasePhases": [
+      {
+        "at": "2026-11-02T18:51:25.282Z",
+        "phase": "outbox_scope_list",
+        "outcome": "connection_timeout",
+        "acquisitionMs": 6300
+      },
+      {
+        "start": "2026-11-02T18:52:12.082Z",
+        "endExclusive": "2026-11-02T18:52:46.882Z",
+        "phase": "outbox_cursor_read",
+        "outcome": "success",
+        "elapsedMs": 34801,
+        "acquisitionMs": 2300,
+        "postCheckoutMs": 32500
+      },
+      {
+        "start": "2026-11-02T18:52:12.281Z",
+        "endExclusive": "2026-11-02T18:52:47.382Z",
+        "phase": "status_aggregate",
+        "outcome": "success",
+        "elapsedMs": 35100,
+        "acquisitionMs": 2200,
+        "postCheckoutMs": 32900
+      },
+      {
+        "at": "2026-11-02T18:52:54.582Z",
+        "phase": "scheduled_evaluation_queue_monitor",
+        "outcome": "slow_sample",
+        "durationMs": 42301,
+        "componentDurationsMs": {
+          "statusAggregate": 35101,
+          "duplicateGroupScan": 7200
+        }
+      },
+      {
+        "start": "2026-11-02T18:53:16.882Z",
+        "endExclusive": "2026-11-02T18:53:18.282Z",
+        "phase": "outbox_cursor_read",
+        "outcome": "checkout_timeout",
+        "elapsedMs": 1400,
+        "acquisitionMs": 1400
+      }
+    ],
+    "runCorrelation": "No run-bound or request-level identity was present in this sampled evidence; this is not proof that the user-reported auto-tracking stop was caused by these stalls.",
+    "assessment": "This later sample is consistent with repeated database-pool contention and includes long post-checkout work and event-loop delay. It makes backend contention a plausible contributor to delayed recovery, but does not identify the initiating cause or link the sample to a specific run. No production setting, data, or schema was changed."
+  },
+  "wakeScreenshotWindow": {
+    "environment": "production",
+    "ownerScreenshotApproxUtc": "2026-11-02T19:01:00Z",
+    "telemetryWindow": {
+      "start": "2026-11-02T18:59:00Z",
+      "endExclusive": "2026-11-02T19:04:00Z"
+    },
+    "captureMethod": "Sanitized aggregates extracted from read-only deployment logs; screenshot time is approximate from owner-provided image.",
+    "rawMessagesRetained": false,
+    "signalsNearScreenshotTime": {
+      "outboxScopeList": {
+        "at": "2026-11-02T19:01:09.930Z",
+        "outcome": "connection_timeout",
+        "acquisitionMs": 4348
+      },
+      "capacityTelemetryAt": "2026-11-02T19:01:23.083Z",
+      "poolAcquisitionMs": {
+        "p95": 700,
+        "p99": 1500,
+        "max": 4348
+      },
+      "poolWaiters": {
+        "p95": 13,
+        "p99": 14,
+        "max": 14
+      },
+      "eventLoopDelayMs": {
+        "p95": 200,
+        "p99": 2000,
+        "max": 5004
+      }
+    },
+    "subsequentWindowAt": "2026-11-02T19:02:23.088Z",
+    "subsequentWindowPoolAcquisitionMs": {
+      "p95": 12,
+      "p99": 70,
+      "max": 213
+    },
+    "ownerReportedBehavior": {
+      "reportedDate": "2026-11-02",
+      "context": "After switching from chat to the app",
+      "tabNavigationResponds": true,
+      "controlsInsideTabsRespond": false,
+      "timersAdvance": true,
+      "autoTrackingAdvances": false,
+      "limitations": "No exact event time, active screen, request identity, or run-bound trace was supplied. This narrows the symptom but does not identify its cause."
+    },
+    "additionalScreenshotPair": {
+      "ownerScreenshotApproxLocal": "2026-11-02 13:09 CST",
+      "commonVisibleState": "Still recovering: checking the current production state",
+      "reportedBaselineIndicators": [
+        "Confirmed server baseline",
+        "Offline — local projection"
+      ],
+      "activeRunControlsVisible": true,
+      "tapOutcome": "Not established by the screenshots",
+      "productionTelemetry": {
+        "sampleAt2026-11-02T19:08:23.682Z": {
+          "poolAcquisitionMs": {
+            "p95": 6199,
+            "p99": 10100,
+            "max": 10100
+          },
+          "poolWaiters": {
+            "p95": 13,
+            "p99": 17,
+            "max": 17
+          },
+          "eventLoopDelayMs": {
+            "p95": 6002,
+            "p99": 7902,
+            "max": 7902
+          }
+        },
+        "sampleAt2026-11-02T19:09:28.282Z": {
+          "poolAcquisitionMs": {
+            "p95": 2600,
+            "p99": 4901,
+            "max": 8000
+          },
+          "poolWaiters": {
+            "p95": 5,
+            "p99": 7,
+            "max": 8
+          },
+          "eventLoopDelayMs": {
+            "p95": 2802,
+            "p99": 4601,
+            "max": 6501
+          }
+        }
+      },
+      "databaseCheckoutTimeouts": [
+        {
+          "at": "2026-11-02T19:08:26.581Z",
+          "phase": "status_aggregate",
+          "elapsedMs": 1601,
+          "acquisitionMs": 1600
+        },
+        {
+          "at": "2026-11-02T19:08:47.184Z",
+          "phase": "outbox_scope_list",
+          "outcome": "connection_timeout",
+          "acquisitionMs": 4901
+        },
+        {
+          "at": "2026-11-02T19:09:33.982Z",
+          "phase": "status_aggregate",
+          "elapsedMs": 2599,
+          "acquisitionMs": 2300
+        }
+      ],
+      "queueMonitor": {
+        "samplesUnavailable": 2,
+        "recoveredAt": "2026-11-02T19:10:28.673Z"
+      },
+      "limitations": "The status indicators differ across the screenshot pair while recovery remains visible. The matching production interval also shows severe pool and event-loop pressure, but there is no request/run correlation and no proof that this caused the UI or auto-tracking behavior."
+    },
+    "limitations": "The production pressure temporally overlaps the owner-reported wake/unresponsive screen, but aggregate telemetry does not identify the browser request or run and does not prove causation. Pool and event-loop measurements improved in the following sample. No production setting, data, or schema was changed."
+  },
+  "wakeRecoverySreInvestigation": {
+    "performedBy": "Read-only production SRE investigation",
+    "deploymentBoundary": {
+      "deploymentType": "autoscale",
+      "isDeployed": true,
+      "hasSuccessfulBuild": true,
+      "servingRevisionId": "42763954-0c35-47c4-8b4b-6ea38c26deb1",
+      "servingBuildId": "app-build:934ed015-7a94-4db0-a558-0fdbad559c27",
+      "servingBuildCreatedAt": "2026-10-30T15:38:15Z",
+      "buildDuringIncidentWindow": false,
+      "localWakeDiagnosticChangesIncluded": false
+    },
+    "aggregateEndpointMetrics": [
+      {
+        "windowStart": "2026-11-02T18:59:00Z",
+        "windowEndExclusive": "2026-11-02T19:04:00Z",
+        "syncTodayRequests": 6,
+        "syncTodayP95MsApprox": 2275,
+        "syncToday4xxResponses": 1,
+        "autoTrackClaimRequests": 2,
+        "autoTrackClaim4xxResponses": 0,
+        "autoTrackClaim5xxResponses": 0,
+        "syncEvents": "Long-duration requests observed; may be normal long-lived streams."
+      },
+      {
+        "windowStart": "2026-11-02T19:06:00Z",
+        "windowEndExclusive": "2026-11-02T19:11:00Z",
+        "syncTodayRequests": 1,
+        "syncEvents": "One long-duration request observed; may be a normal stream.",
+        "autoTrackClaimRequestsInReturnedMetrics": "None appeared in the endpoint list."
+      }
+    ],
+    "otherChecks": {
+      "scheduledJobReviewWindow": {
+        "start": "2026-11-02T04:17:00Z",
+        "endExclusive": "2026-11-02T04:21:00Z",
+        "result": "Two failed jobs across six attempts; one lease_expired and remaining handler_failed.",
+        "relevance": "Not contemporaneous with the 19:01Z or 19:09Z wake windows; cannot explain those reports."
+      },
+      "providerResourceSignal": "CPU/memory aggregates and ordinary-route latency do not indicate host-wide saturation, but provider samples are sparse."
+    },
+    "causalAssessment": {
+      "finding": "Recurring application-side database-pool contention and event-loop delay are the strongest measured contributor and overlap both wake reports. They could delay recovery and tracking, but do not prove why in-tab controls appeared inert or auto-tracking stopped.",
+      "claimStormAssessment": "The endpoint aggregates weakly argue against a simple repeated auto-track-claim storm; they cannot rule out a wake burst, identify the affected browser/run, or establish server-worker progress.",
+      "rankedAlternatives": [
+        "Slow or timed-out canonical recovery leaves the client safety barrier active.",
+        "A client/browser resume or recovery-state defect remains plausible and unexcluded.",
+        "A host-wide CPU/memory saturation event is less supported by the sparse provider samples."
+      ],
+      "limitations": "No request/run correlation, exact worker events, or browser/OS lifecycle trace is available. Long sync/events durations may be normal open streams."
+    },
+    "nextDiagnostic": "Capture one controlled, synchronized wake reproduction with privacy-safe client visibility, control-action, recovery, and auto-track outcomes. Pair each recovery with an ephemeral correlation token and server request status/duration plus per-instance pool, event-loop, and worker events. Do not retain payloads or personal identifiers.",
+    "laterDeploymentLogSnapshot": {
+      "environment": "Published production deployment logs, distinguished by SRE from the local API workflow.",
+      "capturedAt": "2026-11-02T19:33:01Z",
+      "windowStart": "2026-11-02T19:29:56Z",
+      "windowEndExclusive": "2026-11-02T19:32:00Z",
+      "exactRevisionAttribution": "The later snapshot does not embed a serving revision. The earlier SRE check identified revision 42763954-0c35-47c4-8b4b-6ea38c26deb1 as serving and found no newer build, but the later snapshot's revision is not independently confirmed.",
+      "adjacentPoolWindows": [
+        {
+          "acquisitionErrors": 35,
+          "p95AcquisitionWaitMs": 5301,
+          "p99AcquisitionWaitMs": 7000,
+          "maxAcquisitionWaitMs": 8101,
+          "poolSize": 10,
+          "maxWaiters": 18,
+          "eventLoopP95Ms": 2200,
+          "eventLoopMaxMs": 5402
+        },
+        {
+          "acquisitionErrors": 35,
+          "p95AcquisitionWaitMs": 6801,
+          "p99AcquisitionWaitMs": 8499,
+          "poolSize": 10,
+          "idleConnectionsAtSample": 0,
+          "maxWaiters": 18,
+          "eventLoopMaxMs": 4601
+        }
+      ],
+      "otherSignals": "The queue monitor timed out, outbox reads were slow, and two production server-job runs failed with dependency-connection after about 13 seconds.",
+      "assessment": "This is a later recurrence of production pool pressure after the 19:01–19:10Z wake reports, not proof of continuous pressure between windows or of the cause of the phone's unresponsive controls or stopped tracking.",
+      "endpointMetricCheck": {
+        "exactWindow": "No endpoint rows were returned for /api/sync/today, /api/sync/events, or /api/sync/auto-track/claim; missing rows do not prove zero requests or success.",
+        "nearestMinuteAlignedWindow": {
+          "start": "2026-11-02T19:29:00Z",
+          "endExclusive": "2026-11-02T19:33:00Z",
+          "returnedEndpoint": "/__ready",
+          "requestCount": 3,
+          "averageMs": 245,
+          "p95Ms": 481,
+          "p99Ms": 496,
+          "4xxResponses": 0,
+          "5xxResponses": 0
+        },
+        "comparison": "Earlier partial aggregates around the screenshots contained a small number of sync/today and sync/events requests; two auto-track claims had no 4xx/5xx in 18:59–19:04Z. Later missing endpoint rows do not establish absence of traffic.",
+        "limitation": "No request, run, or device correlation is available, and the later pool-pressure evidence adds no direct sync-route status or latency."
+      },
+      "requestRunDeviceCorrelation": "None available.",
+      "productionChangesMade": false,
+      "publicationPerformed": false
+    },
+    "successfulWakeAttemptComparison": {
+      "environment": "Published production",
+      "ownerReportedLocalApprox": "2026-11-02T13:41:00-06:00",
+      "ownerReportedUtcApprox": "2026-11-02T19:41:00Z",
+      "queryWindow": {
+        "start": "2026-11-02T19:40:00Z",
+        "endExclusive": "2026-11-02T19:43:00Z"
+      },
+      "screenshotObservation": {
+        "labels": [
+          "Latest production snapshot received",
+          "Confirmed server baseline",
+          "Resume Run"
+        ],
+        "unsavedEditsWarningVisible": true,
+        "interpretation": "Owner reports the Pause tap appeared to work; this screenshot is not a server acknowledgement trace and does not identify which edits remain unconfirmed."
+      },
+      "endpointMetrics": [
+        {
+          "route": "/api/sync/today",
+          "requests": 10,
+          "averageMs": 659,
+          "p50Ms": 500,
+          "p95Ms": 1750,
+          "p99Ms": 2350,
+          "fourXxResponses": 0,
+          "fiveXxResponses": 0,
+          "successfulTwoXxCount": "not exposed"
+        },
+        {
+          "route": "/api/sync/auto-track/claim",
+          "requests": 7,
+          "averageMs": 464,
+          "p50Ms": 425,
+          "p95Ms": 1975,
+          "p99Ms": 2395,
+          "fourXxResponses": 0,
+          "fiveXxResponses": 0,
+          "successfulTwoXxCount": "not exposed"
+        },
+        {
+          "route": "/api/sync/events",
+          "requests": 1,
+          "averageMs": 36529,
+          "reportedPercentileMs": {
+            "p50": 10000,
+            "p95": 10000,
+            "p99": 10000
+          },
+          "fourXxResponses": 0,
+          "fiveXxResponses": 0,
+          "interpretation": "One long-duration stream may be normal; it is not evidence by itself of a failed sync."
+        }
+      ],
+      "publishedLogSamples": {
+        "infoEntries": 78,
+        "warningEntries": 0,
+        "errorEntries": 0,
+        "acquisitionDurationSamples": 13,
+        "acquisitionDurationMinMs": 0,
+        "acquisitionDurationMaxMs": 977,
+        "poolStateReadings": 4,
+        "poolTotalConnectionsMin": 5,
+        "poolTotalConnectionsMax": 9,
+        "poolIdleConnectionsMin": 0,
+        "poolIdleConnectionsMax": 2,
+        "poolWaiters": 0,
+        "eventLoopNumericDelay": "unknown; two event-loop-related entries had no numeric delay"
+      },
+      "comparisonWithSeverePoolWindow": "Sampled pool values are lower than the 19:29:56–19:32:00Z recurrence, which had 35 acquisition errors in each adjacent minute and up to 18 waiters. Sparse samples do not prove recovery or zero contention.",
+      "requestRunDeviceCorrelation": "None available; aggregate metrics cannot identify the owner's device or run, and 4xx/5xx counts do not expose successful 2xx counts.",
+      "productionChangesMade": false,
+      "publicationPerformed": false
+    },
+    "productionChangesMade": false,
+    "publicationPerformed": false
+  },
+  "isolatedBrowserSyncPerformance": {
+    "environment": "Isolated Chromium browser; synthetic test, not production.",
+    "test": "Measures canonical edit and foreground recovery latency",
+    "network": "Loopback, 0/40ms injected request delay, no bandwidth cap",
+    "editMeasurements": {
+      "samples": 6,
+      "requestBytes": 8227,
+      "zeroDelayAckMsRange": [
+        296,
+        385
+      ],
+      "zeroDelayPeerMsRange": [
+        320,
+        414
+      ],
+      "fortyMsInjectedDelayAckMsRange": [
+        340,
+        346
+      ],
+      "fortyMsInjectedDelayPeerMsRange": [
+        353,
+        368
+      ],
+      "allMeasuredEditsConverged": true,
+      "retries": 0
+    },
+    "wakeMeasurements": {
+      "samples": 4,
+      "durationMsRange": [
+        140,
+        191
+      ],
+      "conditions": [
+        "healthy duplicate wake",
+        "one 503 followed by retry"
+      ],
+      "timedOutPulls": 0
+    },
+    "syncResults": {
+      "failedPulls": 1,
+      "peerPulls": 9,
+      "peerWrites": 4,
+      "allRecordedPeerPutsWereHttp200Unchanged": true,
+      "ownerConsoleErrors": 0,
+      "ownerPageErrors": 0,
+      "peerConsoleErrors": 2,
+      "peerConsoleWarnings": 1,
+      "peerPageErrors": 0
+    },
+    "limitations": "Loopback and injected-delay results do not represent production mobile networking, physical Android behavior, or OS-suspended JavaScript. Browser signal counts are retained without raw messages."
+  },
   "nextDiagnostic": {
     "owner": "Engineering/operations",
-    "action": "Capture synchronized primary-database query/connection/lock waits, per-instance pool and event-loop intervals, request outcomes, and terminal-job failure details; first reconcile the Oct 21 versus Nov 2 historical log-query discrepancy.",
+    "action": "Use a controlled wake reproduction with privacy-safe client state/action outcomes and an ephemeral correlation token, paired with server request outcomes, per-instance pool/event-loop data, and worker events. Separately reconcile the Oct 21 versus Nov 2 historical log-query discrepancy before changing infrastructure.",
     "productionChangesMade": false,
     "publicationPerformed": false
   }

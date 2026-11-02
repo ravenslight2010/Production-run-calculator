@@ -219,8 +219,9 @@ describe("sync diagnostics", () => {
 
     expect(loadSyncDiagnostics("2026-08-21")).toEqual([
       expect.objectContaining({
-        kind: "failure",
+        kind: "recovery",
         response: "wake-recovery:non-retryable-http",
+        message: "Foreground wake recovery completed",
         wakeRecovery: {
           attempts: 99,
           durationMs: 86_400_000,
@@ -229,5 +230,52 @@ describe("sync diagnostics", () => {
         },
       }),
     ]);
+  });
+
+  it("records pending wake recovery locally without labeling it as a write result", () => {
+    recordWakeRecoveryDiagnostic({
+      date: "2026-08-21",
+      at: 12,
+      attempts: 1,
+      durationMs: 0,
+      trigger: "foreground",
+      outcome: "in-progress",
+    });
+
+    const [event] = loadSyncDiagnostics("2026-08-21");
+    expect(event).toEqual(expect.objectContaining({
+      kind: "recovery",
+      message: "Foreground wake recovery attempt started",
+      response: "wake-recovery:in-progress",
+      wakeRecovery: {
+        attempts: 1,
+        durationMs: 0,
+        trigger: "foreground",
+        outcome: "in-progress",
+      },
+    }));
+    expect(event.fieldCheck).toBeUndefined();
+  });
+
+  it("normalizes legacy recovery events so pulls are not counted as write acknowledgments or failures", () => {
+    recordSyncDiagnostic({
+      kind: "ack",
+      at: 1,
+      date: "2026-08-21",
+      message: "Foreground wake recovery completed",
+      response: "wake-recovery:success",
+    });
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 2,
+      date: "2026-08-21",
+      message: "Foreground wake recovery completed",
+      response: "wake-recovery:connectivity-retry",
+    });
+
+    const events = loadSyncDiagnostics("2026-08-21");
+    expect(events.map((event) => event.kind)).toEqual(["recovery", "recovery"]);
+    expect(events.some((event) => event.kind === "ack")).toBe(false);
+    expect(events.some((event) => event.kind === "failure")).toBe(false);
   });
 });

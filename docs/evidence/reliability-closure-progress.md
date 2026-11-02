@@ -838,11 +838,27 @@ attempt is preserved. Following owner-approved exact review, the updated
 combined regression passed both current collections and the original-set
 retention fence; see the ledger and inventory document.
 
-The earlier invalid Chromium attempt remains stopped/preserved. The approved
-240-case main attempt subsequently ended with 187 passed, 43 failed, one
-interrupted and nine not run. It is a failed attempt, not an executing run or
-a passing-duration certificate. Subsequent bounded repairs and the selected
-Warehouse recheck are recorded separately below.
+The earlier invalid Chromium attempt remains stopped/preserved. The first
+approved 240-case attempt ended with 187 passed, 43 failed, one interrupted and
+nine not run; that historical result remains preserved. The latest approved
+240-case run completed on test identity
+`test-sha256:9f510ad9d4fc6a3f32bdd9952fd4110ec7a83c68ea9b8cf80d6b7c8cc53fd3de`
+in 3,795,633 ms: 232 passed, six failed, two skipped, zero not run. It is a
+complete failed run, not a passing-duration certificate.
+
+The six failures are grouped into four investigation areas: the authenticated
+QC test could not find the expected synthetic long-ingredient option after its
+earlier workflow steps; all three Run Insights journeys timed out before the
+refresh control became visible; the wake/reset test timed out waiting for the
+peer's run to disappear after reset; and the desktop visual baseline differed
+by 43,110 pixels (4%). The actual desktop capture shows the current
+“Development preview” banner and explanatory notice where the stored baseline
+shows “Current.” The visual test group is serial, so its phone and tablet
+cases were skipped after the desktop failure. Each cause still needs focused
+triage; these symptoms do not alone establish product defects. The exact
+run report is `release-evidence/browser-full/FINAL-REPORT.md`. The runner
+cleaned up its disposable database; no shared development or production data
+was changed.
 Current sync/wake behavior against a second physical device and the
 remaining scheduled, inventory and operational-domain journeys have not all
 passed. Full release evidence remains a separate lane; the standard release
@@ -857,7 +873,11 @@ data were used in the isolated API tests.
 | Manager sync-health uses device selection while shared calculations follow lifecycle | FOCUSED PASS | Shared selector/calculator identity has 12 passing focused tests, including no-mutation checks. Final integrated browser evidence remains separate. Owner: this task. |
 | Production database aggregate measurement unavailable | SUPPORTED READS RESTORED; CAUSAL ATTRIBUTION GAP | The earlier authenticated-user rejection is historical. Replica reads, a verified primary snapshot, host metrics and both pages of the sampled phase-log query succeeded. See the bounded current capture above. The ultimate stall cause and revision attribution remain unresolved; no direct-connection workaround or unsupported capacity change was made. |
 | Published stalls' causal attribution | REVISION-BOUND REVIEW COMPLETE; INCIDENT LINK OPEN | Same-revision comparison confirms acquisition delays predate the selected window and were not worse in it; no build changed in either window. The selected phase samples still show 30-second acquisition delays, but no incident timestamp/trace ties them to a phone sync. Revision-filtered capacity logs returned 12 current and 13 prior records but no sync-write counters or duration distributions; this cannot establish zero writes or a failure rate. The development candidate and serving source fingerprints differ, so candidate instrumentation is not assumed live. No setting change is supported. Owner: this task; next action is one timestamped, sanitized trace of a reproducible user sync/recovery request. |
-| Required local integrated verification | FAILED MAIN ATTEMPT; REPAIR BATCHES IN PROGRESS | The approved 240-case attempt ended with 187 passed, 43 failed, one interrupted and nine not run. Focused repairs do not replace that result. No full-browser pass, certified duration, retry or duration-gate change is claimed. |
+| Required local integrated verification | LATEST FULL RUN FAIL; FOUR TRIAGE AREAS OPEN | The latest complete 240-case Chromium run passed 232, failed 6, skipped 2, and had 0 not run in 3,795,633 ms on test identity `test-sha256:9f510ad9d4fc6a3f32bdd9952fd4110ec7a83c68ea9b8cf80d6b7c8cc53fd3de`. Failures: missing synthetic QC ingredient option; three Run Insights controls not visible; wake/reset peer retained its run past the convergence wait; desktop screenshot differs by 43,110 pixels (4%) from its “Current” baseline, with the actual showing the development-preview notice. The serial visual suite skipped phone/tablet cases after the desktop failure. The earlier 187-pass/43-failure attempt remains historical. Owner: this task; next action: focused isolated reproduction and safe repair, then rerun skipped visual cases and final suite. No assertion/tolerance was weakened. |
+| QC authenticated evidence journey | FAILURE; FIXTURE/PRODUCT CAUSE OPEN | At case 169, the expected synthetic long-ingredient option was absent from the operator's `select-ingredient` after the component-check workflow. Earlier QC evidence saves had passed. Next: trace the isolated profile/substitution fixture and authoritative option source; do not weaken the ingredient assertion without confirming the intended selectable ingredient. |
+| Run Insights accept/dismiss/follow-up | THREE FAILURES; ROOT CAUSE OPEN | Cases 184–186 each timed out before `[data-testid="button-run-insights-refresh"]` became visible. The saved failure contexts show a navigation interruption and are insufficient to prove whether the page role/product seed, API query, or browser lifecycle caused the missing card. Next: rerun all three together in a fresh disposable database and capture bounded auth, route-status, and selected-run diagnostics before any UI or API change. |
+| Wake reset-epoch convergence | FAILURE; SYNC INVARIANT TRIAGE OPEN | Case 218 timed out waiting for the peer's stale run to disappear after reset/wake; the attached bounded diagnostics show reset epoch 2, a post-reset baseline acknowledgment, two epoch-2 day-state PUTs, and the test run still present locally. Next: inspect the complete current trace and reset/reconciliation contract, then repair only if the stale replay is confirmed. Follow `sync-invariant-check`; production behavior remains unverified. |
+| Desktop visual baseline and responsive visual cases | BASELINE MISMATCH; TWO CASES SKIPPED | Case 228 differs from the stored desktop snapshot by 43,110 pixels (4%). The visible difference includes the development-preview banner and explanation replacing the old “Current” status. Cases 229–230 were skipped because the test group is serial. Next: confirm banner intent/source, update the snapshot only if this change is intentional, then run phone and tablet baselines without changing tolerance. |
 | Standalone diagnostic inventory | RECONCILED; REPORTER REGRESSION PASS | Owner-approved exact review established 15 additions and zero removals: 13 already-approved main cases plus focused saved-schedule and synthetic-import journeys. Updated 293-case digest retains a second fence for every original 278-case identity. Combined reporter regression exited 0 with fresh main 240 and standalone 293 collections and the original-set fence. No matcher, retry, timeout or browser assertion changed; no browser launched. See `docs/full-browser-inventory.md`. The previous failed attempt remains preserved, not relabeled. |
 | Warehouse/local day-overlay queue | FOCUSED PASS; SELECTED WAREHOUSE BROWSER PASS | The staging, substitution/log and prep producers advance their synchronous local reference before the queue's acknowledged-snapshot comparison. The original nine regressions and 84 existing checks passed (93), with root typecheck. One exact, preflighted Warehouse staging/database/reload follow-up then passed 1/1 on disposable local fixtures. Other overlays are unit-verified, not browser-certified. The old main failure remains preserved. |
 | Run ordering and suggested-order Undo | SOURCE REPAIR; CURRENT FOCUSED PASS | Manual/suggested ordering and Undo now queue the intended current snapshot. Forward actions preserve newer rows/values; positional moves refuse stale lists. Order-only Undo retains current fields and selection, and refuses changed membership/order, day, reset or operational scope. Final actual-source producer suite passed 27/27 with client typecheck and diff check. Earlier combined 105/root-typecheck evidence is recorded separately below. No run-order browser or physical-device pass is claimed. |
@@ -868,6 +888,16 @@ data were used in the isolated API tests.
 | Missing protected Gold read inventory | REPAIRED; FOCUSED PASS | Approvals/retention use either manage-staff or manage-qc; cleanup uses manage-staff. All remain scoped and retain their existing role middleware. The mounted-router registration test passes. |
 | Full API attempt | HISTORICAL FAILURE; CURRENT DISJOINT PARTITIONS PASS | The earlier 2,483-pass/16-failure attempt remains preserved. Current disposable-cluster unit and integration partitions passed 2,507 tests across 193 files, with the existing opt-in concurrency-trial skip reported separately. This is not one timed full-suite run; unchanged passing convergence evidence remains separate. |
 | Current same-day published-runtime signals | CONTRIBUTING SYMPTOMS OBSERVED; ROOT CAUSE OPEN | Sanitized ten-minute serving-log rollup is appended to `reliability-closure-production-window.md`. Pool pressure, outbox timeouts and long queue snapshots occurred together; initiating workload, database execution time and sync-intent outcome remain unresolved. No capacity or retry setting changed. |
+| 2026-11-02 wake/recovery and tracking report | RUN-BOUND CAUSE OPEN; DB POOL PRESSURE CONFIRMED | Sanitized read-only telemetry for 17:35–17:42Z showed pool saturation (10/10 connections in use, zero idle, 18 waiting) and a checkout timeout; a sync-outbox scope read timed out after 12.1 seconds. One `/api/sync/events` request ended after 300 seconds with HTTP 200/request aborted; a long-lived stream is not proof of cause. Only one foreground-recovery observation was recorded in this window, as success at 17:36:27Z; none were recorded at screenshot times. CPU/memory were low and no deployment changed. This does not prove the user’s run stopped tracking or correlate the pool stall to that run. Owner: this task; next action: finish the local recovery/heartbeat review and retain the incident as unconfirmed if no run-bound evidence emerges. No production writes or settings changes. |
+| Later production log snapshot, 2026-11-02 18:51–18:53Z | REPEATED SERVER-SIDE PRESSURE; NO RUN CORRELATION | A read-only deployment-log refresh showed 15 and 19 pool-acquisition errors across consecutive one-minute windows, up to 18 waiting checkouts, event-loop delay up to 32.7 seconds, and outbox/queue database phases taking 34.8–42.3 seconds. The sample did not identify a run or request and did not establish a serving revision; it is a plausible contributor, not the cause of the reported tracking stop. Sanitized aggregates are in `docs/evidence/reliability-closure-production-pool-pressure-2026-11-02.json`. No production mutation. |
+| Owner screenshots after run stop, 2026-11-02 12:56 CST | UI STATE OBSERVED; SERVER/HISTORY BEHAVIOR UNCONFIRMED | The mobile browser screenshots show ended runs still in a Frontline-draining state and a selected next run labeled provisional/awaiting server confirmation; another selected run shows a confirmed server baseline. The screenshots do not establish whether the state is stale or expected during drain/handoff. No run identifiers, product names, or counts were retained. Next action: compare selection, server confirmation, and drain transitions with existing lifecycle coverage and test reload/switch behavior if uncovered. The raw screenshots remain user-provided attachments and were not copied into repository evidence. |
+| Owner report after attempted Resume, 2026-11-02 14:13 CST | REPEATED WAKE/RECOVERY CONTROL SYMPTOM; EVENT PATH UNKNOWN | The screenshot shows “Still recovering” and provisional server confirmation while Resume Run is visible; the owner reports tapping Resume did nothing until refresh. This repeats the wake symptom but does not establish whether the browser missed the touch, the handler intentionally rejected it, or the request failed. Next: reproduce the pending-recovery interaction locally with bounded touch/handler/request evidence; preserve the adopt-before-publish barrier and make any blocked action explicit. The raw screenshot remains a user attachment and was not copied into repository evidence. |
+| Owner wake/recovery report and 13:09 CST screenshot pair, 2026-11-02 | TAB CONTENT/AUTO-TRACKING FAILURE REPORTED; SERVER PRESSURE COINCIDENT | The owner clarifies that tab-to-tab navigation responds, but controls inside the selected tab screens do not; timers continue advancing while auto-tracking does not. The screenshot pair keeps the recovery banner while its baseline indicator differs between “Confirmed server baseline” and “Offline — local projection”; the images do not establish tap outcomes. Logs overlap the 13:09 CST pair: pool acquisition p95 up to 6.2 seconds, 17 waiters, event-loop delay up to 7.9 seconds, three checkout timeouts, and two unavailable queue samples; the queue monitor later recovered. Local code review found wake raises a shared-sync barrier and blocks auto-tracking; selected operational-control writes are rejected while the barrier remains up, ordinary edits are retained/queued, and failed recovery intentionally keeps the safety fence. The banner is inline; profile/factory refresh is decoupled from the barrier. This can explain a subset of unavailable actions while recovery is unresolved, but does not prove device taps or request/run causality. Raw screenshots remain user-provided attachments and were not copied into repository evidence. |
+| Read-only production SRE investigation, 2026-11-02 | ROOT CAUSE INCONCLUSIVE; SERVING BUILD BOUNDARY CONFIRMED | Current serving Autoscale build `app-build:934ed015-7a94-4db0-a558-0fdbad559c27` (revision `42763954-0c35-47c4-8b4b-6ea38c26deb1`) was created 2026-10-30 15:38:15Z; no build occurred in the incident windows and local diagnostics are not deployed. Aggregate metrics show six `/api/sync/today` requests and two error-free auto-track claims in 18:59–19:04Z; no claim appeared in the returned endpoint list for 19:06–19:11Z. These aggregates cannot identify the affected browser/run and only weakly argue against a claim storm. The 04:17–04:21Z job failures are not contemporaneous; sparse provider CPU/memory data do not indicate host-wide saturation. SRE finds pool contention/event-loop delay the strongest measured contributor but cannot establish causality; client/browser resume remains plausible. Smallest next diagnostic: one controlled synchronized wake with privacy-safe client outcomes, ephemeral correlation token, request statuses/durations, and per-instance pool/event-loop/worker events. No production changes or publication. |
+| Web-workflow duplicate start, 2026-11-02 19:05Z | EXISTING APP HEALTHY; WORKFLOW START ATTEMPT FAILED | The workflow log reported port 26038 already in use. Process inspection found the existing run-calculator Vite process, and the Replit development domain answered HTTP 200. This is a duplicate-start conflict, not evidence of an application outage. Do not restart while the full browser runner may share the service; after the runner exits, restart once only if the workflow status still needs recovery. |
+| Final-candidate browser rerun before diagnostic repair | INTERRUPTED; NO ASSERTION FAILURE REPORTED | The unchanged 240-case run passed 21 cases and began case 22 before it was stopped to address the confirmed absence of a local event for an in-progress wake recovery. This partial run is not a pass; it reports no completed failing assertion. Owner: this task; next action: focused-verify the bounded local diagnostic, then rerun the complete inventory under the existing limits. |
+| Final-source Chromium browser inventory after diagnostic repair | IN PROGRESS; 103/240 PASSED AT CHECKPOINT | Cases 1–103 passed so far, including the five-run lifecycle; case 104 is running and no failures have been reported at this checkpoint. The wake-recovery interaction cases remain pending. The run is not complete and must not be described as a pass until all 240 cases finish. |
+| In-progress wake-recovery diagnostics | REPAIRED LOCALLY; FOCUSED PASS; FULL RUN PENDING | Each attempt now writes a bounded local in-progress record and immediately updates the activity list; terminal recovery records use a separate `recovery` category so a snapshot pull is not shown as a write acknowledgment or failed write. Legacy wake events are normalized on read. No run ID, production payload, or server write is added. Focused tests passed 30/30 and root typecheck passed; owner: this task; next action: complete the approved 240-case browser run and reconcile its exact result. |
 | Owner policy choices | RECORDED; DELIVERY STILL OWNED HERE | Packaging factual status only; approval-expiry reminders seven days before expiry; verified offline runtime-tool handoff approved for isolated testing. These decisions do not authorize publication, provider sends, real-source Gold, or production trials. |
 | Current test:client workflow | PASS; ONE EXISTING SKIP | Latest configured workflow completed 397 client test files (3,879 tests passed; one existing workbook-source test skipped), in 83.4 seconds against its 150-second budget. The separate full-browser and release-evidence gates remain unresolved. |
 | Isolated API sync-convergence test | PASS | The dedicated local disposable-Postgres runner completed successfully in 56.7 seconds. It unsets inherited database connection variables and starts its own local test database; no shared development or production database was used. This confirms the tested synthetic convergence flow, not physical wake behavior. |
@@ -2117,7 +2147,133 @@ approved Nov. 1 inventory and the Nov. 2 inventory record in
 The existing QC import-review reload/badge browser case now starts from Run,
 clicks the global badge, and requires the Import review section to open. This
 extends one approved identity without adding or removing a case. Its focused
-isolated browser check must pass before the complete Chromium rerun. The
+isolated browser check passed in Chromium and WebKit (2/2); the authenticated
+Home-to-review browser journey is now verified, though the signed-in preview
+still cannot be captured by the unauthenticated screenshot browser. The
 workflow's historical `browser-full-159` label does not describe the currently
 approved 240-case inventory; the actual isolated runner and exact contract are
-used here.
+used here. The complete 240-case Chromium rerun remains pending.
+
+### 2026-11-02 — active-run recovery and tracking stall report
+
+The owner supplied screenshots at 11:38:03, 11:38:44, and 11:38:56
+America/Chicago (17:38:03Z, 17:38:44Z, and 17:38:56Z). They show an active
+run with the app still reporting that it is checking current production state;
+the Packaging view shows Auto while a separate view reports the line about 13
+minutes behind with no stoppage logged. These are browser-observed states, not
+proof that auto-tracking was progressing. Product identity and production
+quantities are intentionally omitted from this record.
+
+Read-only production field-check records in 17:35–17:42Z contain one
+`foreground-recovery` success at 17:36:27.075Z from mobile Chrome on app build
+`934ed015…`; there is no field-check observation at the screenshot times. The
+live aggregate issue table, last updated at 17:17:48Z, still had the
+performance issue open while production-run-save-sync and sync-acknowledgment
+were marked recovered. Those aggregate states are not run- or device-bound.
+The success record therefore cannot establish that this run's visible recovery
+barrier was released.
+
+The SRE correlation confirms database-pool stalls in the surrounding period:
+at 17:33:52Z the sample showed all 10 pool connections occupied, 18 waiting
+requests, and `pool_checkout_timeout`; at 17:36:28Z the sync-outbox scope-list
+read timed out after 12.1 seconds. At 17:41:58Z the queue monitor could not
+sample status because of a database timeout. One `/api/sync/events` request
+ended at 17:41:30Z after 300 seconds with status 200 and `request aborted`;
+the 17:35–17:42 endpoint sample had one such request, zero 4xx/5xx for that
+route, and 166.9 seconds average duration. This is evidence of an unusually
+long open stream, not proof it caused the tracking stop. Overall traffic in
+that window had no measured 5xx; readiness and server auto-track health checks
+succeeded, but they do not attest this user's run state. CPU and memory were
+low, one instance was reported, and no deployment build occurred in the
+window. No error-severity runtime log identifies the request or the affected
+run.
+
+The leading confirmed condition is database-pool contention; its causal link
+to this run's recovery banner and stopped tracking remains **UNCONFIRMED**.
+The client recovery code intentionally keeps auto-tracking fenced until it
+adopts a canonical response, so a recovery that is pending or failed can leave
+tracking paused. A source review of `/api/sync/events` found that each new
+stream reads the canonical day and reset state for its initial frame and again
+for registration reconciliation. The established stream's default 15-second
+heartbeat reads the day and reset state again; active-run calculation ticks
+also read station-activity rows through a shared one-second cache. That cache
+does not coalesce concurrent same-key misses, and the per-stream interval
+callbacks have no explicit in-flight guard. If these reads are slow or many
+streams resume together, overlapping queries could amplify pool demand. This
+is a source-level risk, not evidence that SSE caused the observed production
+stalls or the phone's unresponsive controls. No runtime behavior or production
+configuration was changed.
+
+The bounded next experiment is an isolated delayed-query test with concurrent
+same-key stream reads and slow heartbeat/calc work. Measure loader calls, pool
+wait and lease timing; preserve canonical/reset fencing and station-activity
+freshness. Do not change heartbeat cadence, stale-evidence behavior, or
+production settings without that measurement.
+
+A later read-only snapshot of published deployment logs covered 19:29:56–19:32:00Z.
+Two adjacent one-minute windows each had 35 pool acquisition errors, waits up to
+8.5 seconds, and up to 18 waiters; event-loop delay reached 5.4 seconds. The
+queue monitor timed out, outbox reads were slow, and two production background
+jobs failed with dependency-connection after about 13 seconds. SRE confirmed
+these are published-production logs, not output from the local API workflow.
+This establishes a later recurrence, not continuous pressure between the
+reported wake windows or causality for the unresponsive phone controls. The
+snapshot has no request, run, or device correlation and no independently
+confirmed serving-revision identity.
+
+The exact-window endpoint metric check returned no rows for sync/today,
+sync/events, or auto-track/claim; missing rows cannot be interpreted as zero
+requests or successful requests. In the nearest minute-aligned window, only
+`/__ready` was returned (3 requests; p95 481 ms; no 4xx/5xx). Thus the later
+pool-pressure sample has no direct sync-route status or latency evidence.
+
+The approved 240-case Chromium run is in progress. Visible failure markers are
+case 169 (`QC operator and manager complete scoped evidence workflows in
+authenticated browsers`), cases 184–186 in the Run Insights
+accept/dismiss/follow-up flow, case 218 (`wake enforces reset epoch and
+client-date scope while unchanged writes stay no-op`), and case 228 (desktop
+visual-regression baseline). Cases 187–217 and 219–227 passed, including remote
+Stop adoption, Packaging correction through wake/reload, retry visibility
+after a failed correction, a manual correction winning over stale automation,
+foreground recovery, retry after network recovery, stale-base conflict
+handling, tab restart, premade-crust persistence, and date-scoped
+sync-diagnostic downloads. Phone/tablet visual cases 229–230 were skipped; the
+reason remains unconfirmed. Cases 231–237 passed, including cross-device
+Warehouse staging, phone/tablet guidance, tab navigation, and synthetic-
+workbook review/cancel; case 238 is running. Exact assertions and sanitized
+artifacts for the six failures remain to be inspected after the suite. These
+automated Chromium checks do not establish physical Android wake/touch
+behavior.
+
+The isolated-browser latency test ran on loopback with 0/40ms injected request
+delay and no bandwidth cap. Six edit samples acknowledged in 296–385ms and
+reached the peer in 320–414ms; the 40ms-delay samples measured 340–346ms for
+acknowledgement and 353–368ms for peer adoption. Four wake samples took
+140–191ms, including a simulated 503/retry; timed-out pulls were zero. All
+recorded peer PUTs returned 200 unchanged, though the run also recorded one
+failed pull. These measurements are synthetic and cannot estimate production
+mobile latency or OS-suspended-device behavior.
+
+### 2026-11-02 — later successful wake/pause observation
+
+At about 13:41 America/Chicago (19:41Z), the owner reports that after waking
+the phone, tapping Pause appeared to work. The screenshot shows the UI labels
+“Latest production snapshot received,” “Confirmed server baseline,” and
+“Resume Run,” but also shows a warning that unsaved edits are not confirmed by
+the refresh. This is a single owner-reported successful control attempt, not a
+controlled reproduction or a server acknowledgment trace; it does not identify
+which edits are pending. Build identity is unknown from the screenshot, and it
+does not establish subsequent auto-tracking progress or resolve the earlier
+intermittent failures.
+
+Read-only SRE telemetry for 19:40–19:43Z returned 10 `/api/sync/today`
+requests (p95 1.75s) and seven `/api/sync/auto-track/claim` requests (p95
+1.975s), with no observed 4xx/5xx for either route; successful 2xx counts were
+not exposed. One `/api/sync/events` request averaged 36.529s, which may be a
+normal long-lived stream. The 78 published-log entries had no warning/error
+entries; 13 acquisition-duration samples were 0–977ms, four pool readings
+showed 5–9 connections, 0–2 idle, and zero waiters; numeric event-loop delay
+was unavailable. This is lower sampled pressure than the severe 19:29–19:32Z
+window, not proof of recovery. No request/run/device correlation exists, so
+the metrics cannot attribute the calls to the owner or prove the edits were
+acknowledged.

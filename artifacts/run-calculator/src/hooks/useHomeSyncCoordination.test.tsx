@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   initialResetRequiresReload,
@@ -276,6 +276,42 @@ describe("useHomeSyncCoordination", () => {
     registration.dispose();
     unmount();
     vi.useRealTimers();
+  });
+
+  it("records an in-progress wake attempt before its recovery pull resolves", async () => {
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    let finish!: (value: boolean) => void;
+    const recover = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const recordDiagnostic = vi.fn();
+    const registration = result.current.registerForegroundRecovery(
+      { register: () => () => undefined },
+      recover,
+      recordDiagnostic,
+    );
+
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = registration.reconcile();
+    });
+    await waitFor(() => expect(recordDiagnostic).toHaveBeenCalledTimes(1));
+    expect(recordDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "manual",
+      outcome: "in-progress",
+    }));
+
+    finish(true);
+    await act(async () => {
+      await pending;
+    });
+    expect(recordDiagnostic).toHaveBeenLastCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "manual",
+      outcome: "success",
+    }));
+
+    registration.dispose();
+    unmount();
   });
 
   it("does not let an older successful pull settle a new offline/wake boundary", async () => {

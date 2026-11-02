@@ -9572,7 +9572,10 @@ export default function Home() {
         }
       })();
     }, (diagnostic) => {
-      recordWakeRecoveryDiagnostic({ date: todayStr(), ...diagnostic });
+      // Recovery confirms a snapshot, not a local write; keep its activity
+      // visible without advancing the last-write-acknowledged timestamp.
+      const event = recordWakeRecoveryDiagnostic({ date: todayStr(), ...diagnostic });
+      setSyncDiagnostics((current) => [...current, event].slice(-20));
     });
     foregroundRecoveryRetryRef.current = foregroundRegistration.reconcile;
     return () => {

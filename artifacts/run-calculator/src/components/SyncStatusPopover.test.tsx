@@ -72,7 +72,7 @@ describe("SyncStatusPopover wake-recovery activity", () => {
         {...baseProps}
         diagnostics={[{
           id: "wake-success",
-          kind: "ack",
+          kind: "recovery",
           at: 1_758_211_200_000,
           date: "2026-09-18",
           message: "Foreground wake recovery completed",
@@ -94,13 +94,44 @@ describe("SyncStatusPopover wake-recovery activity", () => {
     );
   });
 
+  it("shows an in-progress wake attempt without implying a write acknowledgment", () => {
+    render(
+      <SyncStatusPopover
+        {...baseProps}
+        diagnostics={[{
+          id: "wake-in-progress",
+          kind: "recovery",
+          at: 1_758_211_200_000,
+          date: "2026-09-18",
+          message: "Foreground wake recovery attempt started",
+          response: "wake-recovery:in-progress",
+          wakeRecovery: {
+            attempts: 1,
+            durationMs: 0,
+            trigger: "foreground",
+            outcome: "in-progress",
+          },
+        }]}
+      />,
+    );
+
+    openPopover();
+
+    const row = screen.getByTestId("sync-activity-wake-in-progress");
+    expect(row.textContent).toContain(
+      "Foreground wake recovery attempt started [wake-recovery:in-progress] · 1 attempt · foreground · in progress",
+    );
+    expect(row.textContent).not.toContain("0ms");
+    expect(screen.getByText("Last acknowledgment").parentElement?.textContent).toContain("Not yet");
+  });
+
   it("shows attempts and terminal outcome for a failed wake recovery", () => {
     render(
       <SyncStatusPopover
         {...baseProps}
         diagnostics={[{
           id: "wake-failure",
-          kind: "failure",
+          kind: "recovery",
           at: 1_758_211_200_000,
           date: "2026-09-18",
           message: "Foreground wake recovery completed",

@@ -2401,6 +2401,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       "data-foreground-recovery-state",
       "recovering",
     );
+    const syncStatusButton = page.getByTestId("sync-status-button");
+    await syncStatusButton.click();
+    await expect(
+      page.getByText(/Foreground wake recovery attempt started \[wake-recovery:in-progress\]/),
+    ).toBeVisible();
+    await syncStatusButton.click();
     releaseWakePull();
     await page.locator('[data-testid="tab-dough"]').click();
     await page

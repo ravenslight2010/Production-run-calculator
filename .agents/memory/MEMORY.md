@@ -78,7 +78,7 @@
 - [Pepperoni names](natural-pep-name-poison.md) + [rename memory](spec-reimport-rename-memory.md) — use full names; learn aliases on rename and never fuzz distinct variants.
 - [Attach](recipe-name-only-attachment.md) + [fan](brand-fan-linked-name-narrowing.md) + [correction](correcting-import-alias-cleanup.md) — link by name/slot; correct bad aliases safely.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
-- [Sync](sync-snapshot-identity.md) + [fence](complete-sync-snapshot-fencing.md) + [offline](offline-operational-intents.md) + [conflict](sync-conflict-policy.md) — non-OK isn't ack; server wins.
+- [Sync](sync-snapshot-identity.md) [fence](complete-sync-snapshot-fencing.md) [offline](offline-operational-intents.md) [conflict](sync-conflict-policy.md) — reads aren't write acks; server wins.
 - [Sync and auto-tracking priority](sync-autotracking-priority.md) — prioritize sync reliability; align recovery/lifecycle across trackers without flattening station-specific production math.
 - [Cross-channel claims](cross-channel-auto-track-claims.md) — shared stamps need queued deltas to distinguish peer auto-accepts from manual edits before rebasing.
 - [Formula safety](formula-import-safety.md) + [layouts](source-workbook-layouts.md) + [Apply retention](apply-source-evidence-retention.md) — preserve units; formula/cached values stay review-only.

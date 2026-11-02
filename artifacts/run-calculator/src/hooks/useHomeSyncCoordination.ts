@@ -371,9 +371,21 @@ export function useHomeSyncCoordination() {
       if (retryTimer !== null) clearTimeout(retryTimer);
       retryTimer = null;
     };
-    const finishEpisode = (outcome: WakeRecoveryOutcome) => {
+    const recordDiagnosticSafely = (diagnostic: {
+      attempts: number;
+      durationMs: number;
+      trigger: WakeRecoveryTrigger;
+      outcome: WakeRecoveryOutcome;
+    }) => {
+      try {
+        recordDiagnostic?.(diagnostic);
+      } catch {
+        // Best-effort local diagnostics must never hold the recovery barrier.
+      }
+    };
+    const finishEpisode = (outcome: Exclude<WakeRecoveryOutcome, "in-progress">) => {
       if (!episode) return;
-      recordDiagnostic?.({
+      recordDiagnosticSafely({
         attempts: episode.attempts,
         durationMs: Math.max(0, Date.now() - episode.startedAt),
         trigger: episode.trigger,
@@ -392,6 +404,12 @@ export function useHomeSyncCoordination() {
       const attemptBoundary = boundaryGeneration;
       const controller = new AbortController();
       attemptController = controller;
+      recordDiagnosticSafely({
+        attempts: episode.attempts,
+        durationMs: Math.max(0, Date.now() - episode.startedAt),
+        trigger,
+        outcome: "in-progress",
+      });
       const recovered = await recover({
         trigger,
         signal: controller.signal,
