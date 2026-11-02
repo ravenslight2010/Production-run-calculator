@@ -1,7 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { omitArchivedSyncHistory } from "../sharedRecordMigration";
 import { createSyncBaselineGate } from "../domain/runSyncPolicy";
-import type { ForegroundStopIntent } from "../foregroundLifecycleIntent";
+import type {
+  ForegroundRunControlIntent,
+  ForegroundStopIntent,
+} from "../foregroundLifecycleIntent";
 import { SingleFlightSyncQueue } from "../syncPushQueue";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
@@ -186,6 +189,7 @@ export function useHomeSyncCoordination() {
   const foregroundSyncBarrierRef = useRef(false);
   const foregroundPushPendingRef = useRef(false);
   const foregroundStopIntentRef = useRef<ForegroundStopIntent | null>(null);
+  const foregroundRunControlIntentRef = useRef<ForegroundRunControlIntent | null>(null);
   const foregroundRecoveryRetryRef = useRef<(() => Promise<boolean>) | null>(null);
   const foregroundRecoveryNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundRecoveryOwnerRef = useRef(0);
@@ -204,6 +208,8 @@ export function useHomeSyncCoordination() {
   const [autoTrackWakeRebaseReason, setAutoTrackWakeRebaseReason] =
     useState<AutoTrackWakeRebaseReason | null>(null);
   const [pendingForegroundStopRunId, setPendingForegroundStopRunId] = useState<string | null>(null);
+  const [pendingForegroundRunControl, setPendingForegroundRunControl] =
+    useState<ForegroundRunControlIntent | null>(null);
   const [foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement] = useState(0);
   const [foregroundRecoveryNotice, setForegroundRecoveryNotice] = useState<{
     kind: "recovering" | "failed" | "outcome";
@@ -511,6 +517,7 @@ export function useHomeSyncCoordination() {
     foregroundSyncBarrierRef,
     foregroundPushPendingRef,
     foregroundStopIntentRef,
+    foregroundRunControlIntentRef,
     foregroundRecoveryRetryRef,
     foregroundRecoveryNoticeTimerRef,
     foregroundRecoveryOwnerRef,
@@ -528,6 +535,8 @@ export function useHomeSyncCoordination() {
     setAutoTrackWakeRebaseReason,
     pendingForegroundStopRunId,
     setPendingForegroundStopRunId,
+    pendingForegroundRunControl,
+    setPendingForegroundRunControl,
     foregroundSyncAcknowledgement,
     setForegroundSyncAcknowledgement,
     foregroundRecoveryNotice,

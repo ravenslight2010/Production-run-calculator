@@ -88,7 +88,9 @@ import {
 } from "../updateReloadSafety";
 import {
   browserIsOnline,
+  resolveForegroundRunControlIntent,
   resolveForegroundStopIntent,
+  type ForegroundRunControlIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
 import { hasUnsavedFormValueChanges } from "../domain/runSyncPolicy";
@@ -7277,6 +7279,7 @@ export default function Home() {
   const {
     synchronizationStateMachineRef, isSyncApplyingRef, syncApplyPushPendingRef,
     foregroundSyncBarrierRef, foregroundPushPendingRef, foregroundStopIntentRef,
+    foregroundRunControlIntentRef,
     foregroundRecoveryRetryRef, foregroundRecoveryNoticeTimerRef,
     foregroundRecoveryOwnerRef, syncPushGenerationRef, syncPushAbortControllersRef,
     syncRetryTimerRef, syncPushQueueRef, connectSse, writeToday, requestBaselinePush,
@@ -7284,6 +7287,7 @@ export default function Home() {
     autoTrackBlocked, setAutoTrackBlocked,
     autoTrackWakeRebaseReason, setAutoTrackWakeRebaseReason,
     pendingForegroundStopRunId, setPendingForegroundStopRunId,
+    pendingForegroundRunControl, setPendingForegroundRunControl,
     foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement,
     foregroundRecoveryNotice, setForegroundRecoveryNotice,
   } = useHomeSyncCoordination();
@@ -9270,10 +9274,13 @@ export default function Home() {
         !cancelled && isCurrent() && foregroundRecoveryOwnerRef.current === recoveryOwner;
       foregroundSyncBarrierRef.current = true;
       const queuedStop = foregroundStopIntentRef.current;
+      const queuedRunControl = foregroundRunControlIntentRef.current;
       showForegroundRecoveryNotice(
         "recovering",
         queuedStop
           ? "Still recovering: stop requested. Checking the current run state before applying it…"
+          : queuedRunControl
+            ? `Still recovering: ${queuedRunControl.action} requested. Checking the current run state before applying it…`
           : "Still recovering: checking the current production state…",
       );
       // Raise both the synchronous ref fence and its rendered companion before
@@ -9470,13 +9477,16 @@ export default function Home() {
              "failure",
              "Foreground recovery failed; local work and lifecycle writes remain fenced",
               `foreground-recovery:${failurePhase}`,
-             foregroundStopIntentRef.current?.runId,
+              foregroundStopIntentRef.current?.runId
+                ?? foregroundRunControlIntentRef.current?.runId,
            );
            setSyncFailedCount((count) => count + 1);
            if (screenMode !== null) dispatchScreenSync({ type: "recovery-failed" });
            showForegroundRecoveryNotice(
              "failed",
-             "Couldn't confirm the current production state. Your local work is retained and tracking is paused. Retry recovery when connected.",
+              foregroundRunControlIntentRef.current
+                ? `Couldn't confirm the current production state. Your ${foregroundRunControlIntentRef.current.action} request is retained, and automatic tracking is paused. Retry recovery when connected.`
+                : "Couldn't confirm the current production state. Your local work is retained and tracking is paused. Retry recovery when connected.",
            );
           return false;
          } finally {
@@ -9495,6 +9505,8 @@ export default function Home() {
                    displayedRun,
                  );
                  foregroundStopIntentRef.current = null;
+                  foregroundRunControlIntentRef.current = null;
+                  setPendingForegroundRunControl(null);
                  setPendingForegroundStopRunId(null);
                  if (resolution.kind === "apply") {
                    endRun(resolution.runId, true);
@@ -9515,14 +9527,47 @@ export default function Home() {
                      `Stop was not applied: this run was ${outcome}. No other run was stopped.`,
                    );
                  }
-               } else {
+                } else {
+                  const runControlIntent = foregroundRunControlIntentRef.current;
+                  if (runControlIntent) {
+                    const recoveredState = dayStateRef.current;
+                    const displayedRun = recoveredState.runs[recoveredState.currentIndex];
+                    const resolution = resolveForegroundRunControlIntent(
+                      runControlIntent,
+                      displayedRun?.id,
+                      displayedRun,
+                    );
+                    if (resolution.kind === "apply") {
+                      if (resolution.action === "pause") pauseRunAfterForegroundRecovery();
+                      else resumeRunAfterForegroundRecovery();
+                    } else {
+                      foregroundRunControlIntentRef.current = null;
+                      setPendingForegroundRunControl(null);
+                      const outcome = resolution.kind === "already-applied"
+                        ? `No additional ${resolution.action} action was needed; this run is already ${resolution.action === "pause" ? "paused" : "running"}.`
+                        : resolution.reason === "changed"
+                          ? "the displayed run changed on another device"
+                          : resolution.reason === "ended"
+                            ? "the run already ended"
+                            : "the run has not started";
+                      showForegroundRecoveryNotice(
+                        "outcome",
+                        resolution.kind === "already-applied"
+                          ? outcome
+                          : `${runControlIntent.action === "pause" ? "Pause" : "Resume"} was not applied because ${outcome}. No other run was changed.`,
+                      );
+                    }
+                  } else {
                   showForegroundRecoveryNotice("outcome", "Latest production snapshot received. Unsaved edits are not confirmed by this refresh; resolve any section warning before saving again.");
+                  }
                }
              if (!cancelled) {
                 releaseForegroundRecovery({
                   releaseFence: () => {
                     foregroundSyncBarrierRef.current = false;
-                    setAutoTrackBlocked(false);
+                     if (!foregroundStopIntentRef.current && !foregroundRunControlIntentRef.current) {
+                       setAutoTrackBlocked(false);
+                     }
                   },
                   acknowledgeRelease: () => {
                     setForegroundSyncAcknowledgement((value) => value + 1);
@@ -9549,7 +9594,9 @@ export default function Home() {
                   },
                   releaseFence: () => {
                     foregroundSyncBarrierRef.current = false;
-                    setAutoTrackBlocked(false);
+                    if (!foregroundStopIntentRef.current && !foregroundRunControlIntentRef.current) {
+                      setAutoTrackBlocked(false);
+                    }
                   },
                 });
               }
@@ -9564,7 +9611,9 @@ export default function Home() {
                 },
                 releaseFence: () => {
                   foregroundSyncBarrierRef.current = false;
-                  setAutoTrackBlocked(false);
+                  if (!foregroundStopIntentRef.current && !foregroundRunControlIntentRef.current) {
+                    setAutoTrackBlocked(false);
+                  }
                 },
               });
             }
@@ -12009,8 +12058,10 @@ export default function Home() {
     switchToRun,
     startRun,
     pauseRun,
+    pauseRunAfterForegroundRecovery,
     setPauseTunnelPolicy,
     resumeRun,
+    resumeRunAfterForegroundRecovery,
     endRun,
     pauseDecisionRunId,
     dismissPauseDecision: setPauseDecisionRunId,
@@ -12022,6 +12073,7 @@ export default function Home() {
     canManageProfiles, saveProfile, propagateProfileToPendingRuns, resetFieldArrays,
     setDoughSubTab, setActiveStopId, setConfirmDeleteStopId, setActiveTab,
     foregroundSyncBarrierRef, foregroundStopIntentRef, setPendingForegroundStopRunId,
+    foregroundRunControlIntentRef, setPendingForegroundRunControl, setAutoTrackBlocked,
     operationalAdoptionInFlightRef, operationalCanonicalRevisionRef,
     operationalIntentBlocksLifecycle,
     showForegroundRecoveryNotice, recordSyncEvent,
@@ -16521,7 +16573,7 @@ export default function Home() {
     mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
     nameConsolidationRef, namedPoolSnapRef, newPin, newPinConfirm, newReasonInput, nextRunDieType,
-    noFacilityPin, noteChange, openScheduleEditor, openSetupEditor, pauseDecisionRunId, pauseRun, pendingForegroundStopRunId, pendingMixPushRef,
+    noFacilityPin, noteChange, openScheduleEditor, openSetupEditor, pauseDecisionRunId, pauseRun, pendingForegroundStopRunId, pendingForegroundRunControl, pendingMixPushRef,
     pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
@@ -16631,7 +16683,7 @@ export default function Home() {
     mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput, mgPresetRows,
     mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, newPin, newPinConfirm, newReasonInput, nextRunDieType,
-    noFacilityPin, pep1ShowB, pep2ShowB, pendingForegroundStopRunId, pendingResetCount, pepTypes,
+    noFacilityPin, pep1ShowB, pep2ShowB, pendingForegroundStopRunId, pendingForegroundRunControl, pendingResetCount, pepTypes,
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
     premixImportPrepared, premixImportProgress, productionStartTime, productionRules,
@@ -21399,10 +21451,11 @@ function FloorModeView() {
                     type="button"
                     onClick={pauseRun}
                     data-testid="floor-pause-run"
-                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    disabled={pendingForegroundRunControl?.runId === currentRun?.id}
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-wait"
                     style={{ background: "rgba(255,255,255,0.06)", color: "#fbbf24", border: "1px solid rgba(255,255,255,0.08)" }}
                   >
-                    ⏸ Pause
+                    {pendingForegroundRunControl?.runId === currentRun?.id ? "⏸ Pause requested" : "⏸ Pause"}
                   </button>
                 )}
                 {runStatus === "paused" && (
@@ -21410,10 +21463,11 @@ function FloorModeView() {
                     type="button"
                     onClick={resumeRun}
                     data-testid="floor-resume-run"
-                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    disabled={pendingForegroundRunControl?.runId === currentRun?.id}
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-wait"
                     style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
                   >
-                    ▶ Resume
+                    {pendingForegroundRunControl?.runId === currentRun?.id ? "▶ Resume requested" : "▶ Resume"}
                   </button>
                 )}
                 {(runStatus === "running" || runStatus === "paused") && (

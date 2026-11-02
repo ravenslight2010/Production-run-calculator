@@ -5,6 +5,16 @@ export type ForegroundStopIntent = {
   runId: string;
 };
 
+export type ForegroundRunControlIntent = {
+  action: "pause" | "resume";
+  runId: string;
+};
+
+export type ForegroundRunControlResolution =
+  | { kind: "apply"; action: ForegroundRunControlIntent["action"]; runId: string }
+  | { kind: "already-applied"; action: ForegroundRunControlIntent["action"]; runId: string }
+  | { kind: "not-applied"; reason: "changed" | "ended" | "not-started" };
+
 export type ForegroundStopResolution =
   | { kind: "apply"; runId: string }
   | {
@@ -43,4 +53,31 @@ export function resolveForegroundStopIntent(
   if (displayedRun.pausedAt) return { kind: "not-applied", reason: "paused" };
   if (!displayedRun.startedAt) return { kind: "not-applied", reason: "not-started" };
   return { kind: "apply", runId: intent.runId };
+}
+
+/**
+ * Resolve a Pause/Resume request against the run visible when it was tapped.
+ * A peer may already have completed the requested transition; never redirect
+ * the request to a different current run after wake adoption.
+ */
+export function resolveForegroundRunControlIntent(
+  intent: ForegroundRunControlIntent,
+  displayedRunId: string | undefined,
+  displayedRun: RunMeta | undefined,
+): ForegroundRunControlResolution {
+  if (!displayedRun || displayedRunId !== intent.runId || displayedRun.id !== intent.runId) {
+    return { kind: "not-applied", reason: "changed" };
+  }
+  if (displayedRun.endedAt) return { kind: "not-applied", reason: "ended" };
+  if (!displayedRun.startedAt) return { kind: "not-applied", reason: "not-started" };
+
+  const isPaused = !!displayedRun.pausedAt;
+  if (intent.action === "pause") {
+    return isPaused
+      ? { kind: "already-applied", action: intent.action, runId: intent.runId }
+      : { kind: "apply", action: intent.action, runId: intent.runId };
+  }
+  return isPaused
+    ? { kind: "apply", action: intent.action, runId: intent.runId }
+    : { kind: "already-applied", action: intent.action, runId: intent.runId };
 }

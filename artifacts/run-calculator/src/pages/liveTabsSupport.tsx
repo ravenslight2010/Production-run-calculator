@@ -1756,7 +1756,8 @@ function OperationalStateBadge({
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, currentRun, doughSubTab,
-    endRun, endStop, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    endRun, endStop, form, pauseDecisionRunId, pauseRun,
+    pendingForegroundRunControl, resumeRun, runStatus,
     persistManualPackagingProgress,
     setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
@@ -2041,10 +2042,11 @@ function FloorModeView() {
                     type="button"
                     onClick={pauseRun}
                     data-testid="floor-pause-run"
-                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    disabled={pendingForegroundRunControl?.runId === currentRun?.id}
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-wait"
                     style={{ background: "rgba(255,255,255,0.06)", color: "#fbbf24", border: "1px solid rgba(255,255,255,0.08)" }}
                   >
-                    ⏸ Pause
+                    {pendingForegroundRunControl?.runId === currentRun?.id ? "⏸ Pause requested" : "⏸ Pause"}
                   </button>
                 )}
                 {runStatus === "paused" && (
@@ -2052,10 +2054,11 @@ function FloorModeView() {
                     type="button"
                     onClick={resumeRun}
                     data-testid="floor-resume-run"
-                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    disabled={pendingForegroundRunControl?.runId === currentRun?.id}
+                    className="min-h-[64px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-wait"
                     style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
                   >
-                    ▶ Resume
+                    {pendingForegroundRunControl?.runId === currentRun?.id ? "▶ Resume requested" : "▶ Resume"}
                   </button>
                 )}
                 {(runStatus === "running" || runStatus === "paused") && (

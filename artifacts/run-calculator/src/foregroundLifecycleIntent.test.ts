@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   browserIsOnline,
   resolveEndRunRoute,
+  resolveForegroundRunControlIntent,
   resolveForegroundStopIntent,
+  type ForegroundRunControlIntent,
   type ForegroundStopIntent,
 } from "./foregroundLifecycleIntent";
 
@@ -38,6 +40,38 @@ describe("foreground Stop intent", () => {
         { id: "run-2", brand: "C", flavor: "D", startedAt: 300 },
       ),
     ).toEqual({ kind: "not-applied", reason: "changed" });
+  });
+});
+
+describe("foreground Pause/Resume intent", () => {
+  it.each([
+    ["pause", { id: "run-1", brand: "A", flavor: "B", startedAt: 100 }, "apply"],
+    ["resume", { id: "run-1", brand: "A", flavor: "B", startedAt: 100, pausedAt: 150 }, "apply"],
+    ["pause", { id: "run-1", brand: "A", flavor: "B", startedAt: 100, pausedAt: 150 }, "already-applied"],
+    ["resume", { id: "run-1", brand: "A", flavor: "B", startedAt: 100 }, "already-applied"],
+  ] as const)(
+    "%s is resolved against the same run's canonical lifecycle state",
+    (action, run, expected) => {
+      const intent: ForegroundRunControlIntent = { action, runId: "run-1" };
+      const resolution = resolveForegroundRunControlIntent(intent, "run-1", run);
+      expect(resolution).toEqual(
+        expected === "apply"
+          ? { kind: "apply", action, runId: "run-1" }
+          : { kind: "already-applied", action, runId: "run-1" },
+      );
+    },
+  );
+
+  it.each([
+    ["changed", "run-2", { id: "run-2", brand: "C", flavor: "D", startedAt: 300 }],
+    ["ended", "run-1", { id: "run-1", brand: "A", flavor: "B", startedAt: 100, endedAt: 200 }],
+    ["not-started", "run-1", { id: "run-1", brand: "A", flavor: "B" }],
+  ] as const)("does not apply after recovery when the run is %s", (reason, runId, run) => {
+    const intent: ForegroundRunControlIntent = { action: "resume", runId: "run-1" };
+    expect(resolveForegroundRunControlIntent(intent, runId, run)).toEqual({
+      kind: "not-applied",
+      reason,
+    });
   });
 });
 

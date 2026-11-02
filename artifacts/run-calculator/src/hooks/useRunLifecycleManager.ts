@@ -4,6 +4,7 @@ import type { UseFormReturn } from "react-hook-form";
 import type { DayState, FormValues, RunMeta, Stoppage } from "../types";
 import type { OperationalIntent, PreEndLifecycle } from "../operationalIntentOutbox";
 import type { OperationalControl } from "@workspace/sync-contract";
+import type { ForegroundRunControlIntent } from "../foregroundLifecycleIntent";
 import { useEvent } from "./useEvent";
 import { initializeApplicatorStockOnRunStart, initializeSauceStockOnRunStart } from "@workspace/live-calc";
 
@@ -40,7 +41,10 @@ export function useRunLifecycleManager(deps: {
   foregroundSyncBarrierRef: MutableRefObject<boolean>;
   formHandoffRef: MutableRefObject<boolean>;
   foregroundStopIntentRef: MutableRefObject<{ action: "stop"; runId: string } | null>;
+  foregroundRunControlIntentRef: MutableRefObject<ForegroundRunControlIntent | null>;
   setPendingForegroundStopRunId: Dispatch<SetStateAction<string | null>>;
+  setPendingForegroundRunControl: Dispatch<SetStateAction<ForegroundRunControlIntent | null>>;
+  setAutoTrackBlocked: Dispatch<SetStateAction<boolean>>;
   showForegroundRecoveryNotice: (kind: "recovering" | "outcome", message: string) => void;
   recordSyncEvent: (kind: string, message: string, response?: string, runId?: string) => void;
   queueOperationalIntent: (input: Omit<OperationalIntent, "version" | "id" | "date" | "resetEpoch" | "state" | "commandCategory" | "deviceId" | "baseRevision" | "occurredAt"> & {
@@ -107,6 +111,54 @@ export function useRunLifecycleManager(deps: {
     (deps.operationalIntentBlocksLifecycle?.(runId) ?? false) ||
     (deps.syncWritePending?.() ?? false);
   const canonicalRevision = () => deps.operationalCanonicalRevisionRef?.current ?? 0;
+  const queueForegroundRunControl = (
+    action: ForegroundRunControlIntent["action"],
+    run: RunMeta | undefined,
+  ): void => {
+    const label = action === "pause" ? "Pause" : "Resume";
+    const expectedPaused = action === "resume";
+    if (
+      !run?.startedAt
+      || run.endedAt
+      || Boolean(run.pausedAt) !== expectedPaused
+    ) {
+      deps.showForegroundRecoveryNotice(
+        "outcome",
+        `${label} was not queued because the displayed run changed before recovery.`,
+      );
+      return;
+    }
+    if (deps.foregroundStopIntentRef.current?.runId === run.id) {
+      deps.showForegroundRecoveryNotice(
+        "recovering",
+        `Stop is already requested for this run. Recovery will check it before applying Stop.`,
+      );
+      return;
+    }
+    const pending = deps.foregroundRunControlIntentRef.current;
+    if (pending) {
+      const message = pending.runId !== run.id
+        ? "A run control for another run is already waiting for recovery. No second control was queued."
+        : pending.action === action
+          ? `${label} is already requested. Checking the current run state before applying it…`
+          : `${pending.action === "pause" ? "Pause" : "Resume"} is already requested. Wait for recovery before choosing another run control.`;
+      deps.showForegroundRecoveryNotice("recovering", message);
+      return;
+    }
+    const intent: ForegroundRunControlIntent = { action, runId: run.id };
+    deps.foregroundRunControlIntentRef.current = intent;
+    deps.setPendingForegroundRunControl(intent);
+    deps.showForegroundRecoveryNotice(
+      "recovering",
+      `${label} requested. Checking the current run state before applying it…`,
+    );
+    deps.recordSyncEvent(
+      "local",
+      `${label} request queued behind foreground recovery`,
+      undefined,
+      run.id,
+    );
+  };
   const scheduleDeferredLifecyclePoll = (poll: () => void, delayMs: number) => {
     if (!lifecycleMountedRef.current) return;
     deferredLifecycleTimerRef.current = window.setTimeout(() => {
@@ -118,8 +170,12 @@ export function useRunLifecycleManager(deps: {
   const deferUntilAdoptionSettles = (
     runId: string,
     action: "start" | "pause" | "resume" | "end",
-  ) => {
-    if (!lifecycleMountedRef.current || deferredLifecycleRef.current) return;
+  ): boolean => {
+    if (!lifecycleMountedRef.current) return false;
+    if (deferredLifecycleRef.current) {
+      return deferredLifecycleRef.current.runId === runId
+        && deferredLifecycleRef.current.action === action;
+    }
     deferredLifecycleRef.current = { runId, action };
     const poll = () => {
       const deferred = deferredLifecycleRef.current;
@@ -141,6 +197,7 @@ export function useRunLifecycleManager(deps: {
       else endRunRef.current(runId);
     };
     scheduleDeferredLifecyclePoll(poll, 0);
+    return true;
   };
 
   useEffect(() => {
@@ -156,7 +213,13 @@ export function useRunLifecycleManager(deps: {
   }, []);
 
   const switchToRun = useEvent((newIndex: number, expectedCurrentRunId?: string) => {
-    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return false;
+    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) {
+      deps.showForegroundRecoveryNotice(
+        "recovering",
+        "Run selection is paused while the current production state is confirmed.",
+      );
+      return false;
+    }
     const base = deps.dayStateRef.current;
     if (newIndex < 0 || newIndex >= base.runs.length) return false;
     if (
@@ -205,7 +268,13 @@ export function useRunLifecycleManager(deps: {
     const activeRun = base.runs[index];
     if (!activeRun) return;
     if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) {
-      deferUntilAdoptionSettles(activeRun.id, "start");
+      const deferred = deferUntilAdoptionSettles(activeRun.id, "start");
+      deps.showForegroundRecoveryNotice(
+        "recovering",
+        deferred
+          ? "Start is waiting until the current production state is confirmed."
+          : "Another run action is already waiting. Review the run after recovery.",
+      );
       return;
     }
     if (lifecycleBlocked(activeRun.id)) {
@@ -297,17 +366,60 @@ export function useRunLifecycleManager(deps: {
   });
   startRunRef.current = startRun;
 
-  const pauseRun = useEvent(() => {
-    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
+  const applyPauseRun = useEvent((fromForegroundRecovery = false) => {
     const base = deps.dayStateRef.current;
     const index = base.currentIndex;
     const run = base.runs[index];
+    if (deps.formHandoffRef.current && !fromForegroundRecovery) {
+      deps.showForegroundRecoveryNotice(
+        "recovering",
+        "Pause is waiting for the run display to finish switching.",
+      );
+      return;
+    }
+    if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
+      queueForegroundRunControl("pause", run);
+      return;
+    }
     if (!run?.startedAt || run.pausedAt || run.endedAt) return;
+    if (fromForegroundRecovery && deps.formHandoffRef.current) {
+      const deferred = deferUntilAdoptionSettles(run.id, "pause");
+      if (!deferred) {
+        deps.foregroundRunControlIntentRef.current = null;
+        deps.setPendingForegroundRunControl(null);
+        deps.showForegroundRecoveryNotice(
+          "outcome",
+          "Pause was not applied because another run action is already waiting. Review the run after recovery.",
+        );
+      } else {
+        deps.showForegroundRecoveryNotice(
+          "recovering",
+          "Pause is waiting for the current run update to finish before it is applied.",
+        );
+      }
+      return;
+    }
     // Pause is an explicit operator command. Wait for an in-flight canonical
     // adoption, then re-read the run before applying it so the command cannot
     // be dropped or built from a stale lifecycle stamp.
     if (lifecycleBlocked(run.id)) {
-      deferUntilAdoptionSettles(run.id, "pause");
+      const deferred = deferUntilAdoptionSettles(run.id, "pause");
+      const pending = deps.foregroundRunControlIntentRef.current;
+      if (fromForegroundRecovery && pending?.action === "pause" && pending.runId === run.id) {
+        if (deferred) {
+          deps.showForegroundRecoveryNotice(
+            "recovering",
+            "Pause is waiting for the current run update to finish. Automatic tracking will stay paused until it is applied.",
+          );
+        } else {
+          deps.foregroundRunControlIntentRef.current = null;
+          deps.setPendingForegroundRunControl(null);
+          deps.showForegroundRecoveryNotice(
+            "outcome",
+            "Pause was not applied because another run action is already waiting. Review the run after recovery.",
+          );
+        }
+      }
       return;
     }
     deps.flushFormWrites();
@@ -334,11 +446,29 @@ export function useRunLifecycleManager(deps: {
     pauseDecisionPauseIdRef.current = stop.id;
     pauseDecisionStartedAtRef.current = Date.now();
     setPauseDecisionRunId(run.id);
+    const pending = deps.foregroundRunControlIntentRef.current;
+    if (pending?.action === "pause" && pending.runId === run.id) {
+      deps.foregroundRunControlIntentRef.current = null;
+      deps.setPendingForegroundRunControl(null);
+      deps.setAutoTrackBlocked(false);
+      deps.showForegroundRecoveryNotice(
+        "outcome",
+        "Pause applied after recovery. The run was still running.",
+      );
+    }
   });
+  const pauseRun = useEvent(() => applyPauseRun(false));
+  const pauseRunAfterForegroundRecovery = useEvent(() => applyPauseRun(true));
   pauseRunRef.current = pauseRun;
 
   const setPauseTunnelPolicy = useEvent((stopTunnel: boolean) => {
-    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
+    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) {
+      deps.showForegroundRecoveryNotice(
+        "recovering",
+        "The tunnel choice was not saved. Wait for recovery, then choose it again.",
+      );
+      return;
+    }
     const runId = pauseDecisionRunId ?? deps.currentRunId;
     const pauseId = pauseDecisionPauseIdRef.current;
     const base = deps.dayStateRef.current;
@@ -369,15 +499,58 @@ export function useRunLifecycleManager(deps: {
     setPauseDecisionRunId(null);
   });
 
-  const resumeRun = useEvent(() => {
-    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
+  const applyResumeRun = useEvent((fromForegroundRecovery = false) => {
     const base = deps.dayStateRef.current;
     const index = base.currentIndex;
     const run = base.runs[index];
+    if (deps.formHandoffRef.current && !fromForegroundRecovery) {
+      deps.showForegroundRecoveryNotice(
+        "recovering",
+        "Resume is waiting for the run display to finish switching.",
+      );
+      return;
+    }
+    if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
+      queueForegroundRunControl("resume", run);
+      return;
+    }
     if (!run) return;
+    if (fromForegroundRecovery && deps.formHandoffRef.current) {
+      const deferred = deferUntilAdoptionSettles(run.id, "resume");
+      if (!deferred) {
+        deps.foregroundRunControlIntentRef.current = null;
+        deps.setPendingForegroundRunControl(null);
+        deps.showForegroundRecoveryNotice(
+          "outcome",
+          "Resume was not applied because another run action is already waiting. Review the run after recovery.",
+        );
+      } else {
+        deps.showForegroundRecoveryNotice(
+          "recovering",
+          "Resume is waiting for the current run update to finish before it is applied.",
+        );
+      }
+      return;
+    }
     // Resume follows the same FIFO admission rule as pause.
     if (lifecycleBlocked(run.id)) {
-      deferUntilAdoptionSettles(run.id, "resume");
+      const deferred = deferUntilAdoptionSettles(run.id, "resume");
+      const pending = deps.foregroundRunControlIntentRef.current;
+      if (fromForegroundRecovery && pending?.action === "resume" && pending.runId === run.id) {
+        if (deferred) {
+          deps.showForegroundRecoveryNotice(
+            "recovering",
+            "Resume is waiting for the current run update to finish. Automatic tracking will stay paused until it is applied.",
+          );
+        } else {
+          deps.foregroundRunControlIntentRef.current = null;
+          deps.setPendingForegroundRunControl(null);
+          deps.showForegroundRecoveryNotice(
+            "outcome",
+            "Resume was not applied because another run action is already waiting. Review the run after recovery.",
+          );
+        }
+      }
       return;
     }
     deps.flushFormWrites();
@@ -401,7 +574,19 @@ export function useRunLifecycleManager(deps: {
     deps.saveDayState(next);
     deps.schedulePush(next, 0);
     setPauseDecisionRunId(null);
+    const pending = deps.foregroundRunControlIntentRef.current;
+    if (pending?.action === "resume" && pending.runId === run.id) {
+      deps.foregroundRunControlIntentRef.current = null;
+      deps.setPendingForegroundRunControl(null);
+      deps.setAutoTrackBlocked(false);
+      deps.showForegroundRecoveryNotice(
+        "outcome",
+        "Resume applied after recovery. The run was still paused.",
+      );
+    }
   });
+  const resumeRun = useEvent(() => applyResumeRun(false));
+  const resumeRunAfterForegroundRecovery = useEvent(() => applyResumeRun(true));
   resumeRunRef.current = resumeRun;
 
   const endRun = useEvent((expectedRunId?: string, fromForegroundRecovery = false) => {
@@ -415,6 +600,8 @@ export function useRunLifecycleManager(deps: {
     if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
       if (activeRun?.startedAt && !activeRun.endedAt && (!deps.foregroundStopIntentRef.current || deps.foregroundStopIntentRef.current.runId === activeRun.id)) {
         deps.foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
+        deps.foregroundRunControlIntentRef.current = null;
+        deps.setPendingForegroundRunControl(null);
         deps.setPendingForegroundStopRunId(activeRun.id);
         deps.showForegroundRecoveryNotice("recovering", "Stop requested. Checking the current run state before applying it…");
         deps.recordSyncEvent("local", "Stop request queued behind foreground recovery", undefined, activeRun.id);
@@ -494,7 +681,8 @@ export function useRunLifecycleManager(deps: {
   }, [deps.currentRun, pauseDecisionRunId]);
 
   return {
-    switchToRun, startRun, pauseRun, setPauseTunnelPolicy, resumeRun, endRun,
+    switchToRun, startRun, pauseRun, pauseRunAfterForegroundRecovery,
+    setPauseTunnelPolicy, resumeRun, resumeRunAfterForegroundRecovery, endRun,
     pauseDecisionRunId,
     dismissPauseDecision: useEvent((_value?: null) => setPauseDecisionRunId(null)),
   };

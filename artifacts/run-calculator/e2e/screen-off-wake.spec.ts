@@ -1664,6 +1664,59 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       .toContainText("Stop applied after recovery");
   });
 
+  test("wake recovery queues one Resume tap and applies it to the same run", async ({
+    page,
+  }) => {
+    const safeBaseMs = await setupAndStartRun(
+      page,
+      "10",
+      [],
+      { pauseBeforeReturn: true },
+    );
+    const pausedRun = await readLiveRunMeta(page);
+    expect(pausedRun.pausedAt).toBeGreaterThan(0);
+
+    let heldWakePulls = 0;
+    let releaseWakePull!: () => void;
+    const wakePullReleased = new Promise<void>((resolve) => {
+      releaseWakePull = resolve;
+    });
+    await page.route("**/api/sync/today**", async (route) => {
+      if (route.request().method() === "GET" && heldWakePulls === 0) {
+        heldWakePulls += 1;
+        await wakePullReleased;
+      }
+      await route.continue();
+    });
+
+    try {
+      await simulateScreenOff(page);
+      await mockDateNow(page, safeBaseMs + 30_000);
+      await simulateWake(page);
+      await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBe(1);
+
+      const resumeButton = page.getByTestId("resume-run");
+      await expect(resumeButton).toBeVisible();
+      await resumeButton.click();
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Resume requested");
+      await expect(page.getByRole("button", { name: /resume requested/i }))
+        .toBeDisabled();
+
+      releaseWakePull();
+      await expect(page.getByRole("button", { name: /pause.?run/i }).first())
+        .toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toContainText("Resume applied after recovery");
+      const resumedRun = await readLiveRunMeta(page);
+      expect(resumedRun.id).toBe(pausedRun.id);
+      expect(resumedRun.pausedAt).toBeFalsy();
+    } finally {
+      releaseWakePull();
+      await page.unroute("**/api/sync/today**");
+    }
+  });
+
   test(
     "responsive display matches shared line occupancy while running, paused, and draining",
     async ({ page }) => {

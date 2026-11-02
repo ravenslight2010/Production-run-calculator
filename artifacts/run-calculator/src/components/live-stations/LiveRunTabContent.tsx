@@ -523,7 +523,8 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
     doughSubTab, endRun, endStop, flavorInput, flavorScrollKeep, form,
     initialFinishTimestampRef, isSupervisor, lastEndedRun, lastRunRecall,
     logStop, nextRunDieType, openSetupEditor, pauseRun, removeBlankRuns, removeBrand,
-    removeFlavor, removeRun, pauseDecisionRunId, pendingForegroundStopRunId, resumeRun, ruleViolations,
+    removeFlavor, removeRun, pauseDecisionRunId, pendingForegroundStopRunId,
+    pendingForegroundRunControl, resumeRun, ruleViolations,
     runStatus, setBrandInput, setConfirmDeleteBrand, setConfirmDeleteFlavor,
     setConfirmRemoveBlanks, setConfirmRemoveRun, setDayState, setDoughSubTab,
     setFlavorInput, setManageCategory, setManageInput, setPinChangeMsg,
@@ -926,10 +927,12 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <button
                         type="button"
+                        data-testid="pause-run"
                         onClick={pauseRun}
-                        className="min-h-11 min-w-11 bg-amber-600 hover:bg-amber-500 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
+                        disabled={pendingForegroundRunControl?.runId === currentRun?.id}
+                        className="min-h-11 min-w-11 bg-amber-600 hover:bg-amber-500 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5 disabled:opacity-70 disabled:cursor-wait"
                       >
-                        <Pause className="w-5 h-5 fill-current" /> PAUSE RUN
+                        <Pause className="w-5 h-5 fill-current" /> {pendingForegroundRunControl?.runId === currentRun?.id ? "PAUSE REQUESTED" : "PAUSE RUN"}
                       </button>
                       <button
                         type="button"
@@ -1003,9 +1006,10 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                         type="button"
                         data-testid="resume-run"
                         onClick={resumeRun}
-                        className="min-h-11 min-w-11 w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors"
+                        disabled={pendingForegroundRunControl?.runId === currentRun?.id}
+                        className="min-h-11 min-w-11 w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors disabled:opacity-70 disabled:cursor-wait"
                       >
-                        <Play className="w-6 h-6 fill-current" /> RESUME RUN
+                        <Play className="w-6 h-6 fill-current" /> {pendingForegroundRunControl?.runId === currentRun?.id ? "RESUME REQUESTED" : "RESUME RUN"}
                       </button>
                     </>
                   )}

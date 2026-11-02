@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DayState, FormValues, RunMeta } from "../types";
+import type { ForegroundRunControlIntent } from "../foregroundLifecycleIntent";
 import { useRunLifecycleManager } from "./useRunLifecycleManager";
 import { canChoosePauseTunnelPolicy, pauseDecisionRemainingMs, shouldClosePauseDecision } from "../pausePolicy";
 
@@ -36,7 +37,10 @@ function setup(state: DayState) {
     canManageProfiles: false, saveProfile: vi.fn(() => false), propagateProfileToPendingRuns: vi.fn(async () => {}),
     resetFieldArrays: spies.resetArrays, setDoughSubTab: vi.fn(), setActiveStopId: vi.fn(), setConfirmDeleteStopId: vi.fn(), setActiveTab: vi.fn(),
     foregroundSyncBarrierRef: { current: false }, formHandoffRef: { current: false }, foregroundStopIntentRef: { current: null as { action: "stop"; runId: string } | null },
-    setPendingForegroundStopRunId: vi.fn(), showForegroundRecoveryNotice: spies.foregroundNotice, recordSyncEvent: spies.syncEvent,
+    foregroundRunControlIntentRef: { current: null as ForegroundRunControlIntent | null },
+    setPendingForegroundStopRunId: vi.fn(), setPendingForegroundRunControl: vi.fn(),
+    setAutoTrackBlocked: vi.fn(),
+    showForegroundRecoveryNotice: spies.foregroundNotice, recordSyncEvent: spies.syncEvent,
     queueOperationalIntent: spies.queue, flushOperationalIntentOutbox: vi.fn(async () => {}), browserIsOnline: vi.fn(() => true),
     capturePreEndLifecycle: vi.fn((x: RunMeta) => ({ startedAt: x.startedAt })), computeRunConsumptionLines: spies.inventory,
     effectiveValuesForRun: vi.fn((_run: RunMeta, x: FormValues) => x), overlayRunMetaStamps: spies.overlay,
@@ -136,6 +140,56 @@ describe("useRunLifecycleManager", () => {
       expect(spies.save).not.toHaveBeenCalled();
       hook.unmount();
     }
+  });
+
+  it.each([
+    ["pause", { startedAt: 10 }, "Pause"],
+    ["resume", { startedAt: 10, pausedAt: 20 }, "Resume"],
+  ] as const)("retains a %s tap during wake recovery and gives visible feedback", (action, extra, label) => {
+    const { deps, spies } = setup(day([run("a", extra)]));
+    const originalRun = { ...deps.dayStateRef.current.runs[0] };
+    deps.foregroundSyncBarrierRef.current = true;
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    act(() => {
+      if (action === "pause") result.current.pauseRun();
+      else result.current.resumeRun();
+    });
+
+    const intent = { action, runId: "a" } as const;
+    expect(deps.foregroundRunControlIntentRef.current).toEqual(intent);
+    expect(deps.setPendingForegroundRunControl).toHaveBeenCalledWith(intent);
+    expect(spies.foregroundNotice).toHaveBeenCalledWith(
+      "recovering",
+      expect.stringContaining(`${label} requested`),
+    );
+    expect(spies.queue).not.toHaveBeenCalled();
+    expect(deps.dayStateRef.current.runs[0]).toEqual(originalRun);
+  });
+
+  it("deduplicates repeated foreground run-control taps and lets Stop supersede one", () => {
+    const { deps, spies } = setup(day([run("a", { startedAt: 10 })]));
+    deps.foregroundSyncBarrierRef.current = true;
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    act(() => {
+      result.current.pauseRun();
+      result.current.pauseRun();
+    });
+    expect(deps.foregroundRunControlIntentRef.current).toEqual({
+      action: "pause",
+      runId: "a",
+    });
+    expect(deps.setPendingForegroundRunControl).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.endRun());
+    expect(deps.foregroundRunControlIntentRef.current).toBeNull();
+    expect(deps.setPendingForegroundRunControl).toHaveBeenLastCalledWith(null);
+    expect(deps.foregroundStopIntentRef.current).toEqual({
+      action: "stop",
+      runId: "a",
+    });
+    expect(spies.queue).not.toHaveBeenCalled();
   });
 
   it("replays a deferred Start after the foreground barrier clears", () => {
