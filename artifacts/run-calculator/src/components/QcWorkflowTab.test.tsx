@@ -200,6 +200,9 @@ vi.mock("../masterData", () => ({
 }));
 
 vi.mock("./QualityHistoryTab", () => ({ default: () => null }));
+vi.mock("./QcImportReview", () => ({
+  default: () => <section data-testid="qc-import-review-panel" />,
+}));
 // Date-code form and comparison have their own focused hook/state tests.
 vi.mock("./QcDateCodeVerification", () => ({
   default: () => <section data-testid="qc-date-code-verification" />,
@@ -350,6 +353,7 @@ type RenderOptions = {
   runStoppages?: Array<{ type?: string; startedAt: number; endedAt?: number }>;
   runIsActive?: boolean;
   canManageQc?: boolean;
+  openImportReviewRequestId?: number;
 };
 
 function renderTab(options: RenderOptions = {}) {
@@ -371,6 +375,7 @@ function renderTab(options: RenderOptions = {}) {
         canRecordQc
         canManageQc={currentOptions.canManageQc ?? false}
         canViewPhotos={false}
+        openImportReviewRequestId={currentOptions.openImportReviewRequestId}
       />
     </QueryClientProvider>
   );
@@ -384,6 +389,12 @@ function renderTab(options: RenderOptions = {}) {
   };
 }
 describe("QC workflow UI", () => {
+  it("opens the Import review section when requested from the global badge", () => {
+    renderTab({ canManageQc: true, openImportReviewRequestId: 1 });
+    expect(screen.getByTestId("button-toggle-qc-import-review").textContent).toContain("Hide import review");
+    expect(screen.getByTestId("qc-import-review-panel")).toBeTruthy();
+  });
+
   it("lets QC staff save observed label text without an approved reference or client-supplied expected values", () => {
     renderTab();
     expect(screen.getByText("Observation-only mode").textContent).toBe("Observation-only mode");

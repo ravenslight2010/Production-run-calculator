@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -93,6 +93,7 @@ export type QcWorkflowTabProps = {
   canRecordQc: boolean;
   canManageQc: boolean;
   canViewPhotos: boolean;
+  openImportReviewRequestId?: number;
 };
 
 type ViewName = "lots" | "weights" | "brix";
@@ -284,6 +285,7 @@ export default function QcWorkflowTab({
   canRecordQc,
   canManageQc,
   canViewPhotos,
+  openImportReviewRequestId = 0,
 }: QcWorkflowTabProps) {
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewName>("lots");
@@ -291,6 +293,7 @@ export default function QcWorkflowTab({
   const [showPlanning, setShowPlanning] = useState(false);
   const [showIntelligence, setShowIntelligence] = useState(false);
   const [showImportReview, setShowImportReview] = useState(false);
+  const handledImportReviewRequestId = useRef(0);
   const [showRecipeReview, setShowRecipeReview] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [selectedIngredient, setSelectedIngredient] = useState("");
@@ -305,6 +308,20 @@ export default function QcWorkflowTab({
   const [checkType, setCheckType] = useState<QcWeightCheckInput["checkType"]>(
     runIsActive ? "30-minute" : "pre-run",
   );
+  useEffect(() => {
+    if (!canManageQc) {
+      setShowImportReview(false);
+      return;
+    }
+    if (
+      !Number.isSafeInteger(openImportReviewRequestId) ||
+      openImportReviewRequestId <= handledImportReviewRequestId.current
+    ) {
+      return;
+    }
+    handledImportReviewRequestId.current = openImportReviewRequestId;
+    setShowImportReview(true);
+  }, [canManageQc, openImportReviewRequestId]);
   const [actualValue, setActualValue] = useState("");
   const [actualUnit, setActualUnit] = useState<Unit>("oz");
   const [weightNote, setWeightNote] = useState("");

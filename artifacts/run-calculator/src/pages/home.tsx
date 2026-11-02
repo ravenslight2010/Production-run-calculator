@@ -879,6 +879,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
+import { QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT } from "../qcImportReviewNavigation";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -3118,6 +3119,7 @@ export default function Home() {
   // Navigation owns only tab persistence/history. Run selection and lifecycle
   // transitions remain in Home's day-state coordinator.
   const { activeTab, setActiveTab, goBack } = useHomeNavigation();
+  const [openImportReviewRequestId, setOpenImportReviewRequestId] = useState(0);
   useEffect(() => {
     return visibleTabScheduler.register({
       id: "memory-sample",
@@ -3295,6 +3297,22 @@ export default function Home() {
     "qcWorkflow",
     me?.capabilities ?? [],
   );
+  useEffect(() => {
+    const openImportReview = () => {
+      if (!canManageQc || !canAccessQcWorkflow) {
+        toast({
+          title: "QC import review access required",
+          description: "Ask a manager with QC-review permission to review these imports.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setOpenImportReviewRequestId((current) => current + 1);
+      setActiveTab("quality");
+    };
+    window.addEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, openImportReview);
+    return () => window.removeEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, openImportReview);
+  }, [canAccessQcWorkflow, canManageQc, setActiveTab]);
   useEffect(() => {
     if (me && !canAccessQcWorkflow && activeTab === "quality") {
       setActiveTab("run");
@@ -19068,6 +19086,7 @@ export default function Home() {
                   canRecordQc={canRecordQc}
                   canManageQc={canManageQc}
                   canViewPhotos={canManageInventory}
+                  openImportReviewRequestId={openImportReviewRequestId}
                 />
               </TabsContent>}
 

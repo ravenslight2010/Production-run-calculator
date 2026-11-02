@@ -555,6 +555,9 @@ export function createFieldCheckObserver(appBuild: string, originScope: string):
   let responsivenessSamples = 0;
   const maxResponsivenessSamples = 10;
   const responsivenessThresholdMs = 250;
+  const measuredInteractionTypes = new Set([
+    "click", "pointerdown", "pointerup", "touchstart", "touchend", "keydown", "keyup", "input",
+  ]);
   const observeResponsiveness = (entryType: "longtask" | "event", sourceCode: number) => {
     if (typeof PerformanceObserver === "undefined") return;
     try {
@@ -564,6 +567,7 @@ export function createFieldCheckObserver(appBuild: string, originScope: string):
         if (stopped || document.visibilityState !== "visible") return;
         for (const entry of list.getEntries()) {
           if (responsivenessSamples >= maxResponsivenessSamples) break;
+          if (entryType === "event" && !measuredInteractionTypes.has(entry.name)) continue;
           if (!Number.isFinite(entry.duration) || entry.duration <= responsivenessThresholdMs) continue;
           responsivenessSamples += 1;
           emitFieldCheckSignal("performance", "failure", {

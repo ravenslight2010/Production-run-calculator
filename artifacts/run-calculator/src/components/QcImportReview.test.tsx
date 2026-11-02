@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT } from "../qcImportReviewNavigation";
 
 const mutate = vi.fn();
 const refetch = vi.fn(() => Promise.resolve({ isError: false }));
@@ -104,12 +105,18 @@ it("legacy and failed imports are not actionable", () => {
   expect(screen.queryByTestId("form-qc-import-decision")).toBeNull();
 });
 
-it("hides review for non-managers and badge shows counts only", () => {
+it("hides review for non-managers and badge opens the import review request", () => {
   render(<QcImportReview canManageQc={false} />);
   expect(screen.queryByTestId("section-qc-import-review")).toBeNull();
   badges = { pending: 2, rejected: 1 };
   render(<QcImportReviewBadge />);
   const badge = screen.getByTestId("badge-qc-import-review");
   expect(badge.textContent).toContain("2 pending");
-  expect(badge.querySelector("a,button")).toBeNull();
+  expect(badge.tagName).toBe("BUTTON");
+  expect(badge.getAttribute("aria-label")).toContain("Open Import QC review");
+  const request = vi.fn();
+  window.addEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, request);
+  fireEvent.click(badge);
+  expect(request).toHaveBeenCalledTimes(1);
+  window.removeEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, request);
 });

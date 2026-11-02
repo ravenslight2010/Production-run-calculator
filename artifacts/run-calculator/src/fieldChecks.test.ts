@@ -444,13 +444,13 @@ describe("field-check observer", () => {
   });
 
   it("queues bounded responsiveness outliers without retaining interaction details", async () => {
-    const created: Array<(entries: Array<{ duration: number }>) => void> = [];
+    const created: Array<(entries: Array<{ duration: number; name?: string }>) => void> = [];
     class FakePerformanceObserver {
       static supportedEntryTypes = ["longtask", "event"];
-      callback: (list: { getEntries: () => Array<{ duration: number }> }) => void;
+      callback: (list: { getEntries: () => Array<{ duration: number; name?: string }> }) => void;
       observe = vi.fn();
       disconnect = vi.fn();
-      constructor(callback: (list: { getEntries: () => Array<{ duration: number }> }) => void) {
+      constructor(callback: (list: { getEntries: () => Array<{ duration: number; name?: string }> }) => void) {
         this.callback = callback;
         created.push((entries) => this.callback({ getEntries: () => entries }));
       }
@@ -459,7 +459,7 @@ describe("field-check observer", () => {
     const stop = createFieldCheckObserver("responsiveness-build", TEST_SCOPE);
     try {
       created[0]?.([{ duration: 400 }, { duration: 800 }]);
-      created[1]?.([{ duration: 300 }]);
+      created[1]?.([{ duration: 300, name: "click" }, { duration: 350, name: "visibilitychange" }]);
       await new Promise((resolve) => setTimeout(resolve, 0));
     } finally {
       stop();
@@ -477,6 +477,14 @@ describe("field-check observer", () => {
       ["5", "failure", { durationMs: 300, sourceCode: PERFORMANCE_SOURCE_CODES.slowInteraction }],
     ]);
     expect(JSON.stringify(samples)).not.toMatch(/target|selector|input|eventName|control/);
+    expect(fieldCheckDiagnosticLabel("performance", {
+      durationMs: 400,
+      sourceCode: PERFORMANCE_SOURCE_CODES.mainThreadLongTask,
+    })).toContain("long task");
+    expect(fieldCheckDiagnosticLabel("performance", {
+      durationMs: 300,
+      sourceCode: PERFORMANCE_SOURCE_CODES.slowInteraction,
+    })).toContain("tap or keyboard response");
   });
 
   it("queues a quick HTTP 500 with operation, elapsed time, observation, background and correlation evidence", async () => {

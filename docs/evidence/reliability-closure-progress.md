@@ -2031,11 +2031,34 @@ handlers return without visible feedback while it is active, while Start is
 deferred. This can explain some ignored actions, but not a whole page that
 cannot accept touch input.
 
-Current browser diagnostics record request, load, render, calculation, and
-storage durations, but do not observe long tasks or interaction latency.
-Therefore the evidence cannot distinguish a main-thread stall from the
-recovery barrier or device/browser wake behavior. Existing local recovery,
-lifecycle, wake-snapshot, and screen-sync tests passed, but they do not
-establish physical Android touch responsiveness. Root cause remains
-**UNCONFIRMED**; physical-device reproduction or approved responsiveness
-measurement is still needed. No wake/recovery behavior was changed.
+The owner supplied two further browser-observed failures from 2026-11-02, both
+marked as backgrounded: an authentication wait of 8,608 ms and a network wait
+of 1,480,032 ms (about 24.7 minutes). The second report did not identify a
+support route. These are client elapsed waits, not server processing time, and
+neither has a request correlation that ties it to a server trace.
+
+A read-only aggregate of the production replica showed 1,802 diagnostic
+observations retained over 30 days, 276 received in the previous 24 hours, and
+206 performance observations in that 24-hour period, all under one facility
+scope. The report API returns at most five recent failures per category, and
+the screen renders at most three per category; the visible card list is
+therefore bounded. The report builder does read all observations in its
+30-day window to calculate issue counts, but current volume is modest and does
+not by itself explain a page-wide freeze. Concurrent wake-time requests or
+database pressure remain possible; exact incident-to-server correlation is
+unavailable.
+
+Added browser-supported `PerformanceObserver` measurements for long tasks and
+slow interaction events above 250 ms. They retain only duration and fixed
+source codes, are capped at ten samples per page, and never record input values,
+event targets, selectors, or page content. Unsupported browser APIs simply
+produce no observation. These measurements are not available from the current
+published build until an owner-authorized publish; none was performed here.
+
+Focused verification after this addition: the run-calculator field-check and
+auto-track wake tests passed (33 tests), API field-check validation passed
+(13 tests), the API field-check route integration passed (20 tests), API
+generated-contract checks passed, and root workspace typecheck passed.
+Physical Android touch behavior remains unverified. Root cause remains
+**UNCONFIRMED**; no wake/recovery behavior or production configuration was
+changed.
