@@ -29,6 +29,7 @@ function setup(state: DayState) {
     inventory: vi.fn(() => [{ itemKey: "flour", qty: 3 }]),
     foregroundNotice: vi.fn(), syncEvent: vi.fn(),
   };
+  const syncPending = { current: false };
   const deps = {
     dayStateRef, setDayState: vi.fn(), saveDayState: spies.save, form,
     lastFormRunIdRef: { current: "" }, currentRun: state.runs[state.currentIndex],
@@ -50,9 +51,9 @@ function setup(state: DayState) {
     todayStr: vi.fn(() => "2026-01-01"), reportRunInsightsAfterFinalize: vi.fn(async () => {}), getRunInsightsSignal: vi.fn(() => new AbortController().signal),
     genId: vi.fn(() => "pause-1"), applyResumeToRun: vi.fn((x: RunMeta) => ({ ...x, pausedAt: undefined })),
     canChoosePauseTunnelPolicy: vi.fn(() => true), pauseDecisionRemainingMs: vi.fn(() => 10_000), shouldClosePauseDecision: vi.fn(() => false),
-    schedulePush: spies.push,
+    schedulePush: spies.push, syncWritePending: vi.fn(() => syncPending.current),
   };
-  return { deps, spies, form };
+  return { deps, spies, form, syncPending };
 }
 
 describe("useRunLifecycleManager", () => {
@@ -405,6 +406,72 @@ describe("useRunLifecycleManager", () => {
     expect(deps.applyResumeToRun).toHaveBeenCalled();
     expect(deps.dayStateRef.current.runs[0].pausedAt).toBeUndefined();
     expect(spies.save).toHaveBeenCalledBefore(spies.push);
+  });
+
+  it("keeps Resume visibly queued while sync is pending and applies it after acknowledgment", async () => {
+    const { deps, syncPending } = setup(day([run("a", { startedAt: 10, pausedAt: 20 })]));
+    syncPending.current = true;
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    act(() => result.current.resumeRun());
+    expect(deps.setPendingForegroundRunControl).toHaveBeenCalledWith({
+      action: "resume",
+      runId: "a",
+    });
+    expect(deps.setAutoTrackBlocked).toHaveBeenCalledWith(true);
+    expect(deps.showForegroundRecoveryNotice).toHaveBeenCalledWith(
+      "recovering",
+      "Resume requested. Waiting for the current run update to finish.",
+    );
+    expect(deps.queueOperationalIntent).not.toHaveBeenCalled();
+
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 5)));
+    expect(deps.queueOperationalIntent).not.toHaveBeenCalled();
+    syncPending.current = false;
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 35)));
+
+    expect(deps.queueOperationalIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "resume", runId: "a" }),
+    );
+    expect(deps.dayStateRef.current.runs[0].pausedAt).toBeUndefined();
+    expect(deps.setPendingForegroundRunControl).toHaveBeenLastCalledWith(null);
+    expect(deps.setAutoTrackBlocked).toHaveBeenLastCalledWith(false);
+    expect(deps.showForegroundRecoveryNotice).toHaveBeenLastCalledWith(
+      "outcome",
+      "Resume applied after the current run update finished.",
+    );
+  });
+
+  it("does not redirect a deferred Resume if another run becomes selected", async () => {
+    const { deps, syncPending } = setup(day([
+      run("a", { startedAt: 10, pausedAt: 20 }),
+      run("b", { startedAt: 30 }),
+    ]));
+    syncPending.current = true;
+    const { result, rerender } = renderHook(() => useRunLifecycleManager(deps));
+
+    act(() => result.current.resumeRun());
+    expect(deps.setPendingForegroundRunControl).toHaveBeenCalledWith({
+      action: "resume",
+      runId: "a",
+    });
+
+    const selectedElsewhere = day([
+      run("a", { startedAt: 10, pausedAt: 20 }),
+      run("b", { startedAt: 30 }),
+    ], 1);
+    deps.dayStateRef.current = selectedElsewhere;
+    deps.currentRun = selectedElsewhere.runs[1];
+    rerender();
+    syncPending.current = false;
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 35)));
+
+    expect(deps.queueOperationalIntent).not.toHaveBeenCalled();
+    expect(deps.setPendingForegroundRunControl).toHaveBeenLastCalledWith(null);
+    expect(deps.showForegroundRecoveryNotice).toHaveBeenLastCalledWith(
+      "outcome",
+      "Resume was not applied because the displayed run changed or ended. Review the current run.",
+    );
   });
 
   it("keeps the same intent-bound pause choice after canonical acknowledgement", () => {

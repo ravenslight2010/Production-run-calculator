@@ -2780,3 +2780,104 @@ the focused wake test does not replace it. Physical Android wake/touch and
 foreground/peer-device handoff remain unverified. The task stays **IN
 PROGRESS** pending broader integrated verification and bounded incident
 correlation.
+
+### 2026-11-03 — current-source peer/stale-auto-track recheck
+
+The focused isolated browser scenario
+`D. active peers and server keep a downward skid correction over a stale
+automatic write` passed **1/1** on source commit
+`5efa70ead0076d3fd6902666b1279626ddc8a874` (1.5 minutes for the case, 2.7
+minutes total). It uses a disposable database and verifies that a manual
+Packaging correction remains authoritative when an active peer submits an
+older automatic write.
+
+This recheck does not exercise a second device waking while the first remains
+foreground. The separate offline-peer wake case currently verifies ordinary
+run-value adoption, while the paired Packaging wake case uses one device.
+Their combined foreground-peer + waking-peer + live Packaging auto-track
+sequence remains an explicit coverage gap; the existing passing cases are not
+being described as proof of that combined journey. This focused result does not
+supersede the failed 241-case browser run or establish physical-device or
+published-app behavior. No application code or production data changed.
+
+### 2026-11-03 — Pause/Resume tap during pending sync
+
+The isolated two-session wake scenario initially failed: after the foreground
+operator tapped Resume, the run remained paused and the control stayed on
+Resume for the test's five-second observation window. The trace showed a
+`/api/sync/today` write in flight at the tap and no Resume operational-intent
+request during that interval. Source review found that lifecycle controls are
+deferred behind pending sync/adoption work, but a normal Pause/Resume tap on
+that path did not render a queued state or a waiting message. This is
+consistent with the reported “tap looks received, but nothing happens” issue;
+the trace does not identify a physical-device or published-server cause.
+
+The lifecycle path now marks Pause/Resume as requested while waiting, blocks
+automatic tracking until the wait resolves, and revalidates the original run
+before applying the deferred action. If that run changed or the action was
+already completed elsewhere, the app clears the pending state and reports the
+outcome rather than redirecting the control.
+
+Current-worktree verification passed: lifecycle-manager tests **28/28**;
+auto-track pause/resume and wake tests **34/34**; the isolated two-session
+offline-wake browser scenario **1/1**; root `CI=true pnpm run typecheck`.
+The isolated browser scenario uses a disposable database. The development web
+preview served, but its signed-out session probe returned 502 because the
+separate API workflow is stopped; it was not started against shared
+development data. The 241-case browser result remains **233 passed / 8
+failed**, and this focused pass does not replace that full-suite result or
+physical-device/published-app verification.
+
+### 2026-11-03 — review of sync / pool-pressure research
+
+The supplied research is useful as a mechanism hypothesis, and its main
+background-work claims match the current source: server auto-track runs on a
+15-second default cadence (minimum 5 seconds) over a rolling 45-day
+`daily_sync` date window, and the sync outbox schedules a durable catch-up poll
+every 5 seconds. These are potential sources of steady database-pool activity
+even when no browser is active.
+
+That fits the previously captured production aggregates: intermittent app-pool
+acquisition waits and event-loop delay occurred while a database sample still
+showed substantial backend headroom and no lock waiters. It points toward
+application-process/pool contention as a plausible contributor, but it does
+not establish that background work caused a specific device wake failure or
+that these loops were active at that exact time. Existing telemetry does not
+provide per-request/device correlation.
+
+Do not skip all server ticks merely because there is no currently running run:
+ended runs may remain eligible for freezer-drain case tracking. Any idle-work
+reduction must preserve that behavior and be backed by a no-active-work
+predicate with focused coverage. The remaining evidence gap is a bounded
+idle-only versus one-tablet observation of tick/outbox activity, pool waits,
+and eligible run state. No pool sizing, scheduler cadence, production data, or
+deployment settings were changed. A new full isolated browser run is in
+progress on this worktree; its result will be recorded separately.
+
+### 2026-11-03 — published runtime interruption correlation
+
+A read-only production log review for 22:25–22:45 UTC found that the serving
+Autoscale deployment remained on its Oct 30 successful build; no new build or
+revision rollout occurred during this window. Logs show a database-client
+`ECONNRESET` at 22:26:53 UTC, followed by the application artifact exiting with
+code 1 at 22:27:00. The platform then shut down that exited artifact. Seventeen
+health checks failed after the exit (11 HTTP 500, 6 HTTP 503); readiness
+returned at 22:27:16, about 571 ms after the last failure. This establishes a
+runtime interruption and recovery on the same serving build, but the logs do
+not identify whether the socket reset originated in the database, network, or
+proxy path, nor do they identify the recovered Autoscale instance.
+
+The same bounded review found intermittent pool-checkout timeouts and long
+post-checkout outbox phases; the health endpoint did not provide Resume or
+Packaging request latency. These production events are separate evidence from
+the mobile browser’s background-time measurements and do not prove that a
+specific tap or device wake caused the process exit. The isolated browser suite
+uses a disposable database and no publish/deployment occurred, so there is no
+evidence it caused the production interruption.
+
+The smallest next server-side observation is a read-only database/provider
+connection-event summary for 22:26:53–22:27:00 UTC, if that telemetry is
+available. A physical wake/Resume reproduction still needs sanitized client
+visibility timestamps and a request identifier correlated with server request,
+checkout, post-checkout, and worker timings. No production records or settings
+were changed.

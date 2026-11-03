@@ -566,6 +566,9 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
     const sync = await response.json() as {
       runValues?: Record<string, {
         app1StockLbs?: number;
+        app1StockConsumedLbs?: number;
+        app1StockAnchorNetSec?: number;
+        app1StockCorrectionGeneration?: number;
         app1BatchesMade?: number;
       }>;
     };
@@ -586,6 +589,55 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
     };
     return Number(sync.dayState?.runs?.find((run) => run.id === fixture.runId)?.pausedAt) || 0;
   };
+  const correctionEvidence: Array<Record<string, unknown>> = [];
+  const stockEvidenceFields = [
+    "app1StockLbs",
+    "app1StockConsumedLbs",
+    "app1StockAnchorNetSec",
+    "app1StockCorrectionGeneration",
+    "app1BatchesMade",
+    "app1BatchAnchorNetSec",
+    "app1BatchCorrectionGeneration",
+  ] as const;
+  const pickStockEvidence = (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(stockEvidenceFields
+      .filter((field) => Object.prototype.hasOwnProperty.call(record, field))
+      .map((field) => [field, record[field]]));
+  };
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname !== "/api/sync/manual-section") return;
+    let body: Record<string, unknown>;
+    try {
+      body = request.postDataJSON() as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (body.section !== "app1") return;
+    correctionEvidence.push({
+      phase: "request",
+      section: body.section,
+      values: pickStockEvidence(body.values),
+      baseValues: pickStockEvidence(body.baseValues),
+    });
+  });
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname !== "/api/sync/manual-section") return;
+    void response.json().then((body: Record<string, unknown>) => {
+      const data = body.data as Record<string, unknown> | undefined;
+      const runValues = data?.runValues as Record<string, unknown> | undefined;
+      correctionEvidence.push({
+        phase: "response",
+        status: response.status(),
+        code: body.code,
+        outcome: body.outcome,
+        values: pickStockEvidence(runValues?.[fixture.runId]),
+      });
+    }).catch(() => {
+      correctionEvidence.push({ phase: "response", status: response.status() });
+    });
+  });
   const app1OnLine = page.getByTestId("output-app1-batches-on-line");
   const readApp1BatchesOnLine = async () =>
     Number.parseFloat((await app1OnLine.textContent()) ?? "");
@@ -660,9 +712,21 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   // A manual correction removes one batch unit without changing the completed
   // run's production counters.
   const stockBeforeCorrection = await readCanonicalStock();
+  const visibleStockBeforeCorrection = await readApp1BatchesOnLine();
   await page.getByRole("button", { name: "Decrease app1 batches on line" }).click();
   const correctedStock = Math.max(0, stockBeforeCorrection - 1);
-  await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeCloseTo(correctedStock, 2);
+  try {
+    await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeCloseTo(correctedStock, 2);
+  } catch (error) {
+    console.error("[app1 manual correction diagnostic]", JSON.stringify({
+      stockBeforeCorrection,
+      visibleStockBeforeCorrection,
+      correctedStock,
+      canonicalAfter: pickStockEvidence(await readCanonicalApp1Values()),
+      correctionEvidence,
+    }));
+    throw error;
+  }
 
   await page.getByTestId("tab-run").click();
   await page.getByRole("button", { name: /pause.?run/i }).click();

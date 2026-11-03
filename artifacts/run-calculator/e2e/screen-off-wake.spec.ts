@@ -3203,7 +3203,22 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .toBeVisible({ timeout: 15_000 });
       await expect(activeStatus).not.toContainText("Still recovering");
       await page.getByTestId("resume-run").click();
-      await expect(page.getByTestId("pause-run")).toBeVisible();
+      await expect.poll(
+        async () => {
+          if (await page.getByTestId("pause-run").count()) return "applied";
+          const resume = page.getByTestId("resume-run");
+          if (!(await resume.count())) return "transitioning";
+          const text = await resume.innerText();
+          return (await resume.isDisabled()) && /RESUME REQUESTED/i.test(text)
+            ? "queued"
+            : "unacknowledged";
+        },
+        {
+          timeout: 5_000,
+          message: "Resume tap was neither applied nor visibly queued behind the pending update",
+        },
+      ).not.toBe("unacknowledged");
+      await expect(page.getByTestId("pause-run")).toBeVisible({ timeout: 15_000 });
       await expect.poll(
         async () => (await readLiveRunMeta(page)).pausedAt ?? 0,
         {
