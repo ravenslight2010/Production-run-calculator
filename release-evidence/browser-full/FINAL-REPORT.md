@@ -1,89 +1,97 @@
 # Full Browser Release Run
 
-Generated: 2026-11-03T03:29:09.243Z
-Revision: test-sha256:00423001368a5c1c7a5dadb9e6e008c2bc9d983fc2fd55379b8198a40c682e1c
+Generated: 2026-11-03T18:31:40.048Z
+Revision: test-sha256:0bd9a720644f5a5f58661b4d376af07c4ed50b6d43218e90f4f990a783b71707
 Result: FAIL
 Expected cases: 241
 Enumerated cases: 241
 Completed cases: 241
-Passed cases: 235
+Passed cases: 233
 Skipped cases: 0
-Failed cases: 6
+Failed cases: 8
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 3661186ms
+Duration: 4093867ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 11 | 11 | 11 | 0 | 0 | 0 | 87021ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 8750ms |
-| `artifacts/run-calculator/e2e/audit-log-export.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4129ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 3729ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 17665ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5238ms |
-| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 31607ms |
-| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 38094ms |
-| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 14134ms |
-| `artifacts/run-calculator/e2e/field-check-diagnostics.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 16102ms |
-| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 202385ms |
-| `artifacts/run-calculator/e2e/guarded-undo.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 23313ms |
-| `artifacts/run-calculator/e2e/home-deferred-panels.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 67228ms |
-| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 16643ms |
-| `artifacts/run-calculator/e2e/ignored-match-filter.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 10435ms |
-| `artifacts/run-calculator/e2e/import-gold-approvals-authenticated.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 27183ms |
-| `artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 12495ms |
-| `artifacts/run-calculator/e2e/line-map-responsive.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 2316ms |
-| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 5 | 5 | 4 | 0 | 1 | 0 | 59002ms |
-| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 15697ms |
-| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 7 | 0 | 0 | 0 | 51372ms |
-| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 10 | 10 | 10 | 0 | 0 | 0 | 53350ms |
-| `artifacts/run-calculator/e2e/merge-alias-retarget.spec.ts` | 7 | 7 | 7 | 0 | 0 | 0 | 126902ms |
-| `artifacts/run-calculator/e2e/merge-ignore-undo.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5578ms |
-| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 35 | 35 | 35 | 0 | 0 | 0 | 1076518ms |
-| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 34242ms |
-| `artifacts/run-calculator/e2e/packaging-recovery.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 20735ms |
-| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 25 | 25 | 25 | 0 | 0 | 0 | 128901ms |
-| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5313ms |
-| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 4 | 0 | 1 | 0 | 69829ms |
-| `artifacts/run-calculator/e2e/premade-crust-profile.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5561ms |
-| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4002ms |
-| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 8532ms |
-| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 19477ms |
-| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 7139ms |
-| `artifacts/run-calculator/e2e/qc-allergen-activity-responsive.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 8742ms |
-| `artifacts/run-calculator/e2e/qc-brix-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 10960ms |
-| `artifacts/run-calculator/e2e/qc-date-code-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 12200ms |
-| `artifacts/run-calculator/e2e/qc-import-review-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 16264ms |
-| `artifacts/run-calculator/e2e/qc-import-review-reload-badge.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 37447ms |
-| `artifacts/run-calculator/e2e/qc-intelligence-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 16345ms |
-| `artifacts/run-calculator/e2e/qc-planning-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4989ms |
-| `artifacts/run-calculator/e2e/qc-recipe-review-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 19563ms |
-| `artifacts/run-calculator/e2e/qc-workflows-authenticated.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 44541ms |
-| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 11 | 11 | 11 | 0 | 0 | 0 | 265364ms |
-| `artifacts/run-calculator/e2e/report-issue-confirmation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 11571ms |
-| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 39544ms |
-| `artifacts/run-calculator/e2e/run-startup-slow-network.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 43776ms |
-| `artifacts/run-calculator/e2e/schedule-dialog-layering.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4077ms |
-| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 15 | 15 | 15 | 0 | 0 | 0 | 244982ms |
-| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 38846ms |
-| `artifacts/run-calculator/e2e/station-handoff-responsive.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 28909ms |
-| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 18 | 18 | 17 | 0 | 1 | 0 | 210519ms |
-| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 10819ms |
-| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 27420ms |
-| `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 29259ms |
-| `artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 39993ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 11 | 11 | 11 | 0 | 0 | 0 | 108625ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 9719ms |
+| `artifacts/run-calculator/e2e/audit-log-export.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4856ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4342ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 27757ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 6382ms |
+| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 31653ms |
+| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 41324ms |
+| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 14874ms |
+| `artifacts/run-calculator/e2e/field-check-diagnostics.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 20417ms |
+| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 240674ms |
+| `artifacts/run-calculator/e2e/guarded-undo.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 33026ms |
+| `artifacts/run-calculator/e2e/home-deferred-panels.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 76982ms |
+| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 36084ms |
+| `artifacts/run-calculator/e2e/ignored-match-filter.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 11345ms |
+| `artifacts/run-calculator/e2e/import-gold-approvals-authenticated.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 28059ms |
+| `artifacts/run-calculator/e2e/import-gold-lab-responsive.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 14265ms |
+| `artifacts/run-calculator/e2e/line-map-responsive.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 2950ms |
+| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 5 | 5 | 4 | 0 | 1 | 0 | 61300ms |
+| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 16845ms |
+| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 6 | 0 | 1 | 0 | 120830ms |
+| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 10 | 10 | 10 | 0 | 0 | 0 | 61666ms |
+| `artifacts/run-calculator/e2e/merge-alias-retarget.spec.ts` | 7 | 7 | 7 | 0 | 0 | 0 | 137906ms |
+| `artifacts/run-calculator/e2e/merge-ignore-undo.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 6947ms |
+| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 35 | 35 | 35 | 0 | 0 | 0 | 1093324ms |
+| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 41062ms |
+| `artifacts/run-calculator/e2e/packaging-recovery.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 27385ms |
+| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 25 | 25 | 25 | 0 | 0 | 0 | 139262ms |
+| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 6060ms |
+| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 59566ms |
+| `artifacts/run-calculator/e2e/premade-crust-profile.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 6738ms |
+| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5011ms |
+| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 11454ms |
+| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 23527ms |
+| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 7790ms |
+| `artifacts/run-calculator/e2e/qc-allergen-activity-responsive.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 11284ms |
+| `artifacts/run-calculator/e2e/qc-brix-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 20707ms |
+| `artifacts/run-calculator/e2e/qc-date-code-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 13313ms |
+| `artifacts/run-calculator/e2e/qc-import-review-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 19333ms |
+| `artifacts/run-calculator/e2e/qc-import-review-reload-badge.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 38719ms |
+| `artifacts/run-calculator/e2e/qc-intelligence-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 17939ms |
+| `artifacts/run-calculator/e2e/qc-planning-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5417ms |
+| `artifacts/run-calculator/e2e/qc-recipe-review-authenticated.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 22539ms |
+| `artifacts/run-calculator/e2e/qc-workflows-authenticated.spec.ts` | 2 | 2 | 1 | 0 | 1 | 0 | 63522ms |
+| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 11 | 11 | 10 | 0 | 1 | 0 | 238042ms |
+| `artifacts/run-calculator/e2e/report-issue-confirmation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 13708ms |
+| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 53748ms |
+| `artifacts/run-calculator/e2e/run-startup-slow-network.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 44117ms |
+| `artifacts/run-calculator/e2e/schedule-dialog-layering.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4523ms |
+| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 15 | 15 | 15 | 0 | 0 | 0 | 289066ms |
+| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 43516ms |
+| `artifacts/run-calculator/e2e/station-handoff-responsive.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 31474ms |
+| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 18 | 18 | 18 | 0 | 0 | 0 | 225112ms |
+| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 11906ms |
+| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 2 | 0 | 1 | 0 | 33833ms |
+| `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 33131ms |
+| `artifacts/run-calculator/e2e/workbook-auto-ai-fallback.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 43111ms |
 
 ## Failed and timed-out cases
 
 ### `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts`
 
-- **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Frontline App1 batch supply survives off-tab work, adjustment, pause, and reload`
+- **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Sauce and Dough live cards work at a phone viewport`
 
-### `artifacts/run-calculator/e2e/photo-spec-import.spec.ts`
+### `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts`
 
-- **FAILED** `› chromium › photo-spec-import.spec.ts › applies photographed review edits to the authenticated profile and recipe pools`
+- **FAILED** `› chromium › manager-action-queue-stale.spec.ts › loads the active view without hiding large queue history`
+
+### `artifacts/run-calculator/e2e/qc-workflows-authenticated.spec.ts`
+
+- **FAILED** `› chromium › qc-workflows-authenticated.spec.ts › QC operator and manager complete scoped evidence workflows in authenticated browsers`
+
+### `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts`
+
+- **FAILED** `› chromium › recipe-refresh-start-freeze.spec.ts › cheese recipe edits refresh pending runs across browsers but freeze after Start`
 
 ### `artifacts/run-calculator/e2e/run-insights.spec.ts`
 
@@ -91,9 +99,9 @@ Duration: 3661186ms
 - **FAILED** `› chromium › run-insights.spec.ts › Run Insights — accept, dismiss, follow-up › Dismiss suppresses the suggestion and it stays suppressed on same drift`
 - **FAILED** `› chromium › run-insights.spec.ts › Run Insights — accept, dismiss, follow-up › Follow-up note appears after next run and is cleared by Got-it`
 
-### `artifacts/run-calculator/e2e/sync-convergence.spec.ts`
+### `artifacts/run-calculator/e2e/visual-regression.spec.ts`
 
-- **FAILED** `› chromium › sync-convergence.spec.ts › wake enforces reset epoch and client-date scope while unchanged writes stay no-op`
+- **FAILED** `› chromium › visual-regression.spec.ts › intentional visual regression baselines › tablet portrait and landscape compact presentation`
 
 ## Skipped cases
 

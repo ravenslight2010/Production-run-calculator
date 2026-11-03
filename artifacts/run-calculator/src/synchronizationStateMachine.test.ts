@@ -59,4 +59,29 @@ describe("SynchronizationStateMachine", () => {
     expect(machine.completeReset(generation)).toBe(true);
     expect(machine.isReady).toBe(false);
   });
+
+  it("does not let a late baseline release the reset barrier", () => {
+    const machine = new SynchronizationStateMachine<string>();
+    machine.completeInitialSnapshot();
+    const generation = machine.beginReset(7);
+
+    expect(machine.completeInitialSnapshot()).toBe(false);
+    expect(machine.phase).toBe("resetting");
+    expect(machine.beginPush("pre-reset snapshot")).toBe(false);
+    expect(machine.phase).toBe("resetting");
+    expect(machine.completeReset(generation)).toBe(true);
+    expect(machine.phase).toBe("connecting");
+  });
+
+  it("does not let a reconnect baseline release an active wake barrier", () => {
+    const machine = new SynchronizationStateMachine<string>();
+    machine.completeInitialSnapshot();
+    const wake = machine.beginWake();
+
+    expect(machine.completeInitialSnapshot()).toBe(false);
+    expect(machine.phase).toBe("waking");
+    expect(machine.beginPush("pre-reconciliation snapshot")).toBe(false);
+    expect(machine.completeWake(wake, true)).toBe(true);
+    expect(machine.phase).toBe("ready");
+  });
 });

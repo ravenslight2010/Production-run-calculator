@@ -18,6 +18,7 @@ description: Less frequent operational, build, browser, and evidence constraints
 - [Vitest hooks](vitest-hook-cleanup.md) — avoid implicit cleanup return values.
 - [Playwright responses](playwright-304-responses.md) — accept valid 304s, not request failures.
 - [Workflow configuration](workflow-configuration-side-effects.md) — inspect aggregate changes; preserve approved hosts and kernel locks.
+- [Preview port discovery](preview-port-discovery.md) — find the active Vite listener when screenshot defaults and static port mappings refuse connections.
 - [Metadata hosts](metadata-maintenance-supported-hosts.md) — constrain supported host platforms.
 - [Timeline estimates](day-timeline-estimate-policy.md) — distinguish actual ends from forecasts and unknowns.
 - [Attempt retention](browser-attempt-retention-policy.md) — owner approved 30-day startup cleanup of diagnostic attempts, not release or user evidence.

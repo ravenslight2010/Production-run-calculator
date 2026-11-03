@@ -119,20 +119,35 @@ async function selectBrandAndFlavor(
 ): Promise<void> {
   const brandInput = page.locator('input[placeholder="Brand…"]');
   await brandInput.click();
-  if (await brandInput.isEditable()) {
-    await brandInput.fill(brand);
-    await brandInput.press("Enter");
+  const brandOption = page.getByRole("button", { name: brand, exact: true });
+  if (await brandOption.isVisible().catch(() => false)) {
+    await brandOption.click();
   } else {
-    await expect(brandInput).toHaveValue(brand);
+    await expect(brandInput).toBeEditable();
+    await brandInput.fill(brand);
+    const addBrandOption = page.getByRole("button", { name: `Add "${brand}"`, exact: true });
+    if (await addBrandOption.isVisible().catch(() => false)) {
+      await addBrandOption.click();
+    } else {
+      await brandInput.press("Enter");
+    }
   }
+  await expect(brandInput).toHaveValue(brand);
 
   const flavorInput = page.locator('input[placeholder="Flavor…"]');
   await flavorInput.click();
-  if (await flavorInput.isEditable()) {
-    await flavorInput.fill(flavor);
-    await flavorInput.press("Enter");
+  const flavorOption = page.getByRole("button", { name: flavor, exact: true });
+  if (await flavorOption.isVisible().catch(() => false)) {
+    await flavorOption.click();
   } else {
-    await expect(flavorInput).toHaveValue(flavor);
+    await expect(flavorInput).toBeEditable();
+    await flavorInput.fill(flavor);
+    const addFlavorOption = page.getByRole("button", { name: `Add "${flavor}"`, exact: true });
+    if (await addFlavorOption.isVisible().catch(() => false)) {
+      await addFlavorOption.click();
+    } else {
+      await flavorInput.press("Enter");
+    }
   }
   await ensureLineSetupOpen(page);
 }

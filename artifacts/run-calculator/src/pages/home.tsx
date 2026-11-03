@@ -9148,6 +9148,17 @@ export default function Home() {
           // device has durably adopted that epoch, the same frame remains the
           // only initial baseline and must continue through normal data handling.
         }
+        // A duplicate baseline can race the reload started by reset adoption.
+        // Do not merge or acknowledge any frame from this old document while
+        // its reset barrier is still raised.
+        if (synchronizationStateMachineRef.current.phase === "resetting") {
+          recordSyncEvent(
+            "stale",
+            "Ignored sync frame while reset reload is pending",
+            "reset-epoch",
+          );
+          return false;
+        }
         if (msg.unchanged) {
           // A malformed unchanged frame is not a baseline. In particular,
           // accepting `{ unchanged: true }` would release the writer while
@@ -9840,7 +9851,11 @@ export default function Home() {
   }
 
   function adoptClientResetEpoch(epoch: number, rollover = false): boolean {
-    const generation = synchronizationStateMachineRef.current.beginReset(epoch);
+    const stateMachine = synchronizationStateMachineRef.current;
+    if (stateMachine.phase === "resetting" && epoch <= stateMachine.resetEpoch) {
+      return true;
+    }
+    const generation = stateMachine.beginReset(epoch);
     // A wake recovery that began before this reset must not release the
     // barrier or replay its queued write after the new epoch is stored.
     foregroundRecoveryOwnerRef.current = generation;

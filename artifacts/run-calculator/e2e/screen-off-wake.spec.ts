@@ -1075,6 +1075,7 @@ async function readPersistedRunValues(
 }
 
 async function readLiveRunMeta(page: Page): Promise<{
+  id?: string;
   date?: string;
   startedAt?: number;
   pausedAt?: number;
@@ -1634,6 +1635,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     page,
   }) => {
     const safeBaseMs = await setupAndStartRun(page);
+    const activeRun = await readLiveRunMeta(page);
     let heldWakePulls = 0;
     let releaseWakePull!: () => void;
     const wakePullReleased = new Promise<void>((resolve) => {
@@ -1641,7 +1643,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     });
 
     await page.route("**/api/sync/today**", async (route) => {
-      if (route.request().method() === "GET" && heldWakePulls === 0) {
+      if (route.request().method() === "GET") {
         heldWakePulls += 1;
         await wakePullReleased;
       }
@@ -1651,7 +1653,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     await simulateScreenOff(page);
     await mockDateNow(page, safeBaseMs + 30_000);
     await simulateWake(page);
-    await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBe(1);
+    await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBeGreaterThan(0);
 
     const stopButton = page.getByRole("button", { name: /^stop.?run$/i }).first();
     await stopButton.click();
@@ -1664,6 +1666,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       .toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("foreground-recovery-status"))
       .toContainText("Stop applied after recovery");
+    await expect.poll(
+      async () => (await readLiveRunMeta(page)).endedAt,
+      { timeout: 15_000, intervals: [250, 500, 1_000, 2_000] },
+    ).toBeTruthy();
+    const stoppedRun = await readLiveRunMeta(page);
+    expect(stoppedRun.id).toBe(activeRun.id);
   });
 
   test("wake recovery queues one Resume tap and applies it to the same run", async ({
@@ -1684,7 +1692,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       releaseWakePull = resolve;
     });
     await page.route("**/api/sync/today**", async (route) => {
-      if (route.request().method() === "GET" && heldWakePulls === 0) {
+      if (route.request().method() === "GET") {
         heldWakePulls += 1;
         await wakePullReleased;
       }
@@ -1695,7 +1703,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await simulateScreenOff(page);
       await mockDateNow(page, safeBaseMs + 30_000);
       await simulateWake(page);
-      await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBe(1);
+      await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBeGreaterThan(0);
 
       const resumeButton = page.getByTestId("resume-run");
       await expect(resumeButton).toBeVisible();
@@ -1710,6 +1718,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .toBeVisible({ timeout: 15_000 });
       await expect(page.getByTestId("foreground-recovery-status"))
         .toContainText("Resume applied after recovery");
+      await expect.poll(
+        async () => (await readLiveRunMeta(page)).pausedAt,
+        { timeout: 15_000, intervals: [250, 500, 1_000, 2_000] },
+      ).toBeFalsy();
       const resumedRun = await readLiveRunMeta(page);
       expect(resumedRun.id).toBe(pausedRun.id);
       expect(resumedRun.pausedAt).toBeFalsy();
@@ -4163,6 +4175,218 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       expected: afterDueBeat.book?.lastExpectedCases,
       value: afterDueBeat.value,
     })).toBe(46);
+    // Hold the next automatic-count reply after the server accepts it. Let
+    // several client case-timer periods expire while that acknowledgment is
+    // pending; no duplicate claim may be sent, and tracking must continue after
+    // the canonical reply is released.
+    const fixtureDate = await page.evaluate(() => {
+      const configured = (window as unknown as Record<string, unknown>).__testFixtureDate;
+      return typeof configured === "string"
+        ? configured
+        : new Date().toISOString().slice(0, 10);
+    });
+    const firstNextCaseDueMs = Number(afterDueBeat.book?.caseNextDueMs ?? 0);
+    expect(
+      firstNextCaseDueMs,
+      "the accepted post-Resume case claim must arm the next case timer",
+    ).toBeGreaterThan(dueNowMs);
+    const caseRequestCount = () =>
+      autoTrackClaimChannels.filter((channel) => channel === "case").length;
+    const caseRequestCountBeforeHeldAck = caseRequestCount();
+    const caseResponsesBeforeHeldAck = caseClaimResponses.length;
+    const autoTrackClaimRoute = "**/api/sync/auto-track/claim**";
+    let holdNextCaseClaim = false;
+    let heldServerClaim: {
+      status: number;
+      outcome?: string;
+      casesOnCurrentSkid?: number;
+      dueAt: number;
+      nextDueAt: number;
+    } | null = null;
+    let releaseHeldCaseClaim: (() => void) | undefined;
+    const heldCaseClaimResponseGate = new Promise<void>((resolve) => {
+      releaseHeldCaseClaim = resolve;
+    });
+    let heldClaimRouteInstalled = false;
+
+    try {
+      await page.route(autoTrackClaimRoute, async (route) => {
+        const request = route.request();
+        let claim: {
+          channel?: string;
+          dueAt?: number;
+          nextDueAt?: number;
+        } | undefined;
+        try {
+          const body = request.postDataJSON() as {
+            claim?: typeof claim;
+          };
+          claim = body.claim;
+        } catch {
+          // Non-claim or unreadable requests continue without interception.
+        }
+        if (
+          !holdNextCaseClaim
+          || request.method() !== "POST"
+          || claim?.channel !== "case"
+        ) {
+          await route.continue();
+          return;
+        }
+
+        holdNextCaseClaim = false;
+        const serverResponse = await route.fetch();
+        const responseBody = await serverResponse.body();
+        let result: {
+          outcome?: string;
+          values?: { casesOnCurrentSkid?: number };
+        } = {};
+        try {
+          result = JSON.parse(responseBody.toString("utf8")) as typeof result;
+        } catch {
+          // The status and empty body below make a malformed reply fail loudly.
+        }
+        heldServerClaim = {
+          status: serverResponse.status(),
+          outcome: result.outcome,
+          casesOnCurrentSkid: result.values?.casesOnCurrentSkid,
+          dueAt: Number(claim.dueAt),
+          nextDueAt: Number(claim.nextDueAt),
+        };
+        await heldCaseClaimResponseGate;
+        await route.fulfill({ response: serverResponse, body: responseBody });
+      });
+      heldClaimRouteInstalled = true;
+
+      // Stop the helper that follows real wall time. The app's own real timer
+      // continues to run, reading this deterministic Date value each interval.
+      await page.evaluate(() => {
+        const w = window as unknown as { __testFollowRealTimer?: number };
+        if (typeof w.__testFollowRealTimer === "number") {
+          window.clearInterval(w.__testFollowRealTimer);
+          delete w.__testFollowRealTimer;
+        }
+      });
+      holdNextCaseClaim = true;
+      await mockDateNow(page, firstNextCaseDueMs + 1, { tick: false });
+      await expect
+        .poll(() => caseRequestCount(), {
+          timeout: 15_000,
+          message: "the next Packaging case claim did not start",
+        })
+        .toBe(caseRequestCountBeforeHeldAck + 1);
+      await expect
+        .poll(() => heldServerClaim, {
+          timeout: 15_000,
+          message: "the server did not resolve the held Packaging claim",
+        })
+        .not.toBeNull();
+
+      const acceptedWhilePending = heldServerClaim!;
+      expect(acceptedWhilePending.status).toBe(200);
+      expect(acceptedWhilePending.outcome).toBe("accepted");
+      expect(acceptedWhilePending.casesOnCurrentSkid).toBe(47);
+      const casePeriodMs = acceptedWhilePending.nextDueAt - acceptedWhilePending.dueAt;
+      expect(
+        casePeriodMs,
+        "the held claim must return a valid next-case cadence",
+      ).toBeGreaterThan(2_000);
+
+      const readNextCaseCountdownSeconds = async () => {
+        const text = await page.getByText(/^Next case in/).first().textContent();
+        const match = text?.match(/Next case in\s*(\d+):(\d{2})/);
+        return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
+      };
+      const expectCaseCountdownRearmed = async (message: string) => {
+        await expect
+          .poll(readNextCaseCountdownSeconds, { timeout: 5_000, message })
+          .toBeGreaterThanOrEqual(Math.max(1, Math.floor(casePeriodMs / 1_000) - 2));
+      };
+
+      expect(
+        caseClaimResponses,
+        "the held accepted claim must not reach the browser before release",
+      ).toHaveLength(caseResponsesBeforeHeldAck);
+      await expect(cases).toHaveText("46");
+
+      const expectedCaseRequestsWhilePending = caseRequestCountBeforeHeldAck + 1;
+      const pendingTimerExpirations = [
+        acceptedWhilePending.nextDueAt + 1,
+        acceptedWhilePending.nextDueAt + casePeriodMs + 2,
+      ];
+      for (const [index, expiredAt] of pendingTimerExpirations.entries()) {
+        await mockDateNow(page, expiredAt, { tick: false });
+        await expectCaseCountdownRearmed(
+          `Packaging timer did not re-arm after pending expiration ${index + 1}`,
+        );
+        expect(
+          caseRequestCount(),
+          "a second case claim started before the first acknowledgment",
+        ).toBe(expectedCaseRequestsWhilePending);
+        expect(
+          caseClaimResponses,
+          "the held acknowledgment must remain pending across timer expirations",
+        ).toHaveLength(caseResponsesBeforeHeldAck);
+        await expect(cases).toHaveText("46");
+      }
+
+      const lastPendingExpiration =
+        pendingTimerExpirations[pendingTimerExpirations.length - 1];
+      releaseHeldCaseClaim();
+      await expect(cases).toHaveText("47", { timeout: 15_000 });
+      await expect
+        .poll(() => caseClaimResponses.length, {
+          timeout: 15_000,
+          message: "the held canonical acknowledgment did not reach the client",
+        })
+        .toBe(caseResponsesBeforeHeldAck + 1);
+
+      // One further due interval must continue tracking without a refresh or
+      // manual retry, while respecting the run's 48-case target.
+      await mockDateNow(
+        page,
+        lastPendingExpiration + casePeriodMs + 1,
+        { tick: false },
+      );
+      await expect
+        .poll(
+          () => caseRequestCount(),
+          {
+            timeout: 15_000,
+            message: "auto-tracking did not resume after the delayed acknowledgment",
+          },
+        )
+        .toBe(expectedCaseRequestsWhilePending + 1);
+      await expect
+        .poll(
+          async () => page.evaluate(async ({ runId, today }) => {
+            const response = await fetch(`/api/sync/today?today=${today}`, {
+              cache: "no-store",
+            });
+            if (!response.ok) return null;
+            const body = (await response.json()) as {
+              runValues?: Record<string, { casesOnCurrentSkid?: number }>;
+            };
+            return body.runValues?.[runId]?.casesOnCurrentSkid ?? null;
+          }, { runId: canonicalRunId, today: fixtureDate }),
+          { timeout: 15_000, message: "the resumed case claim was not canonical" },
+        )
+        .toBe(48);
+      await expect(cases).toHaveText("48", { timeout: 10_000 });
+      await expect
+        .poll(
+          () => postResumeClaims().filter(
+            (claim) => claim.status === 200 && claim.outcome === "accepted",
+          ).length,
+          { timeout: 10_000 },
+        )
+        .toBeGreaterThanOrEqual(3);
+      dueNowMs = await page.evaluate(() => Date.now());
+    } finally {
+      releaseHeldCaseClaim?.();
+      if (heldClaimRouteInstalled) await page.unroute(autoTrackClaimRoute);
+    }
+
     // The authoritative beat is the source of truth for this paired
     // correction. Rehydrate its acknowledged packaging register before
     // asserting the visible value. Preserve that beat's clock across both
@@ -4176,7 +4400,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     await page
       .locator('[data-testid="tab-packaging"]')
       .waitFor({ state: "visible", timeout: 20_000 });
-    await expect(cases).toHaveText("46", { timeout: 15_000 });
+    await expect(cases).toHaveText("48", { timeout: 15_000 });
     await expect(skids).toContainText("0");
 
     // Reload is a separate persistence boundary: form, durable run values,
@@ -4187,7 +4411,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       .waitFor({ state: "visible", timeout: 20_000 });
     await expect(
       page.locator('[data-testid="text-casesOnCurrentSkid"]').first(),
-    ).toHaveText("46", { timeout: 20_000 });
+    ).toHaveText("48", { timeout: 20_000 });
     await expect(
       page.locator('[data-testid="text-skidsCompleted"]').first(),
     ).toContainText("0");
@@ -4225,19 +4449,19 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     }, canonicalRunId);
     expect(persisted.values).toMatchObject({
       skidsCompleted: 0,
-      casesOnCurrentSkid: 46,
+      casesOnCurrentSkid: 48,
     });
     expect(persisted.progress).toMatchObject({
       skidsCompleted: 0,
-      casesOnCurrentSkid: 46,
+      casesOnCurrentSkid: 48,
     });
     expect(persisted.serverValues).toMatchObject({
       skidsCompleted: 0,
-      casesOnCurrentSkid: 46,
+      casesOnCurrentSkid: 48,
     });
     expect(persisted.serverProgress).toMatchObject({
       skidsCompleted: 0,
-      casesOnCurrentSkid: 46,
+      casesOnCurrentSkid: 48,
     });
   });
 

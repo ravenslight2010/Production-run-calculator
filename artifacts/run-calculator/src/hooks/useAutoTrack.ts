@@ -405,6 +405,8 @@ export function useAutoTrack({
   nextRunPrepActive = false,
 }: AutoTrackParams): AutoTrackResult {
   const productionNeedsAvailable = caseBasedProductionNeedsAvailable(v);
+  const latestAutoTrackInputsRef = useRef({ calc, v, productionNeedsAvailable });
+  latestAutoTrackInputsRef.current = { calc, v, productionNeedsAvailable };
   const [autoTrackProgress, setAutoTrackProgress] = useState(
     autoTrackProgressEnabled ?? true,
   );
@@ -918,14 +920,71 @@ useEffect(() => {
             coordinationRetryEventRef.current[channel] = undefined;
             return;
           }
-          // A conflict/stale response is durably recorded against this event ID
-          // by the server. Replaying it can only return the same rejection, not
-          // recover like a lost transport response. Adopt its canonical values,
-          // retire this event, and wait for an explicit operator retry.
-          if (
-            channel === "sauce-barrel"
-            && (result.outcome === "conflict" || result.outcome === "stale")
-          ) {
+          // A conflict is durably recorded against this event ID by the server.
+          // Retire it and retry from the canonical values with a fresh identity;
+          // replaying this event can only return the same rejection.
+          if (result.outcome === "conflict") {
+            coordinationSequenceRef.current[channel] = Math.max(
+              coordinationSequenceRef.current[channel] ?? 0,
+              result.state.sequence,
+            );
+            coordinationRetryEventRef.current[channel] = undefined;
+            const dueRef = dueRefForChannel(channel);
+            const latestInputs = latestAutoTrackInputsRef.current;
+            const canonicalValues: Record<string, unknown> = {
+              ...(latestInputs.v as unknown as Record<string, unknown>),
+              ...result.values,
+            };
+            if (channel === "sauce-stock") {
+              const anchor = Math.max(0, Number(canonicalValues.sauceStockAnchorNetSec) || 0);
+              const cadence = computeSauceStockStepSeconds(
+                Number(canonicalValues.sauceOzPerPizza) || 0,
+                latestInputs.calc.ppm,
+                latestInputs.calc.sauceEffBarrel,
+              );
+              dueRef.current = canonicalValues.sauceStockInitialized === true && cadence > 0
+                ? anchor + cadence
+                : 0;
+            } else {
+              const stockRegister = APPLICATOR_STOCK_REGISTERS.find(
+                (register) => `${register}-stock` === channel,
+              );
+              if (stockRegister) {
+                const fields = applicatorStockFields(stockRegister);
+                const capacity = computeApplicatorStockCapacityLbs(canonicalValues, stockRegister);
+                const onHand = Number(canonicalValues[fields.stock]) || 0;
+                const anchor = Math.max(0, Number(canonicalValues[fields.anchor]) || 0);
+                const cadence = computeApplicatorStockCadenceSeconds(
+                  canonicalValues,
+                  stockRegister,
+                  latestInputs.calc.ppm,
+                );
+                dueRef.current =
+                  latestInputs.productionNeedsAvailable
+                  && canonicalValues.applicatorStockInitialized === true
+                  && capacity > 0
+                  && onHand > 0
+                  && onHand <= capacity
+                  && cadence > 0
+                    ? anchor + cadence
+                    : 0;
+              } else {
+                dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
+              }
+            }
+            if (channel === "case") {
+              lastExpectedCasesRef.current = -1;
+              formResetSkippedRef.current = false;
+              caseClaimRetryRef.current = true;
+            }
+            applyValues(result.values);
+            setCoordinationDelayed(false);
+            return;
+          }
+
+          // A lifecycle-stale Sauce barrel cannot be rebased as an ordinary
+          // value conflict. Keep the existing explicit operator retry fence.
+          if (channel === "sauce-barrel" && result.outcome === "stale") {
             coordinationSequenceRef.current[channel] = Math.max(
               coordinationSequenceRef.current[channel] ?? 0,
               result.state.sequence,
@@ -936,9 +995,6 @@ useEffect(() => {
             onAutomaticClaimFailure?.(claim, "permanent");
             setCoordinationDelayed(false);
             return;
-          }
-          if (result.outcome === "conflict") {
-            throw new Error("Automatic tracking claim conflicted with a newer value");
           }
           coordinationSequenceRef.current[channel] = Math.max(
             coordinationSequenceRef.current[channel] ?? 0,

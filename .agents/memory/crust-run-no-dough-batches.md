@@ -9,6 +9,16 @@ A run's supply mode is `doughSubTab` / `run.progress.subTab`: `"dough"` (mix dou
 count batches) vs `"crusts"` (open pre-made crust cases). In crust mode **no dough is
 mixed**, so every dough-batch concept must be suppressed.
 
+**Rule:** premade-crust runs enter at Frontline and bypass Press/Oven transit. Do not
+count the dough-only Press/Oven duration in a crust run's phase timing. The shared
+timing value remains unchanged when switching modes.
+
+**Why:** the owner clarified that these products are premade crusts, not dough recipes;
+they start at Frontline and have no Press/Oven step.
+
+**How to apply:** keep client and server phase timing aligned, make the setup UI state
+the bypass clearly, and preserve any stored Press/Oven value when editing crust timing.
+
 **Rule:** anything tied to dough batches — the "next batch due / Start next dough
 batch" alert (notification + haptics/vibration + the `showBatchDue` banner), batch
 countdown timers, "Batches Ready"/"Batch Yield" stats — must NOT appear or fire when

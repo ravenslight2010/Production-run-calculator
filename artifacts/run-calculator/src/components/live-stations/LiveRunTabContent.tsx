@@ -1911,7 +1911,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           label="Freeze tunnel time (min)"
                         />
                       </div>
-                      <LineTransitSettings form={form} values={v} />
+                      <LineTransitSettings form={form} values={v} isCrust={doughSubTab === "crusts"} />
                       <Separator className="opacity-30" />
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <NumField

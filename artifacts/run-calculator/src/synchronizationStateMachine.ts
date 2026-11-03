@@ -40,6 +40,7 @@ export class SynchronizationStateMachine<T> {
   }
 
   completeInitialSnapshot(): boolean {
+    if (this.phaseValue === "waking" || this.phaseValue === "resetting") return false;
     this.baselineReady = true;
     this.phaseValue = "ready";
     const pending = this.deferredPush;

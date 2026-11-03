@@ -387,6 +387,230 @@ describe("useAutoTrack applicator stock", () => {
     expect(suppression.current).toBeGreaterThan(Date.now());
   });
 
+  it("retries a conflicted stock claim with a fresh identity from canonical stock", async () => {
+    const { form: fakeForm, values: stored } = form();
+    const canonicalValues = {
+      app1StockLbs: 40,
+      app1StockAnchorNetSec: 20,
+      app1StockCorrectionGeneration: 0,
+      app1StockConsumedLbs: 10,
+    };
+    const app1StockClaims: any[] = [];
+    const claim = vi.fn(async (event) => {
+      if (event.channel === "app1-stock") {
+        app1StockClaims.push(event);
+        if (app1StockClaims.length === 1) {
+          return {
+            outcome: "conflict" as const,
+            state: {
+              generation: event.generation,
+              sequence: 0,
+              nextDueAt: event.nextDueAt,
+            },
+            values: canonicalValues,
+          };
+        }
+      }
+      return {
+        outcome: "accepted" as const,
+        state: {
+          generation: event.generation,
+          sequence: event.sequence,
+          nextDueAt: event.nextDueAt,
+        },
+        values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+      };
+    });
+    const base = {
+      runId: "stock-conflict-rebase",
+      runGeneration: "started",
+      runStatus: "running" as const,
+      nowTime: new Date(),
+      elapsedBatchSec: 61,
+      calc,
+      v: values(),
+      form: fakeForm,
+      claimAutoTrackEvent: claim,
+    };
+    const { rerender } = renderHook((input) => useAutoTrack(input), { initialProps: base });
+
+    await waitFor(() => expect(app1StockClaims).toHaveLength(1));
+    const rejected = app1StockClaims[0];
+    expect(stored.app1StockLbs).toBe(canonicalValues.app1StockLbs);
+
+    rerender({
+      ...base,
+      nowTime: new Date(Date.now() + 1_000),
+      elapsedBatchSec: 500,
+      v: values(canonicalValues),
+    });
+    await waitFor(() => expect(app1StockClaims).toHaveLength(2));
+
+    const retried = app1StockClaims[1];
+    expect(retried.eventId).not.toBe(rejected.eventId);
+    expect(retried.sequence).toBe(1);
+    expect(retried.dueAt).toBeGreaterThan(rejected.dueAt);
+    expect(retried.mutations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "app1StockLbs", from: 40 }),
+      expect.objectContaining({ field: "app1StockAnchorNetSec", from: 20, to: retried.dueAt }),
+      expect.objectContaining({ field: "app1StockConsumedLbs", from: 10 }),
+    ]));
+  });
+
+  it("rebases a conflicted Sauce stock claim from the canonical anchor", async () => {
+    const { form: fakeForm, values: stored } = form();
+    const canonicalValues = {
+      sauceStockBarrels: 1.8,
+      sauceStockAnchorNetSec: 20,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: true,
+    };
+    const sauceStockClaims: any[] = [];
+    const claim = vi.fn(async (event) => {
+      if (event.channel === "sauce-stock") {
+        sauceStockClaims.push(event);
+        if (sauceStockClaims.length === 1) {
+          return {
+            outcome: "conflict" as const,
+            state: {
+              generation: event.generation,
+              sequence: 0,
+              nextDueAt: event.nextDueAt,
+            },
+            values: canonicalValues,
+          };
+        }
+      }
+      return {
+        outcome: "accepted" as const,
+        state: {
+          generation: event.generation,
+          sequence: event.sequence,
+          nextDueAt: event.nextDueAt,
+        },
+        values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+      };
+    });
+    const base = {
+      runId: "sauce-stock-conflict-rebase",
+      runGeneration: "started",
+      runStatus: "running" as const,
+      nowTime: new Date(),
+      elapsedBatchSec: 500,
+      calc,
+      v: values({
+        sauceStockBarrels: 2,
+        sauceStockAnchorNetSec: 0,
+        sauceStockCorrectionGeneration: 0,
+      }),
+      form: fakeForm,
+      claimAutoTrackEvent: claim,
+    };
+    const { rerender } = renderHook((input) => useAutoTrack(input), { initialProps: base });
+
+    await waitFor(() => expect(sauceStockClaims).toHaveLength(1));
+    const rejected = sauceStockClaims[0];
+    expect(stored.sauceStockBarrels).toBe(canonicalValues.sauceStockBarrels);
+
+    rerender({
+      ...base,
+      nowTime: new Date(Date.now() + 1_000),
+      v: values(canonicalValues),
+    });
+    await waitFor(() => expect(sauceStockClaims).toHaveLength(2));
+
+    const retried = sauceStockClaims[1];
+    expect(retried.eventId).not.toBe(rejected.eventId);
+    expect(retried.sequence).toBe(1);
+    expect(retried.dueAt).toBeGreaterThan(rejected.dueAt);
+    expect(retried.mutations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "sauceStockBarrels", from: 1.8 }),
+      expect.objectContaining({ field: "sauceStockAnchorNetSec", from: 20, to: retried.dueAt }),
+    ]));
+  });
+
+  it("rebases a conflicted Packaging case claim and retries the canonical counter", async () => {
+    const { form: fakeForm, values: stored } = form();
+    const canonicalValues = { skidsCompleted: 0, casesOnCurrentSkid: 0 };
+    const caseClaims: any[] = [];
+    const claim = vi.fn(async (event) => {
+      if (event.channel === "case") {
+        caseClaims.push(event);
+        if (caseClaims.length === 1) {
+          return {
+            outcome: "conflict" as const,
+            state: {
+              generation: event.generation,
+              sequence: 0,
+              nextDueAt: event.nextDueAt,
+            },
+            values: canonicalValues,
+          };
+        }
+      }
+      return {
+        outcome: "accepted" as const,
+        state: {
+          generation: event.generation,
+          sequence: event.sequence,
+          nextDueAt: event.nextDueAt,
+        },
+        values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+      };
+    });
+    const startMs = 1_700_000_000_000;
+    const base = {
+      runId: "packaging-conflict-rebase",
+      runGeneration: "started",
+      runStatus: "running" as const,
+      nowTime: new Date(startMs),
+      elapsedBatchSec: 0,
+      calc: { ...calc, ppm: 600 },
+      v: values({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 0,
+        casesPerSkid: 10,
+        pizzasPerCase: 10,
+        casesNeeded: 100,
+      }),
+      form: fakeForm,
+      claimAutoTrackEvent: claim,
+    };
+    const { rerender } = renderHook((input) => useAutoTrack(input), { initialProps: base });
+
+    rerender({
+      ...base,
+      nowTime: new Date(startMs + 1_100),
+      elapsedBatchSec: 1.1,
+    });
+    await waitFor(() => expect(caseClaims).toHaveLength(1));
+    const rejected = caseClaims[0];
+    expect(rejected.mutations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "casesOnCurrentSkid", from: 0, to: 1 }),
+    ]));
+    expect(stored.casesOnCurrentSkid).toBe(0);
+
+    rerender({
+      ...base,
+      nowTime: new Date(startMs + 2_200),
+      elapsedBatchSec: 2.2,
+      v: values({
+        ...canonicalValues,
+        casesPerSkid: 10,
+        pizzasPerCase: 10,
+        casesNeeded: 100,
+      }),
+    });
+    await waitFor(() => expect(caseClaims).toHaveLength(2));
+
+    const retried = caseClaims[1];
+    expect(retried.eventId).not.toBe(rejected.eventId);
+    expect(retried.sequence).toBe(1);
+    expect(retried.mutations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "casesOnCurrentSkid", from: 0 }),
+    ]));
+  });
+
   it("does not arm Sauce or applicator claims when requested cases have no pizzas per case", async () => {
     const { form: fakeForm } = form();
     const claim = vi.fn();

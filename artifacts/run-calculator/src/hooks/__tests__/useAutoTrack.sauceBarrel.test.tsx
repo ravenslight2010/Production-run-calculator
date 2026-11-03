@@ -157,33 +157,44 @@ describe("useAutoTrack sauce barrel coordination", () => {
     expect(claim.mock.calls[1][0].eventId).toBe(claim.mock.calls[0][0].eventId);
   });
 
-  it("retires a recorded conflict ID and retries only after operator action with a fresh event", async () => {
+  it("rebases a recorded conflict onto canonical values and retries with a fresh event", async () => {
+    const canonicalValues = {
+      sauceBarrelsMade: 1,
+      sauceBarrelAnchorNetSec: 10,
+      sauceBarrelCorrectionGeneration: 0,
+    };
     const claim = vi.fn()
       .mockResolvedValueOnce({
         outcome: "conflict",
-        state: { generation: "sauce-auto:started", sequence: 0, nextDueAt: 20 },
-        values: { sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0 },
-      })
-      .mockResolvedValueOnce({
-        outcome: "accepted",
         state: { generation: "sauce-auto:started", sequence: 1, nextDueAt: 20 },
-        values: { sauceBarrelsMade: 1, sauceBarrelAnchorNetSec: 10 },
-      });
+        values: canonicalValues,
+      })
+      .mockImplementationOnce(async (request) => ({
+        outcome: "accepted",
+        state: {
+          generation: request.generation,
+          sequence: request.sequence,
+          nextDueAt: request.nextDueAt,
+        },
+        values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+      }));
     const onFailure = vi.fn();
-    const { result, rerender } = renderHook((p) => useAutoTrack(p), {
+    const { rerender } = renderHook((p) => useAutoTrack(p), {
       initialProps: props(10, claim, {}, { onAutomaticClaimFailure: onFailure }),
     });
 
-    await waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1));
-    expect(onFailure.mock.calls[0][1]).toBe("permanent");
-    rerender(props(11, claim, {}, { onAutomaticClaimFailure: onFailure }));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(claim).toHaveBeenCalledTimes(1);
-
-    act(() => result.current.retryFailedAutomaticClaim());
-    rerender(props(12, claim, {}, { onAutomaticClaimFailure: onFailure }));
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+    const rejectedClaim = claim.mock.calls[0][0];
+    rerender(props(21, claim, canonicalValues, { onAutomaticClaimFailure: onFailure }));
     await waitFor(() => expect(claim).toHaveBeenCalledTimes(2));
-    expect(claim.mock.calls[1][0].eventId).not.toBe(claim.mock.calls[0][0].eventId);
+    const rebasedClaim = claim.mock.calls[1][0];
+    expect(rebasedClaim.eventId).not.toBe(rejectedClaim.eventId);
+    expect(rebasedClaim).toMatchObject({ sequence: 2, dueAt: 20 });
+    expect(rebasedClaim.mutations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "sauceBarrelsMade", from: 1, to: 2 }),
+      expect.objectContaining({ field: "sauceBarrelAnchorNetSec", from: 10, to: 20 }),
+    ]));
+    expect(onFailure).not.toHaveBeenCalled();
   });
 
   it.each([

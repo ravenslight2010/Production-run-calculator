@@ -3,7 +3,7 @@
 Task: Close Remaining Reliability Gaps. This is an in-progress ledger, not a
 completion certificate or release decision.
 
-Last refreshed: 2026-11-02 UTC. This checkpoint preserves earlier failed
+Last refreshed: 2026-11-03 UTC. This checkpoint preserves earlier failed
 attempts; it does not recast a focused rerun as a full-suite pass.
 
 Latest resumed checkpoint: the ingredient-ID stale-profile overwrite is
@@ -2648,3 +2648,71 @@ owner’s 35.7-second client waits, tab-control symptoms, or Packaging
 auto-tracking stop. Browser wait includes background suspension and is not
 server processing time. No production rows, settings, or runtime state were
 changed.
+
+### 2026-11-03 — focused wake and stale-base follow-up
+
+On the isolated Chromium runner with a disposable database, the queued wake
+Stop/Resume cases passed 2/2 and the stale-base recovery case passed 1/1 with
+the recovery-copy storage-failure scenario enabled. The tests verify the same
+run against authoritative server state, preserve the stale conflict, reapply
+independent edits, and settle after reload. A sanitized trace review showed the
+first Resume metadata read preceded the queued PUT; the test now waits for the
+server update rather than weakening the assertion. This is a test-harness
+timing correction, not a product-code repair.
+
+The Run Insights dismissal case passed 1/1 in isolation. Its earlier grouped
+startup/hydration timeout was not reproduced alone; keep that full-run failure
+visible until the integrated suite determines whether it recurs. A process
+check found no browser-suite runner active, so the prior note that a full run
+was in progress is stale.
+
+The reviewed 241-case Chromium suite has now started against its disposable
+database. The existing `release-evidence/browser-full/FINAL-REPORT.md` was
+preserved before this run as
+`docs/evidence/reliability-closure-browser-full-before-2026-11-03.md`
+(SHA-256
+`fbf796a919f4cec0bdb7fec917e7301e0bf5ebbcbe2b99a32f041240eb2c56bb`) because
+the reporter writes the standard report path on a complete run. The runner's
+current identity and full outcome remain pending. No production changes,
+publication, or physical-device testing occurred. The serving build remains
+separate and unchanged; browser emulation does not prove Android wake/touch or
+published-app behavior.
+
+### 2026-11-03 — integrated browser progress
+
+The restarted 241-case Chromium run completed against the disposable database:
+**233 passed, 8 failed, 0 skipped**, with complete enumeration and no cases not
+run. The final report is `release-evidence/browser-full/FINAL-REPORT.md`;
+runner identity:
+`test-sha256:0bd9a720644f5a5f58661b4d376af07c4ed50b6d43218e90f4f990a783b71707`.
+This is a failed full-browser result, not a release pass. The earlier 235/241
+result is a separate historical run.
+
+Current failures to reproduce and classify:
+
+1. Phone Sauce/Dough live-card test could not find `tickbar-fill`.
+2. A manager queue-history item did not reach `item-loaded`/`ready` in 10s.
+3. After reload, the QC lot-entry selector omitted a run-linked ingredient.
+   The QC run and master-data bootstrap requests returned 200 and the earlier
+   component-check write returned 201; response payloads were not captured.
+   The logged `phone-320-long-error` is an intentional synthetic 503 path, not
+   this failure; the separate QC responsive case passed.
+4. In the shared cheese-recipe refresh scenario, at least one of two open pages
+   did not show the pending-run Ingredient Detail change within 20s.
+5–7. All three Run Insights journeys timed out during `signIn` while waiting for
+   the test's localStorage hydration predicate, before feature assertions.
+   Earlier focused reruns passed, so this full-suite failure still needs
+   isolation.
+8. The visual-regression test observed the “Saved” indicator at opacity 1 after
+   its 2.5s wait.
+
+All eight came from synthetic local browser fixtures; none establishes a
+published-app defect. A fresh disposable-database rerun of these exact eight
+tests with Playwright's built-in `list` reporter passed **8/8 in 2.9 minutes**.
+The first filtered attempt used the release reporter, whose exact 241-case
+guard correctly rejected a subset; its results were not used. The clean subset
+is diagnostic evidence only and does not replace the failed full run. All eight
+failures are currently classified as full-suite-only/non-reproduced; a
+suite-order, resource, or fixture interaction remains unresolved, and no
+application defect is confirmed by these cases. No assertions were weakened.
+No production changes, publication, or physical-device testing occurred.

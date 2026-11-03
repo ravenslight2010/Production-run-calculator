@@ -79,7 +79,7 @@
 - [Attach](recipe-name-only-attachment.md) + [fan](brand-fan-linked-name-narrowing.md) + [correction](correcting-import-alias-cleanup.md) — link by name/slot; correct bad aliases safely.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
 - [Sync](sync-snapshot-identity.md) [fence](complete-sync-snapshot-fencing.md) [offline](offline-operational-intents.md) [conflict](sync-conflict-policy.md) — reads aren't write acks; server wins.
-- [Sync and auto-tracking priority](sync-autotracking-priority.md) — prioritize sync reliability; align recovery/lifecycle across trackers without flattening station-specific production math.
+- [Sync and auto-tracking priority](sync-autotracking-priority.md) — keep station math distinct; rebase ordinary conflicts with fresh IDs and preserve stale/transport fences.
 - [Cross-channel claims](cross-channel-auto-track-claims.md) — shared stamps need queued deltas to distinguish peer auto-accepts from manual edits before rebasing.
 - [Formula safety](formula-import-safety.md) + [layouts](source-workbook-layouts.md) + [Apply retention](apply-source-evidence-retention.md) — preserve units; formula/cached values stay review-only.
 - [Release evidence](release-evidence-index.md) + [guide claims](release-guide-authority-claims.md) — bind readiness to revision and deployment; verify provider/live-target claims.

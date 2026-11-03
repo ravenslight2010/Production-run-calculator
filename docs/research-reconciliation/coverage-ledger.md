@@ -1,10 +1,10 @@
 # Coverage, uncertainty and failure ledger
 
-> **Current overlay:** the [app-wide audit, updated 2026-10-30](app-wide-audit-2026-10-29.md)
-> owns the current journey matrix and failure ledger. S177–S183 add current-source
-> lifecycle, importer, inventory and signed-in responsive evidence; F50 closes the
-> client-side inventory 403, while F51 records browser timing variation without
-> claiming server latency. The PASS labels in the October 26 domain table below
+> **Current overlay:** the [app-wide audit, updated 2026-11-03](app-wide-audit-2026-10-29.md)
+> owns the current journey matrix, source/build identity and failure ledger.
+> S185–S188 add Nov 2 owner-supplied wake evidence and read-only published-log
+> results; separate database-pool pressure is confirmed, but the wake cause remains inconclusive. Current test outcomes and remaining
+> work are in that audit. The PASS labels in the October 26 domain table below
 > describe only that historical assessment.
 
 Assessment 2026-10-26, source **B =

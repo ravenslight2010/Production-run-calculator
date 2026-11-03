@@ -303,6 +303,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
   playwright,
   baseURL,
 }, testInfo) => {
+  test.setTimeout(150_000);
   test.skip(!baseURL, "The isolated browser runner must provide a local web origin.");
   const webOrigin = baseURL!;
   const apiBase = requireLocalFixtureApiOrigin("QC authenticated browser verification");

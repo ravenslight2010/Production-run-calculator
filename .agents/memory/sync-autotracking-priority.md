@@ -50,3 +50,9 @@ After a successful canonical acknowledgement, suppress a queued snapshot only wh
 **Why:** A wake sequence can leave an identical full-state snapshot queued after a successful response, producing duplicate writes; browser-observed request counts varied and did not identify the triggering caller.
 
 **How to apply:** Compare queued work against the state actually acknowledged or rebased, not an obsolete pre-recovery body. Test canonical convergence and distinct write contents rather than relying on a fixed request count.
+
+For an ordinary automatic-tracking conflict, adopt the canonical values and sequence, retire the rejected event identity, and continue with a fresh identity. A transport failure remains a same-ID retry for idempotency; lifecycle `stale` remains fenced for explicit recovery.
+
+**Why:** The server durably records rejected event IDs, so replaying a conflict cannot accept newly computed values. A lifecycle-stale result is not equivalent to an ordinary value conflict.
+
+**How to apply:** Rebase channel-specific state and cadence from canonical values; preserve same-ID retry for uncertain transport and never weaken the lifecycle-stale boundary.
