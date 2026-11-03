@@ -1514,6 +1514,8 @@ test(
 test(
   "stale-base recovery keeps the server conflict, reapplies independent edits and settles after reload",
   async ({ page }: { page: Page }) => {
+    const injectRecoveryCopyStorageFailure =
+      process.env.SYNC_RECOVERY_COPY_STORAGE_FAILURE !== "0";
     await page.addInitScript(() => {
       const NativeEventSource = window.EventSource;
       const sources: EventSource[] = [];
@@ -1692,11 +1694,12 @@ test(
       }).catch(() => {});
     });
     let recoveryCopyFaultInjected = false;
+    let staleBaseRouteIntercepted = false;
     let staleBaseObserved = false;
     let queuedIntentBaseCasesNeeded: number | null = null;
     await page.route("**/api/sync/today**", async (route) => {
       const request = route.request();
-      if (recoveryCopyFaultInjected || request.method() !== "PUT") {
+      if (staleBaseRouteIntercepted || request.method() !== "PUT") {
         await route.continue();
         return;
       }
@@ -1746,11 +1749,14 @@ test(
         return null;
       }, runId);
       const response = await route.fetch();
-      await page.evaluate(() => {
-        (window as unknown as { armRecoveryCopyStorageFailure: () => void })
-          .armRecoveryCopyStorageFailure();
-      });
-      recoveryCopyFaultInjected = true;
+      staleBaseRouteIntercepted = true;
+      if (injectRecoveryCopyStorageFailure) {
+        await page.evaluate(() => {
+          (window as unknown as { armRecoveryCopyStorageFailure: () => void })
+            .armRecoveryCopyStorageFailure();
+        });
+        recoveryCopyFaultInjected = true;
+      }
       await route.fulfill({ response });
     });
     const staleWriteResponse = page.waitForResponse((response) => {
@@ -1804,11 +1810,12 @@ test(
     const response = await staleWriteResponse;
     expect(response.status()).toBe(200);
     expect((await response.json() as { partialFallback?: boolean }).partialFallback).toBe(true);
-    expect(recoveryCopyFaultInjected).toBe(true);
+    expect(staleBaseRouteIntercepted).toBe(true);
+    expect(recoveryCopyFaultInjected).toBe(injectRecoveryCopyStorageFailure);
     expect(staleBaseObserved).toBe(true);
     await expect.poll(() => page.evaluate(() => (
       window as unknown as { recoveryCopyStorageFailureOccurred: boolean }
-    ).recoveryCopyStorageFailureOccurred)).toBe(true);
+    ).recoveryCopyStorageFailureOccurred)).toBe(injectRecoveryCopyStorageFailure);
     expect(queuedIntentBaseCasesNeeded).toBe(24);
 
     await expect(casesNeeded).toHaveValue("999", { timeout: 15_000 });
@@ -1833,11 +1840,15 @@ test(
     });
     await page.getByTestId("sync-status-button").click();
     const conflictActivity = page.locator('[data-testid^="sync-activity-"]')
-      .filter({ hasText: "browser storage did not save this rebase for reload" });
+      .filter({ hasText: "Recovered stale-base write" });
     await expect(conflictActivity).toHaveCount(1, { timeout: 10_000 });
     await expect(conflictActivity).toContainText("kept the server value for 1 conflict");
     await expect(conflictActivity).toContainText(/reapplied \d+ changes/);
-    await expect(conflictActivity).toContainText("browser storage did not save this rebase for reload");
+    if (injectRecoveryCopyStorageFailure) {
+      await expect(conflictActivity).toContainText("browser storage did not save this rebase for reload");
+    } else {
+      await expect(conflictActivity).not.toContainText("browser storage did not save this rebase for reload");
+    }
     await expect(conflictActivity).toContainText("review the current value before editing again");
 
     const pendingWrites = page.getByText("Pending writes", { exact: true });
