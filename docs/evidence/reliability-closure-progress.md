@@ -2649,6 +2649,12 @@ auto-tracking stop. Browser wait includes background suspension and is not
 server processing time. No production rows, settings, or runtime state were
 changed.
 
+The owner-supplied sync/pool-pressure research note (2026-11-03) adds a useful
+observe-only comparison of idle behavior against one foreground device, but
+does not add incident measurements or establish pool pressure as the cause.
+Keep that comparison as an evidence gap; do not tune pool limits or background
+schedules from the hypothesis alone.
+
 ### 2026-11-03 — focused wake and stale-base follow-up
 
 On the isolated Chromium runner with a disposable database, the queued wake
@@ -2716,3 +2722,61 @@ failures are currently classified as full-suite-only/non-reproduced; a
 suite-order, resource, or fixture interaction remains unresolved, and no
 application defect is confirmed by these cases. No assertions were weakened.
 No production changes, publication, or physical-device testing occurred.
+
+### 2026-11-03 — same-run wake sequence and production correlation
+
+The focused isolated Chromium test for the paired Packaging correction through
+wake and reload passed **1/1** against a disposable database. It lets one case
+become due around wake, freezes the test clock, delays the next claim response,
+checks for duplicate claims, verifies tracking continues with the next
+accepted per-channel sequence, then confirms reload and persisted counts agree.
+The earlier failure was a locally reproduced same-run sequence reset:
+foreground wake bookkeeping cleared the client sequence even though the server
+still held the accepted sequence for that run generation. Timer-baseline reset
+now preserves coordination sequence for the same generation. This is a local
+source fix and synthetic browser result, not proof of published or physical
+device behavior.
+
+The configured calculator test workflow passed **399 files** with **3,906
+tests passed, 0 failed, and 1 skipped**. The root workspace typecheck also
+passed after the hook change, including the recovery audit, generated
+contracts, and workspace/package TypeScript checks.
+
+A read-only SRE correlation found the public Autoscale deployment serving
+`app-build:934ed015-7a94-4db0-a558-0fdbad559c27` (source fingerprint
+`2da695ab…0629cdb`, created Oct 30); no build landed during the Nov 2 incident
+windows. Pool acquisition pressure and event-loop delay were recorded around
+two reported wake incidents, with the strongest overlap at **09:26:51 CST**:
+the containing minute had 35 acquisition errors, acquisition p95 5.3 seconds
+(max 6.4 seconds), waiting p95 11 (max 15), and event-loop delay p95 3.1
+seconds (max 6.7 seconds). For **08:58:48 CST**, pressure appeared in the
+preceding minutes but not at the exact report minute. For **14:14:16 CST**, the
+adjacent minute had no acquisition-error counter and low event-loop delay,
+although waiting clients remained and larger pool/loop stalls appeared in
+preceding minutes.
+
+This makes intermittent pool/runtime contention a plausible contributor, not
+a demonstrated cause of any device incident. The error-metric series was
+empty, not proof of zero errors; the report found no error-severity log entries
+and no per-request/device correlation. `/api/sync/events` durations include
+long-lived SSE requests, not browser background wait. The local sequence-reset
+defect and production pool pressure are separate findings unless correlated by
+future evidence. No pool limit, background schedule, deployment, or production
+data was changed.
+
+A later **20:00Z Nov 3** sample refines the signal toward intermittent
+per-instance application-pool/runtime contention rather than database-wide
+connection-slot exhaustion: the verified database sample had 13/450 backends,
+433 estimated ordinary slots remaining, and no lock waiters. In the surrounding
+minute, telemetry recorded 22 app-pool acquisition errors, acquisition p95
+1.7 seconds (max 7.2 seconds), up to 19 waiters, and event-loop delay p95 2.2
+seconds (max 9.1 seconds); a scheduled-evaluation status query then timed out
+while acquiring a pool connection. At the capacity-sample instant the app
+pool had six idle connections and no waiters, so this remains intermittent and
+is not a reported-device event.
+
+The full 241-case browser run remains a failed result (233 passed, 8 failed);
+the focused wake test does not replace it. Physical Android wake/touch and
+foreground/peer-device handoff remain unverified. The task stays **IN
+PROGRESS** pending broader integrated verification and bounded incident
+correlation.

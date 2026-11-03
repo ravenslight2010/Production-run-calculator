@@ -56,3 +56,9 @@ For an ordinary automatic-tracking conflict, adopt the canonical values and sequ
 **Why:** The server durably records rejected event IDs, so replaying a conflict cannot accept newly computed values. A lifecycle-stale result is not equivalent to an ordinary value conflict.
 
 **How to apply:** Rebase channel-specific state and cadence from canonical values; preserve same-ID retry for uncertain transport and never weaken the lifecycle-stale boundary.
+
+When foreground recovery only rebases timers or resets wall-clock bookkeeping within the same run generation, preserve every accepted per-channel coordination sequence.
+
+**Why:** A same-run wake reset can clear the client sequence after an accepted claim while the server still expects its next value; the next claim then reuses the old sequence and is rejected as stale.
+
+**How to apply:** Keep sequence lifetime tied to run/generation, not timer-baseline lifetime. Reset it only on a new run/generation; test wake recovery followed by a second accepted claim using the next sequence.

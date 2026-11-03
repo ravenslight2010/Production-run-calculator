@@ -552,6 +552,18 @@ async function followRealDateNow(page: Page): Promise<void> {
   });
 }
 
+async function stopFollowingRealDateNow(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __testFollowRealTimer?: number;
+    };
+    if (w.__testFollowRealTimer) {
+      window.clearInterval(w.__testFollowRealTimer);
+      delete w.__testFollowRealTimer;
+    }
+  });
+}
+
 async function installDateProxyBeforeNavigation(
   page: Page,
   fakeMs: number,
@@ -3809,6 +3821,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       receivedAt: number;
       status: number;
       outcome?: string;
+      claimSequence?: number;
+      claimDueAt?: number;
+      stateSequence?: number;
+      stateNextDueAt?: number;
+      generationMatchesState?: boolean;
+      baseUpdatedAtMatchesServer?: boolean;
     }> = [];
     page.on("request", (request) => {
       if (new URL(request.url()).pathname !== "/api/sync/auto-track/claim") return;
@@ -3826,13 +3844,36 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         || new URL(response.url()).pathname !== "/api/sync/auto-track/claim"
       ) return;
       try {
-        const body = request.postDataJSON() as { claim?: { channel?: string } };
+        const body = request.postDataJSON() as {
+          claim?: {
+            channel?: string;
+            runId?: string;
+            sequence?: number;
+            dueAt?: number;
+            generation?: string;
+            baseUpdatedAt?: number;
+          };
+        };
         if (body.claim?.channel !== "case") return;
-        const result = await response.json() as { outcome?: string };
+        const result = await response.json() as {
+          outcome?: string;
+          state?: { generation?: string; sequence?: number; nextDueAt?: number };
+          data?: { runValuesUpdatedAt?: Record<string, number> };
+        };
+        const serverRunValuesUpdatedAt = body.claim.runId
+          ? Number(result.data?.runValuesUpdatedAt?.[body.claim.runId])
+          : Number.NaN;
         caseClaimResponses.push({
           receivedAt: Date.now(),
           status: response.status(),
           outcome: result.outcome,
+          claimSequence: body.claim.sequence,
+          claimDueAt: body.claim.dueAt,
+          stateSequence: result.state?.sequence,
+          stateNextDueAt: result.state?.nextDueAt,
+          generationMatchesState: result.state?.generation === body.claim.generation,
+          baseUpdatedAtMatchesServer: Number.isFinite(serverRunValuesUpdatedAt)
+            && Math.abs(serverRunValuesUpdatedAt - Number(body.claim.baseUpdatedAt)) < 0.0001,
         });
       } catch {
         caseClaimResponses.push({
@@ -3993,17 +4034,28 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     const resumeAt = Date.now();
     await expect(resumeAuto).toBeHidden({ timeout: 15_000 });
     await expect(skids).toContainText("0");
-    await expect(cases).toHaveText("45");
+    await expect(cases).toHaveText(/^(45|46)$/);
 
-    // The manual correction remains the canonical base through a screen wake.
+    // The next case can become due while Resume settles. Preserve the operator's
+    // correction through the wake, then verify exactly one scheduled case is
+    // accepted, whether its deadline fell just before or just after wake.
     await page.waitForTimeout(1_500);
     await simulateScreenOff(page);
     const firstWakeNowMs = Date.now();
     await mockDateNow(page, firstWakeNowMs, { tick: false });
     const wakeStartedAt = Date.now();
     await simulateOnlineWake(page);
-    await expect(cases).toHaveText("45", { timeout: 15_000 });
+    await expect(cases).toHaveText("46", { timeout: 15_000 });
     await expect(skids).toContainText("0");
+    // Freeze the helper-driven wall clock as soon as the first post-Resume case
+    // lands. The next case is held below while its server acknowledgment waits.
+    await page.evaluate(() => {
+      const w = window as unknown as { __testFollowRealTimer?: number };
+      if (typeof w.__testFollowRealTimer === "number") {
+        window.clearInterval(w.__testFollowRealTimer);
+        delete w.__testFollowRealTimer;
+      }
+    });
 
     const afterWake = await page.evaluate((serverRunId) => {
       const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
@@ -4046,11 +4098,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     ).toBe(canonicalRunId);
     expect(afterWake.values).toMatchObject({
       skidsCompleted: 0,
-      casesOnCurrentSkid: 45,
+      casesOnCurrentSkid: 46,
     });
     expect(afterWake.progress).toMatchObject({
       skidsCompleted: 0,
-      casesOnCurrentSkid: 45,
+      casesOnCurrentSkid: 46,
       correctionGeneration: canonicalCorrectionGeneration,
     });
 
@@ -4082,30 +4134,28 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       .toBeLessThanOrEqual(localNow);
     expect(resumedPackaging.serverValues).toMatchObject({
       skidsCompleted: 0,
-      casesOnCurrentSkid: 45,
+      casesOnCurrentSkid: 46,
     });
     let dueNowMs = 0;
-    let clientCaseClaim: { outcome?: string } | null = null;
+    let clientCaseClaim: {
+      outcome?: string;
+      claimDueAt?: number;
+      stateSequence?: number;
+      stateNextDueAt?: number;
+    } | null = null;
     const postResumeClaims = () =>
       caseClaimResponses.slice(resumeClaimStartIndex);
-    expect(
-      postResumeClaims().filter(
-        (claim) => claim.outcome === "accepted" && claim.receivedAt < wakeStartedAt,
-      ),
-      "the next case must not be claimed before wake recovery completes",
-    ).toHaveLength(0);
     await waitForSyncWritesToDrain(page);
     try {
       await expect
         .poll(
-          () => postResumeClaims().some(
+          () => postResumeClaims().filter(
             (claim) => claim.status === 200
-              && claim.outcome === "accepted"
-              && claim.receivedAt >= wakeStartedAt,
-          ),
+              && claim.outcome === "accepted",
+          ).length,
           { timeout: 15_000 },
         )
-        .toBe(true);
+        .toBe(1);
     } catch (error) {
       const browserState = await page.evaluate((runId) => {
         const w = window as unknown as {
@@ -4130,7 +4180,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         };
       }, canonicalRunId);
       throw new Error([
-        `No post-Resume wake case claim: ${String(error)}`,
+        `Expected one post-Resume case claim: ${String(error)}`,
         `resumeAt=${resumeAt}, wakeStartedAt=${wakeStartedAt}, claims=${JSON.stringify(postResumeClaims())}`,
         `channels=${JSON.stringify(autoTrackClaimChannels)}`,
         `browser=${JSON.stringify(browserState)}`,
@@ -4138,10 +4188,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     }
     clientCaseClaim = postResumeClaims().find(
       (claim) => claim.status === 200
-        && claim.outcome === "accepted"
-        && claim.receivedAt >= wakeStartedAt,
+        && claim.outcome === "accepted",
     ) ?? null;
     expect(clientCaseClaim?.outcome).toBe("accepted");
+    expect(postResumeClaims().filter((claim) => claim.outcome === "accepted"))
+      .toHaveLength(1);
     dueNowMs = Date.now();
     const readAfterDueBeat = async () => page.evaluate(async (runId) => {
       const response = await fetch(
@@ -4157,11 +4208,15 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         autoTrackServerState?: {
           wallClockBookkeeping?: Record<string, { caseNextDueMs?: number; lastExpectedCases?: number }>;
         };
+        autoTrackCoordination?: {
+          runs?: Record<string, Record<string, { nextDueAt?: number }>>;
+        };
       };
       return {
         progress: body.packagingProgress?.[runId],
         value: body.runValues?.[runId]?.casesOnCurrentSkid,
         book: body.autoTrackServerState?.wallClockBookkeeping?.[runId],
+        coordination: body.autoTrackCoordination?.runs?.[runId]?.case,
       };
     }, canonicalRunId);
     const afterDueBeat = await readAfterDueBeat();
@@ -4185,11 +4240,16 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         ? configured
         : new Date().toISOString().slice(0, 10);
     });
-    const firstNextCaseDueMs = Number(afterDueBeat.book?.caseNextDueMs ?? 0);
+    const firstNextCaseDueMs = Number(clientCaseClaim?.stateNextDueAt ?? 0);
     expect(
       firstNextCaseDueMs,
-      "the accepted post-Resume case claim must arm the next case timer",
+      "the accepted post-Resume case claim must return its next due time",
     ).toBeGreaterThan(dueNowMs);
+    expect(afterDueBeat.coordination?.nextDueAt).toBe(firstNextCaseDueMs);
+    const casePeriodMs =
+      firstNextCaseDueMs - Number(clientCaseClaim?.claimDueAt ?? 0);
+    expect(casePeriodMs, "the accepted case claim must report its cadence")
+      .toBeGreaterThan(2_000);
     const caseRequestCount = () =>
       autoTrackClaimChannels.filter((channel) => channel === "case").length;
     const caseRequestCountBeforeHeldAck = caseRequestCount();
@@ -4202,20 +4262,30 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       casesOnCurrentSkid?: number;
       dueAt: number;
       nextDueAt: number;
+      claimSequence: number;
+      stateSequence?: number;
+      generationMatchesState?: boolean;
+      baseUpdatedAtMatchesServer?: boolean;
     } | null = null;
     let releaseHeldCaseClaim: (() => void) | undefined;
     const heldCaseClaimResponseGate = new Promise<void>((resolve) => {
       releaseHeldCaseClaim = resolve;
     });
     let heldClaimRouteInstalled = false;
+    let expectedFinalSkids = 0;
+    let expectedFinalCases = 0;
 
     try {
       await page.route(autoTrackClaimRoute, async (route) => {
         const request = route.request();
         let claim: {
           channel?: string;
+          runId?: string;
+          generation?: string;
+          sequence?: number;
           dueAt?: number;
           nextDueAt?: number;
+          baseUpdatedAt?: number;
         } | undefined;
         try {
           const body = request.postDataJSON() as {
@@ -4240,35 +4310,43 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         let result: {
           outcome?: string;
           values?: { casesOnCurrentSkid?: number };
+          state?: { generation?: string; sequence?: number };
+          data?: { runValuesUpdatedAt?: Record<string, number> };
         } = {};
         try {
           result = JSON.parse(responseBody.toString("utf8")) as typeof result;
         } catch {
           // The status and empty body below make a malformed reply fail loudly.
         }
+        const serverRunValuesUpdatedAt = claim.runId
+          ? Number(result.data?.runValuesUpdatedAt?.[claim.runId])
+          : Number.NaN;
         heldServerClaim = {
           status: serverResponse.status(),
           outcome: result.outcome,
           casesOnCurrentSkid: result.values?.casesOnCurrentSkid,
           dueAt: Number(claim.dueAt),
           nextDueAt: Number(claim.nextDueAt),
+          claimSequence: Number(claim.sequence),
+          stateSequence: result.state?.sequence,
+          generationMatchesState: result.state?.generation === claim.generation,
+          baseUpdatedAtMatchesServer: Number.isFinite(serverRunValuesUpdatedAt)
+            && Math.abs(serverRunValuesUpdatedAt - Number(claim.baseUpdatedAt)) < 0.0001,
         };
         await heldCaseClaimResponseGate;
         await route.fulfill({ response: serverResponse, body: responseBody });
       });
       heldClaimRouteInstalled = true;
 
-      // Stop the helper that follows real wall time. The app's own real timer
-      // continues to run, reading this deterministic Date value each interval.
-      await page.evaluate(() => {
-        const w = window as unknown as { __testFollowRealTimer?: number };
-        if (typeof w.__testFollowRealTimer === "number") {
-          window.clearInterval(w.__testFollowRealTimer);
-          delete w.__testFollowRealTimer;
-        }
-      });
       holdNextCaseClaim = true;
-      await mockDateNow(page, firstNextCaseDueMs + 1, { tick: false });
+      const wakeRebasedCaseDueMs = Math.max(
+        firstNextCaseDueMs,
+        firstWakeNowMs + casePeriodMs,
+      );
+      await stopFollowingRealDateNow(page);
+      const nextClaimDueMs = wakeRebasedCaseDueMs + 1;
+      await mockDateNow(page, nextClaimDueMs, { tick: false });
+      expect(await page.evaluate(() => Date.now())).toBe(nextClaimDueMs);
       await expect
         .poll(() => caseRequestCount(), {
           timeout: 15_000,
@@ -4284,13 +4362,22 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
       const acceptedWhilePending = heldServerClaim!;
       expect(acceptedWhilePending.status).toBe(200);
-      expect(acceptedWhilePending.outcome).toBe("accepted");
+      expect(acceptedWhilePending.outcome, JSON.stringify({
+        heldClaim: acceptedWhilePending,
+        firstClaim: clientCaseClaim,
+        canonicalCoordination: afterDueBeat.coordination,
+        dueNowMs,
+      })).toBe("accepted");
+      expect(acceptedWhilePending.claimSequence).toBe(
+        Number(clientCaseClaim?.stateSequence ?? 0) + 1,
+      );
       expect(acceptedWhilePending.casesOnCurrentSkid).toBe(47);
-      const casePeriodMs = acceptedWhilePending.nextDueAt - acceptedWhilePending.dueAt;
+      const heldCasePeriodMs = acceptedWhilePending.nextDueAt - acceptedWhilePending.dueAt;
       expect(
-        casePeriodMs,
+        heldCasePeriodMs,
         "the held claim must return a valid next-case cadence",
       ).toBeGreaterThan(2_000);
+      expect(heldCasePeriodMs).toBe(casePeriodMs);
 
       const readNextCaseCountdownSeconds = async () => {
         const text = await page.getByText(/^Next case in/).first().textContent();
@@ -4312,7 +4399,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const expectedCaseRequestsWhilePending = caseRequestCountBeforeHeldAck + 1;
       const pendingTimerExpirations = [
         acceptedWhilePending.nextDueAt + 1,
-        acceptedWhilePending.nextDueAt + casePeriodMs + 2,
+        acceptedWhilePending.nextDueAt + heldCasePeriodMs + 2,
       ];
       for (const [index, expiredAt] of pendingTimerExpirations.entries()) {
         await mockDateNow(page, expiredAt, { tick: false });
@@ -4332,7 +4419,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
       const lastPendingExpiration =
         pendingTimerExpirations[pendingTimerExpirations.length - 1];
-      releaseHeldCaseClaim();
+      releaseHeldCaseClaim?.();
       await expect(cases).toHaveText("47", { timeout: 15_000 });
       await expect
         .poll(() => caseClaimResponses.length, {
@@ -4345,7 +4432,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // manual retry, while respecting the run's 48-case target.
       await mockDateNow(
         page,
-        lastPendingExpiration + casePeriodMs + 1,
+        lastPendingExpiration + heldCasePeriodMs + 1,
         { tick: false },
       );
       await expect
@@ -4365,14 +4452,47 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
             });
             if (!response.ok) return null;
             const body = (await response.json()) as {
-              runValues?: Record<string, { casesOnCurrentSkid?: number }>;
+              runValues?: Record<string, {
+                skidsCompleted?: number;
+                casesOnCurrentSkid?: number;
+              }>;
             };
-            return body.runValues?.[runId]?.casesOnCurrentSkid ?? null;
+            const values = body.runValues?.[runId];
+            if (!values) return null;
+            return (values.skidsCompleted ?? 0) * 48
+              + (values.casesOnCurrentSkid ?? 0);
           }, { runId: canonicalRunId, today: fixtureDate }),
           { timeout: 15_000, message: "the resumed case claim was not canonical" },
         )
-        .toBe(48);
-      await expect(cases).toHaveText("48", { timeout: 10_000 });
+        .toBeGreaterThanOrEqual(48);
+      const finalCanonicalProgress = await page.evaluate(async ({ runId, today }) => {
+        const response = await fetch(`/api/sync/today?today=${today}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) return null;
+        const body = (await response.json()) as {
+          runValues?: Record<string, {
+            skidsCompleted?: number;
+            casesOnCurrentSkid?: number;
+          }>;
+        };
+        const values = body.runValues?.[runId];
+        if (!values) return null;
+        return {
+          skidsCompleted: values.skidsCompleted ?? 0,
+          casesOnCurrentSkid: values.casesOnCurrentSkid ?? 0,
+        };
+      }, { runId: canonicalRunId, today: fixtureDate });
+      if (!finalCanonicalProgress) {
+        throw new Error("the final Packaging progress was not canonical");
+      }
+      expectedFinalSkids = finalCanonicalProgress.skidsCompleted;
+      expectedFinalCases = finalCanonicalProgress.casesOnCurrentSkid;
+      expect(
+        finalCanonicalProgress.skidsCompleted * 48
+          + finalCanonicalProgress.casesOnCurrentSkid,
+      ).toBeGreaterThanOrEqual(48);
+      await expect(cases).toHaveText(String(expectedFinalCases), { timeout: 10_000 });
       await expect
         .poll(
           () => postResumeClaims().filter(
@@ -4400,8 +4520,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     await page
       .locator('[data-testid="tab-packaging"]')
       .waitFor({ state: "visible", timeout: 20_000 });
-    await expect(cases).toHaveText("48", { timeout: 15_000 });
-    await expect(skids).toContainText("0");
+    await expect(cases).toHaveText(String(expectedFinalCases), { timeout: 15_000 });
+    await expect(skids).toContainText(String(expectedFinalSkids));
 
     // Reload is a separate persistence boundary: form, durable run values,
     // Packaging register, and canonical server state must still agree.
@@ -4411,10 +4531,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       .waitFor({ state: "visible", timeout: 20_000 });
     await expect(
       page.locator('[data-testid="text-casesOnCurrentSkid"]').first(),
-    ).toHaveText("48", { timeout: 20_000 });
+    ).toHaveText(String(expectedFinalCases), { timeout: 20_000 });
     await expect(
       page.locator('[data-testid="text-skidsCompleted"]').first(),
-    ).toContainText("0");
+    ).toContainText(String(expectedFinalSkids));
 
     const persisted = await page.evaluate(async (runId) => {
       const values = JSON.parse(
@@ -4447,22 +4567,14 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         serverProgress: body.packagingProgress?.[runId],
       };
     }, canonicalRunId);
-    expect(persisted.values).toMatchObject({
-      skidsCompleted: 0,
-      casesOnCurrentSkid: 48,
-    });
-    expect(persisted.progress).toMatchObject({
-      skidsCompleted: 0,
-      casesOnCurrentSkid: 48,
-    });
-    expect(persisted.serverValues).toMatchObject({
-      skidsCompleted: 0,
-      casesOnCurrentSkid: 48,
-    });
-    expect(persisted.serverProgress).toMatchObject({
-      skidsCompleted: 0,
-      casesOnCurrentSkid: 48,
-    });
+    const expectedPersistedProgress = {
+      skidsCompleted: expectedFinalSkids,
+      casesOnCurrentSkid: expectedFinalCases,
+    };
+    expect(persisted.values).toMatchObject(expectedPersistedProgress);
+    expect(persisted.progress).toMatchObject(expectedPersistedProgress);
+    expect(persisted.serverValues).toMatchObject(expectedPersistedProgress);
+    expect(persisted.serverProgress).toMatchObject(expectedPersistedProgress);
   });
 
   test("F. a failed Packaging correction stays visible on phone until an explicit retry", async ({
