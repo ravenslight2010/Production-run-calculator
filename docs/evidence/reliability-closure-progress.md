@@ -2497,9 +2497,154 @@ root typecheck then finished successfully in 41 seconds. This does not prove
 the compile-time issue caused the reported production warm-return behavior;
 the local source has not been published.
 
+The client suite was rerun after the binding change and passed: 398 files,
+3,900 tests passed, zero failed, one skipped, in 117 seconds (within the
+150-second budget). It includes wake coordination, foreground recovery,
+screen-wake auto-tracking, and pause/resume coverage. This does not replace
+physical-device verification.
+
 The owner's warm-return versus cold-reopen observation remains a reported
 reproduction clue. Existing automated coverage exercises failed wake reads,
 visible retries, two-session adoption, and Packaging correction through wake
 and reload, but browser simulation cannot reproduce Android process
 suspension. The final integrated 241-case local release/browser run remains
 pending; no publishing or production mutation is authorized.
+
+### 2026-11-02 — owner-provided screen recordings
+
+Visual samples from the three supplied recordings show two launches from
+Android Home reaching the app's baseline or latest-snapshot UI. A separate
+active Pack recording shows an automatic-count syncing label and one pending
+write requiring acknowledgment; the timer continues and the displayed case
+count changes, then appears stable in later sampled frames. A diagnostics
+recording shows issue and health views opening, including a cancelled-request
+record. No deliberate failed tap or screen-off/warm-return sequence is visible
+in the sampled frames, so the recordings do not prove that tracking stopped or
+that a control was unresponsive. The active-Pack clip begins around 5:11 PM
+local, near the end of the production pool-pressure interval, but no
+request/device correlation is available. Audio was not reviewed. These are
+additional owner-provided client observations, not server-side reproduction
+or proof of causality.
+
+Deployment logs continued to show intermittent pool pressure after that clip.
+The 23:18:23–23:21:24 UTC windows recorded 45, 41, and 24 acquisition errors.
+The first window's p50/p95/max waits were 2.6/5.6/5.8 seconds; the next
+reached p95/max of 6.6/7.4 seconds, and the third reached p95/p99/max of
+5.0/8.3/8.3 seconds. Event-loop delay reached 5.4 seconds. Background jobs,
+outbox draining, push scheduling, and a queue monitor failed or timed out.
+A readiness sample warned about background workers and ten recent server-job
+failures, while the server auto-track tick still showed a recent success. A
+capacity sample reported ordinary DB slots available, so the evidence remains
+intermittent application-pool pressure rather than database-wide connection
+exhaustion. These later errors occurred several minutes after the supplied
+Pack clip and are not correlated to its client request. The readiness endpoint
+returned successfully while marking background workers degraded. Through
+23:21:35 UTC, logs also recorded more status-aggregate checkout and outbox
+timeouts, server-job failures, and a push-scheduling failure.
+
+### 2026-11-02 — additional owner recording, about 5:39–5:41 PM local
+
+The owner clarifies that this is the recurring auto-tracking issue they see
+after a manual change, not merely a generic launch example. The recording begins
+at Home, then shows the Pack screen with an automatic-count sync-pending label
+and a running timer. A later sampled frame shows a confirmed server baseline
+and Resume control; subsequent samples show the timer and displayed production
+counters progressing while the sync-pending label appears again. Counter
+movement does not establish correct auto-track reconciliation or server
+acknowledgment. The manual edit itself is not visible in the sampled frames,
+and there is no request-level correlation. Product names, run IDs, and exact
+counts were omitted; audio was not reviewed.
+
+### 2026-11-02 — additional owner report of stopped auto-tracking
+
+The owner identifies a newly supplied 89.6-second Chrome recording as a case
+where auto-tracking had stopped. This is a distinct reported outcome from the
+preceding recording, where the timer and displayed counters moved while sync
+was pending. Sampled frames show the Pack screen with a pending-sync/recovery
+status and a counter that changes in some samples but is stable across others.
+That is consistent with the reported stall, but does not establish whether a
+case timer should have advanced during those intervals or whether the server
+accepted any auto-track event. The manual edit itself and request-level
+correlation are not visible.
+
+### 2026-11-02 — apparent tap feedback without action
+
+The owner describes a second newly supplied recording in which a button appears
+to register a tap but no action follows. Sampled frames show recovery and
+pending-confirmation states; a run control later changes to a "Stop requested"
+state and an ended-run screen appears. This shows visible state transitions in
+the recording, but does not identify which intended tap succeeded or whether
+its request reached the server. No browser event or request-level correlation
+is available.
+
+### 2026-11-03 — foreground recovery and delayed autosave review
+
+Source review found no full-screen touch-blocking overlay in the recovery
+status component. Run lifecycle actions are intentionally queued behind the
+canonical foreground-recovery barrier; queued Pause/Resume controls change to
+an explicit requested state and remain disabled until resolution. Automatic
+tracking is also paused while that barrier is held. A failed canonical pull
+keeps the fence raised and exposes Retry rather than applying an unconfirmed
+local action. This is consistent with a long recovery appearing as an
+unresponsive tab, but does not prove that all tab controls are blocked or that
+the recovery request is the cause. The canonical GET has a 10-second client
+timeout; background suspension can extend the observed wall-clock wait.
+
+The profile/factory refresh is started independently after canonical adoption
+and is not awaited before releasing recovery. The barrier therefore should not
+be held by those best-effort reads. No weakening of the stale-state fence is
+authorized. The delayed form-autosave path now reuses the existing
+JSON-normalized persistence guard after its debounce, so already-adopted values
+and optional `undefined` form properties do not create a fresh edit stamp.
+Focused verification of the stale-base browser case remains unresolved; a
+standalone run has been sensitive to input timing and is not being masked by
+loosening the conflict assertions.
+
+### 2026-11-03 — focused verification and production log comparison
+
+Current candidate identities: source
+`source-sha256:62c0b716f063484d7e43c36d92c4b32357e0510abebb1ab9b15d776d12c6abe1`;
+verification `test-sha256:00423001368a5c1c7a5dadb9e6e008c2bc9d983fc2fd55379b8198a40c682e1c`.
+The serving app is a separate build and was not changed.
+
+Current local checks passed: run-calculator tests (398 files; 3,900 passed,
+1 skipped), root workspace typecheck, the operational-report integration test
+(22), WebKit identity contract (16 identities), deferred-Home boundary tests
+(102), and the model-version check. Focused browser checks passed for Run
+Insights (3), field diagnostics (1, after updating the assertion to the current
+“Accumulated totals (not daily)” label), and the QC retention workflow on phone
+and tablet WebKit (2). A full model-bump workflow did not pass locally: its
+HTTPS guard suite could not bind the IPv6 `::1` fixture (`EAFNOSUPPORT`), a
+known local-runtime limitation; the security test was not skipped or weakened.
+
+The full Chromium browser suite is running against its disposable database.
+The focused stale-base sync browser case is still unresolved. A temporary fake
+timer attempt changed the field value before the stale request could be
+asserted; that test-only change was reverted. Its result is not treated as a
+product failure or a pass. No sync conflict assertion was weakened.
+
+Read-only production review of the requested Nov 2 windows found no 5xx or
+error-severity entries across 3,153 HTTP requests; 432 `/api/sync/today` reads
+had 1.4–2.1s p95 and 2.3–2.5s p99 across the windows. Logged today reads near
+the owner’s reports returned 200, generally in 73–728ms (and 122–702ms in the
+18:12 CST window). Intermittent pool-acquisition pressure did overlap some
+windows: before 09:26 CST, 30 then 16 acquisition errors/minute; around
+14:12–13 CST, acquisition errors/delays; around 17:11 CST, 43 and 35 errors
+per minute, p95 acquisition up to 10.1s, and event-loop max 25.3s; around
+17:39–41 CST, 30 errors/minute and 7.2s p95 acquisition. `/api/sync/events`
+had multi-second durations with p95 capped at 10s, distinct from today reads.
+Sampled transaction p95s were about 0.5–0.7s; a capacity sample showed no DB
+locks or waiting backends. Outbox health had brief failures and later recovered
+with no pending events. Logs also show Sauce auto-track waiting for a valid
+inventory mapping on an unattributable run; this does not explain the owner’s
+Packaging report. The serving build was
+`42763954-0c35-47c4-8b4b-6ea38c26deb1` (created Oct 30, 15:38 UTC); no build
+landed in the incident windows.
+
+Conclusion remains bounded: intermittent server-pool pressure is a supported
+proximate reliability signal, but successful sync/today reads and the absence
+of a request/device correlation do not establish it as the cause of the
+owner’s 35.7-second client waits, tab-control symptoms, or Packaging
+auto-tracking stop. Browser wait includes background suspension and is not
+server processing time. No production rows, settings, or runtime state were
+changed.

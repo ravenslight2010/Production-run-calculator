@@ -550,15 +550,12 @@ test("applies photographed review edits to the authenticated profile and recipe 
   // deterministic reconciliation endpoint is separate from paid AI parsing.
   const history = page.getByTestId("import-history-panel");
   await expect(history).toBeVisible();
-  const savedRow = history
-    .locator('[data-testid^="import-history-"]')
-    .filter({ hasText: `${FIXTURE_SUFFIX}-apply-page-one.png` })
-    .first();
-  await expect.poll(async () => {
-    await history.getByRole("button", { name: /Refresh/ }).click().catch(() => {});
-    return savedRow.count();
-  }, { timeout: 15_000, intervals: [500, 1_000] }).toBeGreaterThan(0);
-  await savedRow.getByRole("button").first().click();
+  const expectedPageLabel = `${FIXTURE_SUFFIX}-apply-page-one.png`;
+  const savedLabel = history.getByText(expectedPageLabel, { exact: false }).first();
+  await history.getByRole("button", { name: /Refresh/ }).click();
+  await expect(savedLabel).toBeVisible({ timeout: 15_000 });
+  await savedLabel.click();
+  const savedRow = savedLabel.locator("xpath=ancestor::*[starts-with(@data-testid, 'import-history-')][1]");
   const reopenResponse = page.waitForResponse((response) =>
     response.url().includes("/api/operations-insights/spec-reconciliation") &&
     response.request().method() === "POST",

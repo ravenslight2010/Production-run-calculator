@@ -7,6 +7,8 @@ import {
 } from "./isolation";
 import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 
+test.use({ serviceWorkers: "block" });
+
 const API_BASE = requireLocalFixtureApiOrigin("Import Gold responsive manager panel");
 const PASSWORD = "GoldLabTest123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -443,7 +445,9 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
     await managerRetention.screenshot({ path: testInfo.outputPath("retention-status-due-soon.png") });
     expect(goldCaseRequests).toBe(0);
 
+    const retentionRequestsBeforeQc = retentionRequests;
     await openHome(qcManager.token);
+    await expect.poll(() => retentionRequests).toBeGreaterThan(retentionRequestsBeforeQc);
     const qcReminders = page.getByTestId("gold-retention-reminders");
     await expect(qcReminders).toBeVisible({ timeout: 15_000 });
     await expectResponsiveBounds(qcReminders);

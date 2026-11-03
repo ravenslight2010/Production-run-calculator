@@ -306,6 +306,41 @@ async function putToday(page: Page, payload: SyncPayload): Promise<{
   }, { date: today(), payload });
 }
 
+async function putTodayThroughApiContext(page: Page, payload: SyncPayload): Promise<{
+  body: Record<string, unknown>;
+  responseStatus: number;
+}> {
+  const date = today();
+  const [epochResponse, baselineResponse] = await Promise.all([
+    page.request.get("/api/sync/reset-epoch", { headers: { "cache-control": "no-store" } }),
+    page.request.get(`/api/sync/today?today=${date}`, { headers: { "cache-control": "no-store" } }),
+  ]);
+  if (!epochResponse.ok() || !baselineResponse.ok()) {
+    throw new Error("sync fixture API-context baseline request failed");
+  }
+  const epochBody = await epochResponse.json() as { epoch?: number };
+  const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
+  const snapshotId = baselineResponse.headers()["x-sync-snapshot"];
+  if (!snapshotId) throw new Error("sync fixture API-context snapshot identity is missing");
+  const payloadToSend = payload.completeness === "complete"
+    ? { ...payload, baseSnapshotId: payload.baseSnapshotId ?? snapshotId }
+    : payload;
+  const response = await page.request.put(`/api/sync/today?today=${date}&epoch=${epoch}`, {
+    headers: { "content-type": "application/json" },
+    data: {
+      senderId: "sync-matrix",
+      payload: payloadToSend,
+      snapshotId,
+    },
+  });
+  const body = await response.json() as Record<string, unknown>;
+  if (typeof body.snapshotId !== "string") {
+    const headerSnapshot = response.headers()["x-sync-snapshot"];
+    if (headerSnapshot) body.snapshotId = headerSnapshot;
+  }
+  return { responseStatus: response.status(), body };
+}
+
 async function getToday(page: Page): Promise<Record<string, unknown>> {
   const response = await page.request.get(`/api/sync/today?today=${today()}`, {
     headers: { "cache-control": "no-store" },
@@ -1486,11 +1521,17 @@ test(
         fixtureSyncSources: EventSource[];
         armRecoveryCopyStorageFailure: () => void;
         recoveryCopyStorageFailureOccurred: boolean;
+        blockSyncEvents: () => void;
       };
       let failNextPendingSyncWrite = false;
+      let syncEventsBlocked = false;
       hooks.recoveryCopyStorageFailureOccurred = false;
       hooks.armRecoveryCopyStorageFailure = () => {
         failNextPendingSyncWrite = true;
+      };
+      hooks.blockSyncEvents = () => {
+        syncEventsBlocked = true;
+        sources.forEach((source) => source.close());
       };
       const nativeSetItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
@@ -1505,6 +1546,7 @@ test(
         constructor(...args: ConstructorParameters<typeof EventSource>) {
           super(...args);
           sources.push(this);
+          if (syncEventsBlocked) this.close();
         }
       } as typeof EventSource;
       hooks.fixtureSyncSources = sources;
@@ -1526,7 +1568,10 @@ test(
       casesNeeded: 24,
       casesPerSkid: 12,
     };
-    expect((await putToday(page, initial)).responseStatus).toBe(200);
+    const initialWrite = await putToday(page, initial);
+    expect(initialWrite.responseStatus).toBe(200);
+    const staleBaseSnapshotId = initialWrite.body.snapshotId;
+    expect(typeof staleBaseSnapshotId).toBe("string");
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
     await page.getByTestId("tab-run").click();
@@ -1539,8 +1584,7 @@ test(
     );
 
     await page.evaluate(() => {
-      (window as unknown as { fixtureSyncSources: EventSource[] })
-        .fixtureSyncSources.forEach((source) => source.close());
+      (window as unknown as { blockSyncEvents: () => void }).blockSyncEvents();
     });
 
     // Advance the canonical server field without notifying this intentionally
@@ -1558,7 +1602,11 @@ test(
       Date.now(),
       (serverUpdate.runValuesUpdatedAt[runId] ?? 0) + 1,
     );
-    expect((await putToday(page, serverUpdate)).responseStatus).toBe(200);
+    const serverUpdateWrite = await putTodayThroughApiContext(page, serverUpdate);
+    expect(serverUpdateWrite.responseStatus).toBe(200);
+    const serverUpdateSnapshotId = serverUpdateWrite.body.snapshotId;
+    expect(typeof serverUpdateSnapshotId).toBe("string");
+    expect(serverUpdateSnapshotId).not.toBe(staleBaseSnapshotId);
     await expect.poll(async () => {
       const server = await getToday(page) as unknown as SyncPayload;
       return server.runValues[runId]?.casesNeeded;
@@ -1644,6 +1692,8 @@ test(
       }).catch(() => {});
     });
     let recoveryCopyFaultInjected = false;
+    let staleBaseObserved = false;
+    let queuedIntentBaseCasesNeeded: number | null = null;
     await page.route("**/api/sync/today**", async (route) => {
       const request = route.request();
       if (recoveryCopyFaultInjected || request.method() !== "PUT") {
@@ -1663,12 +1713,44 @@ test(
         await route.continue();
         return;
       }
-      recoveryCopyFaultInjected = true;
+      const requestBody = request.postDataJSON() as {
+        payload?: Record<string, unknown>;
+      };
+      if (!requestBody.payload || typeof serverUpdateSnapshotId !== "string") {
+        throw new Error("Stale-base fixture could not identify the original canonical snapshot");
+      }
+      const requestBaseSnapshotId = requestBody.payload.baseSnapshotId;
+      staleBaseObserved = typeof requestBaseSnapshotId === "string"
+        && requestBaseSnapshotId !== serverUpdateSnapshotId;
+      if (!staleBaseObserved) {
+        await route.continue();
+        return;
+      }
+      queuedIntentBaseCasesNeeded = await page.evaluate((targetRunId) => {
+        const prefix = "run-calculator:sync-pending-v1:";
+        for (let index = 0; index < localStorage.length; index++) {
+          const key = localStorage.key(index);
+          if (!key?.startsWith(prefix)) continue;
+          try {
+            const intent = JSON.parse(localStorage.getItem(key) ?? "null") as {
+              baseline?: { runValues?: Record<string, { casesNeeded?: number }> };
+              payload?: { runValues?: Record<string, { casesNeeded?: number }> };
+            } | null;
+            if (intent?.payload?.runValues?.[targetRunId]?.casesNeeded !== 777) continue;
+            const value = intent.baseline?.runValues?.[targetRunId]?.casesNeeded;
+            return typeof value === "number" ? value : null;
+          } catch {
+            // Ignore unrelated or malformed browser records.
+          }
+        }
+        return null;
+      }, runId);
       const response = await route.fetch();
       await page.evaluate(() => {
         (window as unknown as { armRecoveryCopyStorageFailure: () => void })
           .armRecoveryCopyStorageFailure();
       });
+      recoveryCopyFaultInjected = true;
       await route.fulfill({ response });
     });
     const staleWriteResponse = page.waitForResponse((response) => {
@@ -1690,18 +1772,44 @@ test(
     if (!(await lineSetup.evaluate((element) => (element as HTMLDetailsElement).open))) {
       await lineSetup.locator("summary").click();
     }
-    await page.getByTestId("input-pizzasPerCase").fill("8");
-    await page.getByTestId("input-pizzasPerCase").blur();
-    await page.getByTestId("input-casesPerSkid").fill("16");
-    await page.getByTestId("input-casesPerSkid").blur();
-    await casesNeeded.fill("777");
+    // Hold the 120 ms durable-write timer briefly so sequential controlled
+    // inputs coalesce into one actual UI write instead of resolving the stale
+    // base after the first independent edit.
+    await page.evaluate(() => {
+      const controlledWindow = window as Window & {
+        __restoreHomeFormWriteTimer?: () => void;
+      };
+      const originalSetTimeout = window.setTimeout;
+      const wrappedSetTimeout: typeof window.setTimeout = (handler, timeout, ...args) =>
+        originalSetTimeout.call(window, handler, timeout === 120 ? 1_000 : timeout, ...args);
+      window.setTimeout = wrappedSetTimeout;
+      controlledWindow.__restoreHomeFormWriteTimer = () => {
+        window.setTimeout = originalSetTimeout;
+        delete controlledWindow.__restoreHomeFormWriteTimer;
+      };
+    });
+    try {
+      await page.getByTestId("input-pizzasPerCase").fill("8");
+      await page.getByTestId("input-casesPerSkid").fill("16");
+      await casesNeeded.fill("777");
+    } finally {
+      await page.evaluate(() => {
+        (window as Window & { __restoreHomeFormWriteTimer?: () => void })
+          .__restoreHomeFormWriteTimer?.();
+      });
+    }
+    await expect(page.getByTestId("input-pizzasPerCase")).toHaveValue("8");
+    await expect(page.getByTestId("input-casesPerSkid")).toHaveValue("16");
+    await expect(casesNeeded).toHaveValue("777");
     const response = await staleWriteResponse;
     expect(response.status()).toBe(200);
     expect((await response.json() as { partialFallback?: boolean }).partialFallback).toBe(true);
     expect(recoveryCopyFaultInjected).toBe(true);
+    expect(staleBaseObserved).toBe(true);
     await expect.poll(() => page.evaluate(() => (
       window as unknown as { recoveryCopyStorageFailureOccurred: boolean }
     ).recoveryCopyStorageFailureOccurred)).toBe(true);
+    expect(queuedIntentBaseCasesNeeded).toBe(24);
 
     await expect(casesNeeded).toHaveValue("999", { timeout: 15_000 });
     await expect(page.getByTestId("input-pizzasPerCase")).toHaveValue("8");
@@ -1725,8 +1833,8 @@ test(
     });
     await page.getByTestId("sync-status-button").click();
     const conflictActivity = page.locator('[data-testid^="sync-activity-"]')
-      .filter({ hasText: "discarded the conflicting local value" });
-    await expect(conflictActivity).toBeVisible({ timeout: 10_000 });
+      .filter({ hasText: "browser storage did not save this rebase for reload" });
+    await expect(conflictActivity).toHaveCount(1, { timeout: 10_000 });
     await expect(conflictActivity).toContainText("kept the server value for 1 conflict");
     await expect(conflictActivity).toContainText(/reapplied \d+ changes/);
     await expect(conflictActivity).toContainText("browser storage did not save this rebase for reload");
@@ -1782,7 +1890,7 @@ test(
       await page.getByTestId("sync-status-button").click();
       await expect(conflictActivity).toBeVisible({ timeout: 10_000 });
       await expect(conflictActivity).toContainText("kept the server value for 1 conflict");
-       await expect(conflictActivity).toContainText(/reapplied \d+ changes/);
+      await expect(conflictActivity).toContainText(/reapplied \d+ changes/);
       await expect(conflictActivity).toContainText("browser storage did not save this rebase for reload");
       await expect(pendingWrites).toBeVisible();
       await expect.poll(async () => Number(await pendingWrites.evaluate(
@@ -2274,11 +2382,36 @@ test(
       });
     });
     try {
-      await peer.addInitScript(() => {
+      await peer.addInitScript((testRunId) => {
         // Start without a local day row so the peer must adopt the seeded
         // canonical run before it becomes the intentionally stale device.
         localStorage.removeItem("run-calc-day");
-      });
+        const writesKey = "e2e-sync-reset-day-state-writes";
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (key === "run-calc-day") {
+            try {
+              const parsed = JSON.parse(value) as { runs?: Array<{ id?: string }> };
+              const writes = JSON.parse(sessionStorage.getItem(writesKey) ?? "[]") as Array<{
+                at: number;
+                epoch: number;
+                containsTestRun: boolean;
+              }>;
+              const rawEpoch = localStorage.getItem("run-calc-reset-epoch");
+              writes.push({
+                at: Date.now(),
+                epoch: rawEpoch === null ? 0 : Number(JSON.parse(rawEpoch)),
+                containsTestRun: (parsed.runs ?? []).some((run) => run.id === testRunId),
+              });
+              sessionStorage.setItem(writesKey, JSON.stringify(writes.slice(-40)));
+            } catch {
+              // The test only needs a bounded indicator; malformed state is
+              // already covered by the normal sync validation path.
+            }
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      }, runId);
       await peer.goto("/", { waitUntil: "domcontentloaded" });
       await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
       await expect(peer.getByTestId("sync-status-button")).toHaveAttribute(
@@ -2358,6 +2491,23 @@ test(
         await expect.poll(async () => (await localRuns(peer)).some((run) => run.id === runId), {
           timeout: 15_000,
         }).toBe(false);
+        const staleDayStateWrites = await peer.evaluate(
+          ({ after, resetEpoch }) => {
+            const writes = JSON.parse(
+              sessionStorage.getItem("e2e-sync-reset-day-state-writes") ?? "[]",
+            ) as Array<{ at: number; epoch: number; containsTestRun: boolean }>;
+            return writes.filter((write) =>
+              write.at >= after
+              && write.epoch >= resetEpoch
+              && write.containsTestRun,
+            );
+          },
+          { after: resetRequestedAt, resetEpoch: reset.body.epoch },
+        );
+        expect(
+          staleDayStateWrites,
+          "a reset-era epoch must never persist the pre-reset run",
+        ).toEqual([]);
       } catch (error) {
         const postResetBaselineReceived = await peer.evaluate((after) => {
           const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
@@ -2402,6 +2552,12 @@ test(
         const diagnostics = {
           localState,
           postResetBaselineReceived,
+          postResetDayStateWrites: await peer.evaluate((after) => {
+            const writes = JSON.parse(
+              sessionStorage.getItem("e2e-sync-reset-day-state-writes") ?? "[]",
+            ) as Array<{ at: number; epoch: number; containsTestRun: boolean }>;
+            return writes.filter((write) => write.at >= after);
+          }, resetRequestedAt).catch(() => []),
           syncRequests: peerSyncRequests,
         };
         await testInfo.attach("peer-reset-diagnostics.json", {

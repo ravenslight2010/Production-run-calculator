@@ -287,7 +287,9 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await expect(fieldChecks.getByText("Evidence coverage: Never observed").first()).toBeVisible();
   const recoveryCard = fieldChecks.getByText("Stale-deployment recovery", { exact: true }).locator("../..");
   await expect(recoveryCard).toContainText("Evidence coverage: Observed, no success");
-  await expect(recoveryCard).toContainText("Failures: 0 · Incomplete: 1 · No issue recorded");
+  await expect(recoveryCard).toContainText(
+    "Accumulated totals (not daily): 0 failed · 1 incomplete · No issue recorded",
+  );
   await expect(recoveryCard).toContainText("Last success: Not yet");
   await expect(fieldChecks.getByText(/Server receipt delay estimate: Unknown\/unconfirmed/).first()).toBeVisible();
   await expect(fieldChecks.getByText(/Server receipt delay estimate: .*after the browser timestamp/).first()).toBeVisible();
@@ -393,14 +395,20 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await filters.getByLabel("Browser category").selectOption("mobile-safari");
   await filters.getByRole("button", { name: "Apply field filters" }).click();
   await expect(population).toContainText("Selected population: fixture-build-a · mobile-safari");
-  await expect(panel.getByText("Failures: 7 · Incomplete: 0 · Open", { exact: true })).toBeVisible();
+  await expect(panel.getByText(
+    "Accumulated totals (not daily): 7 failed · 0 incomplete · Open",
+    { exact: true },
+  )).toBeVisible();
   await expect(failures).toContainText("fixture-build-a");
   await expect(failures).not.toContainText("build local");
   await expect(panel.getByText("The saved update was out of date or came after a reset", { exact: true }).first()).toBeVisible();
 
   await filters.getByLabel("Browser category").selectOption("desktop-firefox");
   await filters.getByRole("button", { name: "Apply field filters" }).click();
-  await expect(panel.getByText("Failures: 7 · Incomplete: 0 · Open", { exact: true })).toHaveCount(0);
+  await expect(panel.getByText(
+    "Accumulated totals (not daily): 7 failed · 0 incomplete · Open",
+    { exact: true },
+  )).toHaveCount(0);
   await expect(failures).toHaveCount(0);
   await expect(population).toContainText("desktop-firefox");
 

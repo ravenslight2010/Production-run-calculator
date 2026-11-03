@@ -121,6 +121,23 @@ async function signIn(
     { doughKey: `run-calc-profile-${profileSuffix}`, suffix: profileSuffix },
     { timeout: 20_000 },
   );
+  await page.waitForFunction(
+    ({ brand, flavor }) => {
+      try {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "null") as {
+          currentIndex?: number;
+          runs?: Array<{ brand?: string; flavor?: string }>;
+        } | null;
+        const runs = day?.runs ?? [];
+        const current = runs[day?.currentIndex ?? 0] ?? runs[0];
+        return current?.brand === brand && current?.flavor === flavor;
+      } catch {
+        return false;
+      }
+    },
+    product,
+    { timeout: 15_000 },
+  );
 }
 
 /**
@@ -288,11 +305,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     // Step 1: API sign-up + manager promotion BEFORE opening the browser,
     // so the profile exists when the app's startup sync (seedProfilesFromServer)
     // runs and populates localStorage.
-    ({ token } = await authorizedFixtures.createAccount({
+    const managerAccount = await authorizedFixtures.createAccount({
       username,
       password: "TestPass123!",
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
-    }));
+    });
+    ({ token } = managerAccount);
+    await authorizedFixtures.assignManagerRole(managerAccount);
     await createProfile(
       authorizedFixtures,
       token,
@@ -370,11 +389,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     request,
   }) => {
     username = uid();
-    ({ token } = await authorizedFixtures.createAccount({
+    const managerAccount = await authorizedFixtures.createAccount({
       username,
       password: "TestPass123!",
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
-    }));
+    });
+    ({ token } = managerAccount);
+    await authorizedFixtures.assignManagerRole(managerAccount);
     await createProfile(
       authorizedFixtures,
       token,
@@ -443,11 +464,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     request,
   }) => {
     username = uid();
-    ({ token } = await authorizedFixtures.createAccount({
+    const managerAccount = await authorizedFixtures.createAccount({
       username,
       password: "TestPass123!",
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
-    }));
+    });
+    ({ token } = managerAccount);
+    await authorizedFixtures.assignManagerRole(managerAccount);
     await createProfile(
       authorizedFixtures,
       token,

@@ -261,7 +261,11 @@ export function useHomeFormLifecycle({
     homeFormDurableWriter.schedule(writeKey, () => {
       const latestValues = loadRunValues(runId);
       const write = prepareHomeFormWrite(stored, capturedValues, latestValues);
-      if (write.catalogBackfillOnly && deepEqual(write.values, latestValues)) return;
+      // Canonical sync recovery can commit the edits this debounce captured
+      // while it is waiting. Re-run the persistence-facing guard after
+      // rebasing so optional undefined form properties do not look like edits,
+      // and an already-adopted value is not stamped or enqueued again.
+      if (!shouldAutosaveHomeForm(latestValues, write.values, runId, runId, false)) return;
       const now = Date.now();
       const seededPatch = clearSeededFlagForAutosave(
         dayStateRef.current,
