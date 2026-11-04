@@ -4226,7 +4226,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           wallClockBookkeeping?: Record<string, { caseNextDueMs?: number; lastExpectedCases?: number }>;
         };
         autoTrackCoordination?: {
-          runs?: Record<string, Record<string, { nextDueAt?: number }>>;
+          runs?: Record<string, Record<string, { sequence?: number; nextDueAt?: number }>>;
         };
       };
       return {
@@ -4269,260 +4269,131 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       .toBeGreaterThan(2_000);
     const caseRequestCount = () =>
       autoTrackClaimChannels.filter((channel) => channel === "case").length;
-    const caseRequestCountBeforeHeldAck = caseRequestCount();
-    const caseResponsesBeforeHeldAck = caseClaimResponses.length;
-    const autoTrackClaimRoute = "**/api/sync/auto-track/claim**";
-    let holdNextCaseClaim = false;
-    let heldServerClaim: {
-      status: number;
-      outcome?: string;
-      casesOnCurrentSkid?: number;
-      dueAt: number;
-      nextDueAt: number;
-      claimSequence: number;
-      stateSequence?: number;
-      generationMatchesState?: boolean;
-      baseUpdatedAtMatchesServer?: boolean;
-    } | null = null;
-    let releaseHeldCaseClaim: (() => void) | undefined;
-    const heldCaseClaimResponseGate = new Promise<void>((resolve) => {
-      releaseHeldCaseClaim = resolve;
-    });
-    let heldClaimRouteInstalled = false;
+    const clientCaseRequestCountAfterResume = caseRequestCount();
     let expectedFinalSkids = 0;
     let expectedFinalCases = 0;
 
-    try {
-      await page.route(autoTrackClaimRoute, async (route) => {
-        const request = route.request();
-        let claim: {
-          channel?: string;
-          runId?: string;
-          generation?: string;
-          sequence?: number;
-          dueAt?: number;
-          nextDueAt?: number;
-          baseUpdatedAt?: number;
-        } | undefined;
-        try {
-          const body = request.postDataJSON() as {
-            claim?: typeof claim;
-          };
-          claim = body.claim;
-        } catch {
-          // Non-claim or unreadable requests continue without interception.
-        }
-        if (
-          !holdNextCaseClaim
-          || request.method() !== "POST"
-          || claim?.channel !== "case"
-        ) {
-          await route.continue();
-          return;
-        }
+    const wakeRebasedCaseDueMs = Math.max(
+      firstNextCaseDueMs,
+      firstWakeNowMs + casePeriodMs,
+      Number(afterDueBeat.book?.caseNextDueMs ?? 0),
+    );
+    await stopFollowingRealDateNow(page);
+    const nextServerClaimDueMs = wakeRebasedCaseDueMs + 1;
+    await mockDateNow(page, nextServerClaimDueMs, { tick: false });
+    expect(await page.evaluate(() => Date.now())).toBe(nextServerClaimDueMs);
 
-        holdNextCaseClaim = false;
-        const serverResponse = await route.fetch();
-        const responseBody = await serverResponse.body();
-        let result: {
-          outcome?: string;
-          values?: { casesOnCurrentSkid?: number };
-          state?: { generation?: string; sequence?: number };
-          data?: { runValuesUpdatedAt?: Record<string, number> };
-        } = {};
-        try {
-          result = JSON.parse(responseBody.toString("utf8")) as typeof result;
-        } catch {
-          // The status and empty body below make a malformed reply fail loudly.
-        }
-        const serverRunValuesUpdatedAt = claim.runId
-          ? Number(result.data?.runValuesUpdatedAt?.[claim.runId])
-          : Number.NaN;
-        heldServerClaim = {
-          status: serverResponse.status(),
-          outcome: result.outcome,
-          casesOnCurrentSkid: result.values?.casesOnCurrentSkid,
-          dueAt: Number(claim.dueAt),
-          nextDueAt: Number(claim.nextDueAt),
-          claimSequence: Number(claim.sequence),
-          stateSequence: result.state?.sequence,
-          generationMatchesState: result.state?.generation === claim.generation,
-          baseUpdatedAtMatchesServer: Number.isFinite(serverRunValuesUpdatedAt)
-            && Math.abs(serverRunValuesUpdatedAt - Number(claim.baseUpdatedAt)) < 0.0001,
-        };
-        await heldCaseClaimResponseGate;
-        await route.fulfill({ response: serverResponse, body: responseBody });
+    // A fresh canonical schedule gives the server ownership of this channel.
+    // Drive that same authoritative tick path at the fixture clock instead of
+    // waiting for a client claim that the ownership lease intentionally blocks.
+    const beforeServerClaim = await readAfterDueBeat();
+    expect(beforeServerClaim.progress?.casesOnCurrentSkid).toBe(46);
+    const firstServerTick = await tickServerWithoutAdvancingBrowserClock(
+      page,
+      wakeRebasedCaseDueMs,
+    );
+    const afterServerClaim = await readAfterDueBeat();
+    const firstTickDiagnostics = {
+      dueOffsetFromWakeMs: nextServerClaimDueMs - firstWakeNowMs,
+      scheduledDueOffsetFromWakeMs:
+        Number(afterDueBeat.book?.caseNextDueMs ?? 0) - firstWakeNowMs,
+      before: {
+        skids: beforeServerClaim.progress?.skidsCompleted,
+        cases: beforeServerClaim.progress?.casesOnCurrentSkid,
+        value: beforeServerClaim.value,
+        sequence: beforeServerClaim.coordination?.sequence,
+      },
+      tick: firstServerTick,
+      after: {
+        skids: afterServerClaim.progress?.skidsCompleted,
+        cases: afterServerClaim.progress?.casesOnCurrentSkid,
+        value: afterServerClaim.value,
+        sequence: afterServerClaim.coordination?.sequence,
+        nextDueOffsetFromWakeMs:
+          Number(afterServerClaim.coordination?.nextDueAt ?? 0) - firstWakeNowMs,
+        nextBookDueOffsetFromWakeMs:
+          Number(afterServerClaim.book?.caseNextDueMs ?? 0) - firstWakeNowMs,
+      },
+      visibleCases: await cases.textContent(),
+    };
+    console.log(
+      "Screen-off Packaging server-tick diagnostics",
+      JSON.stringify(firstTickDiagnostics),
+    );
+    expect(
+      afterServerClaim.progress?.casesOnCurrentSkid,
+      JSON.stringify(firstTickDiagnostics),
+    ).toBe(47);
+    await expect(cases).toHaveText("47", { timeout: 15_000 });
+    expect(afterServerClaim.coordination?.sequence).toBe(
+      Number(clientCaseClaim?.stateSequence ?? 0) + 1,
+    );
+    expect(
+      caseRequestCount(),
+      "a fresh server-owned Packaging channel must not start a competing client claim",
+    ).toBe(clientCaseRequestCountAfterResume);
+
+    // Replaying the exact same server time must not duplicate the case. Then
+    // advance to the newly returned deadline and confirm tracking continues.
+    await tickServerWithoutAdvancingBrowserClock(page, wakeRebasedCaseDueMs);
+    const afterDuplicateTick = await readAfterDueBeat();
+    expect(afterDuplicateTick.progress?.casesOnCurrentSkid).toBe(47);
+    expect(afterDuplicateTick.coordination?.sequence)
+      .toBe(afterServerClaim.coordination?.sequence);
+    expect(caseRequestCount()).toBe(clientCaseRequestCountAfterResume);
+
+    const nextServerCaseDueMs = Math.max(
+      Number(afterDuplicateTick.coordination?.nextDueAt ?? 0),
+      Number(afterDuplicateTick.book?.caseNextDueMs ?? 0),
+    );
+    expect(nextServerCaseDueMs).toBeGreaterThan(nextServerClaimDueMs);
+    await mockDateNow(page, nextServerCaseDueMs, { tick: false });
+    await tickServerWithoutAdvancingBrowserClock(page, nextServerCaseDueMs);
+    await expect(cases).toHaveText("48", { timeout: 15_000 });
+    const afterSecondServerClaim = await readAfterDueBeat();
+    expect(afterSecondServerClaim.progress?.casesOnCurrentSkid).toBe(48);
+    expect(afterSecondServerClaim.coordination?.sequence).toBe(
+      Number(afterServerClaim.coordination?.sequence ?? 0) + 1,
+    );
+    expect(caseRequestCount()).toBe(clientCaseRequestCountAfterResume);
+
+    const finalCanonicalProgress = await page.evaluate(async ({ runId, today }) => {
+      const response = await fetch(`/api/sync/today?today=${today}`, {
+        cache: "no-store",
       });
-      heldClaimRouteInstalled = true;
-
-      holdNextCaseClaim = true;
-      const wakeRebasedCaseDueMs = Math.max(
-        firstNextCaseDueMs,
-        firstWakeNowMs + casePeriodMs,
-      );
-      await stopFollowingRealDateNow(page);
-      const nextClaimDueMs = wakeRebasedCaseDueMs + 1;
-      await mockDateNow(page, nextClaimDueMs, { tick: false });
-      expect(await page.evaluate(() => Date.now())).toBe(nextClaimDueMs);
-      await expect
-        .poll(() => caseRequestCount(), {
-          timeout: 15_000,
-          message: "the next Packaging case claim did not start",
-        })
-        .toBe(caseRequestCountBeforeHeldAck + 1);
-      await expect
-        .poll(() => heldServerClaim, {
-          timeout: 15_000,
-          message: "the server did not resolve the held Packaging claim",
-        })
-        .not.toBeNull();
-
-      const acceptedWhilePending = heldServerClaim!;
-      expect(acceptedWhilePending.status).toBe(200);
-      expect(acceptedWhilePending.outcome, JSON.stringify({
-        heldClaim: acceptedWhilePending,
-        firstClaim: clientCaseClaim,
-        canonicalCoordination: afterDueBeat.coordination,
-        dueNowMs,
-      })).toBe("accepted");
-      expect(acceptedWhilePending.claimSequence).toBe(
-        Number(clientCaseClaim?.stateSequence ?? 0) + 1,
-      );
-      expect(acceptedWhilePending.casesOnCurrentSkid).toBe(47);
-      const heldCasePeriodMs = acceptedWhilePending.nextDueAt - acceptedWhilePending.dueAt;
-      expect(
-        heldCasePeriodMs,
-        "the held claim must return a valid next-case cadence",
-      ).toBeGreaterThan(2_000);
-      expect(heldCasePeriodMs).toBe(casePeriodMs);
-
-      const readNextCaseCountdownSeconds = async () => {
-        const text = await page.getByText(/^Next case in/).first().textContent();
-        const match = text?.match(/Next case in\s*(\d+):(\d{2})/);
-        return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
+      if (!response.ok) return null;
+      const body = (await response.json()) as {
+        runValues?: Record<string, {
+          skidsCompleted?: number;
+          casesOnCurrentSkid?: number;
+        }>;
       };
-      const expectCaseCountdownRearmed = async (message: string) => {
-        await expect
-          .poll(readNextCaseCountdownSeconds, { timeout: 5_000, message })
-          .toBeGreaterThanOrEqual(Math.max(1, Math.floor(casePeriodMs / 1_000) - 2));
+      const values = body.runValues?.[runId];
+      if (!values) return null;
+      return {
+        skidsCompleted: values.skidsCompleted ?? 0,
+        casesOnCurrentSkid: values.casesOnCurrentSkid ?? 0,
       };
-
-      expect(
-        caseClaimResponses,
-        "the held accepted claim must not reach the browser before release",
-      ).toHaveLength(caseResponsesBeforeHeldAck);
-      await expect(cases).toHaveText("46");
-
-      const expectedCaseRequestsWhilePending = caseRequestCountBeforeHeldAck + 1;
-      const pendingTimerExpirations = [
-        acceptedWhilePending.nextDueAt + 1,
-        acceptedWhilePending.nextDueAt + heldCasePeriodMs + 2,
-      ];
-      for (const [index, expiredAt] of pendingTimerExpirations.entries()) {
-        await mockDateNow(page, expiredAt, { tick: false });
-        await expectCaseCountdownRearmed(
-          `Packaging timer did not re-arm after pending expiration ${index + 1}`,
-        );
-        expect(
-          caseRequestCount(),
-          "a second case claim started before the first acknowledgment",
-        ).toBe(expectedCaseRequestsWhilePending);
-        expect(
-          caseClaimResponses,
-          "the held acknowledgment must remain pending across timer expirations",
-        ).toHaveLength(caseResponsesBeforeHeldAck);
-        await expect(cases).toHaveText("46");
-      }
-
-      const lastPendingExpiration =
-        pendingTimerExpirations[pendingTimerExpirations.length - 1];
-      releaseHeldCaseClaim?.();
-      await expect(cases).toHaveText("47", { timeout: 15_000 });
-      await expect
-        .poll(() => caseClaimResponses.length, {
-          timeout: 15_000,
-          message: "the held canonical acknowledgment did not reach the client",
-        })
-        .toBe(caseResponsesBeforeHeldAck + 1);
-
-      // One further due interval must continue tracking without a refresh or
-      // manual retry, while respecting the run's 48-case target.
-      await mockDateNow(
-        page,
-        lastPendingExpiration + heldCasePeriodMs + 1,
-        { tick: false },
-      );
-      await expect
-        .poll(
-          () => caseRequestCount(),
-          {
-            timeout: 15_000,
-            message: "auto-tracking did not resume after the delayed acknowledgment",
-          },
-        )
-        .toBe(expectedCaseRequestsWhilePending + 1);
-      await expect
-        .poll(
-          async () => page.evaluate(async ({ runId, today }) => {
-            const response = await fetch(`/api/sync/today?today=${today}`, {
-              cache: "no-store",
-            });
-            if (!response.ok) return null;
-            const body = (await response.json()) as {
-              runValues?: Record<string, {
-                skidsCompleted?: number;
-                casesOnCurrentSkid?: number;
-              }>;
-            };
-            const values = body.runValues?.[runId];
-            if (!values) return null;
-            return (values.skidsCompleted ?? 0) * 48
-              + (values.casesOnCurrentSkid ?? 0);
-          }, { runId: canonicalRunId, today: fixtureDate }),
-          { timeout: 15_000, message: "the resumed case claim was not canonical" },
-        )
-        .toBeGreaterThanOrEqual(48);
-      const finalCanonicalProgress = await page.evaluate(async ({ runId, today }) => {
-        const response = await fetch(`/api/sync/today?today=${today}`, {
-          cache: "no-store",
-        });
-        if (!response.ok) return null;
-        const body = (await response.json()) as {
-          runValues?: Record<string, {
-            skidsCompleted?: number;
-            casesOnCurrentSkid?: number;
-          }>;
-        };
-        const values = body.runValues?.[runId];
-        if (!values) return null;
-        return {
-          skidsCompleted: values.skidsCompleted ?? 0,
-          casesOnCurrentSkid: values.casesOnCurrentSkid ?? 0,
-        };
-      }, { runId: canonicalRunId, today: fixtureDate });
-      if (!finalCanonicalProgress) {
-        throw new Error("the final Packaging progress was not canonical");
-      }
-      expectedFinalSkids = finalCanonicalProgress.skidsCompleted;
-      expectedFinalCases = finalCanonicalProgress.casesOnCurrentSkid;
-      expect(
-        finalCanonicalProgress.skidsCompleted * 48
-          + finalCanonicalProgress.casesOnCurrentSkid,
-      ).toBeGreaterThanOrEqual(48);
-      await expect(cases).toHaveText(String(expectedFinalCases), { timeout: 10_000 });
-      await expect
-        .poll(
-          () => postResumeClaims().filter(
-            (claim) => claim.status === 200 && claim.outcome === "accepted",
-          ).length,
-          { timeout: 10_000 },
-        )
-        .toBeGreaterThanOrEqual(3);
-      dueNowMs = await page.evaluate(() => Date.now());
-    } finally {
-      releaseHeldCaseClaim?.();
-      if (heldClaimRouteInstalled) await page.unroute(autoTrackClaimRoute);
+    }, { runId: canonicalRunId, today: fixtureDate });
+    if (!finalCanonicalProgress) {
+      throw new Error("the final Packaging progress was not canonical");
     }
+    expectedFinalSkids = finalCanonicalProgress.skidsCompleted;
+    expectedFinalCases = finalCanonicalProgress.casesOnCurrentSkid;
+    expect(
+      finalCanonicalProgress.skidsCompleted * 48
+        + finalCanonicalProgress.casesOnCurrentSkid,
+    ).toBeGreaterThanOrEqual(48);
+    await expect(cases).toHaveText(String(expectedFinalCases), { timeout: 10_000 });
+    await expect
+      .poll(
+        () => postResumeClaims().filter(
+          (claim) => claim.status === 200 && claim.outcome === "accepted",
+        ).length,
+        { timeout: 10_000 },
+      )
+      .toBe(1);
+    dueNowMs = await page.evaluate(() => Date.now());
 
     // The authoritative beat is the source of truth for this paired
     // correction. Rehydrate its acknowledged packaging register before

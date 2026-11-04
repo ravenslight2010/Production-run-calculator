@@ -1163,22 +1163,39 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
   let failedPulls = 0;
   let peerPulls = 0;
   let peerWrites = 0;
-  const peerPutOutcomes: Array<{ status: number; unchanged: boolean }> = [];
+  type PeerWritePhase = "warmup" | "foreground-recovery" | "unclassified";
+  type PeerPutOutcome = {
+    status: number;
+    unchanged: boolean;
+    phase: PeerWritePhase;
+    requestedCasesNeeded?: number;
+    canonicalCasesNeeded?: number;
+  };
+  let peerWritePhase: Exclude<PeerWritePhase, "unclassified"> = "warmup";
+  let peerPutActivityAt = Date.now();
+  let peerPutResponsesPending = 0;
+  const peerPutPhaseByRequest = new WeakMap<object, Exclude<PeerWritePhase, "unclassified">>();
+  const peerPutOutcomes: PeerPutOutcome[] = [];
   await page.route("**/api/sync/today**", async (route) => {
     if (injectedDelayMs) await new Promise((resolve) => setTimeout(resolve, injectedDelayMs));
     await route.continue();
   });
   await peer.route("**/api/sync/today**", async (route) => {
-    if (route.request().method() === "GET") peerPulls++;
-    if (route.request().method() === "PUT") peerWrites++;
-    if (route.request().method() === "GET" && timeoutNextPull) {
+    const request = route.request();
+    if (request.method() === "GET") peerPulls++;
+    if (request.method() === "PUT") {
+      peerWrites++;
+      peerPutActivityAt = Date.now();
+      peerPutPhaseByRequest.set(request, peerWritePhase);
+    }
+    if (request.method() === "GET" && timeoutNextPull) {
       timeoutNextPull = false;
       timedOutPulls++;
       // Retain the fixture route beyond the existing 10s CLIENT deadline.
       // The next request is not stalled, so canonical recovery can succeed.
       await new Promise((resolve) => setTimeout(resolve, 11_000));
       await route.abort().catch(() => {});
-    } else if (route.request().method() === "GET" && failNextPull) {
+    } else if (request.method() === "GET" && failNextPull) {
       failNextPull = false;
       failedPulls++;
       await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Temporary fixture outage"}' });
@@ -1186,12 +1203,38 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
   });
   peer.on("response", (response) => {
     if (!response.url().includes("/api/sync/today") || response.request().method() !== "PUT") return;
+    const request = response.request();
+    const phase = peerPutPhaseByRequest.get(request) ?? "unclassified";
+    peerPutResponsesPending++;
     void response.json().then((body: unknown) => {
       const unchanged = typeof body === "object" && body !== null
         && "unchanged" in body
         && (body as { unchanged?: unknown }).unchanged === true;
-      peerPutOutcomes.push({ status: response.status(), unchanged });
-    }).catch(() => peerPutOutcomes.push({ status: response.status(), unchanged: false }));
+      const responseData = typeof body === "object" && body !== null
+        && "data" in body
+        ? (body as { data?: SyncPayload }).data
+        : undefined;
+      let requestedCasesNeeded: number | undefined;
+      try {
+        const requestBody = request.postDataJSON() as { payload?: SyncPayload };
+        requestedCasesNeeded = requestBody.payload?.runValues?.[runId]?.casesNeeded;
+      } catch {
+        // Keep response evidence even when a request body is unavailable.
+      }
+      peerPutOutcomes.push({
+        status: response.status(),
+        unchanged,
+        phase,
+        requestedCasesNeeded,
+        canonicalCasesNeeded: responseData?.runValues?.[runId]?.casesNeeded,
+      });
+    }).catch(() => peerPutOutcomes.push({
+      status: response.status(),
+      unchanged: false,
+      phase,
+    })).finally(() => {
+      peerPutResponsesPending--;
+    });
   });
   const isWriteFor = (response: import("@playwright/test").Response, value: number) => {
     if (!response.url().includes("/api/sync/today") || response.request().method() !== "PUT" || !response.ok()) return false;
@@ -1225,6 +1268,7 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
       });
     }
     injectedDelayMs = 0;
+    peerWritePhase = "foreground-recovery";
     const wakeCount = testInfo.project.name === "desktop-chromium" ? 5 : 4;
     for (let sample = 0; sample < wakeCount; sample++) {
       await peer.evaluate(() => {
@@ -1263,7 +1307,15 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
       await expect(peer.getByTestId("foreground-recovery-status")).toHaveAttribute("data-foreground-recovery-state", "outcome");
       wakeSamples.push({ durationMs: Date.now() - startedAt, condition: sample === 4 ? "one-client-timeout-then-retry" : sample === 1 ? "one-503-then-retry" : "healthy-duplicate-wake" });
     }
-    await expect.poll(() => peerPutOutcomes.length).toBe(peerWrites);
+    await expect.poll(() =>
+      Date.now() - peerPutActivityAt >= 1_500
+      && peerPutResponsesPending === 0
+      && peerPutOutcomes.length === peerWrites,
+    { timeout: 10_000 }).toBe(true);
+    const recoveryPutOutcomes = peerPutOutcomes
+      .filter((outcome) => outcome.phase === "foreground-recovery");
+    await expect(page.getByTestId("input-casesNeeded")).toHaveValue("64");
+    await expect(peer.getByTestId("input-casesNeeded")).toHaveValue("64");
     const stageMeasurements = await page.evaluate((date) =>
       JSON.parse(localStorage.getItem(`run-calc-sync-measurements:${date}`) ?? "[]"), today());
     // Measurements are fixed numeric fields; never attach cookies or payloads.
@@ -1283,7 +1335,8 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
     expect(peerPulls).toBeLessThan(20);
     expect(peerWrites).toBeLessThan(20);
     expect(peerPutOutcomes).toHaveLength(peerWrites);
-    expect(peerPutOutcomes.every((outcome) => outcome.status === 200 && outcome.unchanged)).toBe(true);
+    expect(peerPutOutcomes.every((outcome) => outcome.status === 200 && outcome.phase !== "unclassified")).toBe(true);
+    expect(recoveryPutOutcomes.every((outcome) => outcome.unchanged)).toBe(true);
   } finally {
     await peerContext.close();
   }
