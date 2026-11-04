@@ -3,7 +3,7 @@
 Task: Close Remaining Reliability Gaps. This is an in-progress ledger, not a
 completion certificate or release decision.
 
-Last refreshed: 2026-11-03 UTC. This checkpoint preserves earlier failed
+Last refreshed: 2026-11-04 UTC. This checkpoint preserves earlier failed
 attempts; it does not recast a focused rerun as a full-suite pass.
 
 Latest resumed checkpoint: the ingredient-ID stale-profile overwrite is
@@ -3026,4 +3026,14 @@ and handoff without claiming published or physical-device verification.
 - A bounded scan of seven closure/task/inventory/report documents found 145 unique repository-rooted paths, zero invalid line anchors, and three function-like source references resolving. Four package-relative references were manually mapped to existing files. This is target-existence validation, not a claim review.
 - The replacement isolated Chromium suite is still running; 160 of 241 cases have passed in the available log output, with no failure reported. The latest results include cross-tab wake/recovery, stale-build/PWA reload cases, manager layout checks, and crust-mode selection. Final test identity/result remain pending.
 - The repeatable physical-device protocol is now named **Background/Wake Recovery Check** at `docs/screen-off-wake-test-protocol.md`. It covers the reported Packaging edit → Resume → next-case → background/wake sequence and requires an owner-approved isolated staging target with synthetic data. The protocol is not a physical-device result.
-- A read-only workspace survey found 76 GB used and 181 GB free on the 256 GB volume, no Git lock or interrupted operation, `.git` at 1.4 GB, `.local` at 2.5 GB (mostly state), and 155 duplicate packed objects among about 75,000. It does not indicate local disk exhaustion or prove the Replit task-storage cause. No files, packs, or user assets were deleted; the working tree remains modified and the branch is five commits ahead of `origin`.
+- A read-only workspace survey found 76 GB used and 181 GB free on the 256 GB volume, no Git lock or interrupted operation, `.git` at 1.4 GB, `.local` at 2.5 GB (mostly state), and 155 duplicate packed objects among about 75,000. It does not indicate local disk exhaustion or prove the Replit task-storage cause. No files, packs, or user assets were deleted; at that checkpoint the working tree was modified and the branch was five commits ahead of `origin`.
+
+### 2026-11-04 — resumed local verification
+
+- The configured client suite passed 3,909 tests across 399 files, with one skipped and zero failures (100.3 seconds). The root workspace typecheck passed.
+- Focused package checks passed: production-rules (17), inventory-math (96), spec-reconcile (33), scheduled-recipe-check (19), spec-export (51), and corpus-harness (12). The browser-attempt retention suite passed 18/18; its three removals were confined to its temporary test fixtures.
+- The configured full 241-case Chromium workflow was restarted on a disposable PostgreSQL database. Its test identity and final report are pending. An earlier partial workflow log ended at case 220 after reporting a failure at case 212; it had no complete suite summary and is retained only as an interrupted attempt, not as a full-run result.
+- The task register now assigns all 55 MERGED records exactly once across 18 outcome groups; all 43 archived suggestions remain assigned exactly once. Automated checks found no missing, duplicate, or unknown references, and every cited evidence path exists. The broad-audit and full-browser assessments remain provisional.
+- Documentation reference checks covered eight Markdown files (five local links, no broken targets), 151 repository-rooted code references across nine closure/task/evidence documents, and all 35 task-register evidence paths and anchors. One historical ignored archive path remains unavailable as already documented; no replacement artifact was created.
+- `release:standard` stopped before running release gates because published release evidence is missing and reported `BLOCKED / NO-GO`. It is separate from product tests. No publish or production write occurred.
+- Next: finish the current full-browser run, reconcile its complete outcome, finalize the merged/archived task register, and validate links and source references. Published-build behavior, physical Android/iOS wake, real-source Gold evaluation, and provider/primary historical capacity evidence remain outside the verified local boundary.

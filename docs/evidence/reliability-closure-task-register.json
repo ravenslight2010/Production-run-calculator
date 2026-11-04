@@ -5,10 +5,10 @@
     "meaning": "Current local assessments are not original-task completion certificates. Source/native delivery and integrated runtime acceptance are separate.",
     "mergedRecords": {
       "count": 55,
-      "classification": "coverage gap",
-      "reason": "The captured records contain reviewed plans and merged metadata, not 55 independently verified completion outcomes. Preserve their original reviewDepth; do not infer completion from MERGED.",
+      "classification": "assessed by outcome group below",
+      "reason": "Every captured MERGED record is assigned once below. The classification follows current local evidence and explicitly preserves verification, approval, production, source, and physical-device boundaries. MERGED is not completion proof by itself.",
       "owner": "current consolidated closure",
-      "nextAction": "Reconcile available outcome artifacts against final-source journey evidence; retain unavailable historical content explicitly."
+      "nextAction": "Update pending assessments from the final integrated browser result, then keep any remaining gaps attached to an owner and evidence boundary."
     },
     "archivedRecords": {
       "count": 43,
@@ -134,6 +134,140 @@
       "owner": "causal phase-correlation review and production-trial authority",
       "nextAction": "Supported replica, primary-snapshot, phase-log and host measurements are now available. Review their timing and coverage limits before any separately approved production trial; do not infer primary capacity from the replica or causality from one healthy snapshot.",
       "evidence": "docs/evidence/reliability-closure-progress.md#supported-production-observations--access-restored-not-causal-proof"
+    }
+  ],
+  "mergedOutcomeAssessments": [
+    {
+      "sources": ["#3692"],
+      "classification": "coverage gap",
+      "outcome": "The replacement full 241-case browser run is in progress; earlier partial attempts are not a complete-suite result.",
+      "owner": "current consolidated closure",
+      "nextAction": "Record the final report and reconcile every failure before changing this assessment.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3696", "#3697", "#3724", "#3725", "#3726", "#3727", "#3742"],
+      "classification": "covered",
+      "outcome": "Local test evidence, retained browser-attempt handling, and the client suite have been checked independently of published-release evidence. One client test remains skipped; no test pass establishes production or device behavior.",
+      "boundary": "Published release evidence remains blocked; interrupted attempts and historical reports remain distinguishable from the current run.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3715", "#3722"],
+      "classification": "coverage gap",
+      "outcome": "The source catalog and twelve-domain review are recorded, but metadata discovery is not equivalent to reading every source and the consolidated local closure is still in progress.",
+      "owner": "current consolidated closure",
+      "nextAction": "Finish the evidence-backed local domain review and keep unreadable, unavailable, or unapproved source content explicit.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md"
+    },
+    {
+      "sources": ["#3699", "#3700", "#3701", "#3712", "#3739", "#3747", "#3755", "#3756"],
+      "classification": "covered",
+      "outcome": "Selected sync, run, section-edit, and cross-context recovery paths have local unit/API/browser evidence. This does not claim physical Android/iOS wake behavior or a matched published build.",
+      "boundary": "Same-device/browser checks and physical-device evidence are separate; no production record was changed.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3706", "#3719"],
+      "classification": "covered",
+      "outcome": "Mounted API health and protected-route coverage were reviewed with the configured server suite; no shared-database repair or permission bypass was used.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3703", "#3717", "#3791"],
+      "classification": "coverage gap",
+      "outcome": "Read-only runtime evidence shows recurring connection-pool acquisition pressure in sampled background work, but available telemetry does not identify a causal request/device or establish the underlying provider/primary database cause.",
+      "owner": "authorized production telemetry reviewer",
+      "nextAction": "Use an approved request-correlated or provider/primary evidence source before attributing cause or changing capacity settings.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3705", "#3740"],
+      "classification": "approval-gated",
+      "outcome": "The serving publish fingerprint does not match the repaired candidate. No production publish or production write was authorized.",
+      "owner": "project owner",
+      "nextAction": "Reconcile the candidate and serving build only through an owner-authorized publish and read-only post-publish verification.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3709", "#3746", "#3760", "#3761", "#3762"],
+      "classification": "coverage gap",
+      "outcome": "Schedule, break-planning, timeline, and responsive journeys have selected local coverage; the complete break-to-estimate-to-report-to-notification chain and actual provider delivery are not established by those slices.",
+      "owner": "current consolidated closure",
+      "nextAction": "Check the full browser result and available integrated journeys; retain provider delivery as a separate authorized boundary.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3732", "#3735", "#3741"],
+      "classification": "covered",
+      "outcome": "Saved-copy removal protections and the requested staff-role permission audit/recommendation were reviewed. No broader permission-policy change was inferred from the audit-first decision.",
+      "boundary": "Unsent edits must remain protected; any new role policy requires a separate owner decision.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md"
+    },
+    {
+      "sources": ["#3729", "#3736"],
+      "classification": "approval-gated",
+      "outcome": "Real-source Gold evaluation and capture remain disabled; local synthetic coverage does not authorize customer-source use.",
+      "owner": "source/privacy owner",
+      "nextAction": "Obtain explicit source-use, retention, and privacy approval before any real-source evaluation or capture.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md#owner-controlled-decisions-and-access"
+    },
+    {
+      "sources": ["#3730", "#3731", "#3737", "#3743", "#3748", "#3749", "#3750", "#3751", "#3753", "#3758", "#3759", "#3768", "#3769"],
+      "classification": "covered",
+      "outcome": "Local synthetic retention, approval, cleanup, lookup, reminder, audit, and failure-handling paths have evidence in the current test inventory. No real customer-source retention or deletion is claimed.",
+      "boundary": "Source approval remains separate from synthetic tests; external-copy deletion and production cleanup were not performed.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3707"],
+      "classification": "covered",
+      "outcome": "Local alert ownership and idempotent claim behavior are tested; actual provider delivery remains unverified and was not triggered.",
+      "boundary": "Browser/app claims do not establish delivery by an external push service.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3738"],
+      "classification": "covered",
+      "outcome": "Manager-facing behavior has browser and WebKit-emulation evidence, but physical Safari/iOS behavior was not observed.",
+      "boundary": "Emulation is not physical-device evidence.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3744"],
+      "classification": "covered",
+      "outcome": "The reusable isolated local test scope passed its synthetic checks without writing shared development or production records.",
+      "boundary": "This is not a separately published staging project or published-site verification.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md"
+    },
+    {
+      "sources": ["#3728"],
+      "classification": "approval-gated",
+      "outcome": "The isolated local results cannot prove behavior on the published target; no published test scope or production-safe account was exercised.",
+      "owner": "project owner",
+      "nextAction": "Use a separately approved published staging app/database or explicitly accept staging-only verification; do not test destructively on live records.",
+      "evidence": ".local/tasks/consolidated-app-reliability-closure.md"
+    },
+    {
+      "sources": ["#3745"],
+      "classification": "unavailable",
+      "outcome": "The local volume survey found substantial free space and no Git lock, but it cannot observe Replit's remote task-runner storage or prove the reported stall's cause.",
+      "owner": "Replit workspace/task-runner telemetry",
+      "nextAction": "Retain the cause as unverified unless platform-level storage evidence becomes available; do not delete user assets or repository history as a speculative fix.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3757"],
+      "classification": "covered",
+      "outcome": "A bounded local workspace/storage survey was recorded; it found no local disk-full condition and no cleanup of user files or Git history was performed.",
+      "boundary": "Local measurements do not establish the remote agent-storage state.",
+      "evidence": "docs/evidence/reliability-closure-progress.md"
+    },
+    {
+      "sources": ["#3752"],
+      "classification": "covered",
+      "outcome": "Project pnpm provisioning guards against a workspace-local Corepack cache and recursive tool provisioning; current shell inventory and startup diagnostics were reviewed.",
+      "evidence": "scripts/src/configure-project-pnpm.sh"
     }
   ],
   "records": [
