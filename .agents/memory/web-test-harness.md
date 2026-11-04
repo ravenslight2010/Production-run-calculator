@@ -253,10 +253,15 @@ not to a fixture tick evaluated at a future simulated time.
 **Why:** A controlled beat can be minutes ahead of server wall time. Its
 time-dependent tray projection can differ from the later real-time GET even
 when the screen correctly adopts that GET. Comparing them can falsely suggest
-an application counting defect.
+an application counting defect. A single explicit future server tick also
+models delayed-worker recovery, not normal periodic background cadence; the
+Packaging case claim itself remains client-originated.
 
 **How to apply:** Keep separate assertions proving that the simulated due
 interval accepted the intended work and changed the relevant stock. Then
 compare the wake form, adopted values and projection with the received
 foreground response. Retain run identity, duplicate-claim and recovery fences;
 do not change production formulas or loosen numeric ranges to match a forecast.
+For screen-off tests, simulate the intended worker cadence explicitly and
+derive case catch-up from accepted claim deadlines and canonical state rather
+than assuming one case per resumed poll.
