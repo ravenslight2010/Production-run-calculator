@@ -142,6 +142,12 @@ describe("durable outbox wake scheduling", () => {
         .filter((fields) => fields !== null && typeof fields === "object" &&
           "event" in fields && fields.event === "background_database_phase");
       expect(phases).toHaveLength(3);
+      const passIds = phases.map((fields) => (fields as { backgroundPassId?: unknown }).backgroundPassId);
+      expect(passIds[0]).toEqual(expect.any(String));
+      expect(new Set(passIds).size).toBe(1);
+      expect(phases).toEqual(expect.arrayContaining([
+        expect.objectContaining({ backgroundOperation: "sync-outbox-drain" }),
+      ]));
       expect(phases).toEqual(expect.arrayContaining([
         expect.objectContaining({ databasePhase: expect.objectContaining({
           stage: "outbox_events_read", outcome: "success", coverage: "complete",

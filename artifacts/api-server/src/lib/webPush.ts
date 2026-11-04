@@ -569,6 +569,9 @@ function logScheduledEvaluationQueueTransitions(
   transition: ScheduledEvaluationQueueTransition,
 ): void {
   const { diagnostics } = transition;
+  const backgroundPassFields = transition.sampleTiming?.backgroundPassId
+    ? { backgroundPassId: transition.sampleTiming.backgroundPassId }
+    : {};
   const safeCounts = {
     queued: diagnostics.queued,
     running: diagnostics.running,
@@ -584,6 +587,7 @@ function logScheduledEvaluationQueueTransitions(
       event: "scheduled_evaluation_queue_monitor",
       outcome: "warning",
       warningCodes: transition.started,
+      ...backgroundPassFields,
       safeCounts,
     }, "Scheduled evaluation queue warning started");
   }
@@ -592,6 +596,7 @@ function logScheduledEvaluationQueueTransitions(
       event: "scheduled_evaluation_queue_monitor",
       outcome: "recovered",
       warningCodes: transition.cleared,
+      ...backgroundPassFields,
       safeCounts,
     }, "Scheduled evaluation queue warning cleared");
   }
@@ -633,6 +638,9 @@ export function startWebPushAlertScheduler(options: {
             event: "scheduled_evaluation_queue_monitor",
             outcome: "slow_sample",
             failureStage: "snapshot",
+            ...(transition.sampleTiming?.backgroundPassId
+              ? { backgroundPassId: transition.sampleTiming.backgroundPassId }
+              : {}),
             durationMs,
             ...(transition.sampleTiming
               ? { queryDurationsMs: transition.sampleTiming.queryDurationsMs }
@@ -652,6 +660,9 @@ export function startWebPushAlertScheduler(options: {
           outcome: "sample_unavailable",
           failureStage: readError?.failureStage ?? "snapshot",
           failureReason: classifyBackgroundFailure(error, { assumeDatabase: true }),
+          ...(readError?.backgroundPassId
+            ? { backgroundPassId: readError.backgroundPassId }
+            : {}),
           durationMs: readError?.totalDurationMs ?? boundedDurationMs(monotonicNow() - startedAt),
           ...(readError ? { queryDurationMs: readError.queryDurationMs } : {}),
           ...(readError?.databasePhase

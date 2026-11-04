@@ -148,6 +148,7 @@ export type ScheduledEvaluationQueueTransition = {
     durationMs: number;
     queryDurationsMs: Partial<Record<ScheduledEvaluationQueueQueryStage, number>>;
     databasePhases?: Partial<Record<ScheduledEvaluationQueueQueryStage, DatabasePhaseEvidence>>;
+    backgroundPassId?: string;
   };
 };
 
@@ -174,6 +175,7 @@ export class ScheduledEvaluationQueueReadError extends Error {
     readonly totalDurationMs: number,
     cause: unknown,
     readonly databasePhase?: DatabasePhaseEvidence,
+    readonly backgroundPassId?: string,
   ) {
     super("Scheduled evaluation queue snapshot query failed", { cause });
     this.name = "ScheduledEvaluationQueueReadError";
@@ -323,6 +325,7 @@ const scheduledEvaluationQueueMonitor = createScheduledEvaluationQueueMonitor();
 export async function readScheduledEvaluationQueueSnapshot(
   nowMs = Date.now(),
   onQueryTiming?: (stage: ScheduledEvaluationQueueQueryStage, durationMs: number, phase?: DatabasePhaseEvidence) => void,
+  backgroundPassId = randomUUID(),
 ): Promise<ScheduledEvaluationQueueSnapshot> {
   const sampleStartedAt = performance.now();
   const runQuery = async <T>(
@@ -334,7 +337,12 @@ export async function readScheduledEvaluationQueueSnapshot(
     try {
       const result = await observeDatabasePhase(stage, query, (evidence) => {
         databasePhase = evidence;
-        logger.info({ event: "background_database_phase", databasePhase: evidence }, "bounded queue database phase");
+        logger.info({
+          event: "background_database_phase",
+          backgroundOperation: "scheduled-evaluation-queue-monitor",
+          backgroundPassId,
+          databasePhase: evidence,
+        }, "bounded queue database phase");
       });
       onQueryTiming?.(stage, boundedDurationMs(performance.now() - queryStartedAt), databasePhase);
       return result;
@@ -345,6 +353,7 @@ export async function readScheduledEvaluationQueueSnapshot(
         boundedDurationMs(performance.now() - sampleStartedAt),
         cause,
         databasePhase,
+        backgroundPassId,
       );
     }
   };
@@ -483,6 +492,7 @@ export async function sampleScheduledEvaluationQueue(
   nowMs = Date.now(),
 ): Promise<ScheduledEvaluationQueueTransition> {
   const startedAt = performance.now();
+  const backgroundPassId = randomUUID();
   const queryDurationsMs: Partial<Record<ScheduledEvaluationQueueQueryStage, number>> = {};
   const databasePhases: Partial<Record<ScheduledEvaluationQueueQueryStage, DatabasePhaseEvidence>> = {};
   const snapshot = await readScheduledEvaluationQueueSnapshot(
@@ -491,6 +501,7 @@ export async function sampleScheduledEvaluationQueue(
       queryDurationsMs[stage] = durationMs;
       if (phase) databasePhases[stage] = phase;
     },
+    backgroundPassId,
   );
   return {
     ...scheduledEvaluationQueueMonitor.observe(snapshot, nowMs),
@@ -498,6 +509,7 @@ export async function sampleScheduledEvaluationQueue(
       durationMs: boundedDurationMs(performance.now() - startedAt),
       queryDurationsMs,
       databasePhases,
+      backgroundPassId,
     },
   };
 }

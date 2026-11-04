@@ -326,12 +326,16 @@ export function startSyncOutboxListener(
   let retentionTimer: NodeJS.Timeout | undefined;
   let draining = false;
   let drainRequested = false;
+  let activeDrainPassId: string | undefined;
   let retryDelayMs = 500;
   const drainBackoff = createBackgroundOperationBackoff({ jitter: true });
   const observeRead = createOutboxDatabaseObserver((databasePhase) => {
     logger.info({
       event: "background_database_phase",
       sampling: "outbox-stage-category-first-per-minute",
+      ...(activeDrainPassId
+        ? { backgroundOperation: "sync-outbox-drain", backgroundPassId: activeDrainPassId }
+        : {}),
       databasePhase,
     }, "sampled outbox database phase");
   }, () => stopped);
@@ -434,6 +438,8 @@ export function startSyncOutboxListener(
     if (stopped || draining) return;
     drainRequested = false;
     draining = true;
+    const backgroundPassId = randomUUID();
+    activeDrainPassId = backgroundPassId;
     const startedAt = performance.now();
     let failureStage: "scope-list" | "cursor-seed" | "scope-drain" = "scope-list";
     try {
@@ -466,11 +472,14 @@ export function startSyncOutboxListener(
       logger.warn({
         event: "sync_outbox_drain",
         outcome: "retry",
+        backgroundOperation: "sync-outbox-drain",
+        backgroundPassId,
         failureReason: syncOutboxFailureReason(error),
         failureStage,
         durationMs: boundedDurationMs(performance.now() - startedAt),
       }, "Sync outbox drain failed; cursor retained for retry");
     } finally {
+      activeDrainPassId = undefined;
       draining = false;
       // A NOTIFY arriving during an active pass must survive that pass.
       // Failed delivery likewise schedules its own bounded backoff retry.

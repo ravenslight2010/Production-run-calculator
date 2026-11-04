@@ -58,6 +58,15 @@ describe("queue reads adopt scoped phase evidence", () => {
       duplicate_group_scan: expect.objectContaining({ stage: "duplicate_group_scan", phase: "post_checkout", outcome: "success" }),
     });
     expect(state.info).toHaveBeenCalledTimes(2);
+    expect(sample.sampleTiming!.backgroundPassId).toEqual(expect.any(String));
+    expect(state.info.mock.calls.map(([fields]) => fields.backgroundPassId)).toEqual([
+      sample.sampleTiming!.backgroundPassId,
+      sample.sampleTiming!.backgroundPassId,
+    ]);
+    expect(state.info.mock.calls.map(([fields]) => fields.backgroundOperation)).toEqual([
+      "scheduled-evaluation-queue-monitor",
+      "scheduled-evaluation-queue-monitor",
+    ]);
   });
 
   it.each([0, 1])("retains failure stage, duration, original cause and sanitized evidence (stage %s)", async (failureAt) => {
@@ -69,6 +78,7 @@ describe("queue reads adopt scoped phase evidence", () => {
     expect(failure.cause).toBe(state.error);
     expect(failure.failureStage).toBe(failureAt === 0 ? "status_aggregate" : "duplicate_group_scan");
     expect(failure.databasePhase).toMatchObject({ outcome: "query_timeout", phase: "post_checkout" });
+    expect(failure.backgroundPassId).toEqual(state.info.mock.calls.at(-1)?.[0].backgroundPassId);
     expect(failure.totalDurationMs).toBeGreaterThanOrEqual(failure.queryDurationMs);
     const evidence = state.info.mock.calls.map(([fields]) => fields.databasePhase as DatabasePhaseEvidence);
     expect(evidence).toHaveLength(failureAt + 1);
