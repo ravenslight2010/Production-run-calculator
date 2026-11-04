@@ -8,3 +8,11 @@ The owner reports that they have not noticed downtime while actively using the a
 **Why:** This makes background work, pool acquisition, timers, readiness during sparse traffic, wake-time client recovery, volatile client state, and cross-client interaction important correlation targets. A cold reopen clearing symptoms may reset client state but can also coincide with network or server recovery. Browser wait can include time suspended in the background; aggregate probes still cannot establish user-request impact or causality.
 
 **How to apply:** In production investigations, compare warm return with cold reopen and correlate both with background-worker, database-pool, request, and client responsiveness telemetry. Include a two-client case where one stays foreground while another wakes. Separately measure tab navigation, in-screen control actions, timer progress, and auto-track claim/commit after a manual edit and Resume. Keep user observation separate from independently measured evidence; distinguish client elapsed wait from server processing, and do not infer the initiating cause from timing alone.
+
+## Approval to repair after investigation
+
+For this reliability investigation, the owner clarified that “investigate further” means to continue causal investigation, not to decline a fix. Evidence-supported changes are approved once the relevant investigation is exhausted; do not ask for another approval solely because a repair is needed.
+
+**Why:** The earlier response misread the request to investigate as a refusal of the proposed change.
+
+**How to apply:** Complete the relevant client, server, and background-work evidence pass, then make the narrow supported repairs and verify them. Ask again only if new product behavior or policy choices are needed.
