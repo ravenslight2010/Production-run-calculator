@@ -680,6 +680,7 @@ import {
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
 import { captureOperationalIdentityFence, capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, getOperationalDeviceId, operationalIntentBlocksLifecycle, operationalIntentBlocksLifecycleAdoption, queueOperationalIntent, reportRejectedManualSectionErrors, retainOperationalSnapshotReview, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import type { ManualSectionStockAdjustment } from "../operationalIntentOutbox";
 import {
   MANUAL_SECTION_FIELDS,
   isStagedItemVersion,
@@ -1966,7 +1967,12 @@ export default function Home() {
   const { currentRun, currentRunId, currentRunIdRef } = useHomeRunIdentity(dayState);
   // Keep operational corrections on explicit operator paths only.  Autosave and
   // automatic ticks deliberately never call this helper.
-  const queueManualCorrection = useCallback((runId: string, values: Record<string, number>, baselineOverride?: Record<string, number>) => {
+  const queueManualCorrection = useCallback((
+    runId: string,
+    values: Record<string, number>,
+    baselineOverride?: Record<string, number>,
+    stockAdjustment?: ManualSectionStockAdjustment,
+  ) => {
     const run = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
     if (!run) return;
     const section = manualSectionForField(Object.keys(values)[0] ?? "");
@@ -1989,6 +1995,7 @@ export default function Home() {
     void submitManualSection({
       runId, section, values, baseValues: baseline,
       baseRevision: 0,
+      ...(stockAdjustment ? { stockAdjustment } : {}),
       observedGeneration: `${runId}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
       onPersistenceFailure: (baseValues) => {
         const restored = { ...loadRunValues(runId), ...baseValues };

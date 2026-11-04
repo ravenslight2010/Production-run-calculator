@@ -16,6 +16,10 @@ import { emitManualSectionError, manualSectionRejectionMessage } from "./manualS
 import { setDoughTimerControlOwner } from "./autoTrackCoordinationClient";
 
 export const OPERATIONAL_INTENT_OUTBOX_EVENT = "run-calculator:operational-intent-outbox";
+export type ManualSectionStockAdjustment = {
+  kind: "applicator-stock-step";
+  deltaLbs: number;
+};
 const KEY = "run-calculator:operational-intent-outbox:v1";
 const PENDING_PREFIX = `${KEY}:pending:`;
 const TERMINAL_PREFIX = `${KEY}:terminal:`;
@@ -489,6 +493,7 @@ async function submitManualSectionNow(input: {
   owner?: string;
   operation?: "resume-packaging";
   correctionGeneration?: number;
+  stockAdjustment?: ManualSectionStockAdjustment;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
 }): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const id = input.id ?? `online:${crypto.randomUUID()}`;
@@ -539,6 +544,7 @@ async function submitManualSectionNow(input: {
         baseValues: input.baseValues, observedGeneration: input.observedGeneration,
         baseRevision: input.baseRevision ?? 0, resetEpoch: immutableResetEpoch,
         deviceId: getOperationalDeviceId(),
+        ...(input.stockAdjustment ? { stockAdjustment: input.stockAdjustment } : {}),
         ...(input.operation ? { operation: input.operation, correctionGeneration: input.correctionGeneration } : {}),
       }),
     });
@@ -710,6 +716,7 @@ export function submitManualSection(input: {
   owner?: string;
   operation?: "resume-packaging";
   correctionGeneration?: number;
+  stockAdjustment?: ManualSectionStockAdjustment;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
 }): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const sectionFields = MANUAL_SECTION_FIELDS[

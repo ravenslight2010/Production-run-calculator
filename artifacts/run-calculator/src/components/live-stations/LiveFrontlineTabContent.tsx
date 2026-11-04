@@ -107,7 +107,13 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
     const now = Date.now();
     markRunValuesUpdated(currentRunId, now);
     lastLocalEditRef.current = now;
-    queueManualCorrection(currentRunId, correction, baseline);
+    const stockAdjustment = register.startsWith("app")
+      ? {
+        kind: "applicator-stock-step" as const,
+        deltaLbs: next - (Number(values[fields.stock as keyof FormValues]) || 0),
+      }
+      : undefined;
+    queueManualCorrection(currentRunId, correction, baseline, stockAdjustment);
   }, [currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
   const isLive = runStatus === "running" || runStatus === "paused";
   const frontlineRows = deriveFrontlineNeedRows(v, deriveLiveFrontlineQuantitySource(v, calc));

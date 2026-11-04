@@ -2297,6 +2297,23 @@ export type ManualSauceStockEdit = ManualSectionEditRequestBase & {
   baseValues?: ManualSauceStockEditBaseValues;
 };
 
+export type ManualApp1EditStockAdjustmentKind = typeof ManualApp1EditStockAdjustmentKind[keyof typeof ManualApp1EditStockAdjustmentKind];
+
+
+export const ManualApp1EditStockAdjustmentKind = {
+  'applicator-stock-step': 'applicator-stock-step',
+} as const;
+
+export type ManualApp1EditStockAdjustment = {
+  kind: ManualApp1EditStockAdjustmentKind;
+  /**
+     * Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.
+     * @minimum -50
+     * @maximum 50
+     */
+  deltaLbs: number;
+};
+
 export type ManualApp1EditValues = {
   app1BatchesMade?: number;
   app1BatchAnchorNetSec?: number;
@@ -2319,8 +2336,26 @@ export type ManualApp1EditBaseValues = {
 
 export type ManualApp1Edit = ManualSectionEditRequestBase & {
   section?: 'app1';
+  stockAdjustment?: ManualApp1EditStockAdjustment;
   values?: ManualApp1EditValues;
   baseValues?: ManualApp1EditBaseValues;
+};
+
+export type ManualApp2EditStockAdjustmentKind = typeof ManualApp2EditStockAdjustmentKind[keyof typeof ManualApp2EditStockAdjustmentKind];
+
+
+export const ManualApp2EditStockAdjustmentKind = {
+  'applicator-stock-step': 'applicator-stock-step',
+} as const;
+
+export type ManualApp2EditStockAdjustment = {
+  kind: ManualApp2EditStockAdjustmentKind;
+  /**
+     * Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.
+     * @minimum -50
+     * @maximum 50
+     */
+  deltaLbs: number;
 };
 
 export type ManualApp2EditValues = {
@@ -2345,8 +2380,26 @@ export type ManualApp2EditBaseValues = {
 
 export type ManualApp2Edit = ManualSectionEditRequestBase & {
   section?: 'app2';
+  stockAdjustment?: ManualApp2EditStockAdjustment;
   values?: ManualApp2EditValues;
   baseValues?: ManualApp2EditBaseValues;
+};
+
+export type ManualApp3EditStockAdjustmentKind = typeof ManualApp3EditStockAdjustmentKind[keyof typeof ManualApp3EditStockAdjustmentKind];
+
+
+export const ManualApp3EditStockAdjustmentKind = {
+  'applicator-stock-step': 'applicator-stock-step',
+} as const;
+
+export type ManualApp3EditStockAdjustment = {
+  kind: ManualApp3EditStockAdjustmentKind;
+  /**
+     * Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.
+     * @minimum -50
+     * @maximum 50
+     */
+  deltaLbs: number;
 };
 
 export type ManualApp3EditValues = {
@@ -2371,8 +2424,26 @@ export type ManualApp3EditBaseValues = {
 
 export type ManualApp3Edit = ManualSectionEditRequestBase & {
   section?: 'app3';
+  stockAdjustment?: ManualApp3EditStockAdjustment;
   values?: ManualApp3EditValues;
   baseValues?: ManualApp3EditBaseValues;
+};
+
+export type ManualApp4EditStockAdjustmentKind = typeof ManualApp4EditStockAdjustmentKind[keyof typeof ManualApp4EditStockAdjustmentKind];
+
+
+export const ManualApp4EditStockAdjustmentKind = {
+  'applicator-stock-step': 'applicator-stock-step',
+} as const;
+
+export type ManualApp4EditStockAdjustment = {
+  kind: ManualApp4EditStockAdjustmentKind;
+  /**
+     * Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.
+     * @minimum -50
+     * @maximum 50
+     */
+  deltaLbs: number;
 };
 
 export type ManualApp4EditValues = {
@@ -2397,6 +2468,7 @@ export type ManualApp4EditBaseValues = {
 
 export type ManualApp4Edit = ManualSectionEditRequestBase & {
   section?: 'app4';
+  stockAdjustment?: ManualApp4EditStockAdjustment;
   values?: ManualApp4EditValues;
   baseValues?: ManualApp4EditBaseValues;
 };

@@ -618,6 +618,7 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
     correctionEvidence.push({
       phase: "request",
       section: body.section,
+      stockAdjustment: body.stockAdjustment,
       values: pickStockEvidence(body.values),
       baseValues: pickStockEvidence(body.baseValues),
     });

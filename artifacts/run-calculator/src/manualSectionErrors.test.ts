@@ -49,8 +49,8 @@ describe("manual section error notices", () => {
 
   it("maps only known rejection codes to safe, actionable messages", () => {
     const known = manualSectionRejectionMessage("section_changed");
-    expect(known).toContain("Your edits are still here");
-    expect(known).toContain("compare the latest counts");
+    expect(known).toContain("The latest server values are shown");
+    expect(known).toContain("review them before trying again");
     expect(manualSectionRejectionMessage("some server detail")).toBe(
       "This section could not be saved. Your edits are still here; review them and try again.",
     );

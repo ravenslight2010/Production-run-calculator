@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { hasOperationalSnapshotMutation } from "../lib/operationalSnapshotAuthority";
 import { isExactOperationalCommandRetry } from "../lib/operationalCommandIdentity";
+import { canRebaseManualApplicatorAdjustment } from "../lib/manualSectionAutoTrackRebase";
 import { createHash, randomUUID } from "node:crypto";
 import { computeSummaryStats, type SummaryStats, type SummaryStatsInput } from "@workspace/inventory-math";
 import {
@@ -2017,6 +2018,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
   const requestedDate = body?.date;
   const resumePackaging = body?.operation === "resume-packaging";
   const correctionGeneration = body?.correctionGeneration;
+  const stockAdjustment = body?.stockAdjustment;
   if ((body?.operation !== undefined && !resumePackaging)
     || (resumePackaging && (section !== "packaging"
       || !Number.isSafeInteger(correctionGeneration) || (correctionGeneration as number) < 1))) {
@@ -2053,6 +2055,48 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       !Object.prototype.hasOwnProperty.call(baseValues, field)
       || typeof (baseValues as Record<string, unknown>)[field] !== "number"))) {
     reject(400, "invalid_baseline"); return;
+  }
+  let stockAdjustmentDeltaLbs: number | undefined;
+  if (stockAdjustment !== undefined) {
+    const adjustment = stockAdjustment as Record<string, unknown> | null;
+    if (!adjustment || typeof adjustment !== "object" || Array.isArray(adjustment)
+      || Object.keys(adjustment).length !== 2
+      || adjustment.kind !== "applicator-stock-step"
+      || typeof adjustment.deltaLbs !== "number"
+      || !Number.isFinite(adjustment.deltaLbs)
+      || adjustment.deltaLbs === 0
+      || Math.abs(adjustment.deltaLbs) > 50
+      || !["app1", "app2", "app3", "app4"].includes(section as string)) {
+      reject(400, "invalid_edit"); return;
+    }
+    const register = section as "app1" | "app2" | "app3" | "app4";
+    const stockFields = applicatorStockFields(register);
+    const batchFields = {
+      made: `${register}BatchesMade`,
+      anchor: `${register}BatchAnchorNetSec`,
+      generation: `${register}BatchCorrectionGeneration`,
+    };
+    const requestedValues = values as Record<string, number>;
+    const requestedBase = baseValues as Record<string, number>;
+    const requiredFields = [
+      stockFields.stock, stockFields.anchor, stockFields.correctionGeneration,
+      batchFields.made, batchFields.anchor, batchFields.generation,
+    ];
+    if (requiredFields.some((field) =>
+      !Object.prototype.hasOwnProperty.call(requestedValues, field)
+      || !Object.prototype.hasOwnProperty.call(requestedBase, field))) {
+      reject(400, "invalid_baseline"); return;
+    }
+    if (Math.abs(
+      requestedValues[stockFields.stock] - requestedBase[stockFields.stock] - adjustment.deltaLbs,
+    ) > 1e-9
+      || requestedValues[batchFields.made] !== requestedBase[batchFields.made]
+      || requestedValues[stockFields.correctionGeneration] !== requestedBase[stockFields.correctionGeneration] + 1
+      || requestedValues[batchFields.generation] !== requestedBase[batchFields.generation] + 1
+      || Math.abs(requestedValues[stockFields.anchor] - requestedValues[batchFields.anchor]) > 1e-9) {
+      reject(400, "invalid_values"); return;
+    }
+    stockAdjustmentDeltaLbs = adjustment.deltaLbs;
   }
   // The additive consumption ledger may be absent in older clients' baselines.
   // A physical load/correction must never change that ledger.
@@ -2106,6 +2150,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         actorId: req.userId ?? "unknown", deviceId: (deviceId as string | undefined) ?? "unknown",
         baseRevision: baseRevision as number,
         actionData: { runId, section, values, baseValues, observedGeneration,
+          ...(stockAdjustment ? { stockAdjustment } : {}),
           ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration } : {}) },
       })) {
         return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
@@ -2117,6 +2162,86 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "run_changed" };
     }
     const currentValues = current.runValues?.[runId] ?? {};
+    let effectiveValues = values as Record<string, unknown>;
+    let effectiveBaseValues = baseValues as Record<string, unknown>;
+    if (MANUAL_SECTION_FIELDS[section as ManualSection].some((field) =>
+      Number(currentValues[field] ?? 0) !== Number((baseValues as Record<string, unknown>)[field] ?? 0))) {
+      if (stockAdjustmentDeltaLbs === undefined) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+      const history = await tx.select({
+        canonicalRevision: operationalIntentLedgerTable.canonicalRevision,
+        commandType: operationalIntentLedgerTable.commandType,
+        outcome: operationalIntentLedgerTable.outcome,
+        snapshot: operationalIntentLedgerTable.snapshot,
+        actionData: operationalIntentLedgerTable.actionData,
+      }).from(operationalIntentLedgerTable).where(and(
+        eq(operationalIntentLedgerTable.scope, scope),
+        eq(operationalIntentLedgerTable.date, date),
+        lte(operationalIntentLedgerTable.canonicalRevision, currentRevision),
+      )).orderBy(
+        desc(operationalIntentLedgerTable.canonicalRevision),
+        desc(operationalIntentLedgerTable.sequence),
+      ).limit(101);
+      const baseNumericValues = Object.fromEntries(MANUAL_SECTION_FIELDS[section as ManualSection].map((field) => [
+        field,
+        Number((baseValues as Record<string, unknown>)[field] ?? 0),
+      ]));
+      if (!canRebaseManualApplicatorAdjustment({
+        runId: runId as string,
+        section: section as ManualSection,
+        baseValues: baseNumericValues,
+        currentValues,
+        currentRevision,
+        ledgerRows: history,
+      })) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+
+      const register = section as "app1" | "app2" | "app3" | "app4";
+      const stockFields = applicatorStockFields(register);
+      const batchFields = {
+        made: `${register}BatchesMade`,
+        anchor: `${register}BatchAnchorNetSec`,
+        generation: `${register}BatchCorrectionGeneration`,
+      };
+      const stock = Number(currentValues[stockFields.stock]) || 0;
+      const targetStock = stock + stockAdjustmentDeltaLbs;
+      const capacity = computeApplicatorStockCapacityLbs(currentValues, register);
+      const batchGeneration = Number(currentValues[batchFields.generation]) || 0;
+      const stockGeneration = Number(currentValues[stockFields.correctionGeneration]) || 0;
+      const elapsedAnchor = computeAutoTrackElapsedMs({
+        startedAt: Number(run.startedAt) || 0,
+        pausedAt: Number(run.pausedAt) || undefined,
+        nowMs: serverTime,
+        stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : [],
+      }) / 1000;
+      const anchor = Math.max(
+        elapsedAnchor,
+        Number(currentValues[stockFields.anchor]) || 0,
+        Number(currentValues[batchFields.anchor]) || 0,
+      );
+      if (!Number.isFinite(targetStock) || targetStock < 0 || targetStock > capacity
+        || !Number.isSafeInteger(stockGeneration + 1)
+        || !Number.isSafeInteger(batchGeneration + 1)
+        || anchor > elapsedAnchor + 2) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+      const currentSectionValues = Object.fromEntries(MANUAL_SECTION_FIELDS[section as ManualSection].map((field) => [
+        field,
+        Number(currentValues[field] ?? 0),
+      ]));
+      effectiveBaseValues = currentSectionValues;
+      effectiveValues = {
+        ...currentSectionValues,
+        [stockFields.stock]: targetStock,
+        [stockFields.anchor]: anchor,
+        [stockFields.correctionGeneration]: stockGeneration + 1,
+        [batchFields.made]: Number(currentValues[batchFields.made]) || 0,
+        [batchFields.anchor]: anchor,
+        [batchFields.generation]: batchGeneration + 1,
+      };
+    }
     if (resumePackaging) {
       const progress = current.packagingProgress?.[runId];
       // Compare both lifecycle and correction identity under the same row lock.
@@ -2137,10 +2262,10 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     for (const register of stockRegisters) {
       const fields = applicatorStockFields(register);
       const hasStockField = [fields.stock, fields.anchor, fields.correctionGeneration]
-        .some((field) => Object.prototype.hasOwnProperty.call(values, field));
+        .some((field) => Object.prototype.hasOwnProperty.call(effectiveValues, field));
       if (!hasStockField) continue;
       if (![fields.stock, fields.anchor, fields.correctionGeneration]
-        .every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
+        .every((field) => Object.prototype.hasOwnProperty.call(effectiveValues, field))) {
         return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
       // The client expands a section edit to its complete baseline. An untouched
@@ -2148,11 +2273,11 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       // must not require capacity or a new generation. The full baseline fence
       // below still rejects concurrent changes to any field in this section.
       if ([fields.stock, fields.anchor, fields.correctionGeneration].every(
-        (field) => (values as Record<string, unknown>)[field] === (baseValues as Record<string, unknown>)[field],
+        (field) => effectiveValues[field] === effectiveBaseValues[field],
       )) continue;
-      const onHand = Number((values as Record<string, unknown>)[fields.stock]);
-      const anchor = Number((values as Record<string, unknown>)[fields.anchor]);
-      const correctionGeneration = Number((values as Record<string, unknown>)[fields.correctionGeneration]);
+      const onHand = Number(effectiveValues[fields.stock]);
+      const anchor = Number(effectiveValues[fields.anchor]);
+      const correctionGeneration = Number(effectiveValues[fields.correctionGeneration]);
       const previousStock = Number(currentValues[fields.stock]) || 0;
       const previousAnchor = Number(currentValues[fields.anchor]) || 0;
       const previousGeneration = Number(currentValues[fields.correctionGeneration]) || 0;
@@ -2184,14 +2309,14 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       "sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration",
     ] as const;
     const hasSauceStockUpdate = section === "sauce-stock" && sauceStockFields.some((field) =>
-      Object.prototype.hasOwnProperty.call(values, field));
+      Object.prototype.hasOwnProperty.call(effectiveValues, field));
     if (hasSauceStockUpdate) {
-      if (!sauceStockFields.every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
+      if (!sauceStockFields.every((field) => Object.prototype.hasOwnProperty.call(effectiveValues, field))) {
         return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
-      const onHand = Number((values as Record<string, unknown>).sauceStockBarrels);
-      const anchor = Number((values as Record<string, unknown>).sauceStockAnchorNetSec);
-      const correctionGeneration = Number((values as Record<string, unknown>).sauceStockCorrectionGeneration);
+      const onHand = Number(effectiveValues.sauceStockBarrels);
+      const anchor = Number(effectiveValues.sauceStockAnchorNetSec);
+      const correctionGeneration = Number(effectiveValues.sauceStockCorrectionGeneration);
       const previousAnchor = Number(currentValues.sauceStockAnchorNetSec) || 0;
       const previousGeneration = Number(currentValues.sauceStockCorrectionGeneration) || 0;
       const maxAnchor = computeAutoTrackElapsedMs({
@@ -2217,13 +2342,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       }
     }
     for (const key of allowed) {
-      const expected = (baseValues as Record<string, unknown>)[key];
+      const expected = effectiveBaseValues[key];
       if (expected !== undefined && Number(currentValues[key] ?? 0) !== expected) {
         return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
       }
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
-    const updatedRunValues = { ...(next.runValues?.[runId] ?? {}), ...values };
+    const updatedRunValues = { ...(next.runValues?.[runId] ?? {}), ...effectiveValues };
     if (stockUpdates.length) updatedRunValues.applicatorStockInitialized = true;
     if (hasSauceStockUpdate) updatedRunValues.sauceStockInitialized = true;
     next.runValues = { ...(next.runValues ?? {}), [runId]: updatedRunValues };
@@ -2276,7 +2401,8 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       scope, date, intentId: id, outcome: "accepted", snapshot: next,
       commandType: resumePackaging ? "packaging:resume" : `manual-section:${section}`, actorId: req.userId ?? "unknown",
       deviceId: (deviceId as string | undefined) ?? "unknown", baseRevision: baseRevision as number,
-      canonicalRevision: revision, actionData: { runId, section, values, baseValues, observedGeneration,
+        canonicalRevision: revision, actionData: { runId, section, values, baseValues, observedGeneration,
+          ...(stockAdjustment ? { stockAdjustment } : {}),
         ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration } : {}) }, serverReceivedAt: new Date(),
     });
     await appendSyncOutboxEvent(tx, {

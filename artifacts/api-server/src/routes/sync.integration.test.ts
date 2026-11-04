@@ -10,6 +10,7 @@ import pg from "pg";
 import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
+import { canRebaseManualApplicatorAdjustment } from "../lib/manualSectionAutoTrackRebase";
 import { logger } from "../lib/logger";
 import {
   clearCapacityTelemetryForTests,
@@ -1034,6 +1035,132 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     },
     canonicalRevision: 0,
   }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  it("rebases an explicit App1 +/- stock step over an accepted automatic stock claim", async () => {
+    await seedStockRun();
+    const baseValues = {
+      ...stockBaseline,
+      app1StockLbs: 10,
+      app1StockConsumedLbs: 0,
+    };
+    const baselineData = {
+      dayState: { date: DATE, runs: [{ id: "stock-run", startedAt: 1_000, pausedAt: 2_000, metaUpdatedAt: 3 }] },
+      runValues: { "stock-run": {
+        app1Type: "Cheese",
+        app1BatchLbs: 50,
+        app1CheeseRecipe: [],
+        ...baseValues,
+        applicatorStockInitialized: true,
+      } },
+    };
+    await db.update(dailySyncTable).set({ data: baselineData, canonicalRevision: 1 })
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    await db.insert(operationalIntentLedgerTable).values({
+      scope: "live",
+      date: DATE,
+      intentId: "stock-baseline",
+      outcome: "accepted",
+      snapshot: baselineData,
+      commandType: "manual-section:app1",
+      actorId: "fixture",
+      deviceId: "fixture",
+      baseRevision: 0,
+      canonicalRevision: 1,
+      actionData: { runId: "stock-run", section: "app1" },
+      serverReceivedAt: new Date(),
+    });
+
+    const tickValues = {
+      ...baseValues,
+      app1StockLbs: 9.75,
+      app1StockAnchorNetSec: 1,
+      app1StockConsumedLbs: 0.25,
+    };
+    const tickData = {
+      ...baselineData,
+      runValues: { "stock-run": { ...baselineData.runValues["stock-run"], ...tickValues } },
+    };
+    await db.update(dailySyncTable).set({ data: tickData, canonicalRevision: 2 })
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    await db.insert(operationalIntentLedgerTable).values({
+      scope: "live",
+      date: DATE,
+      intentId: "stock-auto-track-tick",
+      outcome: "accepted",
+      snapshot: tickData,
+      commandType: "auto-track",
+      actorId: "server:auto-track",
+      deviceId: "server:auto-track",
+      baseRevision: 1,
+      canonicalRevision: 2,
+      actionData: {
+        runId: "stock-run",
+        channel: "app1-stock",
+        mutations: [
+          { field: "app1StockLbs", from: 10, to: 9.75 },
+          { field: "app1StockAnchorNetSec", from: 0, to: 1 },
+          { field: "app1StockConsumedLbs", from: 0, to: 0.25 },
+        ],
+      },
+      serverReceivedAt: new Date(),
+    });
+
+    const correction = {
+      id: "stock-step-after-auto-track",
+      date: DATE,
+      runId: "stock-run",
+      section: "app1",
+      values: {
+        ...baseValues,
+        app1StockLbs: 9,
+        app1StockAnchorNetSec: 1,
+        app1StockCorrectionGeneration: 1,
+        app1BatchAnchorNetSec: 1,
+        app1BatchCorrectionGeneration: 1,
+      },
+      baseValues,
+      observedGeneration: "stock-run:3",
+      baseRevision: 1,
+      resetEpoch: 0,
+      deviceId: "fixture-device",
+      stockAdjustment: { kind: "applicator-stock-step", deltaLbs: -1 },
+    };
+    const priorLedgerRows = await db.select().from(operationalIntentLedgerTable)
+      .where(and(eq(operationalIntentLedgerTable.scope, "live"), eq(operationalIntentLedgerTable.date, DATE)));
+    expect(canRebaseManualApplicatorAdjustment({
+      runId: "stock-run",
+      section: "app1",
+      baseValues,
+      currentValues: tickValues,
+      currentRevision: 2,
+      ledgerRows: priorLedgerRows,
+    }), JSON.stringify(priorLedgerRows.map((row) => ({
+      canonicalRevision: row.canonicalRevision,
+      commandType: row.commandType,
+      outcome: row.outcome,
+      actionData: row.actionData,
+    })))).toBe(true);
+    const response = await request(correction);
+    const accepted = await response.json() as any;
+    expect(response.status, JSON.stringify(accepted)).toBe(200);
+    expect(accepted.outcome).toBe("accepted");
+    expect(accepted.data.runValues["stock-run"]).toMatchObject({
+      app1BatchesMade: 9,
+      app1BatchCorrectionGeneration: 1,
+      app1StockLbs: 8.75,
+      app1StockCorrectionGeneration: 1,
+      app1StockConsumedLbs: 0.25,
+    });
+
+    const duplicate = await request(correction);
+    expect(duplicate.status).toBe(200);
+    const retried = await duplicate.json() as any;
+    expect(retried.duplicate).toBe(true);
+    expect(retried.data.runValues["stock-run"].app1StockLbs).toBe(8.75);
+
+    const staleManual = await request({ ...correction, id: "stale-after-second-manual-edit" });
+    expect(staleManual.status).toBe(409);
+    expect((await staleManual.json() as any).code).toBe("section_changed");
+  });
   const stockEdit = (id: string, pounds: number) => ({
     id, date: DATE, runId: "stock-run", section: "app1",
     values: {

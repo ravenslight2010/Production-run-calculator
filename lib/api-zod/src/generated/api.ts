@@ -1010,24 +1010,32 @@ export const submitManualSectionEditBodyFiveOneObservedGenerationMax = 160;
 export const submitManualSectionEditBodyFiveOneBaseRevisionMin = 0;
 export const submitManualSectionEditBodyFiveOneResetEpochMin = 0;
 export const submitManualSectionEditBodyFiveOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFiveTwoStockAdjustmentDeltaLbsMin = -50;
+export const submitManualSectionEditBodyFiveTwoStockAdjustmentDeltaLbsMax = 50;
 export const submitManualSectionEditBodySixOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodySixOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodySixOneObservedGenerationMax = 160;
 export const submitManualSectionEditBodySixOneBaseRevisionMin = 0;
 export const submitManualSectionEditBodySixOneResetEpochMin = 0;
 export const submitManualSectionEditBodySixOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySixTwoStockAdjustmentDeltaLbsMin = -50;
+export const submitManualSectionEditBodySixTwoStockAdjustmentDeltaLbsMax = 50;
 export const submitManualSectionEditBodySevenOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodySevenOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodySevenOneObservedGenerationMax = 160;
 export const submitManualSectionEditBodySevenOneBaseRevisionMin = 0;
 export const submitManualSectionEditBodySevenOneResetEpochMin = 0;
 export const submitManualSectionEditBodySevenOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySevenTwoStockAdjustmentDeltaLbsMin = -50;
+export const submitManualSectionEditBodySevenTwoStockAdjustmentDeltaLbsMax = 50;
 export const submitManualSectionEditBodyEightOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodyEightOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodyEightOneObservedGenerationMax = 160;
 export const submitManualSectionEditBodyEightOneBaseRevisionMin = 0;
 export const submitManualSectionEditBodyEightOneResetEpochMin = 0;
 export const submitManualSectionEditBodyEightOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightTwoStockAdjustmentDeltaLbsMin = -50;
+export const submitManualSectionEditBodyEightTwoStockAdjustmentDeltaLbsMax = 50;
 export const submitManualSectionEditBodyNineOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodyNineOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodyNineOneObservedGenerationMax = 160;
@@ -10140,6 +10148,10 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyFiveOneDeviceIdRegExp)
 }).and(zod.object({
   "section": zod.literal("app1").optional(),
+  "stockAdjustment": zod.object({
+  "kind": zod.enum(['applicator-stock-step']),
+  "deltaLbs": zod.number().min(submitManualSectionEditBodyFiveTwoStockAdjustmentDeltaLbsMin).max(submitManualSectionEditBodyFiveTwoStockAdjustmentDeltaLbsMax).describe('Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.')
+}).optional(),
   "values": zod.object({
   "app1BatchesMade": zod.number().optional(),
   "app1BatchAnchorNetSec": zod.number().optional(),
@@ -10168,6 +10180,10 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "deviceId": zod.string().min(1).regex(submitManualSectionEditBodySixOneDeviceIdRegExp)
 }).and(zod.object({
   "section": zod.literal("app2").optional(),
+  "stockAdjustment": zod.object({
+  "kind": zod.enum(['applicator-stock-step']),
+  "deltaLbs": zod.number().min(submitManualSectionEditBodySixTwoStockAdjustmentDeltaLbsMin).max(submitManualSectionEditBodySixTwoStockAdjustmentDeltaLbsMax).describe('Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.')
+}).optional(),
   "values": zod.object({
   "app2BatchesMade": zod.number().optional(),
   "app2BatchAnchorNetSec": zod.number().optional(),
@@ -10196,6 +10212,10 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "deviceId": zod.string().min(1).regex(submitManualSectionEditBodySevenOneDeviceIdRegExp)
 }).and(zod.object({
   "section": zod.literal("app3").optional(),
+  "stockAdjustment": zod.object({
+  "kind": zod.enum(['applicator-stock-step']),
+  "deltaLbs": zod.number().min(submitManualSectionEditBodySevenTwoStockAdjustmentDeltaLbsMin).max(submitManualSectionEditBodySevenTwoStockAdjustmentDeltaLbsMax).describe('Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.')
+}).optional(),
   "values": zod.object({
   "app3BatchesMade": zod.number().optional(),
   "app3BatchAnchorNetSec": zod.number().optional(),
@@ -10224,6 +10244,10 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyEightOneDeviceIdRegExp)
 }).and(zod.object({
   "section": zod.literal("app4").optional(),
+  "stockAdjustment": zod.object({
+  "kind": zod.enum(['applicator-stock-step']),
+  "deltaLbs": zod.number().min(submitManualSectionEditBodyEightTwoStockAdjustmentDeltaLbsMin).max(submitManualSectionEditBodyEightTwoStockAdjustmentDeltaLbsMax).describe('Signed operator +/- adjustment in pounds; zero is invalid and negative values decrement stock.')
+}).optional(),
   "values": zod.object({
   "app4BatchesMade": zod.number().optional(),
   "app4BatchAnchorNetSec": zod.number().optional(),

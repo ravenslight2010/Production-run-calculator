@@ -6,11 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ManualApp3EditBaseValues } from './manualApp3EditBaseValues';
+import type { ManualApp3EditStockAdjustment } from './manualApp3EditStockAdjustment';
 import type { ManualApp3EditValues } from './manualApp3EditValues';
 import type { ManualSectionEditRequestBase } from './manualSectionEditRequestBase';
 
 export type ManualApp3Edit = ManualSectionEditRequestBase & {
   section?: 'app3';
+  stockAdjustment?: ManualApp3EditStockAdjustment;
   values?: ManualApp3EditValues;
   baseValues?: ManualApp3EditBaseValues;
 };
