@@ -902,12 +902,17 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
   const concurrency = boundedInteger(options.concurrency ?? Number(process.env.SERVER_JOB_MAX_CONCURRENCY), 2, 1, 4);
   const intervalMs = boundedInteger(options.intervalMs ?? Number(process.env.SERVER_JOB_POLL_INTERVAL_MS), 1_000, 100, 60_000);
   const pruneIntervalMs = boundedInteger(options.pruneIntervalMs ?? Number(process.env.SERVER_JOB_PRUNE_INTERVAL_MS), 60 * 60_000, 60_000, 24 * 60 * 60_000);
+  const maxIdlePollIntervalMs = Math.max(intervalMs, Math.min(5_000, intervalMs * 5));
   const prune = options.prune ?? (() => pruneExpiredServerJobs());
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const runBackoff = createBackgroundOperationBackoff({ jitter: true });
   const pruneBackoff = createBackgroundOperationBackoff({ jitter: true });
   let active = 0;
+  let idlePollIntervalMs = intervalMs;
+  let nextEmptyPollAt = 0;
+  let currentBatchFoundWork = false;
+  let currentBatchFailed = false;
   let stopped = false;
   let lastPruneAt = 0;
   const tick = () => {
@@ -923,17 +928,41 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
           options.onError?.(error, "prune", boundedDurationMs(monotonicNow() - startedAt));
         });
     }
+    // Preserve configured concurrency and cadence while work is available,
+    // but stop repeatedly checking an empty queue at the full rate. Producers
+    // are cross-process, so empty polling backs off only to a small bounded
+    // delay; a claimed job or failure restores the configured base cadence.
+    if (active === 0 && currentTime < nextEmptyPollAt) return;
     if (!runBackoff.isReady(currentTime)) return;
     while (active < concurrency) {
       active++;
       const startedAt = monotonicNow();
       void runBackgroundOperation("server-job-run", () => worker.runOnce())
-        .then(() => runBackoff.recordSuccess())
+        .then((claimed) => {
+          runBackoff.recordSuccess();
+          if (claimed) currentBatchFoundWork = true;
+        })
         .catch((error) => {
           runBackoff.recordFailure(now());
+          currentBatchFailed = true;
           options.onError?.(error, "run", boundedDurationMs(monotonicNow() - startedAt));
         })
-        .finally(() => { active--; });
+        .finally(() => {
+          active--;
+          if (active !== 0) return;
+          if (currentBatchFoundWork || currentBatchFailed) {
+            idlePollIntervalMs = intervalMs;
+            nextEmptyPollAt = 0;
+          } else {
+            nextEmptyPollAt = now() + idlePollIntervalMs;
+            idlePollIntervalMs = Math.min(
+              maxIdlePollIntervalMs,
+              idlePollIntervalMs * 2,
+            );
+          }
+          currentBatchFoundWork = false;
+          currentBatchFailed = false;
+        });
     }
   };
   tick();

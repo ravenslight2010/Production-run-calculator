@@ -278,6 +278,33 @@ describe("useHomeSyncCoordination", () => {
     vi.useRealTimers();
   });
 
+  it("surfaces unexpected recovery exceptions and retains a safe retry path", async () => {
+    vi.useFakeTimers();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const recover = vi.fn<() => Promise<boolean>>()
+      .mockRejectedValue(new Error("private implementation detail"));
+    const registration = result.current.registerForegroundRecovery(
+      { register: () => () => undefined },
+      recover,
+    );
+
+    await act(async () => {
+      expect(await registration.reconcile()).toBe(false);
+    });
+    expect(result.current.foregroundRecoveryNotice?.kind).toBe("failed");
+    expect(result.current.foregroundRecoveryNotice?.message).toContain("Retry recovery");
+    expect(result.current.foregroundRecoveryNotice?.message).not.toContain("private implementation detail");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_200);
+    });
+    expect(recover).toHaveBeenCalledTimes(2);
+
+    registration.dispose();
+    unmount();
+    vi.useRealTimers();
+  });
+
   it("records an in-progress wake attempt before its recovery pull resolves", async () => {
     const { result, unmount } = renderHook(() => useHomeSyncCoordination());
     let finish!: (value: boolean) => void;

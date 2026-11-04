@@ -52,6 +52,57 @@ describe("server job scheduler backoff", () => {
     }
   });
 
+  it("backs off empty-queue polls to five seconds and resets after work is claimed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const runOnce = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(false);
+    backgroundMocks.runBackgroundOperation.mockImplementation(
+      (_operation: string, run: () => Promise<boolean>) => run(),
+    );
+    const loop = startServerJobWorkerLoop({
+      worker: { runOnce },
+      prune: vi.fn(async () => 0),
+      concurrency: 2,
+      intervalMs: 1_000,
+      pruneIntervalMs: 60_000,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runOnce).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(runOnce).toHaveBeenCalledTimes(4);
+      // A claimed job resets the idle delay, so the next poll stays at the
+      // configured one-second cadence instead of waiting two seconds.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(runOnce).toHaveBeenCalledTimes(6);
+
+      // The next empty batches back off to 2s, 4s, then the 5s cap.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(runOnce).toHaveBeenCalledTimes(8);
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(runOnce).toHaveBeenCalledTimes(8);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runOnce).toHaveBeenCalledTimes(10);
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(runOnce).toHaveBeenCalledTimes(10);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runOnce).toHaveBeenCalledTimes(12);
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(runOnce).toHaveBeenCalledTimes(12);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runOnce).toHaveBeenCalledTimes(14);
+    } finally {
+      loop.stop();
+    }
+  });
+
   it("reports the failed worker stage with bounded elapsed time", async () => {
     vi.useFakeTimers();
     const failure = new Error("private database details");

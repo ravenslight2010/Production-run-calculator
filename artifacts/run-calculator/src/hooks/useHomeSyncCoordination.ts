@@ -416,12 +416,26 @@ export function useHomeSyncCoordination() {
         trigger,
         outcome: "in-progress",
       });
-      const recovered = await recover({
-        trigger,
-        signal: controller.signal,
-        isCurrent: () => !disposed && !controller.signal.aborted && attemptBoundary === boundaryGeneration,
-        classify: (outcome) => { classified = outcome; },
-      });
+      let recovered = false;
+      try {
+        recovered = await recover({
+          trigger,
+          signal: controller.signal,
+          isCurrent: () => !disposed && !controller.signal.aborted && attemptBoundary === boundaryGeneration,
+          classify: (outcome) => { classified = outcome; },
+        });
+      } catch {
+        // A recovery callback should classify and contain its own request
+        // errors, but an unexpected exception must not leave the wake fence in
+        // an endless "recovering" state with no retry control.
+        if (!disposed && !controller.signal.aborted && attemptBoundary === boundaryGeneration) {
+          classified = "connectivity-retry";
+          setForegroundRecoveryNotice({
+            kind: "failed",
+            message: "Couldn't finish recovery. Your local work is retained and tracking remains paused. Retry recovery when connected.",
+          });
+        }
+      }
       // A successful response from BEFORE a second sleep/offline transition
       // cannot settle the next wake. Let the coalesced signal pull again.
       if (!disposed && attemptBoundary !== boundaryGeneration) {
