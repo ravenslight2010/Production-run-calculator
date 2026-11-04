@@ -3993,6 +3993,7 @@ router.post(
 const SERVER_TICK_DEFAULT_MS = 15_000;
 const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
+const SERVER_TICK_SUMMARY_LOG_INTERVAL_MS = 5 * 60_000;
 const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
 const sauceConfigurationWarningAt = new Map<string, number>();
 const SAUCE_CONFIGURATION_WARNING_INTERVAL_MS = 5 * 60_000;
@@ -4267,9 +4268,8 @@ export async function runAutoTrackServerTicks(opts: {
     } catch (err) {
       backoff.recordFailure(nowMs);
       logger.error({
-        err,
         event: "server_auto_track_tick",
-        date: row.date,
+        scope,
         failureStage,
         failureReason: classifyBackgroundFailure(err, { assumeDatabase: failureStage === "date-transaction" }),
       }, "Server auto-track tick failed");
@@ -4311,12 +4311,25 @@ export async function runAutoTrackServerTicks(opts: {
 export function startAutoTrackServerTicks(): NodeJS.Timeout {
   const intervalMs = Math.max(5_000, Number(process.env.AUTO_TRACK_SERVER_TICK_MS) || SERVER_TICK_DEFAULT_MS);
   let running = false;
+  let lastSummaryLogAt = 0;
   const timer = setInterval(() => {
     if (running) return;
     running = true;
-    void runAutoTrackServerTicks().catch((err) => {
+    const startedAt = Date.now();
+    void runAutoTrackServerTicks().then((summary) => {
+      const completedAt = Date.now();
+      if (completedAt - lastSummaryLogAt < SERVER_TICK_SUMMARY_LOG_INTERVAL_MS) return;
+      lastSummaryLogAt = completedAt;
+      logger.info({
+        event: "server_auto_track_tick_summary",
+        durationMs: Math.max(0, completedAt - startedAt),
+        examinedDates: summary.examinedDates,
+        builtClaims: summary.builtClaims,
+        accepted: summary.accepted,
+        outcomes: summary.outcomes,
+      }, "Server auto-track tick summary");
+    }).catch((err) => {
       logger.error({
-        err,
         event: "server_auto_track_tick",
         failureStage: "tick-pass",
         failureReason: classifyBackgroundFailure(err, { assumeDatabase: true }),

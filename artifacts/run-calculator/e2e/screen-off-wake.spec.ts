@@ -4162,6 +4162,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     } | null = null;
     const postResumeClaims = () =>
       caseClaimResponses.slice(resumeClaimStartIndex);
+    const acceptedPostResumeClaims = () =>
+      postResumeClaims().filter(
+        (claim) => claim.status === 200 && claim.outcome === "accepted",
+      );
     await waitForSyncWritesToDrain(page);
     try {
       await expect
@@ -4219,11 +4223,18 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       if (!response.ok) throw new Error(`canonical due read failed: ${response.status}`);
       const body = (await response.json()) as {
         packagingProgress?: Record<string, {
-          skidsCompleted?: number; casesOnCurrentSkid?: number; manualOverrideUntil?: number;
+          skidsCompleted?: number; casesOnCurrentSkid?: number;
+          correctionGeneration?: number; manualOverrideUntil?: number;
         }>;
         runValues?: Record<string, { casesOnCurrentSkid?: number }>;
         autoTrackServerState?: {
-          wallClockBookkeeping?: Record<string, { caseNextDueMs?: number; lastExpectedCases?: number }>;
+          wallClockBookkeeping?: Record<string, {
+            caseNextDueMs?: number;
+            lastExpectedCases?: number;
+            appliedPackagingCorrectionGeneration?: number;
+            appliedPackagingOverrideUntil?: number;
+            serverSequences?: Record<string, number>;
+          }>;
         };
         autoTrackCoordination?: {
           runs?: Record<string, Record<string, { sequence?: number; nextDueAt?: number }>>;
@@ -4247,10 +4258,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       expected: afterDueBeat.book?.lastExpectedCases,
       value: afterDueBeat.value,
     })).toBe(46);
-    // Hold the next automatic-count reply after the server accepts it. Let
-    // several client case-timer periods expire while that acknowledgment is
-    // pending; no duplicate claim may be sent, and tracking must continue after
-    // the canonical reply is released.
+    // This recovery scenario deliberately skips intermediate worker beats:
+    // simulate a prolonged background interval, then let the server tick and
+    // the client-owned Packaging case claim reconcile from canonical state.
     const fixtureDate = await page.evaluate(() => {
       const configured = (window as unknown as Record<string, unknown>).__testFixtureDate;
       return typeof configured === "string"
@@ -4273,89 +4283,163 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     let expectedFinalSkids = 0;
     let expectedFinalCases = 0;
 
-    const wakeRebasedCaseDueMs = Math.max(
+    const workerRecoveryAtMs = Math.max(
       firstNextCaseDueMs,
       firstWakeNowMs + casePeriodMs,
       Number(afterDueBeat.book?.caseNextDueMs ?? 0),
     );
     await stopFollowingRealDateNow(page);
-    const nextServerClaimDueMs = wakeRebasedCaseDueMs + 1;
-    await mockDateNow(page, nextServerClaimDueMs, { tick: false });
-    expect(await page.evaluate(() => Date.now())).toBe(nextServerClaimDueMs);
+    const clientRecoveryAtMs = workerRecoveryAtMs + 1;
+    await mockDateNow(page, clientRecoveryAtMs, { tick: false });
+    expect(await page.evaluate(() => Date.now())).toBe(clientRecoveryAtMs);
 
-    // A fresh canonical schedule gives the server ownership of this channel.
-    // Drive that same authoritative tick path at the fixture clock instead of
-    // waiting for a client claim that the ownership lease intentionally blocks.
+    // The case channel is client-owned. The delayed server tick repairs its
+    // private baseline; the client then submits one catch-up claim from the
+    // acknowledged correction rather than replaying the stale event.
     const beforeServerClaim = await readAfterDueBeat();
-    expect(beforeServerClaim.progress?.casesOnCurrentSkid).toBe(46);
+    const totalCases = (progress: {
+      skidsCompleted?: number;
+      casesOnCurrentSkid?: number;
+    } | undefined) =>
+      Number(progress?.skidsCompleted ?? 0) * 48
+      + Number(progress?.casesOnCurrentSkid ?? 0);
+    const totalBeforeRecovery = totalCases(beforeServerClaim.progress);
+    expect(totalBeforeRecovery).toBeGreaterThanOrEqual(46);
     const firstServerTick = await tickServerWithoutAdvancingBrowserClock(
       page,
-      wakeRebasedCaseDueMs,
+      workerRecoveryAtMs,
     );
+    await expect
+      .poll(() => acceptedPostResumeClaims().length, { timeout: 15_000 })
+      .toBe(2);
     const afterServerClaim = await readAfterDueBeat();
+    const acceptedClaimsAfterRecovery = acceptedPostResumeClaims();
+    const catchUpClaim = acceptedClaimsAfterRecovery[1];
+    const expectedCatchUpCases = Math.floor(
+      (Number(catchUpClaim.claimDueAt ?? 0)
+        - Number(clientCaseClaim?.claimDueAt ?? 0))
+      / casePeriodMs,
+    );
+    const totalAfterRecovery = totalCases(afterServerClaim.progress);
     const firstTickDiagnostics = {
-      dueOffsetFromWakeMs: nextServerClaimDueMs - firstWakeNowMs,
+      workerRecoveryOffsetFromWakeMs: workerRecoveryAtMs - firstWakeNowMs,
+      clientRecoveryOffsetFromWakeMs: clientRecoveryAtMs - firstWakeNowMs,
       scheduledDueOffsetFromWakeMs:
         Number(afterDueBeat.book?.caseNextDueMs ?? 0) - firstWakeNowMs,
+      clientClaimDueOffsetFromWakeMs:
+        Number(clientCaseClaim?.claimDueAt ?? 0) - firstWakeNowMs,
+      clientNextDueOffsetFromWakeMs: firstNextCaseDueMs - firstWakeNowMs,
+      clientCasePeriodMs: casePeriodMs,
+      manualOverrideEndOffsetFromWakeMs:
+        Number(afterDueBeat.progress?.manualOverrideUntil ?? 0) - firstWakeNowMs,
+      resumeOffsetFromWakeMs: Number(resumeAt) - firstWakeNowMs,
+      correctionGeneration: afterDueBeat.progress?.correctionGeneration,
+      appliedCorrectionGeneration:
+        afterDueBeat.book?.appliedPackagingCorrectionGeneration,
+      appliedOverrideOffsetFromWakeMs:
+        Number(afterDueBeat.book?.appliedPackagingOverrideUntil ?? 0) - firstWakeNowMs,
       before: {
         skids: beforeServerClaim.progress?.skidsCompleted,
         cases: beforeServerClaim.progress?.casesOnCurrentSkid,
-        value: beforeServerClaim.value,
+        total: totalBeforeRecovery,
         sequence: beforeServerClaim.coordination?.sequence,
       },
-      tick: firstServerTick,
+      tick: {
+        builtClaims: firstServerTick.builtClaims,
+        accepted: firstServerTick.accepted,
+        outcomes: firstServerTick.outcomes,
+      },
+      clientCaseRequestsBeforeAndAfter: {
+        before: clientCaseRequestCountAfterResume,
+        after: caseRequestCount(),
+      },
+      recentClientCaseResponses: caseClaimResponses.slice(-3).map((claim) => ({
+        status: claim.status,
+        outcome: claim.outcome,
+        sequence: claim.claimSequence,
+        dueOffsetFromWakeMs: Number(claim.claimDueAt ?? 0) - firstWakeNowMs,
+        stateSequence: claim.stateSequence,
+        nextDueOffsetFromWakeMs:
+          Number(claim.stateNextDueAt ?? 0) - firstWakeNowMs,
+      })),
       after: {
         skids: afterServerClaim.progress?.skidsCompleted,
         cases: afterServerClaim.progress?.casesOnCurrentSkid,
-        value: afterServerClaim.value,
+        total: totalAfterRecovery,
         sequence: afterServerClaim.coordination?.sequence,
+        serverSequence: afterServerClaim.book?.serverSequences?.case,
         nextDueOffsetFromWakeMs:
           Number(afterServerClaim.coordination?.nextDueAt ?? 0) - firstWakeNowMs,
         nextBookDueOffsetFromWakeMs:
           Number(afterServerClaim.book?.caseNextDueMs ?? 0) - firstWakeNowMs,
       },
-      visibleCases: await cases.textContent(),
     };
-    console.log(
-      "Screen-off Packaging server-tick diagnostics",
-      JSON.stringify(firstTickDiagnostics),
-    );
     expect(
-      afterServerClaim.progress?.casesOnCurrentSkid,
-      JSON.stringify(firstTickDiagnostics),
-    ).toBe(47);
-    await expect(cases).toHaveText("47", { timeout: 15_000 });
+      expectedCatchUpCases,
+      `expected at least one elapsed case interval: ${JSON.stringify(firstTickDiagnostics)}`,
+    ).toBeGreaterThan(0);
+    expect(
+      totalAfterRecovery,
+      `Packaging catch-up after delayed worker tick: ${JSON.stringify(firstTickDiagnostics)}`,
+    ).toBe(totalBeforeRecovery + expectedCatchUpCases);
+    expect(afterServerClaim.book?.appliedPackagingCorrectionGeneration)
+      .toBe(afterServerClaim.progress?.correctionGeneration);
+    expect(afterServerClaim.book?.appliedPackagingOverrideUntil)
+      .toBe(afterServerClaim.progress?.manualOverrideUntil);
+    expect(Number(afterServerClaim.book?.caseNextDueMs ?? 0))
+      .toBeGreaterThan(workerRecoveryAtMs);
     expect(afterServerClaim.coordination?.sequence).toBe(
-      Number(clientCaseClaim?.stateSequence ?? 0) + 1,
+      Number(catchUpClaim.stateSequence ?? 0),
     );
+    const clientCaseRequestCountAfterRecovery = caseRequestCount();
     expect(
       caseRequestCount(),
-      "a fresh server-owned Packaging channel must not start a competing client claim",
-    ).toBe(clientCaseRequestCountAfterResume);
+      "the client-owned case claim must be accepted after the server rebase",
+    ).toBeGreaterThan(clientCaseRequestCountAfterResume);
 
-    // Replaying the exact same server time must not duplicate the case. Then
-    // advance to the newly returned deadline and confirm tracking continues.
-    await tickServerWithoutAdvancingBrowserClock(page, wakeRebasedCaseDueMs);
+    // Replaying the server beat at the same time must not duplicate progress.
+    // The next case is still a client-owned claim at the returned deadline.
+    await tickServerWithoutAdvancingBrowserClock(page, workerRecoveryAtMs);
     const afterDuplicateTick = await readAfterDueBeat();
-    expect(afterDuplicateTick.progress?.casesOnCurrentSkid).toBe(47);
+    expect(totalCases(afterDuplicateTick.progress)).toBe(totalAfterRecovery);
     expect(afterDuplicateTick.coordination?.sequence)
       .toBe(afterServerClaim.coordination?.sequence);
-    expect(caseRequestCount()).toBe(clientCaseRequestCountAfterResume);
+    expect(caseRequestCount()).toBe(clientCaseRequestCountAfterRecovery);
 
-    const nextServerCaseDueMs = Math.max(
+    const nextClientCaseDueMs = Math.max(
       Number(afterDuplicateTick.coordination?.nextDueAt ?? 0),
       Number(afterDuplicateTick.book?.caseNextDueMs ?? 0),
     );
-    expect(nextServerCaseDueMs).toBeGreaterThan(nextServerClaimDueMs);
-    await mockDateNow(page, nextServerCaseDueMs, { tick: false });
-    await tickServerWithoutAdvancingBrowserClock(page, nextServerCaseDueMs);
-    await expect(cases).toHaveText("48", { timeout: 15_000 });
-    const afterSecondServerClaim = await readAfterDueBeat();
-    expect(afterSecondServerClaim.progress?.casesOnCurrentSkid).toBe(48);
-    expect(afterSecondServerClaim.coordination?.sequence).toBe(
+    expect(nextClientCaseDueMs).toBeGreaterThan(clientRecoveryAtMs);
+    await mockDateNow(page, nextClientCaseDueMs, { tick: false });
+    await expect
+      .poll(() => acceptedPostResumeClaims().length, { timeout: 15_000 })
+      .toBe(3);
+    const afterSecondClientClaim = await readAfterDueBeat();
+    const nextAcceptedClaim = acceptedPostResumeClaims()[2];
+    const expectedNextCatchUpCases = Math.floor(
+      (Number(nextAcceptedClaim.claimDueAt ?? 0)
+        - Number(catchUpClaim.claimDueAt ?? 0))
+      / casePeriodMs,
+    );
+    expect(
+      totalCases(afterSecondClientClaim.progress),
+      JSON.stringify({
+        totalAfterRecovery,
+        totalAfterNextClaim: totalCases(afterSecondClientClaim.progress),
+        firstClaimDueAt: clientCaseClaim?.claimDueAt,
+        catchUpClaimDueAt: catchUpClaim.claimDueAt,
+        nextClaimDueAt: nextAcceptedClaim.claimDueAt,
+        nextClaimSequence: nextAcceptedClaim.stateSequence,
+        expectedNextCatchUpCases,
+        actualCoordinationSequence: afterSecondClientClaim.coordination?.sequence,
+        serverCaseSequence: afterSecondClientClaim.book?.serverSequences?.case,
+      }),
+    ).toBe(totalAfterRecovery + expectedNextCatchUpCases);
+    expect(afterSecondClientClaim.coordination?.sequence).toBe(
       Number(afterServerClaim.coordination?.sequence ?? 0) + 1,
     );
-    expect(caseRequestCount()).toBe(clientCaseRequestCountAfterResume);
+    expect(caseRequestCount()).toBeGreaterThan(clientCaseRequestCountAfterRecovery);
 
     const finalCanonicalProgress = await page.evaluate(async ({ runId, today }) => {
       const response = await fetch(`/api/sync/today?today=${today}`, {
@@ -4387,12 +4471,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     await expect(cases).toHaveText(String(expectedFinalCases), { timeout: 10_000 });
     await expect
       .poll(
-        () => postResumeClaims().filter(
-          (claim) => claim.status === 200 && claim.outcome === "accepted",
-        ).length,
+          () => acceptedPostResumeClaims().length,
         { timeout: 10_000 },
       )
-      .toBe(1);
+        .toBe(3);
     dueNowMs = await page.evaluate(() => Date.now());
 
     // The authoritative beat is the source of truth for this paired

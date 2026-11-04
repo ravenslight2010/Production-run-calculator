@@ -3044,12 +3044,14 @@ describe("server auto-track tick recovery under database pressure", () => {
       expect(tickErrorLog).toHaveBeenCalledWith(
         expect.objectContaining({
           event: "server_auto_track_tick",
-          date: TICK_DATE,
+          scope: "live",
           failureStage: "date-transaction",
           failureReason: "database-connection",
         }),
         "Server auto-track tick failed",
       );
+      expect(tickErrorLog.mock.calls[0]?.[0]).not.toHaveProperty("err");
+      expect(tickErrorLog.mock.calls[0]?.[0]).not.toHaveProperty("date");
       const firstDeferred = getAutoTrackDeferredDiagnostic(TICK_NOW);
       expect(firstDeferred).toMatchObject({
         deferredDateCount: 1,
