@@ -66,6 +66,62 @@ describe("durable outbox wake scheduling", () => {
     stop();
   });
 
+  it("catches up a cross-process event on the five-second fallback poll", async () => {
+    const scope = "private-scope";
+    const row = {
+      scope,
+      cursor: 1,
+      kind: "configuration",
+      date: null,
+      sender_id: "private-sender",
+      payload: { origin: "peer", family: "profiles" },
+      created_at: new Date(),
+    };
+    let latestCursor = 0;
+    mocks.query.mockImplementation(async (query: string) => {
+      if (query.startsWith("SELECT scope, cursor FROM")) {
+        return { rows: [{ scope, cursor: 0 }] };
+      }
+      if (query.startsWith("SELECT scope FROM")) {
+        return { rows: [{ scope }] };
+      }
+      if (query.startsWith("SELECT cursor FROM")) {
+        return { rows: [{ cursor: latestCursor }] };
+      }
+      if (query.includes("FROM sync_outbox_events")) {
+        return { rows: [row] };
+      }
+      return { rows: [] };
+    });
+    const handleEvent = vi.fn(async () => {});
+    const stop = startSyncOutboxListener(handleEvent, async () => {});
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      expect(handleEvent).not.toHaveBeenCalled();
+
+      // A different process commits an event after this process's initial
+      // catch-up. No in-process NOTIFY is delivered to this listener.
+      latestCursor = 1;
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(handleEvent).not.toHaveBeenCalled();
+
+      // The interval schedules its own zero-delay drain timer; advance once
+      // more so the fake clock runs that timer after the poll fires.
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(handleEvent).toHaveBeenCalledTimes(1);
+      expect(handleEvent).toHaveBeenCalledWith(expect.objectContaining({
+        scope,
+        cursor: 1,
+        kind: "configuration",
+        family: "profiles",
+      }));
+    } finally {
+      stop();
+    }
+  });
+
   it("schedules a failed pass at its backoff deadline without another notification", async () => {
     let calls = 0;
     const { logger } = await import("./logger");
