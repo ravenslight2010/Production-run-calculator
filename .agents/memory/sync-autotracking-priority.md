@@ -62,3 +62,15 @@ When foreground recovery only rebases timers or resets wall-clock bookkeeping wi
 **Why:** A same-run wake reset can clear the client sequence after an accepted claim while the server still expects its next value; the next claim then reuses the old sequence and is rejected as stale.
 
 **How to apply:** Keep sequence lifetime tied to run/generation, not timer-baseline lifetime. Reset it only on a new run/generation; test wake recovery followed by a second accepted claim using the next sequence.
+
+Manual App1–App4 stock buttons are signed step adjustments, not absolute replacements. Rebase them only across contiguous ledger history that proves every same-section change was an accepted auto-track claim for the same run; preserve consumption and batch counters, and reject manual or unknown intervening writes.
+
+**Why:** The owner approved automatic rebasing of manual +/- stock steps over verified auto-track claims, but not overwriting unrelated or ambiguous edits.
+
+**How to apply:** Keep this narrow to explicit stock-step actions. Test multiple accepted claims through the real endpoint, exact delta application, idempotent retry, preserved counters, and fail-closed stale manual writes.
+
+Synthetic auto-track ticks in browser tests must not move canonical anchors ahead of real server time before a manual operation.
+
+**Why:** A test that injected a tick at run-start plus 60 seconds while the server clock was only about 10 seconds past start correctly hit the server's future-anchor guard; it was a fixture time-travel error, not evidence for weakening production validation.
+
+**How to apply:** Align the fixture's start time and injected tick to the same clock before testing a following manual edit or pause.

@@ -8,6 +8,22 @@ export type ManualSectionAutoTrackLedgerRow = {
   actionData: unknown;
 };
 
+export type ManualSectionAutoTrackRebaseFailureReason =
+  | "unsupported-section"
+  | "invalid-revision"
+  | "history-too-large"
+  | "incomplete-baseline"
+  | "baseline-not-found"
+  | "revision-count-mismatch"
+  | "revision-gap"
+  | "missing-snapshot"
+  | "manual-section-edit"
+  | "unverified-change"
+  | "missing-mutation-proof"
+  | "mutation-mismatch"
+  | "canonical-state-mismatch"
+  | "no-automatic-change";
+
 const MAX_REBASE_HISTORY_ROWS = 100;
 const APPLICATOR_SECTIONS = new Set<ManualSection>(["app1", "app2", "app3", "app4"]);
 
@@ -58,18 +74,21 @@ export function canRebaseManualApplicatorAdjustment(input: {
   currentValues: Record<string, unknown>;
   currentRevision: number;
   ledgerRows: readonly ManualSectionAutoTrackLedgerRow[];
-}): boolean {
+}, onReject?: (reason: ManualSectionAutoTrackRebaseFailureReason) => void): boolean {
+  const reject = (reason: ManualSectionAutoTrackRebaseFailureReason) => {
+    onReject?.(reason);
+    return false;
+  };
   const { runId, section, baseValues, currentValues, currentRevision, ledgerRows } = input;
-  if (!APPLICATOR_SECTIONS.has(section)
-    || !Number.isSafeInteger(currentRevision)
-    || currentRevision < 1
-    || ledgerRows.length > MAX_REBASE_HISTORY_ROWS) return false;
+  if (!APPLICATOR_SECTIONS.has(section)) return reject("unsupported-section");
+  if (!Number.isSafeInteger(currentRevision) || currentRevision < 1) return reject("invalid-revision");
+  if (ledgerRows.length > MAX_REBASE_HISTORY_ROWS) return reject("history-too-large");
 
   const fields = MANUAL_SECTION_FIELDS[section];
   if (fields.some((field) =>
     !Object.prototype.hasOwnProperty.call(baseValues, field)
     || typeof baseValues[field] !== "number"
-    || !Number.isFinite(baseValues[field]))) return false;
+    || !Number.isFinite(baseValues[field]))) return reject("incomplete-baseline");
 
   const currentSectionValues = Object.fromEntries(
     fields.map((field) => [field, valueFor(currentValues, field)]),
@@ -85,12 +104,14 @@ export function canRebaseManualApplicatorAdjustment(input: {
       fields,
     ));
   const baselineRow = baselineRows.at(-1);
-  if (!baselineRow) return false;
+  if (!baselineRow) return reject("baseline-not-found");
 
   const rowsAfterBaseline = sortedRows.filter((row) =>
     row.canonicalRevision > baselineRow.canonicalRevision
     && row.canonicalRevision <= currentRevision);
-  if (rowsAfterBaseline.length !== currentRevision - baselineRow.canonicalRevision) return false;
+  if (rowsAfterBaseline.length !== currentRevision - baselineRow.canonicalRevision) {
+    return reject("revision-count-mismatch");
+  }
 
   let previousValues = { ...baseValues };
   let expectedRevision = baselineRow.canonicalRevision + 1;
@@ -98,18 +119,18 @@ export function canRebaseManualApplicatorAdjustment(input: {
   const channels = allowedChannels(section);
 
   for (const row of rowsAfterBaseline) {
-    if (row.canonicalRevision !== expectedRevision) return false;
+    if (row.canonicalRevision !== expectedRevision) return reject("revision-gap");
     expectedRevision += 1;
 
     const nextValues = sectionValuesFromSnapshot(row.snapshot, runId, fields);
-    if (!nextValues) return false;
+    if (!nextValues) return reject("missing-snapshot");
     const changedFields = fields.filter((field) =>
       Math.abs(previousValues[field] - nextValues[field]) > 1e-9);
     const action = object(row.actionData);
 
     if (row.commandType === `manual-section:${section}`
       && action.runId === runId
-      && action.section === section) return false;
+      && action.section === section) return reject("manual-section-edit");
 
     if (changedFields.length) {
       if (row.commandType !== "auto-track"
@@ -117,16 +138,17 @@ export function canRebaseManualApplicatorAdjustment(input: {
         || action.runId !== runId
         || typeof action.channel !== "string"
         || !channels.has(action.channel)
-        || !Array.isArray(action.mutations)) return false;
+        || !Array.isArray(action.mutations)) return reject("unverified-change");
 
       const mutations = action.mutations.map((mutation) => object(mutation));
       for (const field of changedFields) {
         const mutation = mutations.find((candidate) => candidate.field === field);
-        if (!mutation
-          || typeof mutation.from !== "number"
+        if (!mutation) return reject("missing-mutation-proof");
+        if (typeof mutation.from !== "number"
           || typeof mutation.to !== "number"
           || Math.abs(mutation.from - previousValues[field]) > 1e-9
-          || Math.abs(mutation.to - nextValues[field]) > 1e-9) return false;
+          || Math.abs(mutation.to - nextValues[field]) > 1e-9
+        ) return reject("mutation-mismatch");
       }
       observedAutomaticChange = true;
     }
@@ -134,6 +156,8 @@ export function canRebaseManualApplicatorAdjustment(input: {
     previousValues = nextValues;
   }
 
-  return observedAutomaticChange
-    && matches(previousValues, currentSectionValues, fields);
+  if (!matches(previousValues, currentSectionValues, fields)) {
+    return reject("canonical-state-mismatch");
+  }
+  return observedAutomaticChange || reject("no-automatic-change");
 }

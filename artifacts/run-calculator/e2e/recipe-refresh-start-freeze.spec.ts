@@ -2643,7 +2643,13 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
   }
   await expect(runOneSummary).toBeVisible();
 
-  const activeBefore = await readServerRunValue(page, activeRunId);
+  const readEffectiveActiveRunValue = async () => {
+    const runValue = JSON.parse(
+      await readServerRunValue(page, activeRunId),
+    ) as Record<string, unknown>;
+    return JSON.stringify({ ...DEFAULT_VALUES, ...runValue });
+  };
+  const activeBefore = await readEffectiveActiveRunValue();
   const futureStartedBefore = await readScheduledRunValues(
     page,
     TOMORROW,
@@ -2732,7 +2738,7 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
     )
     .toBe(12);
   await expect
-    .poll(() => readServerRunValue(page, activeRunId), { timeout: 25_000 })
+    .poll(() => readEffectiveActiveRunValue(), { timeout: 25_000 })
     .toBe(activeBefore);
   await expect
     .poll(
@@ -2901,7 +2907,7 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
     })
     .toBe(16);
   await expect
-    .poll(() => readServerRunValue(page, activeRunId), { timeout: 25_000 })
+    .poll(() => readEffectiveActiveRunValue(), { timeout: 25_000 })
     .toBe(activeBefore);
 
   await setupDialog.getByRole("button", { name: "Close", exact: true }).click();

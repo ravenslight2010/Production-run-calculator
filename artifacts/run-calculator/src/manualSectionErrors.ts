@@ -12,7 +12,7 @@ const REJECTION_MESSAGES: Record<ManualSectionRejectionCode, string> = {
   invalid_baseline: "The section could not be checked. Your edits are still here; review them and save again.",
   reset_changed: "Today's data changed while saving. Your edits are still here; check with a manager before retrying.",
   run_changed: "This run changed while saving. Your edits are still here; review the run and save again.",
-  section_changed: "This correction could not be saved because the section changed. The latest server values are shown; review them before trying again.",
+  section_changed: "This correction could not be saved because the section changed. Your edits are still here; review them before trying again.",
 };
 
 export function manualSectionRejectionMessage(code: unknown): string {

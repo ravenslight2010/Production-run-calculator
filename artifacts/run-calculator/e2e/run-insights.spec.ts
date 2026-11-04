@@ -33,6 +33,7 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { Client } from "pg";
 import { seedRunInsightsBrowserState } from "../src/test/runInsightsBrowserSeed";
+import { DEFAULT_VALUES } from "../src/types";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -86,8 +87,37 @@ async function signIn(
         substitutionLog: [],
         stagedItems: {},
       },
+      runValues: { [runId]: { ...DEFAULT_VALUES } },
     },
   });
+  const seededSnapshotResponse = await page.request.get(
+    `${API_BASE}/api/sync/today?today=${date}`,
+    {
+      headers: {
+        Cookie: `rc_auth=${token}`,
+        "Cache-Control": "no-store",
+      },
+    },
+  );
+  if (!seededSnapshotResponse.ok()) {
+    throw new Error(
+      `Run Insights fixture read-back failed: HTTP ${seededSnapshotResponse.status()}.`,
+    );
+  }
+  const seededSnapshot = await seededSnapshotResponse.json() as {
+    dayState?: { currentIndex?: number; runs?: Array<{ id?: string }> };
+    runValues?: Record<string, unknown>;
+  };
+  const seededRuns = seededSnapshot.dayState?.runs ?? [];
+  if (
+    !seededRuns.some((run) => run.id === runId)
+    || !seededSnapshot.runValues
+    || !Object.prototype.hasOwnProperty.call(seededSnapshot.runValues, runId)
+  ) {
+    throw new Error(
+      `Run Insights fixture was acknowledged but its run or values were absent from the canonical snapshot (${seededRuns.length} runs).`,
+    );
+  }
   // This fixture creates a synthetic server profile without mutating the shared
   // factory brand list. Skip the one-time legacy orphan-profile cleanup so it
   // does not delete that deliberately isolated record during startup.
@@ -121,6 +151,39 @@ async function signIn(
     { doughKey: `run-calc-profile-${profileSuffix}`, suffix: profileSuffix },
     { timeout: 20_000 },
   );
+  await page.waitForFunction(
+    ({ runId }) => {
+      try {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "null") as {
+          runs?: Array<{ id?: string }>;
+        } | null;
+        return (day?.runs ?? []).some((run) => run.id === runId);
+      } catch {
+        return false;
+      }
+    },
+    { runId },
+    { timeout: 15_000 },
+  );
+  const selectedRun = await page.evaluate((targetRunId) => {
+    const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "null") as {
+      currentIndex?: number;
+      runs?: Array<{ id?: string }>;
+    } | null;
+    const runs = day?.runs ?? [];
+    const index = runs.findIndex((run) => run.id === targetRunId);
+    return { index, currentIndex: day?.currentIndex ?? 0 };
+  }, runId);
+  if (selectedRun.index < 0) {
+    throw new Error("Run Insights fixture did not reach the browser's canonical day state.");
+  }
+  if (selectedRun.currentIndex !== selectedRun.index) {
+    await page.getByTestId("tab-run").click();
+    await page.getByRole("button", {
+      name: `Select run ${selectedRun.index + 1}`,
+      exact: true,
+    }).click();
+  }
   await page.waitForFunction(
     ({ brand, flavor }) => {
       try {

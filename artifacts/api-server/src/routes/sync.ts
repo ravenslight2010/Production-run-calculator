@@ -2187,6 +2187,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         field,
         Number((baseValues as Record<string, unknown>)[field] ?? 0),
       ]));
+      let rebaseFailureReason: string | undefined;
       if (!canRebaseManualApplicatorAdjustment({
         runId: runId as string,
         section: section as ManualSection,
@@ -2194,7 +2195,16 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         currentValues,
         currentRevision,
         ledgerRows: history,
-      })) {
+      }, (reason) => { rebaseFailureReason = reason; })) {
+        const reason = rebaseFailureReason ?? "unknown";
+        req.log.warn({
+          event: "manual_stock_step_rebase_rejected",
+          section,
+          reason,
+          baseRevision,
+          currentRevision,
+          historyRows: history.length,
+        }, "Explicit applicator stock adjustment could not be safely rebased");
         return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
       }
 
@@ -2221,10 +2231,19 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         Number(currentValues[stockFields.anchor]) || 0,
         Number(currentValues[batchFields.anchor]) || 0,
       );
-      if (!Number.isFinite(targetStock) || targetStock < 0 || targetStock > capacity
-        || !Number.isSafeInteger(stockGeneration + 1)
-        || !Number.isSafeInteger(batchGeneration + 1)
-        || anchor > elapsedAnchor + 2) {
+      const stockStepRejectionReason = !Number.isFinite(targetStock) || targetStock < 0 || targetStock > capacity
+        ? "stock-out-of-capacity"
+        : !Number.isSafeInteger(stockGeneration + 1) || !Number.isSafeInteger(batchGeneration + 1)
+          ? "generation-overflow"
+          : anchor > elapsedAnchor + 2 ? "anchor-ahead-of-net-time" : null;
+      if (stockStepRejectionReason) {
+        req.log.warn({
+          event: "manual_stock_step_rejected",
+          section,
+          reason: stockStepRejectionReason,
+          baseRevision,
+          currentRevision,
+        }, "Explicit applicator stock adjustment could not be safely applied");
         return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
       }
       const currentSectionValues = Object.fromEntries(MANUAL_SECTION_FIELDS[section as ManualSection].map((field) => [

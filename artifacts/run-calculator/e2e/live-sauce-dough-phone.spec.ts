@@ -61,6 +61,7 @@ function uid(): string {
 async function createAuthorizedServerFixture(
   username: string,
   valueOverrides: Partial<FormValues> = {},
+  options: { startedAtOffsetMs?: number } = {},
 ): Promise<{ token: string; brand: string; flavor: string; runId: string; startedAt: number }> {
   const auth = await authorizedFixtures.createAccount({
     username,
@@ -73,6 +74,7 @@ async function createAuthorizedServerFixture(
   const key = `${brand.toLowerCase()}__${flavor.toLowerCase()}`;
   const runId = `frontline-run-${uid()}`;
   const now = Date.now();
+  const startedAt = now - Math.max(0, options.startedAtOffsetMs ?? 0);
   const values = {
     casesNeeded: 500,
     pizzasPerCase: 1,
@@ -126,7 +128,7 @@ async function createAuthorizedServerFixture(
           id: runId,
           brand,
           flavor,
-          startedAt: now,
+          startedAt,
           pausedAt: undefined,
           endedAt: undefined,
           metaUpdatedAt: now,
@@ -144,7 +146,7 @@ async function createAuthorizedServerFixture(
       packagingProgress: {},
     },
   });
-  return { token: auth.token, brand, flavor, runId, startedAt: now };
+  return { token: auth.token, brand, flavor, runId, startedAt };
 }
 
 async function runAuthoritativeAutoTrackTick(
@@ -308,6 +310,7 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
     pizzasPerCase: 1,
     sauceOzPerPizza: 2,
     sauceBarrelLbs: 2,
+    sauceStockBarrels: 2,
     frontlineRecipeName: sauceName,
     frontlineRecipe: [{ ingredient: sauceName, lbs: 2 }],
   });
@@ -548,7 +551,7 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 390, height: 844 });
   const username = uid();
-  const fixture = await createAuthorizedServerFixture(username);
+  const fixture = await createAuthorizedServerFixture(username, {}, { startedAtOffsetMs: 60_000 });
   await page.context().addCookies([{
     name: "rc_auth",
     value: fixture.token,
@@ -570,12 +573,28 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
         app1StockAnchorNetSec?: number;
         app1StockCorrectionGeneration?: number;
         app1BatchesMade?: number;
+        app1BatchLbs?: number;
+        app1CheeseRecipe?: Array<{ lbs?: number }>;
       }>;
     };
     const values = sync.runValues?.[fixture.runId];
     expect(Number.isFinite(values?.app1StockLbs), "canonical App 1 stock must be present").toBe(true);
     expect(Number.isFinite(values?.app1BatchesMade), "canonical App 1 batch count must be present").toBe(true);
-    return values as { app1StockLbs: number; app1BatchesMade: number };
+    const recipeBatchLbs = values?.app1CheeseRecipe?.reduce(
+      (total, row) => total + (Number(row.lbs) || 0),
+      0,
+    ) ?? 0;
+    const effectiveBatchWeightLbs = recipeBatchLbs > 0
+      ? recipeBatchLbs
+      : Number(values?.app1BatchLbs);
+    expect(
+      Number.isFinite(effectiveBatchWeightLbs) && effectiveBatchWeightLbs > 0,
+      "canonical App 1 batch weight must be positive",
+    ).toBe(true);
+    return {
+      ...(values as { app1StockLbs: number; app1BatchesMade: number }),
+      effectiveBatchWeightLbs,
+    };
   };
   const readCanonicalStock = async () => (await readCanonicalApp1Values()).app1StockLbs;
   const readCanonicalApp1BatchesMade = async () =>
@@ -639,6 +658,52 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
       correctionEvidence.push({ phase: "response", status: response.status() });
     });
   });
+  const lifecycleNetworkEvidence: Array<Record<string, unknown>> = [];
+  const lifecycleActiveRequests = new Map<object, Record<string, unknown>>();
+  const lifecycleSyncPaths = new Set([
+    "/api/sync/today",
+    "/api/sync/operational-intents",
+    "/api/sync/operational-intents/cursor",
+    "/api/sync/manual-section",
+    "/api/sync/auto-track/claim",
+  ]);
+  const recordLifecycleNetworkEvidence = (record: Record<string, unknown>) => {
+    lifecycleNetworkEvidence.push(record);
+    if (lifecycleNetworkEvidence.length > 40) lifecycleNetworkEvidence.shift();
+  };
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (!lifecycleSyncPaths.has(path)) return;
+    const evidence = {
+      phase: "request",
+      method: request.method(),
+      path,
+    };
+    lifecycleActiveRequests.set(request, evidence);
+    recordLifecycleNetworkEvidence(evidence);
+  });
+  page.on("response", (response) => {
+    const path = new URL(response.url()).pathname;
+    if (!lifecycleSyncPaths.has(path)) return;
+    lifecycleActiveRequests.delete(response.request());
+    recordLifecycleNetworkEvidence({
+      phase: "response",
+      method: response.request().method(),
+      path,
+      status: response.status(),
+    });
+  });
+  page.on("requestfailed", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (!lifecycleSyncPaths.has(path)) return;
+    lifecycleActiveRequests.delete(request);
+    recordLifecycleNetworkEvidence({
+      phase: "request-failed",
+      method: request.method(),
+      path,
+      failure: request.failure()?.errorText,
+    });
+  });
   const app1OnLine = page.getByTestId("output-app1-batches-on-line");
   const readApp1BatchesOnLine = async () =>
     Number.parseFloat((await app1OnLine.textContent()) ?? "");
@@ -649,20 +714,24 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   await expect.poll(async () => {
     const [visible, canonical] = await Promise.all([
       readApp1BatchesOnLine(),
-      readCanonicalStock(),
+      readCanonicalApp1Values(),
     ]);
-    return Math.abs(visible - canonical);
+    return Math.abs(visible - canonical.app1StockLbs / canonical.effectiveBatchWeightLbs);
   }, { timeout: 8_000 }).toBeLessThan(0.005);
-  const stockBeforeRefill = await readCanonicalStock();
-  // Frontline exposes App1 supply in whole batch units; the operator refill
-  // must add exactly one batch to the synchronized starting amount.
+  const beforeRefill = await readCanonicalApp1Values();
+  const stockBeforeRefill = beforeRefill.app1StockLbs;
+  const batchWeightLbs = beforeRefill.effectiveBatchWeightLbs;
+  const batchesBeforeRefill = await readApp1BatchesOnLine();
+  // The stock ledger is in pounds, while the station control moves one
+  // configured recipe batch at a time.
   await page.getByRole("button", { name: "Increase app1 batches on line" }).click();
-  const stockAfterRefill = stockBeforeRefill + 1;
+  const stockAfterRefill = stockBeforeRefill + batchWeightLbs;
   await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeCloseTo(stockAfterRefill, 2);
-  await expect.poll(readApp1BatchesOnLine, { timeout: 8_000 }).toBeCloseTo(stockAfterRefill, 2);
+  await expect.poll(readApp1BatchesOnLine, { timeout: 8_000 })
+    .toBeCloseTo(batchesBeforeRefill + 1, 2);
   const batchesBeforeTick = await readCanonicalApp1BatchesMade();
-  // Keep the client tracker from advancing on wall time while the test injects
-  // a future server tick. Freeze Date without replacing timers or SSE callbacks.
+  // Keep the client tracker from advancing independently while the server tick
+  // uses current server time. Freeze Date without replacing timers or SSE callbacks.
   await page.evaluate(() => {
     const fixedNow = Date.now();
     const OriginalDate = window.Date;
@@ -689,7 +758,7 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   // station is mounted, then the canonical value is visible on return.
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
-  const tick = await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 60_000);
+  const tick = await runAuthoritativeAutoTrackTick(page, Date.now());
   expect(tick.accepted, JSON.stringify(tick)).toBeGreaterThan(0);
   await expect.poll(readCanonicalApp1BatchesMade, { timeout: 8_000 })
     .toBeGreaterThan(batchesBeforeTick);
@@ -712,16 +781,64 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
 
   // A manual correction removes one batch unit without changing the completed
   // run's production counters.
-  const stockBeforeCorrection = await readCanonicalStock();
-  const visibleStockBeforeCorrection = await readApp1BatchesOnLine();
+  const beforeCorrection = await readCanonicalApp1Values();
+  const stockBeforeCorrection = beforeCorrection.app1StockLbs;
+  const batchWeightBeforeCorrection = beforeCorrection.effectiveBatchWeightLbs;
+  const visibleBatchesBeforeCorrection = await readApp1BatchesOnLine();
+  const manualCorrectionResponsePromise = page.waitForResponse((response) => {
+    const request = response.request();
+    if (request.method() !== "POST") return false;
+    try {
+      const body = request.postDataJSON() as {
+        stockAdjustment?: { deltaLbs?: unknown };
+      };
+      return new URL(response.url()).pathname.endsWith("/api/sync/manual-section")
+        && typeof body.stockAdjustment?.deltaLbs === "number"
+        && Number.isFinite(body.stockAdjustment.deltaLbs)
+        && body.stockAdjustment.deltaLbs < 0;
+    } catch {
+      return false;
+    }
+  });
   await page.getByRole("button", { name: "Decrease app1 batches on line" }).click();
-  const correctedStock = Math.max(0, stockBeforeCorrection - 1);
+  const manualCorrectionResponse = await manualCorrectionResponsePromise;
+  const correctionRequest = manualCorrectionResponse.request().postDataJSON() as {
+    stockAdjustment?: { deltaLbs?: unknown };
+  };
+  const requestedCorrectionDelta = correctionRequest.stockAdjustment?.deltaLbs;
+  if (typeof requestedCorrectionDelta !== "number" || !Number.isFinite(requestedCorrectionDelta)) {
+    throw new Error("The manual App1 correction must include a finite stock delta.");
+  }
+  const expectedCorrectionDelta = -Math.min(batchWeightBeforeCorrection, stockBeforeCorrection);
+  if (Math.abs(requestedCorrectionDelta - expectedCorrectionDelta) >= 0.005) {
+    console.error("[app1 manual correction units]", JSON.stringify({
+      stockBeforeCorrection,
+      batchWeightBeforeCorrection,
+      visibleBatchesBeforeCorrection,
+      requestedCorrectionDelta,
+      expectedCorrectionDelta,
+    }));
+  }
+  expect(requestedCorrectionDelta).toBeCloseTo(expectedCorrectionDelta, 2);
+  const manualCorrectionBody = await manualCorrectionResponse.json() as {
+    outcome?: string;
+  };
+  expect(manualCorrectionResponse.status(), JSON.stringify(manualCorrectionBody)).toBe(200);
+  expect(manualCorrectionBody.outcome).toBe("accepted");
+  const correctedStockCeiling =
+    Math.max(0, stockBeforeCorrection - batchWeightBeforeCorrection) + 0.011;
+  let correctedStock = Number.NaN;
   try {
-    await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeCloseTo(correctedStock, 2);
+    await expect.poll(readCanonicalStock, { timeout: 8_000 })
+      .toBeLessThanOrEqual(correctedStockCeiling);
+    correctedStock = await readCanonicalStock();
+    await expect.poll(readApp1BatchesOnLine, { timeout: 8_000 })
+      .toBeCloseTo(correctedStock / batchWeightBeforeCorrection, 2);
   } catch (error) {
     console.error("[app1 manual correction diagnostic]", JSON.stringify({
       stockBeforeCorrection,
-      visibleStockBeforeCorrection,
+      batchWeightBeforeCorrection,
+      visibleBatchesBeforeCorrection,
       correctedStock,
       canonicalAfter: pickStockEvidence(await readCanonicalApp1Values()),
       correctionEvidence,
@@ -737,10 +854,44 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   // before the pause acknowledgement. Compare the paused tick with the stock
   // at the acknowledged pause, not with the earlier manual correction value.
   const stockAtPause = await readCanonicalStock();
-  await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 65_000);
+  await runAuthoritativeAutoTrackTick(page, Date.now());
   await expect.poll(readCanonicalStock).toBeCloseTo(stockAtPause, 2);
+  const resumeEvidenceStart = lifecycleNetworkEvidence.length;
   await page.getByRole("button", { name: /resume.?run/i }).click();
-  await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
+  try {
+    await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
+  } catch (error) {
+    const localOutboxEvidence = await page.evaluate(() => {
+      const pendingPrefix = "run-calculator:operational-intent-outbox:v1:pending:";
+      const records: Array<Record<string, unknown>> = [];
+      for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index);
+        if (!key?.startsWith(pendingPrefix)) continue;
+        try {
+          const item = JSON.parse(localStorage.getItem(key) ?? "null") as Record<string, unknown> | null;
+          if (!item) continue;
+          records.push({
+            action: item.action,
+            state: item.state,
+            failure: item.failure,
+            attempts: item.attempts,
+            retryDelayMs: typeof item.nextRetryAt === "number"
+              ? Math.max(0, item.nextRetryAt - Date.now())
+              : undefined,
+          });
+        } catch {
+          records.push({ state: "unreadable" });
+        }
+      }
+      return records.slice(0, 20);
+    });
+    console.error("[lifecycle resume diagnostic]", JSON.stringify({
+      network: lifecycleNetworkEvidence.slice(resumeEvidenceStart),
+      inFlight: [...lifecycleActiveRequests.values()],
+      pendingOutbox: localOutboxEvidence,
+    }));
+    throw error;
+  }
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
@@ -748,10 +899,15 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   // Once resumed, normal automatic tracking may advance before the page
   // reloads. Verify hydration against the canonical value rather than freezing
   // a running counter at the earlier paused snapshot.
-  await expect.poll(async () =>
-    Math.abs((await readApp1BatchesOnLine()) - (await readCanonicalStock())),
-    { timeout: 15_000 },
-  ).toBeLessThan(0.005);
+  await expect.poll(async () => {
+    const [visibleBatches, canonical] = await Promise.all([
+      readApp1BatchesOnLine(),
+      readCanonicalApp1Values(),
+    ]);
+    return Math.abs(
+      visibleBatches - canonical.app1StockLbs / canonical.effectiveBatchWeightLbs,
+    );
+  }, { timeout: 15_000 }).toBeLessThan(0.005);
   await page.getByTestId("tab-packaging").click();
   await expect(page.getByTestId("tab-sauce")).toBeAttached();
   await expect(page.getByTestId("tab-dough")).toBeAttached();

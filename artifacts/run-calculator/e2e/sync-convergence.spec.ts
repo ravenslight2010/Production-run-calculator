@@ -2452,6 +2452,17 @@ test(
       };
       expect(reset.status).toBe(200);
       expect(reset.body.epoch).toBeGreaterThan(0);
+      const serverImmediatelyAfterReset = await getToday(page);
+      const resetDayState = serverImmediatelyAfterReset.dayState as SyncPayload["dayState"];
+      const resetServerSummary = {
+        epoch: serverImmediatelyAfterReset.resetEpoch,
+        runCount: resetDayState.runs.length,
+        containsTestRun: resetDayState.runs.some((run) => run.id === runId),
+      };
+      expect(
+        resetServerSummary,
+        "the reset must leave an empty canonical row before the sleeping peer wakes",
+      ).toMatchObject({ epoch: reset.body.epoch, runCount: 0, containsTestRun: false });
 
       // The stale device must reconcile the new epoch on wake, not republish
       // its pre-reset run.  Failed/reset-stale responses are safe no-ops.
@@ -2563,6 +2574,23 @@ test(
         const diagnostics = {
           localState,
           postResetBaselineReceived,
+          serverImmediatelyAfterReset: resetServerSummary,
+          foregroundPageLocalState: await page.evaluate((targetRunId) => {
+            const raw = localStorage.getItem("run-calc-day");
+            try {
+              const day = JSON.parse(raw ?? "{}") as {
+                runs?: Array<{ id?: string }>;
+              };
+              const runs = day.runs ?? [];
+              return {
+                resetEpoch: localStorage.getItem("run-calc-reset-epoch"),
+                runCount: runs.length,
+                containsTestRun: runs.some((run) => run.id === targetRunId),
+              };
+            } catch {
+              return { resetEpoch: localStorage.getItem("run-calc-reset-epoch"), malformed: true };
+            }
+          }, runId).catch(() => ({ pageUnavailable: true })),
           postResetDayStateWrites: await peer.evaluate((after) => {
             const writes = JSON.parse(
               sessionStorage.getItem("e2e-sync-reset-day-state-writes") ?? "[]",

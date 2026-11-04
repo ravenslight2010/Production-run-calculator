@@ -1,7 +1,27 @@
-export const QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT = "run-calculator:open-qc-import-review";
+type QcImportReviewOpenListener = () => void;
+
+const listeners = new Set<QcImportReviewOpenListener>();
+let pendingOpenRequest = false;
 
 export function requestOpenQcImportReview(): void {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT));
+  if (listeners.size === 0) {
+    pendingOpenRequest = true;
+    return;
   }
+
+  for (const listener of [...listeners]) listener();
+}
+
+export function subscribeToQcImportReviewOpenRequests(
+  listener: QcImportReviewOpenListener,
+): () => void {
+  listeners.add(listener);
+  if (pendingOpenRequest) {
+    pendingOpenRequest = false;
+    for (const current of [...listeners]) current();
+  }
+
+  return () => {
+    listeners.delete(listener);
+  };
 }

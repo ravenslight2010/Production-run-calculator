@@ -882,7 +882,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import { QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT } from "../qcImportReviewNavigation";
+import { subscribeToQcImportReviewOpenRequests } from "../qcImportReviewNavigation";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -3319,8 +3319,7 @@ export default function Home() {
       setOpenImportReviewRequestId((current) => current + 1);
       setActiveTab("quality");
     };
-    window.addEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, openImportReview);
-    return () => window.removeEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, openImportReview);
+    return subscribeToQcImportReviewOpenRequests(openImportReview);
   }, [canAccessQcWorkflow, canManageQc, setActiveTab]);
   useEffect(() => {
     if (me && !canAccessQcWorkflow && activeTab === "quality") {

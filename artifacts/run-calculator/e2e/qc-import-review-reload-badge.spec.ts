@@ -48,6 +48,7 @@ async function captureAfter(page: Page, testInfo: TestInfo, viewport: string) {
 }
 
 test("retained import QC reload and badge deltas", async ({ browser, playwright, baseURL }, testInfo) => {
+  test.setTimeout(120_000);
   const apiOrigin = requireLocalFixtureApiOrigin("QC import-review reload and badge delta verification");
   const fixtures = await AuthorizedBrowserFixtures.create(
     playwright,

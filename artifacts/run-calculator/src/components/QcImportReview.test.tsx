@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT } from "../qcImportReviewNavigation";
+import {
+  requestOpenQcImportReview,
+  subscribeToQcImportReviewOpenRequests,
+} from "../qcImportReviewNavigation";
 
 const mutate = vi.fn();
 const refetch = vi.fn(() => Promise.resolve({ isError: false }));
@@ -115,8 +118,30 @@ it("hides review for non-managers and badge opens the import review request", ()
   expect(badge.tagName).toBe("BUTTON");
   expect(badge.getAttribute("aria-label")).toContain("Open Import QC review");
   const request = vi.fn();
-  window.addEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, request);
-  fireEvent.click(badge);
-  expect(request).toHaveBeenCalledTimes(1);
-  window.removeEventListener(QC_IMPORT_REVIEW_OPEN_REQUEST_EVENT, request);
+  const unsubscribe = subscribeToQcImportReviewOpenRequests(request);
+  try {
+    fireEvent.click(badge);
+    expect(request).toHaveBeenCalledTimes(1);
+  } finally {
+    unsubscribe();
+  }
+});
+
+it("queues a badge request until the lazy Home listener subscribes", () => {
+  requestOpenQcImportReview();
+  const request = vi.fn();
+  const unsubscribe = subscribeToQcImportReviewOpenRequests(request);
+  try {
+    expect(request).toHaveBeenCalledTimes(1);
+  } finally {
+    unsubscribe();
+  }
+
+  const laterRequest = vi.fn();
+  const unsubscribeLater = subscribeToQcImportReviewOpenRequests(laterRequest);
+  try {
+    expect(laterRequest).not.toHaveBeenCalled();
+  } finally {
+    unsubscribeLater();
+  }
 });

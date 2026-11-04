@@ -1161,6 +1161,152 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     expect(staleManual.status).toBe(409);
     expect((await staleManual.json() as any).code).toBe("section_changed");
   });
+
+  it("rebases a stock step over successive claims accepted by the real auto-track endpoint", async () => {
+    await seedStockRun();
+    const baseValues = {
+      ...stockBaseline,
+      app1BatchesMade: 9,
+      app1StockLbs: 50,
+      app1StockConsumedLbs: 0,
+    };
+    const baselineData = {
+      dayState: { date: DATE, runs: [{ id: "stock-run", brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: { "stock-run": {
+        casesNeeded: 200,
+        crustsPerCycle: 12,
+        cycleSpeed: 600,
+        speedAdjustment: 1,
+        approxLineSpeed: 400,
+        freezerTime: 3,
+        pizzasPerCase: 12,
+        casesPerSkid: 48,
+        casesPerLayer: 12,
+        doughballsPerTray: 36,
+        crustsPerStack: 6,
+        doughBatchYield: 150,
+        crustsPerCase: 12,
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 0,
+        traysOnLine: 0,
+        batchesReady: 0,
+        targetDoughballWeight: 8,
+        doughRecipe: [],
+        app1Type: "Cheese",
+        app1OzPerPizza: 2,
+        app1BatchLbs: 50,
+        app1CheeseRecipe: [],
+        ...baseValues,
+        applicatorStockInitialized: true,
+      } },
+      runValuesUpdatedAt: { "stock-run": 1 },
+    };
+    await db.update(dailySyncTable).set({ data: baselineData, canonicalRevision: 1 })
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    await db.insert(operationalIntentLedgerTable).values({
+      scope: "live",
+      date: DATE,
+      intentId: "real-stock-step-baseline",
+      outcome: "accepted",
+      snapshot: baselineData,
+      commandType: "manual-section:app1",
+      actorId: "fixture",
+      deviceId: "fixture",
+      baseRevision: 0,
+      canonicalRevision: 1,
+      actionData: { runId: "stock-run", section: "app1" },
+      serverReceivedAt: new Date(),
+    });
+
+    const claimResponse = await fetch(`${baseUrl}/api/sync/auto-track/claim?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "real-stock-step",
+        claim: {
+          version: 1,
+          runId: "stock-run",
+          channel: "app1-stock",
+          generation: "stock-run:2",
+          sequence: 1,
+          eventId: "real-stock-step:app1:1",
+          dueAt: 1,
+          nextDueAt: 2,
+          baseUpdatedAt: 1,
+          correctionGeneration: 0,
+          mutations: [
+            { field: "app1StockLbs", from: 50, to: 35 },
+            { field: "app1StockAnchorNetSec", from: 0, to: 1 },
+            { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+            { field: "app1StockConsumedLbs", from: 0, to: 15 },
+          ],
+        },
+      }),
+    });
+    expect(claimResponse.status).toBe(200);
+    const acceptedClaim = await claimResponse.json() as any;
+    expect(acceptedClaim.outcome, JSON.stringify(acceptedClaim)).toBe("accepted");
+    const followupClaimResponse = await fetch(`${baseUrl}/api/sync/auto-track/claim?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "real-stock-step",
+        claim: {
+          version: 1,
+          runId: "stock-run",
+          channel: "app1-stock",
+          generation: "stock-run:2",
+          sequence: 2,
+          eventId: "real-stock-step:app1:2",
+          dueAt: 2,
+          nextDueAt: 3,
+          baseUpdatedAt: acceptedClaim.data.runValuesUpdatedAt["stock-run"],
+          correctionGeneration: 0,
+          mutations: [
+            { field: "app1StockLbs", from: 35, to: 20 },
+            { field: "app1StockAnchorNetSec", from: 1, to: 2 },
+            { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+            { field: "app1StockConsumedLbs", from: 15, to: 30 },
+          ],
+        },
+      }),
+    });
+    expect(followupClaimResponse.status).toBe(200);
+    const acceptedFollowupClaim = await followupClaimResponse.json() as any;
+    expect(acceptedFollowupClaim.outcome, JSON.stringify(acceptedFollowupClaim)).toBe("accepted");
+
+    const response = await request({
+      id: "manual-step-after-real-claim",
+      date: DATE,
+      runId: "stock-run",
+      section: "app1",
+      values: {
+        ...baseValues,
+        app1StockLbs: 49,
+        app1StockAnchorNetSec: 1,
+        app1StockCorrectionGeneration: 1,
+        app1BatchAnchorNetSec: 1,
+        app1BatchCorrectionGeneration: 1,
+      },
+      baseValues,
+      observedGeneration: "stock-run:2",
+      baseRevision: 1,
+      resetEpoch: 0,
+      deviceId: "manual-fixture",
+      stockAdjustment: { kind: "applicator-stock-step", deltaLbs: -1 },
+    });
+    const accepted = await response.json() as any;
+    expect(response.status, JSON.stringify(accepted)).toBe(200);
+    expect(accepted.outcome).toBe("accepted");
+    expect(accepted.data.runValues["stock-run"]).toMatchObject({
+      app1StockLbs: 19,
+      app1StockConsumedLbs: 30,
+      app1StockCorrectionGeneration: 1,
+      app1BatchesMade: 9,
+      app1BatchCorrectionGeneration: 1,
+    });
+  });
+
   const stockEdit = (id: string, pounds: number) => ({
     id, date: DATE, runId: "stock-run", section: "app1",
     values: {

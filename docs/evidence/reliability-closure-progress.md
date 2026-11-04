@@ -12,9 +12,14 @@ browser journeys passed. Three Gold journeys passed; the reminder fixture's
 role assignment is corrected but its browser journey is not rerun. The declared
 client command subsequently exited 0: **395 files passed, one file skipped;
 3,868 tests passed, one skipped; duration guard 103.7s / 150.0s**. The existing
-real-workbook audit skip is retained, not newly added. This clears the current
-client-runtime blocker only. The full-browser failure and remaining app-wide,
-physical-device and publication-bound gaps keep this task **IN PROGRESS**.
+real-workbook audit skip is retained, not newly added. A later complete
+pre-fix client run found one inaccurate manual-conflict message; its correction
+and 35/35 focused tests now pass. A subsequent post-fix background client run
+exited 0: **399 files passed, one skipped; 3,908 tests passed, one skipped;
+99.3s / 150.0s budget**. The separate first post-fix rerun that hit the shell
+limit at 270/399 files remains recorded as an incomplete attempt. The
+full-browser failure and remaining app-wide, physical-device and
+publication-bound gaps keep this task **IN PROGRESS**.
 
 ### Completion continuation — isolated runtime available
 
@@ -2881,3 +2886,144 @@ available. A physical wake/Resume reproduction still needs sanitized client
 visibility timestamps and a request identifier correlated with server request,
 checkout, post-checkout, and worker timings. No production records or settings
 were changed.
+
+### 2026-11-03 — manual App1 stock-step rebase and browser clock alignment
+
+The approved App1–App4 manual stock +/- action is represented as a signed delta,
+not an absolute stock replacement. The server may rebase it only when contiguous
+ledger history proves each intervening same-section change was an accepted
+auto-track claim for the same run. It applies the delta to current stock,
+preserves current consumed pounds and batch count, advances the correction
+generations/anchors, and keeps unknown or manual intervening changes fenced.
+Rejected step/proof paths now emit bounded reason categories and revision
+numbers only; logs omit run identity and stock values.
+
+On the isolated API fixture, two successive stock claims accepted by the real
+auto-track endpoint followed by a stale-baseline -1 lb manual step passed. The
+result reflected the latest canonical stock minus one and preserved consumed
+pounds. Focused manual-section route tests passed 2/2 and helper tests passed
+3/3. API-server and run-calculator package typechecks passed after the code
+changes. The sync-invariant set also passed: API 3 files/240 tests and web
+5 files/87 tests.
+
+The isolated browser journey `Frontline App1 batch supply survives off-tab work,
+adjustment, pause, and reload` passed **3/3** after aligning the fixture and tick
+to real server time. Before that fix, a run-start-plus-60-second test tick was
+sent while the fixture had only been active for about ten seconds. That
+artificially placed the accepted batch anchor roughly fifty seconds ahead of
+server elapsed time, and the server correctly returned 409. The fixture now
+starts early enough and invokes the tick with current time; the server's
+anchor-safety guard was not weakened. This explains that local test conflict,
+not the reported physical-device wake symptom.
+
+The first browser assertion also looked for stock at the wrong response nesting;
+it was changed to verify accepted outcome and canonical/UI convergence. The
+first broader client run hit the shell limit at 244/399 files without a final
+failure summary. A later complete pre-fix rerun finished with 397 files passed,
+one failed, one skipped; it exposed misleading `section_changed` copy, which
+was corrected. The two focused manual-conflict/error files then passed 35/35.
+The first post-fix broad rerun hit the 300-second limit at 270/399 files and
+3,110 passing tests, without a final summary. A later post-fix background run
+exited 0 with 399 files passed, one skipped; 3,908 tests passed, one skipped;
+99.3s within the 150-second budget. A full root typecheck passed before the
+final bounded logging edit; after the final edits, the focused API-server and
+run-calculator package typechecks passed. `git diff --check` passed. The worktree base is
+`80ac7bde98ebde947b34a4fff9254e2014424f4e`; the code-diff fingerprint is
+`5088e86c8a68a9ca59b53fa7d0c38fb8ba21b51ad616325fd3d7cf0d63dc46ed`.
+
+All browser/API runs used disposable test data. No published build, physical
+phone, production write, or shared development-data workflow was used. The
+reported wake/recovery behavior remains unverified against a physical device
+and the published service; the local regression only verifies the stock-step
+conflict path.
+
+### 2026-11-04 — focused repairs and final integrated browser attempt
+
+The latest complete 241-case run remains the authoritative failed result until a
+new complete run finishes: 235 passed and 6 failed. The follow-up repairs were
+limited to test setup and diagnostics, not weaker product assertions:
+
+- The Sauce/Dough phone fixture now seeds positive line stock so its countdown
+  assertion tests the visible timer rather than the intentional zero-stock
+  state; the exact case passed 1/1.
+- Run Insights setup now reads back the canonical synthetic run, waits for that
+  run in the browser, selects it explicitly if needed, and verifies its identity
+  before checking the manager review. All three exact journeys passed 3/3.
+- The reset/wake test now checks the canonical row immediately after reset,
+  before the sleeping peer reconnects, and records only bounded epoch/count/run-
+  presence summaries plus foreground local run-count diagnostics. The exact
+  case passed 1/1; the earlier full-suite ordering failure remains unresolved
+  until the integrated rerun completes.
+- The App1 stock-step case passed 1/1 in a clean isolated run. Its prior full-
+  suite 409 is retained as a suite-order/load finding, not treated as a product
+  defect or erased by the focused pass.
+
+The root workspace typecheck passed after these test changes. `git diff
+--check` also passed. The current full browser attempt has enumerated exactly
+241 cases and is running serially on a disposable database; its generated test
+identity and outcome will be recorded in a separate dated rerun report. The
+last complete run already passed all 15 screen-off/wake cases, including the
+manual Packaging correction → acknowledged Resume → next-case → background/
+wake sequence and delayed-ack coverage. This remains browser-emulated evidence,
+not physical Android/iOS verification.
+
+The active integrated run has produced two test failures so far. The Sauce phone
+failure snapshot showed zero barrels because its fixture used `sauceStockLbs`
+instead of the app's `sauceStockBarrels` field, so the stock-gated tick bar was
+absent. The App1 lifecycle case timed out waiting specifically for a
+`deltaLbs === -1` response; a sanitized trace summary showed two
+`POST /api/sync/manual-section` responses with HTTP 200. Since the control clamps
+decreases at zero, the test's exact-delta predicate may be too narrow. These are
+provisional test-fixture/assertion findings; the suite is still running, and
+focused reruns will confirm the corrections before any final classification.
+
+Before the new run could replace the standard report path, the preceding
+2026-11-04 failed report was preserved as
+`release-evidence/browser-full/RERUN-2026-11-04-attempt-1.md` and
+`release-evidence/browser-full/FINAL-REPORT-2026-11-04-before-attempt-2.md`
+(SHA-256 `c367693e4f9c7cac5738a4b68542f94a42cc72224962b08e4798d4263eecb04c`).
+A bounded read-only scan of seven closure/task/inventory/report documents
+checked 174 local Markdown links and 238 repository-path references; none had a
+missing target. This checks link/path existence, not the truth of every
+implementation claim.
+
+The API/error-contract review found the manual stock-step field documented in
+OpenAPI and generated validators, with the existing safe JSON conflict envelope
+and `409` status preserved. Rejection telemetry is bounded to section, reason,
+revision numbers, and history count; no run ID or stock payload is logged.
+The root typecheck included the generated-contract checks.
+
+No production or shared-development writes, publication, schema change, or
+real-source import occurred. The current-serving-build fingerprint still does
+not match the candidate, so production evidence remains a separate blocked
+lane. Next: reconcile the complete browser result against the six retained
+failures, validate documentation references, then finalize the local evidence
+and handoff without claiming published or physical-device verification.
+
+### Later execution checkpoint — 2026-11-04
+
+- The configured client suite passed 3,909 tests across 399 files, with one skipped and zero failed (95.8 seconds). Root workspace typecheck passed.
+- The App1 batch-supply lifecycle case now derives pounds-per-batch from the canonical recipe metadata, preserving the UI-batch versus stock-pound distinction. That case, the three Run Insights journeys, and reset/wake passed in one focused isolated run. The QC reload/badge journey exceeded the old 60-second budget twice; the sanitized report showed reload verification, all four viewport checks, no HTTP errors, and no page errors. It passed 1/1 after a 120-second test budget was set; no assertions were relaxed. QC navigation unit coverage now verifies that a badge request is retained until lazy Home subscribes.
+- The configured full 241-case Chromium run has been restarted on a disposable database. Record its final identity and result in a separate dated attempt report after it finishes; do not overwrite the preserved prior attempt reports.
+- A read-only SRE investigation examined deployed runtime telemetry for 2026-11-04 08:36:30–08:37:30 UTC. The deployment was public autoscale with a successful build; runtime identified app build `app-build:934ed015-7a94-4db0-a558-0fdbad559c27`, source fingerprint `2da695ab03f3d90d3c2fa5c6d90519addbc420701e88445b5df3b986e0629cdb`, and no build during the window. A roughly 61-second sample reported 25 DB-pool acquisition errors, p95/p99/max acquisition waits of 5.399/7.799/7.900 seconds, and event-loop p95/p99/max delay of 3.5/4.4/5.402 seconds; p95 pool total reached 10 of the configured max 10, with p95 waiting count 7. The queue monitor and an outbox read hit checkout timeouts, one web-push enqueue failed with a DB connection error, and later outbox reads succeeded. The prior minute and same minute the prior day also had acquisition errors. HTTP metrics reported zero requests in this sample and endpoint metrics were unavailable; these data cannot quantify user-request impact or link a particular browser wake/run to the pressure. This establishes recurring pool-acquisition pressure affecting sampled background work, not the underlying cause or proof of the owner's client-side symptom.
+- The SRE review and all test work were read-only with respect to production. No publication, production/shared-development write, schema change, or real-source import occurred. Physical Android/iOS wake and published-client behavior remain unverified.
+
+### 2026-11-04 — Run Insights fixture correction and production timing comparison
+
+- The latest complete integrated Chromium run before this correction was 238/241; its report is preserved as `release-evidence/browser-full/RERUN-2026-11-04-attempt-5.md` before the next run can replace `FINAL-REPORT.md`.
+- A sanitized Playwright trace showed the synthetic Run Insights fixture wrote a `dayState` without the required `runValues` map. The API returned that malformed row as a complete snapshot; client sync adoption then threw at `Object.entries(payload.runValues)`. This establishes a fixture-contract error in that test path, not a production-device cause. The fixture now seeds `runValues` for its run and verifies the canonical response includes the map; all three focused Run Insights journeys passed (3/3). No fallback was added that could conceal a malformed complete snapshot.
+- The configured API-server suite finished with 2,516 passing tests across 194 files and one skipped test (1,018.52 seconds). The full 241-case isolated Chromium suite was restarted after the fixture correction; its test identity and final result are pending. At the last workflow snapshot, cases 1–18 had passed with no failure reported. The earlier full report remains historical evidence and is not overwritten by the focused pass.
+- The first focused rerun invocation spent 229 seconds waiting for the shared validation lock and hit its 300-second shell limit before producing a test result. It was rerun after the lock cleared and passed all three cases; the timed-out invocation is not counted as a test failure or pass. The standard release command later waited 3,417 seconds (56m57s) for that workspace lock before it ran.
+- The clean-start check was not run: its API launch path calls `apply-audit-log-protection` and inherits the current `DATABASE_URL`; no documented disposable-database override was present in that workflow. Running it could change shared development data, so it was skipped rather than risk a prohibited write.
+- A read-only SRE investigation compared deployed metrics with the user-reported 2026-11-02 windows. For 14:50–15:40 UTC, aggregate HTTP metrics showed 398 requests, 3 4xx, no returned 5xx datapoints, p95 719 ms, and zero log-error count. `/api/sync/today` had 23 requests with p95 971 ms. Around 15:24–15:29 UTC, `/api/sync/today` had 16 requests with p95/p99 2,260/2,452 ms and one 4xx. The same windows contained `/api/sync/events` metric values at 10 seconds, but the checked-in route is a long-lived SSE response and the metric callback does not specify whether its latency is time-to-headers, stream duration, or capped. Because the serving source is unmatched, these values are ambiguous and are not evidence that ordinary requests were slow or failed.
+- The 2026-11-02 20:05–20:25 UTC window overlaps the owner's 14:14 local timeout report. Aggregate metrics showed 860 requests, 1 4xx, no returned 5xx datapoints, p95 611 ms; `/api/sync/today` had 117 requests with p95/p99 1,403/2,281 ms. Four `/api/sync/events` values at 10 seconds are likewise ambiguous SSE metrics, not a confirmed request delay. The 35.7-second browser wait is not server processing time; the browser may have been suspended. The `/api/sync/today` aggregates are time-aligned but cannot link a particular phone request or establish cause.
+- The 2026-11-04 09:55–10:15 UTC deployment-metric window showed 16 requests and p95 382 ms, mostly readiness traffic, while app-owned runtime samples separately recorded recurring pool acquisition errors, full-pool windows, and background queue/outbox checkout timeouts. Pool saturation and event-loop delay co-occurred; neither is proven as the cause of the phone incidents. The serving deployment is public autoscale and successful; runtime logs still identify build `app-build:934ed015-7a94-4db0-a558-0fdbad559c27` and source fingerprint `2da695ab03f3d90d3c2fa5c6d90519addbc420701e88445b5df3b986e0629cdb`. No build appeared in the incident windows, and deployment metadata does not independently match the local candidate.
+- The available app-owned telemetry gives bounded pool-acquisition/post-checkout and event-loop aggregates, but not historical primary `pg_stat_activity`/lock or query aggregates, provider reserves, Autoscale current/max instance counts, or per-request checkout traces. Replit's supported production SQL path is read-only against a replica, not a historical primary time series; no direct-connection workaround was used. These provider/primary measurements remain unavailable and require an approved provider/host evidence source or an explicit decision to keep the limitation.
+- A parameterized, read-only production-replica aggregate for 2026-11-02 and 2026-11-04 returned one `daily_sync` row per date; both had object-valued `dayState` and `runValues`, with zero rows missing/invalidating `runValues`. The incomplete Run Insights row was therefore a synthetic test-fixture defect, not observed in those two persisted production dates. This does not validate every historical scope or tie a stored row to a particular request.
+- `release:standard` was not a product-test failure: after the 56m57s workspace-lock wait, it stopped before running release gates because published release evidence was missing and reported `BLOCKED / NO-GO`. No publication is authorized here. Production requests and records were not modified; retained evidence is limited to these sanitized aggregates, with no payloads or device identifiers.
+- Next: finish the integrated Chromium run, rerun root typecheck after the fixture edit, reconcile any full-suite failures, and preserve the production/physical-device evidence boundary in the handoff.
+- Additional read-only deployed-runtime logs at 2026-11-04 09:10 UTC recorded an outbox database checkout timeout (2.6 seconds, 1.7 seconds beyond its budget) and a scheduled-evaluation queue status-aggregate connection timeout (7.8 seconds, with 7.799 seconds spent acquiring a connection). The subsequent readiness check succeeded but reported a background-worker warning and the queue sample unavailable. This supports recurring pool-acquisition pressure in sampled background work; it does not tie the owner's particular request, run, or device to that pressure.
+- A bounded scan of seven closure/task/inventory/report documents found 145 unique repository-rooted paths, zero invalid line anchors, and three function-like source references resolving. Four package-relative references were manually mapped to existing files. This is target-existence validation, not a claim review.
+- The replacement isolated Chromium suite is still running; 160 of 241 cases have passed in the available log output, with no failure reported. The latest results include cross-tab wake/recovery, stale-build/PWA reload cases, manager layout checks, and crust-mode selection. Final test identity/result remain pending.
+- The repeatable physical-device protocol is now named **Background/Wake Recovery Check** at `docs/screen-off-wake-test-protocol.md`. It covers the reported Packaging edit → Resume → next-case → background/wake sequence and requires an owner-approved isolated staging target with synthetic data. The protocol is not a physical-device result.
+- A read-only workspace survey found 76 GB used and 181 GB free on the 256 GB volume, no Git lock or interrupted operation, `.git` at 1.4 GB, `.local` at 2.5 GB (mostly state), and 155 duplicate packed objects among about 75,000. It does not indicate local disk exhaustion or prove the Replit task-storage cause. No files, packs, or user assets were deleted; the working tree remains modified and the branch is five commits ahead of `origin`.
