@@ -243,20 +243,85 @@ describe("useRunLifecycleManager", () => {
     }
   });
 
-  it("blocks every lifecycle command while form ownership is handing off", () => {
+  it("keeps other lifecycle commands fenced while form ownership is handing off", () => {
     const { deps, spies } = setup(day([run("a", { startedAt: 10, pausedAt: 20 })]));
     deps.formHandoffRef.current = true;
     const { result } = renderHook(() => useRunLifecycleManager(deps));
     act(() => {
       result.current.switchToRun(0);
       result.current.startRun();
-      result.current.pauseRun();
       result.current.setPauseTunnelPolicy(false);
-      result.current.resumeRun();
       result.current.endRun(undefined, true);
     });
     expect(spies.queue).not.toHaveBeenCalled();
     expect(spies.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["pause", { startedAt: 10 }, "Pause"],
+    ["resume", { startedAt: 10, pausedAt: 20 }, "Resume"],
+  ] as const)("retains a %s tap through form handoff", (action, extra, label) => {
+    vi.useFakeTimers();
+    try {
+      const { deps, spies } = setup(day([run("a", extra)]));
+      deps.formHandoffRef.current = true;
+      const { result, unmount } = renderHook(() => useRunLifecycleManager(deps));
+
+      act(() => {
+        if (action === "pause") result.current.pauseRun();
+        else result.current.resumeRun();
+      });
+
+      expect(deps.foregroundRunControlIntentRef.current).toEqual({
+        action,
+        runId: "a",
+      });
+      expect(deps.setPendingForegroundRunControl).toHaveBeenCalledWith({
+        action,
+        runId: "a",
+      });
+      expect(deps.setAutoTrackBlocked).toHaveBeenCalledWith(true);
+      expect(spies.foregroundNotice).toHaveBeenCalledWith(
+        "recovering",
+        expect.stringContaining(`${label} requested`),
+      );
+      expect(spies.queue).not.toHaveBeenCalled();
+
+      deps.formHandoffRef.current = false;
+      act(() => vi.advanceTimersByTime(25));
+
+      expect(spies.queue).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "a", action }),
+      );
+      expect(deps.foregroundRunControlIntentRef.current).toBeNull();
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not apply a deferred pause or resume to a run selected during handoff", () => {
+    vi.useFakeTimers();
+    try {
+      const { deps, spies } = setup(day([run("a", { startedAt: 10, pausedAt: 20 })]));
+      deps.formHandoffRef.current = true;
+      const { result, unmount } = renderHook(() => useRunLifecycleManager(deps));
+
+      act(() => result.current.resumeRun());
+      deps.dayStateRef.current = day([run("b", { startedAt: 30, pausedAt: 40 })]);
+      deps.formHandoffRef.current = false;
+      act(() => vi.advanceTimersByTime(25));
+
+      expect(spies.queue).not.toHaveBeenCalled();
+      expect(deps.foregroundRunControlIntentRef.current).toBeNull();
+      expect(spies.foregroundNotice).toHaveBeenLastCalledWith(
+        "outcome",
+        expect.stringContaining("not applied"),
+      );
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("attributes a switched form only to its settled form owner", () => {

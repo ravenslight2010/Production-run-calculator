@@ -243,6 +243,44 @@ export function useRunLifecycleManager(deps: {
     scheduleDeferredLifecyclePoll(poll, 0);
     return true;
   };
+  const deferForegroundRunControlDuringHandoff = (
+    action: "pause" | "resume",
+    run: RunMeta | undefined,
+  ): void => {
+    if (
+      !run?.startedAt
+      || run.endedAt
+      || Boolean(run.pausedAt) !== (action === "resume")
+    ) {
+      queueForegroundRunControl(action, run);
+      return;
+    }
+    const pending = deps.foregroundRunControlIntentRef.current;
+    if (
+      (pending && (pending.runId !== run?.id || pending.action !== action))
+      || (run && deps.foregroundStopIntentRef.current?.runId === run.id)
+    ) {
+      queueForegroundRunControl(action, run);
+      return;
+    }
+    if (!run || !deferUntilAdoptionSettles(run.id, action)) {
+      deps.showForegroundRecoveryNotice(
+        "outcome",
+        `${action === "pause" ? "Pause" : "Resume"} was not queued because another run action is already waiting. Review the current run.`,
+      );
+      return;
+    }
+    // Retain the tap for the same-run check in deferUntilAdoptionSettles.
+    // The form may still be changing owners, so do not apply from its current
+    // values; surface the pending action and keep auto-tracking fenced.
+    queueForegroundRunControl(action, run);
+    if (
+      deps.foregroundRunControlIntentRef.current?.runId === run.id
+      && deps.foregroundRunControlIntentRef.current.action === action
+    ) {
+      deps.setAutoTrackBlocked(true);
+    }
+  };
 
   useEffect(() => {
     lifecycleMountedRef.current = true;
@@ -415,10 +453,7 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const run = base.runs[index];
     if (deps.formHandoffRef.current && !fromForegroundRecovery) {
-      deps.showForegroundRecoveryNotice(
-        "recovering",
-        "Pause is waiting for the run display to finish switching.",
-      );
+      deferForegroundRunControlDuringHandoff("pause", run);
       return;
     }
     if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
@@ -579,10 +614,7 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const run = base.runs[index];
     if (deps.formHandoffRef.current && !fromForegroundRecovery) {
-      deps.showForegroundRecoveryNotice(
-        "recovering",
-        "Resume is waiting for the run display to finish switching.",
-      );
+      deferForegroundRunControlDuringHandoff("resume", run);
       return;
     }
     if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {

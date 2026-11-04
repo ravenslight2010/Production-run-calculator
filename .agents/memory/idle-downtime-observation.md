@@ -11,8 +11,8 @@ The owner reports that they have not noticed downtime while actively using the a
 
 ## Approval to repair after investigation
 
-For this reliability investigation, the owner clarified that “investigate further” means to continue causal investigation, not to decline a fix. Evidence-supported changes are approved once the relevant investigation is exhausted; do not ask for another approval solely because a repair is needed.
+The owner clarified that choosing “investigate further” means to continue causal investigation, not to decline a fix. This applies consistently to prior and future investigations. Evidence-supported changes are approved once the relevant investigation is exhausted; do not ask for another approval solely because a repair is needed.
 
-**Why:** The earlier response misread the request to investigate as a refusal of the proposed change.
+**Why:** The owner has chosen further investigation several times and clarified that these choices defer repair until the evidence is sufficient; they do not refuse the repair.
 
 **How to apply:** Complete the relevant client, server, and background-work evidence pass, then make the narrow supported repairs and verify them. Ask again only if new product behavior or policy choices are needed.
