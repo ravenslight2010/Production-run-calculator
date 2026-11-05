@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { isDeepStrictEqual } from "node:util";
 import { hasOperationalSnapshotMutation } from "../lib/operationalSnapshotAuthority";
 import { isExactOperationalCommandRetry } from "../lib/operationalCommandIdentity";
 import { canRebaseManualApplicatorAdjustment } from "../lib/manualSectionAutoTrackRebase";
@@ -3088,7 +3089,7 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
     }
   }
   const summary = req.body?.skipAutoTrack === true
-    ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
+    ? { examinedDates: 0, dateTransactions: 0, builtClaims: 0, accepted: 0, outcomes: {} }
     : await runAutoTrackServerTicks({ nowMs, scope, date });
   // Compute counters at the fixture clock, but timestamp the read model at the
   // real server clock. This keeps deterministic elapsed-time tests from
@@ -4029,16 +4030,62 @@ function serverTickStartDate(nowMs: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function isServerTickRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Avoid opening a per-date transaction only when the fetched snapshot proves
+ * there is no due work and no wall-clock state to persist. Any malformed or
+ * uncertain shape falls through to the existing locked transaction.
+ */
+function canSkipIdleServerAutoTrackDate(
+  raw: unknown,
+  nowMs: number,
+  claimIdNamespace: string,
+): boolean {
+  if (!isServerTickRecord(raw)) return false;
+  const dayState = raw.dayState;
+  if (!isServerTickRecord(dayState) || !Array.isArray(dayState.runs)) return false;
+  if (raw.runValues !== undefined && !isServerTickRecord(raw.runValues)) return false;
+  if (raw.autoTrackServerState !== undefined && !isServerTickRecord(raw.autoTrackServerState)) return false;
+  if (raw.autoTrackCoordination !== undefined && !isServerTickRecord(raw.autoTrackCoordination)) return false;
+  const serverState = raw.autoTrackServerState as Record<string, any> | undefined;
+  const existingBookkeeping = serverState?.wallClockBookkeeping;
+  if (existingBookkeeping !== undefined && !isServerTickRecord(existingBookkeeping)) return false;
+  for (const run of dayState.runs) {
+    if (!isServerTickRecord(run) || typeof run.id !== "string") return false;
+    if (run.startedAt !== undefined && typeof run.startedAt !== "number") return false;
+    if (typeof run.startedAt === "number" && run.startedAt > 0
+      && !isServerTickRecord(raw.runValues?.[run.id])) return false;
+  }
+
+  try {
+    if (buildNetSecondServerClaims(raw, nowMs, claimIdNamespace).length > 0) return false;
+    const wallPlans = buildServerWallClockPlans(raw, nowMs, claimIdNamespace);
+    if (wallPlans.some((wall) => wall.claims.length > 0)) return false;
+    return !wallPlans.some((wall) =>
+      !isDeepStrictEqual(existingBookkeeping?.[wall.runId] ?? {}, wall.bookkeeping),
+    );
+  } catch {
+    // The current locked path is the authority whenever preflight cannot
+    // safely classify the fetched row.
+    return false;
+  }
+}
+
 export type ServerTickSummary = {
   examinedDates: number;
+  dateTransactions: number;
   builtClaims: number;
   accepted: number;
   outcomes: Record<string, number>;
 };
 
 /** Executes automatic claims under the same locked, idempotent path as the
- * public claim route. A beat writes wall-clock bookkeeping even without an
- * accepted claim, which prevents a restart from replaying elapsed time. */
+ * public claim route. Dates with no due claims and unchanged wall-clock
+ * bookkeeping exit before the transaction; every other date preserves the
+ * write-ahead bookkeeping needed to prevent restart replay. */
 export async function runAutoTrackServerTicks(opts: {
   nowMs?: number;
   maxClaims?: number;
@@ -4054,6 +4101,7 @@ export async function runAutoTrackServerTicks(opts: {
     ...(opts.scope ? [eq(dailySyncTable.scope, opts.scope)] : []),
     ...(opts.date ? [eq(dailySyncTable.date, opts.date)] : []),
   ));
+  let dateTransactions = 0;
   let builtClaims = 0;
   let accepted = 0;
   // Scoped invocations can recover their own date, but cannot certify health
@@ -4082,12 +4130,19 @@ export async function runAutoTrackServerTicks(opts: {
       passComplete = false;
       continue;
     }
+    // Keep one identity across preflight and the authoritative locked rebuild.
+    const claimIdNamespace = `tick-${randomUUID()}`;
+    if (canSkipIdleServerAutoTrackDate(row.data, nowMs, claimIdNamespace)) {
+      outcomes.noWorkSkipped = (outcomes.noWorkSkipped ?? 0) + 1;
+      backoff.recordSuccess(nowMs);
+      continue;
+    }
     let failureStage: "date-transaction" | "peer-broadcast" = "date-transaction";
     try {
       // A transaction retry must keep the same event identity. If the database
       // committed but its reply was lost, the ledger then fences the rebuilt
       // claim instead of applying the operational effect a second time.
-      const claimIdNamespace = `tick-${randomUUID()}`;
+      dateTransactions++;
       const result = await runBackgroundOperation(
         "server-auto-track-tick",
         () => runWithScope(scope, () => db.transaction(async (tx) => {
@@ -4305,7 +4360,7 @@ export async function runAutoTrackServerTicks(opts: {
   if (passComplete && outcomes.error === undefined) {
     recordBackgroundOperationSuccess("server-auto-track-tick");
   }
-  return { examinedDates: rows.length, builtClaims, accepted, outcomes };
+  return { examinedDates: rows.length, dateTransactions, builtClaims, accepted, outcomes };
 }
 
 export function startAutoTrackServerTicks(): NodeJS.Timeout {
@@ -4324,6 +4379,7 @@ export function startAutoTrackServerTicks(): NodeJS.Timeout {
         event: "server_auto_track_tick_summary",
         durationMs: Math.max(0, completedAt - startedAt),
         examinedDates: summary.examinedDates,
+        dateTransactions: summary.dateTransactions,
         builtClaims: summary.builtClaims,
         accepted: summary.accepted,
         outcomes: summary.outcomes,

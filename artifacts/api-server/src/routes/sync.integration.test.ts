@@ -2411,11 +2411,75 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
     }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
   }
 
+  it("skips an unstarted scheduled run without opening a date transaction or rewriting its snapshot", async () => {
+    await seedServerApplicatorRun();
+    const [seeded] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const unstartedData = seeded.data as any;
+    unstartedData.dayState.runs[0] = {
+      ...unstartedData.dayState.runs[0],
+      startedAt: 0,
+    };
+    await db.update(dailySyncTable).set({ data: unstartedData })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const [beforeTick] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const result = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+
+    expect(result.dateTransactions).toBe(0);
+    expect(result.outcomes.noWorkSkipped).toBe(1);
+    const [afterTick] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect(afterTick.updatedAt.getTime()).toBe(beforeTick.updatedAt.getTime());
+    expect(afterTick.canonicalRevision).toBe(beforeTick.canonicalRevision);
+    expect(afterTick.data).toEqual(beforeTick.data);
+  });
+
+  it("skips a repeated same-time beat after persisting server wall-clock bookkeeping", async () => {
+    await seedServerApplicatorRun();
+    const [seeded] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const notYetDueData = seeded.data as any;
+    notYetDueData.dayState.runs[0] = {
+      ...notYetDueData.dayState.runs[0],
+      startedAt: TICK_NOW - 1_000,
+    };
+    await db.update(dailySyncTable).set({ data: notYetDueData })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const initialBeat = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    expect(initialBeat.accepted).toBeGreaterThan(0);
+    expect(initialBeat.dateTransactions).toBe(1);
+    const [afterInitialBeat] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const initialBookkeeping = (afterInitialBeat.data as any)
+      .autoTrackServerState.wallClockBookkeeping[TICK_RUN];
+    expect(initialBookkeeping).toBeDefined();
+
+    const beforeIdleBeat = afterInitialBeat;
+    const idleBeat = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    expect(idleBeat.dateTransactions).toBe(0);
+    expect(idleBeat.outcomes.noWorkSkipped).toBe(1);
+    const [afterIdleBeat] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect(afterIdleBeat.updatedAt.getTime()).toBe(beforeIdleBeat.updatedAt.getTime());
+    expect(afterIdleBeat.canonicalRevision).toBe(beforeIdleBeat.canonicalRevision);
+    expect(afterIdleBeat.data).toEqual(beforeIdleBeat.data);
+  });
+
   it("commits server-owned applicator progress and evidence together, with retry idempotency", async () => {
     await seedServerApplicatorRun();
     const first = await runAutoTrackServerTicks({
       nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
     });
+    expect(first.dateTransactions).toBe(1);
     expect(first.accepted).toBeGreaterThan(0);
     const firstEvidence = await db.select().from(applicatorBatchEvidenceTable);
     expect(firstEvidence.filter((row) => row.source === "automatic-observation")).toHaveLength(1);
@@ -3021,6 +3085,8 @@ describe("server auto-track tick recovery under database pressure", () => {
       scope: "sandbox",
       updatedAt: new Date(0),
     });
+    await seedTickRun();
+    await seedTickRun("sandbox");
     await db.execute(sql`
       CREATE FUNCTION reject_auto_track_tick_always() RETURNS trigger
       LANGUAGE plpgsql AS $$
@@ -3037,6 +3103,8 @@ describe("server auto-track tick recovery under database pressure", () => {
     `);
 
     try {
+      const [healthyDateBefore] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, "2030-03-11"), eq(dailySyncTable.scope, "live")));
       const firstFailure = await runAutoTrackServerTicks({
         nowMs: TICK_NOW, maxClaims: 8,
       });
@@ -3074,7 +3142,9 @@ describe("server auto-track tick recovery under database pressure", () => {
         .where(and(eq(dailySyncTable.date, "2030-03-11"), eq(dailySyncTable.scope, "live")));
       const [healthyScope] = await db.select().from(dailySyncTable)
         .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
-      expect(healthyDate.updatedAt.getTime()).toBeGreaterThan(0);
+      expect(firstFailure.dateTransactions).toBeGreaterThanOrEqual(2);
+      expect(firstFailure.outcomes.noWorkSkipped).toBeGreaterThanOrEqual(1);
+      expect(healthyDate.updatedAt.getTime()).toBe(healthyDateBefore.updatedAt.getTime());
       expect(healthyScope.updatedAt.getTime()).toBeGreaterThan(0);
 
       const tooSoon = await runAutoTrackServerTicks({
@@ -3115,7 +3185,9 @@ describe("server auto-track tick recovery under database pressure", () => {
       const [failedDate] = await db.select().from(dailySyncTable)
         .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
       expect(failedDate.canonicalRevision).toBe(0);
-      expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+      const autoTrackLedger = await db.select().from(operationalIntentLedgerTable);
+      expect(autoTrackLedger.filter((entry) => entry.scope === "live")).toHaveLength(0);
+      expect(autoTrackLedger.some((entry) => entry.scope === "sandbox")).toBe(true);
 
       const scopedSuccess = await runAutoTrackServerTicks({
         nowMs: TICK_NOW + 7_000, maxClaims: 8, scope: "sandbox",

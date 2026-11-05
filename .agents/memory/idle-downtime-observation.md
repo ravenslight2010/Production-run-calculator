@@ -16,3 +16,11 @@ The owner clarified that choosing “investigate further” means to continue ca
 **Why:** The owner has chosen further investigation several times and clarified that these choices defer repair until the evidence is sufficient; they do not refuse the repair.
 
 **How to apply:** Complete the relevant client, server, and background-work evidence pass, then make the narrow supported repairs and verify them. Ask again only if new product behavior or policy choices are needed.
+
+## Approved no-work auto-track boundary
+
+The owner approved a conservative server auto-track optimization: skip a date transaction only when the existing claim builders show no due claims and wall-clock bookkeeping is unchanged. Missing, malformed, or uncertain state must use the existing locked transaction. Keep tick cadence, claim authority, outbox polling, other worker cadence, and pool sizing unchanged.
+
+**Why:** The owner suspects idle background work contributes to pool pressure, but preserving server authority and restart-safe claim bookkeeping takes priority over reducing work.
+
+**How to apply:** Use this boundary when reducing scheduled auto-track database work. Validate both the idle skip and active/uncertain fallbacks; do not infer production impact without a measured before/after window.
