@@ -69,6 +69,12 @@ Manual App1–App4 stock buttons are signed step adjustments, not absolute repla
 
 **How to apply:** Keep this narrow to explicit stock-step actions. Test multiple accepted claims through the real endpoint, exact delta application, idempotent retry, preserved counters, and fail-closed stale manual writes.
 
+For Packaging, an accepted Resume after a manual correction rebases the expected-case baseline but preserves the already-running case deadline. Bound projection growth by the case intervals actually due on that schedule.
+
+**Why:** The elapsed-run projection and the independently re-armed case timer can differ by one case after a manual edit or wake. Resetting a full interval delays tracking; trusting the unbounded projection can overcount.
+
+**How to apply:** Keep the projection baseline and scheduled cadence separate. Verify that an accepted manual correction survives Resume, the next due claim is not duplicated or over-counted, and the canonical count persists through wake and reload.
+
 Synthetic auto-track ticks in browser tests must not move canonical anchors ahead of real server time before a manual operation.
 
 **Why:** A test that injected a tick at run-start plus 60 seconds while the server clock was only about 10 seconds past start correctly hit the server's future-anchor guard; it was a fixture time-travel error, not evidence for weakening production validation.

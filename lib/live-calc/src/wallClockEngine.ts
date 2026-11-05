@@ -1,4 +1,4 @@
-import { clampWebPeriodMs, computeBatchTick, computeCaseTickWrite, computeTrayTick, getAutoTrackTiming, suggestedDoughStaging, type AutoTrackTiming } from "./autoTrackEngine";
+import { capCaseExpectedRawByDueIntervals, clampWebPeriodMs, computeBatchTick, computeCaseTickWrite, computeTrayTick, getAutoTrackTiming, suggestedDoughStaging, type AutoTrackTiming } from "./autoTrackEngine";
 
 export type WallClockRunStatus = "pending" | "running" | "paused" | "ended";
 export type WallClockChannel = "case" | "tray-consume" | "tray-produce" | "batch-consume" | "batch-produce" | "hopper";
@@ -29,12 +29,23 @@ export function tickWallClock(input: WallClockTickInput): { next: WallClockBookk
   const caseActive = input.runStatus === "running" && input.packagingAutoTrackActive || input.drainActive || input.packagingDrainActive;
   if (caseActive && input.calc.ppm > 0 && input.v.pizzasPerCase > 0 && input.nowMs >= next.caseNextDueMs) {
     const dueAt = input.nowMs;
+    const scheduledDueAtMs = next.caseNextDueMs;
     next.caseNextDueMs = input.nowMs + clampWebPeriodMs(input.v.pizzasPerCase / input.calc.ppm * 60000);
     const prevExpected = next.lastExpectedCases, prevFreezer = next.drainFreezer;
-    next.lastExpectedCases = input.expectedCasesRaw;
+    const expectedCasesRaw = capCaseExpectedRawByDueIntervals({
+      previousExpected: prevExpected,
+      expectedRaw: input.expectedCasesRaw,
+      nextDueAtMs: scheduledDueAtMs,
+      nowMs: input.nowMs,
+      periodMs: input.timing.caseMs,
+    });
+    const expectedCases = input.v.casesNeeded > 0
+      ? Math.min(input.v.casesNeeded, expectedCasesRaw)
+      : expectedCasesRaw;
+    next.lastExpectedCases = expectedCasesRaw;
     next.drainFreezer = Math.max(0, Math.floor(input.calc.casesInFreezer));
     if (!input.caseSuppressed) {
-      const d = computeCaseTickWrite({ prevExpected, expectedRaw: input.expectedCasesRaw, expectedCases: input.expectedCases, prevFreezer, nextFreezer: next.drainFreezer, curTotal: (input.form.skidsCompleted || 0) * input.v.casesPerSkid + (input.form.casesOnCurrentSkid || 0), casesPerSkid: input.v.casesPerSkid, casesNeeded: input.v.casesNeeded, drainActive: input.drainActive, packagingDrainActive: input.packagingDrainActive, caseClaimRetry: next.caseClaimRetry, formResetSkipped: next.formResetSkipped });
+      const d = computeCaseTickWrite({ prevExpected, expectedRaw: expectedCasesRaw, expectedCases, prevFreezer, nextFreezer: next.drainFreezer, curTotal: (input.form.skidsCompleted || 0) * input.v.casesPerSkid + (input.form.casesOnCurrentSkid || 0), casesPerSkid: input.v.casesPerSkid, casesNeeded: input.v.casesNeeded, drainActive: input.drainActive, packagingDrainActive: input.packagingDrainActive, caseClaimRetry: next.caseClaimRetry, formResetSkipped: next.formResetSkipped });
       if (d.caseClaimRetryReset) next.caseClaimRetry = false;
       next.formResetSkipped = d.formResetSkippedNew;
       if (d.action !== "none" && d.action !== "reset-skip") events.push({ channel: "case", dueAt, nextDueAt: next.caseNextDueMs, mutations: [{ field: "skidsCompleted", from: input.form.skidsCompleted || 0, to: Math.floor(d.newTotal / input.v.casesPerSkid) }, { field: "casesOnCurrentSkid", from: input.form.casesOnCurrentSkid || 0, to: Math.round(d.newTotal % input.v.casesPerSkid) }] });

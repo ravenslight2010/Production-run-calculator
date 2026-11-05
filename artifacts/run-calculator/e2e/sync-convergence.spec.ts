@@ -2460,12 +2460,18 @@ test(
                 at: number;
                 epoch: number;
                 containsTestRun: boolean;
+                stack?: string[];
               }>;
               const rawEpoch = localStorage.getItem("run-calc-reset-epoch");
+              const epoch = rawEpoch === null ? 0 : Number(JSON.parse(rawEpoch));
+              const containsTestRun = (parsed.runs ?? []).some((run) => run.id === testRunId);
               writes.push({
                 at: Date.now(),
-                epoch: rawEpoch === null ? 0 : Number(JSON.parse(rawEpoch)),
-                containsTestRun: (parsed.runs ?? []).some((run) => run.id === testRunId),
+                epoch,
+                containsTestRun,
+                ...(epoch > 0 && containsTestRun
+                  ? { stack: (new Error().stack ?? "").split("\n").slice(2, 9).map((line) => line.trim()) }
+                  : {}),
               });
               sessionStorage.setItem(writesKey, JSON.stringify(writes.slice(-40)));
             } catch {

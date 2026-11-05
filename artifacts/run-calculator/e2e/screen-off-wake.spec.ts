@@ -3845,8 +3845,34 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       generationMatchesState?: boolean;
       baseUpdatedAtMatchesServer?: boolean;
     }> = [];
+    const manualSectionRequests: Array<{ section?: string; operation?: string }> = [];
+    const manualSectionResponses: Array<{
+      status: number;
+      section?: string;
+      operation?: string;
+      code?: string;
+      outcome?: string;
+      canonicalRevision?: number;
+      canonicalSkids?: number;
+      canonicalCases?: number;
+      correctionGeneration?: number;
+    }> = [];
+    const manualSectionResponseTasks: Promise<void>[] = [];
     page.on("request", (request) => {
-      if (new URL(request.url()).pathname !== "/api/sync/auto-track/claim") return;
+      const pathname = new URL(request.url()).pathname;
+      if (pathname === "/api/sync/manual-section") {
+        try {
+          const body = request.postDataJSON() as { section?: string; operation?: string };
+          manualSectionRequests.push({
+            section: body.section,
+            operation: body.operation,
+          });
+        } catch {
+          manualSectionRequests.push({});
+        }
+        return;
+      }
+      if (pathname !== "/api/sync/auto-track/claim") return;
       try {
         const body = request.postDataJSON() as { claim?: { channel?: string } };
         autoTrackClaimChannels.push(body.claim?.channel ?? "unknown");
@@ -3899,6 +3925,62 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         });
       }
     });
+    page.on("response", (response) => {
+      const request = response.request();
+      if (
+        request.method() !== "POST"
+        || new URL(response.url()).pathname !== "/api/sync/manual-section"
+      ) return;
+      const task = (async () => {
+        let requestBody: { section?: string; operation?: string; runId?: string } = {};
+        try {
+          requestBody = request.postDataJSON() as typeof requestBody;
+        } catch {}
+        try {
+          const body = await response.json() as {
+            code?: unknown;
+            outcome?: unknown;
+            canonicalRevision?: unknown;
+            data?: {
+              packagingProgress?: Record<string, {
+                skidsCompleted?: number;
+                casesOnCurrentSkid?: number;
+                correctionGeneration?: number;
+              }>;
+            };
+          };
+          const progress = requestBody.runId
+            ? body.data?.packagingProgress?.[requestBody.runId]
+            : undefined;
+          manualSectionResponses.push({
+            status: response.status(),
+            section: requestBody.section,
+            operation: requestBody.operation,
+            ...(typeof body.code === "string" ? { code: body.code } : {}),
+            ...(typeof body.outcome === "string" ? { outcome: body.outcome } : {}),
+            ...(typeof body.canonicalRevision === "number"
+              ? { canonicalRevision: body.canonicalRevision }
+              : {}),
+            ...(typeof progress?.skidsCompleted === "number"
+              ? { canonicalSkids: progress.skidsCompleted }
+              : {}),
+            ...(typeof progress?.casesOnCurrentSkid === "number"
+              ? { canonicalCases: progress.casesOnCurrentSkid }
+              : {}),
+            ...(typeof progress?.correctionGeneration === "number"
+              ? { correctionGeneration: progress.correctionGeneration }
+              : {}),
+          });
+        } catch {
+          manualSectionResponses.push({
+            status: response.status(),
+            section: requestBody.section,
+            operation: requestBody.operation,
+          });
+        }
+      })();
+      manualSectionResponseTasks.push(task);
+    });
     const safeBaseMs = await setupAndStartRun(page, "48");
     // Keep the browser and server clocks aligned. The isolated fixture can
     // shift the canonical run start backward, so line phases and the local
@@ -3943,10 +4025,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     await expect(cases).toHaveText("45");
 
     let canonicalCorrectionGeneration = 0;
-    await expect
-      .poll(
-        async () => {
-          canonicalCorrectionGeneration = await page.evaluate(async () => {
+    let latestCanonicalCorrectionSnapshot: Record<string, unknown> | undefined;
+    try {
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await page.evaluate(async () => {
             const today = new Date().toISOString().slice(0, 10);
             const response = await fetch(`/api/sync/today?today=${today}`, {
               cache: "no-store",
@@ -3968,6 +4052,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
                   correctionGeneration?: number;
                 }
               >;
+              canonicalRevision?: number;
             };
             const runId =
               body.dayState?.currentRunId ?? body.dayState?.runs?.[0]?.id;
@@ -3975,20 +4060,62 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
             const progress = runId
               ? body.packagingProgress?.[runId]
               : undefined;
-            return runId &&
-              values?.skidsCompleted === 0 &&
-              values.casesOnCurrentSkid === 45 &&
-              progress?.skidsCompleted === 0 &&
-              progress.casesOnCurrentSkid === 45 &&
-              (progress.correctionGeneration ?? 0) > 0
-              ? (progress.correctionGeneration ?? 0)
-              : 0;
+            return {
+              status: response.status,
+              queryDate: today,
+              rowDate: body.dayState?.date,
+              hasRun: Boolean(runId),
+              canonicalRevision: body.canonicalRevision,
+              values: values
+                ? {
+                  skidsCompleted: values.skidsCompleted,
+                  casesOnCurrentSkid: values.casesOnCurrentSkid,
+                }
+                : null,
+              progress: progress
+                ? {
+                  skidsCompleted: progress.skidsCompleted,
+                  casesOnCurrentSkid: progress.casesOnCurrentSkid,
+                  correctionGeneration: progress.correctionGeneration,
+                }
+                : null,
+            };
           });
+          latestCanonicalCorrectionSnapshot = snapshot;
+          const progress = snapshot.progress as {
+            skidsCompleted?: number;
+            casesOnCurrentSkid?: number;
+            correctionGeneration?: number;
+          } | null;
+          const values = snapshot.values as {
+            skidsCompleted?: number;
+            casesOnCurrentSkid?: number;
+          } | null;
+          canonicalCorrectionGeneration = snapshot.hasRun
+            && values?.skidsCompleted === 0
+            && values.casesOnCurrentSkid === 45
+            && progress?.skidsCompleted === 0
+            && progress.casesOnCurrentSkid === 45
+            && (progress.correctionGeneration ?? 0) > 0
+            ? (progress.correctionGeneration ?? 0)
+            : 0;
           return canonicalCorrectionGeneration;
         },
         { timeout: 15_000 },
       )
-      .toBeGreaterThan(0);
+        .toBeGreaterThan(0);
+    } catch (error) {
+      await Promise.allSettled(manualSectionResponseTasks);
+      console.error(
+        "[screen-off-wake] Packaging correction acknowledgement diagnostics",
+        JSON.stringify({
+          manualSectionRequests,
+          manualSectionResponses,
+          latestCanonicalCorrectionSnapshot,
+        }),
+      );
+      throw error;
+    }
     const canonicalRunId = await page.evaluate(async () => {
       const response = await fetch(
         `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
@@ -4309,9 +4436,75 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       page,
       workerRecoveryAtMs,
     );
-    await expect
-      .poll(() => acceptedPostResumeClaims().length, { timeout: 15_000 })
-      .toBe(2);
+    const firstServerTimeMs = Number(firstServerTick.serverTime ?? 0);
+    expect(firstServerTimeMs, "the fixture tick must return canonical server time")
+      .toBeGreaterThan(0);
+    const firstCanonicalDueDelayMs = Math.max(
+      0,
+      firstNextCaseDueMs - firstServerTimeMs,
+    );
+    // The fixture advances server bookkeeping at fakeMs but deliberately
+    // timestamps its sync frame with real server time. The client honors that
+    // server clock, so don't demand a local claim before its canonical due time.
+    const firstClaimWaitMs = Math.min(
+      30_000,
+      Math.max(15_000, firstCanonicalDueDelayMs + 5_000),
+    );
+    try {
+      await expect
+        .poll(() => acceptedPostResumeClaims().length, { timeout: firstClaimWaitMs })
+        .toBe(2);
+    } catch (error) {
+      const latest = await readAfterDueBeat();
+      const browserState = await page.evaluate(() => ({
+        now: Date.now(),
+        recovery: document.querySelector(
+          '[data-testid="foreground-recovery-status"]',
+        )?.textContent?.trim() ?? null,
+        nextCase: [...document.querySelectorAll("span, div")]
+          .map((node) => node.textContent?.trim() ?? "")
+          .find((text) => text.startsWith("Next case in")) ?? null,
+      }));
+      console.error("[Packaging wake recovery]", JSON.stringify({
+        acceptedClaims: acceptedPostResumeClaims().map((claim) => ({
+          status: claim.status,
+          outcome: claim.outcome,
+          sequence: claim.sequence,
+          claimDueAt: claim.claimDueAt,
+          stateSequence: claim.stateSequence,
+          stateNextDueAt: claim.stateNextDueAt,
+        })),
+        recentResponses: caseClaimResponses.slice(-5).map((claim) => ({
+          status: claim.status,
+          outcome: claim.outcome,
+          sequence: claim.sequence,
+          claimDueAt: claim.claimDueAt,
+          stateSequence: claim.stateSequence,
+          stateNextDueAt: claim.stateNextDueAt,
+        })),
+        channels: autoTrackClaimChannels.slice(-8),
+        server: {
+          total: totalCases(latest.progress),
+          caseNextDueMs: latest.book?.caseNextDueMs,
+          lastExpectedCases: latest.book?.lastExpectedCases,
+          sequence: latest.coordination?.sequence,
+          nextDueAt: latest.coordination?.nextDueAt,
+          serverSequence: latest.book?.serverSequences?.case,
+        },
+        firstServerTick: {
+          serverTimeMs: firstServerTimeMs,
+          builtClaims: firstServerTick.builtClaims,
+          accepted: firstServerTick.accepted,
+          canonicalDueDelayMs: firstCanonicalDueDelayMs,
+          waitTimeoutMs: firstClaimWaitMs,
+          priorServerSequence: beforeServerClaim.book?.serverSequences?.case,
+        },
+        browserState,
+        workerRecoveryAtMs,
+        clientRecoveryAtMs,
+      }));
+      throw error;
+    }
     const afterServerClaim = await readAfterDueBeat();
     const acceptedClaimsAfterRecovery = acceptedPostResumeClaims();
     const catchUpClaim = acceptedClaimsAfterRecovery[1];
@@ -4399,7 +4592,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
     // Replaying the server beat at the same time must not duplicate progress.
     // The next case is still a client-owned claim at the returned deadline.
-    await tickServerWithoutAdvancingBrowserClock(page, workerRecoveryAtMs);
+    const duplicateTick = await tickServerWithoutAdvancingBrowserClock(page, workerRecoveryAtMs);
     const afterDuplicateTick = await readAfterDueBeat();
     expect(totalCases(afterDuplicateTick.progress)).toBe(totalAfterRecovery);
     expect(afterDuplicateTick.coordination?.sequence)
@@ -4412,8 +4605,21 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     );
     expect(nextClientCaseDueMs).toBeGreaterThan(clientRecoveryAtMs);
     await mockDateNow(page, nextClientCaseDueMs, { tick: false });
+    const duplicateTickServerTimeMs = Number(duplicateTick.serverTime ?? 0);
+    expect(
+      duplicateTickServerTimeMs,
+      "the duplicate fixture tick must return canonical server time",
+    ).toBeGreaterThan(0);
+    const nextCanonicalDueDelayMs = Math.max(
+      0,
+      nextClientCaseDueMs - duplicateTickServerTimeMs,
+    );
+    const nextClaimWaitMs = Math.min(
+      30_000,
+      Math.max(15_000, nextCanonicalDueDelayMs + 5_000),
+    );
     await expect
-      .poll(() => acceptedPostResumeClaims().length, { timeout: 15_000 })
+      .poll(() => acceptedPostResumeClaims().length, { timeout: nextClaimWaitMs })
       .toBe(3);
     const afterSecondClientClaim = await readAfterDueBeat();
     const nextAcceptedClaim = acceptedPostResumeClaims()[2];

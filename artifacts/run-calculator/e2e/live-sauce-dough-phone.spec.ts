@@ -803,16 +803,22 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   await page.getByRole("button", { name: "Decrease app1 batches on line" }).click();
   const manualCorrectionResponse = await manualCorrectionResponsePromise;
   const correctionRequest = manualCorrectionResponse.request().postDataJSON() as {
+    baseValues?: { app1StockLbs?: unknown };
     stockAdjustment?: { deltaLbs?: unknown };
   };
+  const stockAtClick = correctionRequest.baseValues?.app1StockLbs;
+  if (typeof stockAtClick !== "number" || !Number.isFinite(stockAtClick)) {
+    throw new Error("The manual App1 correction must include the click-time stock baseline.");
+  }
   const requestedCorrectionDelta = correctionRequest.stockAdjustment?.deltaLbs;
   if (typeof requestedCorrectionDelta !== "number" || !Number.isFinite(requestedCorrectionDelta)) {
     throw new Error("The manual App1 correction must include a finite stock delta.");
   }
-  const expectedCorrectionDelta = -Math.min(batchWeightBeforeCorrection, stockBeforeCorrection);
+  const expectedCorrectionDelta = -Math.min(batchWeightBeforeCorrection, stockAtClick);
   if (Math.abs(requestedCorrectionDelta - expectedCorrectionDelta) >= 0.005) {
     console.error("[app1 manual correction units]", JSON.stringify({
       stockBeforeCorrection,
+      stockAtClick,
       batchWeightBeforeCorrection,
       visibleBatchesBeforeCorrection,
       requestedCorrectionDelta,
@@ -826,7 +832,7 @@ test("Frontline App1 batch supply survives off-tab work, adjustment, pause, and 
   expect(manualCorrectionResponse.status(), JSON.stringify(manualCorrectionBody)).toBe(200);
   expect(manualCorrectionBody.outcome).toBe("accepted");
   const correctedStockCeiling =
-    Math.max(0, stockBeforeCorrection - batchWeightBeforeCorrection) + 0.011;
+    Math.max(0, stockAtClick - batchWeightBeforeCorrection) + 0.011;
   let correctedStock = Number.NaN;
   try {
     await expect.poll(readCanonicalStock, { timeout: 8_000 })

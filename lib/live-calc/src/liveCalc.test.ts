@@ -3,6 +3,7 @@ import {
   computeAutoTrackSchedule,
   computeAutoTrackSuggestion,
   computeAppSlotInfo,
+  capCaseExpectedRawByDueIntervals,
   computeCaseTickWrite,
   computeEffectiveLineSpeed,
   computeServerCalc,
@@ -171,6 +172,18 @@ describe("shared live calculation boundary", () => {
       caseClaimRetry: false,
       formResetSkipped: false,
     }).action).toBe("reset-skip");
+  });
+
+  it("caps a phase-shifted case projection to elapsed scheduled intervals", () => {
+    const base = {
+      previousExpected: 46,
+      expectedRaw: 56,
+      nextDueAtMs: 12_000,
+      periodMs: 6_000,
+    };
+    expect(capCaseExpectedRawByDueIntervals({ ...base, nowMs: 62_800 })).toBe(55);
+    expect(capCaseExpectedRawByDueIntervals({ ...base, nowMs: 66_000 })).toBe(56);
+    expect(capCaseExpectedRawByDueIntervals({ ...base, nowMs: 11_999 })).toBe(46);
   });
 
   it("applies persisted temporary overrides to server calculations", () => {

@@ -190,6 +190,39 @@ export type CaseTickWriteDecision =
   | { action: "write"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: boolean }
   | { action: "reset-skip"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: true }
   | { action: "none"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: boolean };
+/**
+ * Keep an elapsed-time projection from creating more case increments than the
+ * scheduled cadence has actually made due. The projection's phase is anchored
+ * to run start, while the timer may be re-armed after a manual correction or
+ * wake; without this bound those two clocks can differ by one case.
+ */
+export function capCaseExpectedRawByDueIntervals(input: {
+  previousExpected: number;
+  expectedRaw: number;
+  nextDueAtMs: number;
+  nowMs: number;
+  periodMs: number;
+}): number {
+  if (
+    input.previousExpected < 0
+    || !Number.isFinite(input.previousExpected)
+    || !Number.isFinite(input.expectedRaw)
+    || !Number.isFinite(input.nextDueAtMs)
+    || input.nextDueAtMs <= 0
+    || !Number.isFinite(input.nowMs)
+    || !Number.isFinite(input.periodMs)
+    || input.periodMs <= 0
+  ) {
+    return Math.floor(input.expectedRaw);
+  }
+  const elapsedDueIntervals = input.nowMs < input.nextDueAtMs
+    ? 0
+    : Math.floor((input.nowMs - input.nextDueAtMs) / input.periodMs) + 1;
+  return Math.min(
+    Math.floor(input.expectedRaw),
+    Math.floor(input.previousExpected) + elapsedDueIntervals,
+  );
+}
 export function computeCaseTickWrite(input: {
   prevExpected: number;
   expectedRaw: number;

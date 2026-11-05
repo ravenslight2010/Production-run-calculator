@@ -1168,6 +1168,10 @@ test.describe("accessibility smoke", () => {
       inFlight.delete(request);
     });
     const openEditor = async () => {
+      await expect(page.getByTestId("operational-state-badge")).toHaveText(
+        "Confirmed server baseline",
+        { timeout: 25_000 },
+      );
       await page.getByRole("button", { name: "More" }).click();
       await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
       await expect(page.getByRole("menu")).toHaveCount(0);
@@ -1238,9 +1242,12 @@ test.describe("accessibility smoke", () => {
         })).toBe(true);
         await option.click();
         await expect(picker).toBeHidden();
-        await editor.getByRole("button", { name: `Break ${slot} run`, exact: true }).click();
-        await page.getByRole("dialog", { name: `Break ${slot} run`, exact: true })
-          .getByRole("option", { name: /Run 1 —/ }).click();
+        const runControl = editor.getByRole("button", { name: `Break ${slot} run`, exact: true });
+        await runControl.click();
+        const runOption = page.getByRole("dialog", { name: `Break ${slot} run`, exact: true })
+          .getByRole("option", { name: /Run 1 — Break E2E One/ });
+        await expect(runOption).toBeVisible();
+        await runOption.click();
         await trigger.click();
         await page.keyboard.press("Escape");
         await expect(trigger).toBeFocused();
@@ -1250,7 +1257,9 @@ test.describe("accessibility smoke", () => {
           .getByRole("button", { name: "Cancel", exact: true }).click();
       } else {
         await trigger.selectOption("after-run");
-        await editor.getByLabel(`Break ${slot} run`, { exact: true }).selectOption({ index: 1 });
+        const runControl = editor.getByLabel(`Break ${slot} run`, { exact: true });
+        await expect(runControl.locator("option").nth(1)).toHaveText(/Run 1 — Break E2E One/);
+        await runControl.selectOption({ index: 1 });
       }
       await choose(slot, "at-time", "At a clock time");
       await editor.getByLabel(`Break ${slot} time`).fill("23:00");
@@ -1260,11 +1269,21 @@ test.describe("accessibility smoke", () => {
     }
     await choose(2, "at-time", "At a clock time");
     await choose(3, "off", "Not scheduled");
+    const readProjectedFinish = async () => {
+      const text = await editor.getByTestId("schedule-break-preview").innerText();
+      return text.match(/day finish\s+(\d{1,2}:\d{2}\s*[AP]M)/i)?.[1] ?? null;
+    };
+    await expect.poll(readProjectedFinish, {
+      timeout: 10_000,
+      message: "the complete seeded run data must produce a stable day-finish estimate",
+    }).not.toBeNull();
     const preview = await editor.getByTestId("schedule-break-preview").innerText();
-    const projectedFinish = preview.match(/day finish ([^\n]+)/)?.[1];
-    expect(projectedFinish).toBeTruthy();
+    const projectedFinish = preview.match(/day finish\s+(\d{1,2}:\d{2}\s*[AP]M)/i)?.[1];
+    expect(projectedFinish, "the complete seeded schedule should show its estimated finish").toBeTruthy();
+    const saveButton = editor.getByRole("button", { name: "Save Schedule", exact: true });
+    await expect(saveButton, "the hydrated, named live schedule must remain saveable").toBeEnabled();
     const saved = page.waitForResponse((response) => response.url().includes("/api/sync/today") && response.request().method() === "PUT");
-    await editor.getByRole("button", { name: "Save Schedule", exact: true }).click();
+    await saveButton.click();
     expect((await saved).ok()).toBe(true);
     requestPhase = "persistence reload";
     markNavigation();
@@ -1297,7 +1316,10 @@ test.describe("accessibility smoke", () => {
     await page.getByRole("button", { name: "More" }).click();
     await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
     await expect(page.getByRole("menu")).toHaveCount(0);
-    await expect(page.getByTestId("day-timeline")).toContainText(projectedFinish!);
+    const timeline = page.getByTestId("day-timeline");
+    await expect(timeline).toBeVisible();
+    await expect(timeline).toContainText("Break 2");
+    await expect(timeline).toContainText(projectedFinish!);
     requestPhase = "post-auth journey";
     if (test.info().project.name === "android-touch") {
       await page.getByTestId("day-timeline").screenshot({ path: "../../.local/evidence/break-planning/break-summary.png" });

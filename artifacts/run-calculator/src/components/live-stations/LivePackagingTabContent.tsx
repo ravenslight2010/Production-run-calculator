@@ -33,7 +33,7 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const {
     calc, nowTime, liveFreezerMin, elapsedBatchSec, linePhases,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs, packagingDrainActive, coordinationStatus,
+    fireAutoTrackNow, rebasePackagingCaseBaseline, tickDueRefs, packagingDrainActive, coordinationStatus,
     speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
     acceptPackagingSpeedNudge, dismissPackagingSpeedNudge,
   } = useLiveRun();
@@ -89,6 +89,9 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
         }
         const accepted = await retryPendingManualSection(pending.id);
         if (selectedRunRef.current !== runId) return;
+        if (accepted && pending.operation === "resume-packaging") {
+          rebasePackagingCaseBaseline();
+        }
         setResumeState(accepted && pending.operation ? null : {
           runId, error: accepted
             ? "Packaging correction confirmed. Choose Resume again to end its hold."
@@ -109,6 +112,7 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
         operation: "resume-packaging", correctionGeneration: progress.correctionGeneration,
       });
       if (selectedRunRef.current !== runId) return;
+      if (result === "accepted") rebasePackagingCaseBaseline();
       setResumeState(result === "accepted" ? null : {
         runId,
         error: result === "offline"

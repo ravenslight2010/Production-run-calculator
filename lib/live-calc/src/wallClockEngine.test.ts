@@ -33,4 +33,22 @@ describe("tickWallClock", () => {
       { field: "casesOnCurrentSkid", from: 0, to: 1 },
     ]);
   });
+
+  it("does not let phase-shifted raw production add an extra case during wake catch-up", () => {
+    const timing = getAutoTrackTiming(100, 10, 6, 24);
+    const result = tickWallClock({
+      bookkeeping: { ...createWallClockBookkeeping(), caseNextDueMs: 12_000, lastExpectedCases: 46 },
+      nowMs: 62_800, timing, runStatus: "running", drainActive: false, packagingDrainActive: false,
+      packagingAutoTrackActive: true, caseSuppressed: false, doughSuppressed: false,
+      calc: { ppm: 100, perTray: 6, perBatch: 24, pressDone: false, casesInFreezer: 0, traysNeeded: 0, batchesNeeded: 0 },
+      v: { pizzasPerCase: 10, casesPerSkid: 48, casesNeeded: 100, traysOnLine: 1, batchesReady: 1 },
+      form: { skidsCompleted: 0, casesOnCurrentSkid: 46, traysOnLine: 1, batchesReady: 1 },
+      expectedCasesRaw: 56, expectedCases: 56,
+    });
+    expect(result.events.find((event) => event.channel === "case")?.mutations).toEqual([
+      { field: "skidsCompleted", from: 0, to: 1 },
+      { field: "casesOnCurrentSkid", from: 46, to: 7 },
+    ]);
+    expect(result.next.lastExpectedCases).toBe(55);
+  });
 });

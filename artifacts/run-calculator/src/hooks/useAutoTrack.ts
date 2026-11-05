@@ -23,6 +23,7 @@ import {
   depleteSauceStock,
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
+  capCaseExpectedRawByDueIntervals,
   computeCaseTickWrite,
   computeSauceRunRequirement,
   getAutoTrackTiming,
@@ -316,6 +317,8 @@ interface AutoTrackResult {
    * counter in the same render as the resume action.
    */
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
+  /** Rebase Packaging's count baseline after accepted Resume without restarting its timer. */
+  rebasePackagingCaseBaseline: () => void;
   retryFailedAutomaticClaim: () => void;
   /**
    * Wall-clock ms timestamps of each counter's next tick — read-only refs for
@@ -1372,6 +1375,32 @@ useEffect(() => {
     v.pizzasPerCase,
   ]);
 
+  const rebasePackagingCaseBaseline = useCallback(() => {
+    const nowMs = Date.now();
+    const timing = getAutoTrackTiming(
+      calc.ppm,
+      v.pizzasPerCase,
+      calc.perTray,
+      calc.perBatch,
+      machine,
+    );
+    if (caseNextDueMsRef.current <= 0) {
+      caseNextDueMsRef.current = timing.caseMs > 0 ? nowMs + timing.caseMs : 0;
+    }
+    lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+    drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
+    formResetSkippedRef.current = false;
+    caseClaimRetryRef.current = false;
+  }, [
+    autoTrackSuggestion?.expectedCasesRaw,
+    calc.casesInFreezer,
+    calc.perBatch,
+    calc.perTray,
+    calc.ppm,
+    machine,
+    v.pizzasPerCase,
+  ]);
+
   useEffect(() => {
     if (wakeRebaseRunIdRef.current !== runId) {
       wakeRebaseRunIdRef.current = runId;
@@ -1869,8 +1898,17 @@ useEffect(() => {
       // the estimate ran ahead, the operator corrected the count down, then hit
       // "Resume now"). Using the clamped value here would pin the delta at 0 and
       // the count would never climb again.
-      const expectedRaw = autoTrackSuggestion.expectedCasesRaw;
-      const expectedCases = autoTrackSuggestion.expectedCases;
+      const scheduledDueAtMs = caseNextDueMsRef.current;
+      const expectedRaw = capCaseExpectedRawByDueIntervals({
+        previousExpected: prevExpected,
+        expectedRaw: autoTrackSuggestion.expectedCasesRaw,
+        nextDueAtMs: scheduledDueAtMs,
+        nowMs,
+        periodMs: casePeriodMs,
+      });
+      const expectedCases = v.casesNeeded > 0
+        ? Math.min(v.casesNeeded, expectedRaw)
+        : expectedRaw;
       caseNextDueMsRef.current = nowMs + casePeriodMs;
       lastExpectedCasesRef.current = expectedRaw;
       // Freeze tunnel baseline advances on EVERY case tick (even suppressed / while
@@ -2142,6 +2180,7 @@ useEffect(() => {
     autoSuppressUntilRef,
     doughAutoSuppressUntilRef,
     fireAutoTrackNow,
+    rebasePackagingCaseBaseline,
     retryFailedAutomaticClaim,
     tickDueRefs: tickDueRefsRef.current,
     isDoughTimerPaused,

@@ -91,6 +91,7 @@ export interface LiveRunContextValue {
   autoSuppressUntilRef: React.MutableRefObject<number>;
   doughAutoSuppressUntilRef: React.MutableRefObject<number>;
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
+  rebasePackagingCaseBaseline: () => void;
   retryFailedAutomaticClaim: () => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
   coordinationStatus: ReturnType<typeof useAutoTrack>["coordinationStatus"];
@@ -560,7 +561,7 @@ export function LiveRunProvider({
   calcRef.current = calc;
 
   // ── Auto-track ───────────────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress: setLocalAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
+  const { autoTrackProgress, setAutoTrackProgress: setLocalAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, rebasePackagingCaseBaseline, retryFailedAutomaticClaim, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
     useAutoTrack({
       runId: currentRunId,
       runGeneration: String(currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0),
@@ -752,7 +753,7 @@ export function LiveRunProvider({
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, rebasePackagingCaseBaseline, retryFailedAutomaticClaim, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptPackagingSpeedNudge: acceptSharedPackagingSpeedNudge,
@@ -775,7 +776,7 @@ export function LiveRunProvider({
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, rebasePackagingCaseBaseline, retryFailedAutomaticClaim, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptSharedPackagingSpeedNudge, dismissSharedPackagingSpeedNudge,
