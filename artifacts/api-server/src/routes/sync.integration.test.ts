@@ -3438,6 +3438,76 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
 
+  it("keeps staged stock informational and consumes the substituted ingredient into completed history once", async () => {
+    await seedFinalization();
+    const stageKey = `${RUN}::Flour__lbs`;
+    const substitution = {
+      id: "synthetic-substitution",
+      ingredient: "Whole Mozzarella",
+      action: "swap",
+      substitute: "Part Skim Mozzarella",
+    };
+    const [substituteItem] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:Part Skim Mozzarella:batches",
+      category: "ingredient",
+      name: "Part Skim Mozzarella",
+      unit: "batches",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: substituteItem.id,
+      qtyReceived: 8,
+      qtyRemaining: 8,
+    });
+
+    const [initial] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+    const initialData = initial!.data as Record<string, any>;
+    await db.update(dailySyncTable).set({
+      data: {
+        ...initialData,
+        dayState: {
+          ...initialData.dayState,
+          substitutions: [substitution],
+          stagedItems: { [stageKey]: true },
+        },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    // A peer-adopted staging marker does not itself mean stock was consumed.
+    expect((await db.select().from(inventoryLotsTable))
+      .find((lot) => lot.itemId === substituteItem.id)?.qtyRemaining).toBe(8);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+
+    // The client substitution projection maps Whole Mozzarella to the same
+    // substitute key; accepted End owns the actual stock and history commit.
+    const end = finalization("offline:substitution-stage");
+    end.intent.inventoryLines = [{
+      itemKey: "ingredient:Part Skim Mozzarella:batches",
+      qty: 3,
+    }];
+    const accepted = await postFinalization(end);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({ outcome: "accepted", duplicate: false });
+    expect((await db.select().from(inventoryLotsTable))
+      .find((lot) => lot.itemId === substituteItem.id)?.qtyRemaining).toBe(5);
+    expect(await db.select().from(inventoryLedgerTable)).toMatchObject([
+      expect.objectContaining({ itemId: substituteItem.id, qtyDelta: -3, type: "consume" }),
+    ]);
+
+    const [completion] = await db.select().from(completedRunHistoryTable);
+    expect((completion!.snapshot as any).dayState).toMatchObject({
+      substitutions: [substitution],
+      stagedItems: { [stageKey]: true },
+    });
+
+    const retry = await postFinalization(end);
+    expect(await retry.json()).toMatchObject({ outcome: "accepted", duplicate: true });
+    expect((await db.select().from(inventoryLotsTable))
+      .find((lot) => lot.itemId === substituteItem.id)?.qtyRemaining).toBe(5);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
+  });
+
   it("returns review-required for stale generation and leaves inventory unchanged", async () => {
     await seedFinalization();
     const response = await postFinalization(finalization("offline:stale-end", `${RUN}:99`));

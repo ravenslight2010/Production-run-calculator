@@ -69,7 +69,7 @@ function baseSettings(over: Record<string, unknown> = {}): Record<string, unknow
 
 function sub(p: Partial<IngredientSubstitution>): IngredientSubstitution {
   return {
-    id: p.id ?? Math.random().toString(36).slice(2),
+    id: p.id ?? "synthetic-substitution",
     ingredient: p.ingredient ?? "",
     action: p.action ?? "swap",
     substitute: p.substitute,

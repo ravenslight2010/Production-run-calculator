@@ -1,4 +1,4 @@
-# App-Wide Workflow Audit — 2026-10-29 (updated 2026-10-30)
+# App-Wide Workflow Audit — 2026-10-29 (updated 2026-11-04)
 
 > **Current checkpoint (2026-10-30):** the integrated checkout is
 > `6db5dcbcae06e74645a1a55b51ffc6f6895779fe`, production source
@@ -154,7 +154,7 @@ The inventory records 124 exact-byte duplicate groups (335 member paths) and
 The inventory is metadata discovery, not a claim that all 1,915 records were
 read. It does not make task-plan filenames, dates, hashes, titles, or headings
 into approval.
-The refreshed `inventory.json` is regenerated after this report/source-register
+The refreshed `docs/research-reconciliation/inventory.json` is regenerated after this report/source-register
 update from current HEAD `6db5dcbcae06e74645a1a55b51ffc6f6895779fe`. It records
 the dirty-worktree status, four changed report files and patch hash so the
 catalog is tied to this integrated checkout rather than HEAD alone. Its image hashes are
@@ -377,6 +377,9 @@ command is not converted into a PASS by counting its completed cases.
 | F51 | **PARTIALLY EXPLAINED / BROWSER TIMING VARIATION, SERVER CAUSE UNKNOWN** | S179's cold initial navigation measured 2,070 ms DOMContentLoaded and 2,323 ms load against the local 1,500 ms browser warning threshold. Later authenticated samples were 735/815 ms; home/review chunks were 744/1,046 ms. A prior warm run measured 622/684 ms with 643/941 ms chunks. | Compared the cold initial page with later/warm samples and inspected current browser diagnostics. These durations are browser-observed waits, not server processing time. No server phase timing, request-level attribution or stable regression was established. | No timeout, pool, infrastructure or topology change. A specific server-side performance claim would need a same-build bounded authenticated sample with phase data; owner: app performance maintainer if this recurs. |
 | F52 | **CLOSED / TEST CLOCK TIME TRAVEL REMOVED** | A synthetic browser attempt received HTTP 409 because its injected auto-track tick used run-start +60 seconds while only about ten real seconds had elapsed; the accepted batch anchor was ahead of server elapsed time. The server's anchor guard behaved correctly. | The fixture now starts 60 seconds earlier and sends the tick using current time. The isolated browser journey then passed 3/3; production anchor validation was not weakened. | This was a test-harness error, not a diagnosis of the reported phone wake issue. Keep injected ticks at or before current server time. |
 | F53 | **RESOLVED / CLIENT SUITE PASS AFTER CONFLICT-COPY FIX** | A complete pre-fix run finished with 397 files passed, one failed and one skipped (3,907 tests passed, one failed, one skipped). `manualSectionLocks.test.ts` exposed that a `section_changed` message said latest server values were shown even though the conflict path deliberately retained the user's local edits and did not adopt canonical values. | Corrected the message to state that edits remain and should be reviewed; updated the safe-message assertion. The two focused files passed 35/35. A post-fix background suite completed with 399 files passed, one skipped; 3,908 tests passed, one skipped; 99.3s within the 150s guard. An earlier redundant post-fix shell attempt timed out at 270/399 and is not a product failure. | No further client-suite action for this finding. Physical/published wake behavior remains a separate evidence boundary. |
+| F54 | **CLOSED / ISOLATED BROWSER RERUN PASSED** | The combined five-run lifecycle invocation reached its 300-second shell limit after Chromium passed while WebKit was still running; no WebKit final result was emitted by that command. | Reran only the WebKit project with the same selected case; it passed 1/1. Chromium and WebKit are each recorded as separate 1/1 passes in S191/J83. | Runner time limit, not a failing assertion. Do not count the interrupted combined command as a full two-project result. |
+| F55 | **CLOSED / ISOLATED POSTGRES SETUP CORRECTED BEFORE TESTS** | The first disposable PostgreSQL cluster could not create its default socket lock under missing `/run/postgresql`; no API test started and the existing workspace database was not used. | Started the temporary cluster with its Unix socket directory inside its own temporary data directory. The selected API tests then passed on that isolated cluster. | Runner setup only; no shared or production database operation. |
+| F56 | **CLOSED / TEST RUNNER OPTION REMOVED** | Vitest 5 rejected the unsupported `--minWorkers` option before test discovery. | Removed that option and reran the selected API cases with one maximum worker; seven tests passed across five integration files. | Invocation-only issue; no test result was inferred from the rejected command. |
 
 ## 6. Visual and responsive evidence
 
@@ -728,3 +731,27 @@ No defensible remaining-time estimate is given: the remaining evidence depends
 on a runnable physical device, a published build, external delivery access, or
 human source/policy approval. No production query/write, migration, publication,
 or production readiness decision was made here.
+
+## 11. Supplemental synthetic recovery evidence — 2026-11-04
+
+This update adds only the named local synthetic evidence and does not replace the
+release owner's full browser suite or make a GO/NO-GO decision. Test changes are
+limited to two test files at checkout
+`683e1c5ce5919bd1d2c6fafeff0f3055ec0e268e`: sync integration SHA-256
+`7b7009073f0004d474d698f32b480221f17ffe1a4e8fdccf9b6caf94687ab1dd` and
+substitution calculation test SHA-256
+`2fc505b3f698bd9a684bddd74521a9805b579930e13eca8db83c321f8090c412`.
+
+| ID | Synthetic scope and result | Remaining boundary |
+|---|---|---|
+| J83 / S191 | Five-run Start/Packaging/End/history passed 1/1 each in Chromium and WebKit emulation; manager correction/resume passed 1/1 in Chromium. | Emulated browsers only; not physical-device or full lifecycle certification. |
+| J84 / S191 | Client importer operation/queue tests passed 15/15; synthetic Spec review, Apply, history/reload and guarded Undo passed 1/1 in Chromium. | Gold Lab capture remained disabled; its integration suite was not run because its setup enables capture approval flags. No customer workbook was used. |
+| J85 / S191 | Cross-device stage adoption/reload passed 1/1. A new sync integration test confirmed staged stock does not consume inventory; accepted End consumes the substituted ingredient once, preserves substitution/staging in completed history, and remains idempotent on exact retry. Substitution calculation tests passed 4/4. | Synthetic fixtures only; not physical stock attestation or an actual production shift. |
+| J86 / S191 | Saved break/estimate browser case passed 1/1. Seven selected isolated API tests passed across five integration files, covering staged substitution finalization, report finalization/retrieval, notification preference merge and incident-review count. | Break, report and notification checks are separate persistence slices, not one connected flow. Actual push delivery remains NOT RUN. |
+
+The API tests used a fresh temporary PostgreSQL cluster and disposable
+integration databases, not the workspace/shared development database or
+production. The full browser release suite, physical Android/iOS, published
+behavior, real-source import evidence, actual push delivery and production
+readiness remain NOT RUN. Code and Markdown reference validation outcomes are
+recorded in the companion coverage ledger.

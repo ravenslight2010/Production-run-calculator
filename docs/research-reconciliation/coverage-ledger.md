@@ -1,11 +1,12 @@
 # Coverage, uncertainty and failure ledger
 
-> **Current overlay:** the [app-wide audit, updated 2026-11-03](app-wide-audit-2026-10-29.md)
+> **Current overlay:** the [app-wide audit, updated 2026-11-04](app-wide-audit-2026-10-29.md)
 > owns the current journey matrix, source/build identity and failure ledger.
 > S185–S188 add Nov 2 owner-supplied wake evidence and read-only published-log
-> results; separate database-pool pressure is confirmed, but the wake cause remains inconclusive. Current test outcomes and remaining
-> work are in that audit. The PASS labels in the October 26 domain table below
-> describe only that historical assessment.
+> results; S191/J83–J86 add focused synthetic recovery evidence. Separate
+> database-pool pressure is confirmed, but the wake cause remains inconclusive.
+> The PASS labels in the October 26 domain table below describe only that
+> historical assessment.
 
 Assessment 2026-10-26, source **B =
 `ded88b96104b58eea47cf36e66204cd4d79d5409`**.
@@ -81,7 +82,7 @@ uncertainty, not that its software passed runtime verification.
 | L14 Unread/unknown source material | MISSING content review for metadata-only records, unmatched DOCX/PDF, unexamined ZIPs and hidden conversations. Explicit inventory defaults; selected existing sanitized dispositions reused. | Assessment boundary; future decision-specific review if a source can change a decision. No demand that user find discoverable local facts. |
 | L15 Microsoft page auth banner / moving llama.cpp docs | Partially accessible P04 substantive formula/cache section used, no protected content. P13 truncated master option table only; not pinned-runtime compatibility. | Assessment owner; limited claims to observed text; no runtime flag adopted. No source availability silently promoted. |
 | L16 Prospective combined roadmap could duplicate active tasks | PASS boundary check: W1 preserves existing #3712/#3709/#3692 and proposed #3696/#3697/#3716/#3717. W2–W4 are reviewable recommendations requiring approval, not automatic task creation. | Assessment owner; no scope/status changes. Follow-up guidance read; existing downstream work already covers immediate reliability/verification next steps. |
-| L17 Historical manager-warning endpoint/coverage proposals | The disconnected-router claim was true only at source B (M41). Current source `906e241…` mounts the router in `routes/index.ts`; isolated HTTP integration verified anonymous 401, operator 403 and manager 200. The richer health-diagnostics endpoint remains separate. | **RESOLVED for local mount and focused role authorization.** No restoration work or duplicate task. Published behavior, revocation and cross-scope denial remain unverified. |
+| L17 Historical manager-warning endpoint/coverage proposals | The disconnected-router claim was true only at source B (M41). Current source `906e241…` mounts the router in `artifacts/api-server/src/routes/index.ts`; isolated HTTP integration verified anonymous 401, operator 403 and manager 200. The richer health-diagnostics endpoint remains separate. | **RESOLVED for local mount and focused role authorization.** No restoration work or duplicate task. Published behavior, revocation and cross-scope denial remain unverified. |
 | L18 Documentation verification caught a guessed shared-test filename | PASS repaired report locator from nonexistent `index.test.ts` to inspected `liveCalc.test.ts`; no implementation or test failure. | Assessment owner; final local reference check covers fully qualified backtick paths as well as Markdown links. |
 | L19 Automated report-reference check flagged API-root shorthand | PASS corrected three shorthand API-library locators to full repository paths. Documentation-check attempts flagged these references and a ledger placeholder, not any app test. | Assessment owner; repeat only document reference checks after correction, with no app test rerun. |
 | L20 Authorization inventory had route omissions | CLOSED for the identified inventory gaps: F26/S126 passed the final inventory check (2 selected cases) and focused role/capability tests (80 selected) on isolated DB. This does not establish full authorization coverage or a security certification. | Assigned audit owner; preserve the bounded route inventory and rerun only when route registration or authorization ownership changes. No broad API suite or production/shared-data operation. |
@@ -156,3 +157,28 @@ Final documentation checks (2026-10-26):
   observations and full release verification: **NOT RUN by this assessment**.
   Completion validation, if configured, is recorded separately by the task
   system and must not be confused with the retained application evidence above.
+
+## Supplemental synthetic recovery verification — 2026-11-04
+
+This addendum updates only the named local synthetic evidence; it does not
+replace the historical Source B matrix or certify the release. Tests ran from
+checkout `683e1c5ce5919bd1d2c6fafeff0f3055ec0e268e` with two test-only changes:
+`artifacts/api-server/src/routes/sync.integration.test.ts`
+(`7b7009073f0004d474d698f32b480221f17ffe1a4e8fdccf9b6caf94687ab1dd`) and
+`artifacts/run-calculator/src/substitutionConsumption.e2e.test.ts`
+(`2fc505b3f698bd9a684bddd74521a9805b579930e13eca8db83c321f8090c412`).
+
+| Scope | Current result | Limit |
+|---|---|---|
+| Five-run Start/Packaging/End/history; manager correction and resume | Five-run lifecycle browser case passed 1/1 in Chromium and 1/1 in WebKit emulation. Focused manager correction/resume passed 1/1 in Chromium. | Emulated browser journeys only; not physical device or complete lifecycle certification. |
+| Importer uncertain response, retry and Undo | Focused client operation/queue tests passed 15/15; substitution calculation tests passed 4/4. Synthetic manager Spec review, Apply, history/reload and guarded Undo browser path passed 1/1. | Gold Lab capture and its approval flags stayed disabled. `importOperations.integration.test.ts` was not run because its suite setup enables capture approvals; server-side importer retry/Undo remains unverified in this run. No customer workbook was used. |
+| Substitution, cross-device staging, stock and history | Peer staging adoption/reload browser case passed 1/1. New sync finalization integration case passed: staging alone did not consume stock; accepted End consumed the substituted ingredient once and retained substitution/staging in completed history. | Synthetic fixture only; not a physical stock attestation or real shift. |
+| Break estimate, report and notification persistence | Saved break/estimate browser case passed 1/1. Focused isolated API checks passed for immutable report finalization/retrieval, merged notification preferences and manager incident-review count; seven selected API checks passed across five route integration files. | These are separate persistence checks, not one connected break→report→notification flow. Actual push delivery remains **NOT RUN**. |
+| Local audit references | Markdown links/anchors and repository code locators in the app-wide audit, this ledger and `matrix.md` were checked. | No broken local links/anchors or unresolved current code locators. The remaining non-file examples are explicitly historical stale/guessed paths, the served `/app-build.json` endpoint and generated Playwright output; they are not source-code references. |
+
+The focused API checks used a fresh local PostgreSQL cluster and disposable test
+databases; they did not use the workspace/shared development or production
+database. The full browser release suite, published behavior, physical Android/
+iOS, actual push delivery, real-source import evidence and a production
+GO/NO-GO remain **NOT RUN**. No Gold Lab capture, customer workbook, deployment
+or production data operation was performed.
