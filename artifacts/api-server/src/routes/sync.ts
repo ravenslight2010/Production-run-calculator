@@ -3995,6 +3995,9 @@ const SERVER_TICK_DEFAULT_MS = 15_000;
 const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
 const SERVER_TICK_SUMMARY_LOG_INTERVAL_MS = 5 * 60_000;
+const SERVER_TICK_UNCERTAIN_WARNING_THRESHOLD = 3;
+const SERVER_TICK_UNCERTAIN_WARNING_COUNT_MAX = 1_000;
+let consecutiveUncertainServerTickPasses = 0;
 const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
 const sauceConfigurationWarningAt = new Map<string, number>();
 const SAUCE_CONFIGURATION_WARNING_INTERVAL_MS = 5 * 60_000;
@@ -4019,6 +4022,23 @@ function warnSauceConfigurationBlocked(scope: Scope, date: string, runId: string
 export function clearServerTickDateBackoffsForTests(): void {
   serverTickDateBackoffs.clear();
   sauceConfigurationWarningAt.clear();
+  consecutiveUncertainServerTickPasses = 0;
+}
+
+function shouldWarnForUncertainServerTick(
+  uncertainSnapshotCount: number,
+  passComplete: boolean,
+): boolean {
+  if (!passComplete) return false;
+  if (uncertainSnapshotCount <= 0) {
+    consecutiveUncertainServerTickPasses = 0;
+    return false;
+  }
+  if (consecutiveUncertainServerTickPasses >= SERVER_TICK_UNCERTAIN_WARNING_THRESHOLD) {
+    return false;
+  }
+  consecutiveUncertainServerTickPasses++;
+  return consecutiveUncertainServerTickPasses === SERVER_TICK_UNCERTAIN_WARNING_THRESHOLD;
 }
 
 function serverTickBackoffKey(scope: Scope, date: string): string {
@@ -4382,6 +4402,24 @@ export async function runAutoTrackServerTicks(opts: {
   // Persist only the bounded aggregate, after all per-date transactions have
   // completed; diagnostic writes must not join an automatic-tracking tx.
   await persistAutoTrackDeferredDiagnostic(nowMs);
+  // Only complete, unscoped background passes contribute to this process-local
+  // warning. Scoped operations cannot establish or clear global health.
+  if (opts.scope === undefined && opts.date === undefined
+    && shouldWarnForUncertainServerTick(
+      transactionReasons.uncertainSnapshot,
+      passComplete,
+    )) {
+    logger.warn({
+      event: "server_auto_track_uncertain_snapshot",
+      reason: "uncertain_snapshot_fallback_sustained",
+      thresholdPasses: SERVER_TICK_UNCERTAIN_WARNING_THRESHOLD,
+      consecutivePasses: SERVER_TICK_UNCERTAIN_WARNING_THRESHOLD,
+      uncertainSnapshotCount: Math.min(
+        transactionReasons.uncertainSnapshot,
+        SERVER_TICK_UNCERTAIN_WARNING_COUNT_MAX,
+      ),
+    }, "Repeated uncertain auto-track snapshots used the locked fallback");
+  }
   if (passComplete && outcomes.error === undefined) {
     recordBackgroundOperationSuccess("server-auto-track-tick");
   }

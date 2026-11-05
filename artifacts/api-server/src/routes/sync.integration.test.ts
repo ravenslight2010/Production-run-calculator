@@ -2555,6 +2555,54 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
       .toBe(result.dateTransactions);
   });
 
+  it("warns only after sustained uncertain snapshots and rearms after a clean pass", async () => {
+    await seedCanonicalSync(TICK_DATE, { dayState: { runs: [] }, runValues: [] });
+    const warning = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const runFullPass = () => runAutoTrackServerTicks({ nowMs: TICK_NOW, maxClaims: 4 });
+    try {
+      for (let pass = 0; pass < 2; pass++) {
+        const result = await runFullPass();
+        expect(result.transactionReasons.uncertainSnapshot).toBe(1);
+        expect(result.dateTransactions).toBe(1);
+        expect(warning).not.toHaveBeenCalled();
+      }
+
+      // A scoped recovery operation cannot contribute to the global warning.
+      const scoped = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+      expect(scoped.transactionReasons.uncertainSnapshot).toBe(1);
+      expect(warning).not.toHaveBeenCalled();
+
+      const crossing = await runFullPass();
+      expect(crossing.transactionReasons.uncertainSnapshot).toBe(1);
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning).toHaveBeenCalledWith({
+        event: "server_auto_track_uncertain_snapshot",
+        reason: "uncertain_snapshot_fallback_sustained",
+        thresholdPasses: 3,
+        consecutivePasses: 3,
+        uncertainSnapshotCount: 1,
+      }, "Repeated uncertain auto-track snapshots used the locked fallback");
+      const serializedWarning = JSON.stringify(warning.mock.calls[0]);
+      expect(serializedWarning).not.toMatch(/date|scope|runId|payload|sql|parameter/i);
+
+      await seedCanonicalSync(TICK_DATE, { dayState: { runs: [] }, runValues: {} });
+      const recovery = await runFullPass();
+      expect(recovery.transactionReasons.uncertainSnapshot).toBe(0);
+      expect(warning).toHaveBeenCalledTimes(1);
+
+      await seedCanonicalSync(TICK_DATE, { dayState: { runs: [] }, runValues: [] });
+      await runFullPass();
+      await runFullPass();
+      expect(warning).toHaveBeenCalledTimes(1);
+      await runFullPass();
+      expect(warning).toHaveBeenCalledTimes(2);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it("commits server-owned applicator progress and evidence together, with retry idempotency", async () => {
     await seedServerApplicatorRun();
     const first = await runAutoTrackServerTicks({
