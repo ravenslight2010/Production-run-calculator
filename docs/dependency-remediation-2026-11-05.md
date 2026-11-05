@@ -43,3 +43,37 @@ No global override was added for glob, minimatch, or deepmerge. In particular, g
 - `pnpm --filter @workspace/run-calculator run test` — FAIL: 3,912 passed, 1 failed, 1 skipped across 3,914 tests. The failure reproduces in isolation in `src/autoTrackFreezerDrain.test.tsx`: the paused Stage 3 drain assertion expected 64 cases and received 63. Neither that test nor application behavior was changed in this dependency task; the failure is recorded rather than repaired outside scope.
 
 The complete client test failure is a separate live-counter correctness issue. It should be triaged by its owning operational/state-accuracy work before changing `useAutoTrack`; no claim is made here that it predates this dependency update.
+
+## Dependency-override compatibility review
+
+The project owner approved updating the workspace `postcss` override from `8.5.23` to `8.5.32`. Vite 8.3.4 declares `postcss: ^8.5.29`; the new resolution is within that range. PostCSS 8.5.32 was the npm registry's latest release on 2026-11-05 and was published October 26, 2026, so it also satisfies the unchanged 1,440-minute minimum release-age policy. Only this mismatch was resolved; the Vite exception was removed from the exact exception list.
+
+The following four exceptions remain exact and visible in the compatibility check because current upstream releases do not declare ranges that safely include the security-fixed versions:
+
+| Consumer | Current registry release and declared range | Fixed version / compatibility | Owner and next review condition |
+|---|---|---|---|
+| `@tailwindcss/typography` | 0.5.20 pins `postcss-selector-parser` to `6.0.10`. | The project override resolves 7.1.6, outside that exact dependency pin. No newer Typography release was available in the registry snapshot. | Project owner; revisit when Typography publishes a release declaring a compatible fixed parser version or removes the dependency. |
+| `drizzle-kit` | 0.31.11 declares `esbuild: ^0.25.4`. | esbuild 0.28.1 is the first release fixing the current security advisory; it is outside that range. The latest Drizzle Kit release still has the older range. | Project owner; revisit when Drizzle Kit supports esbuild 0.28.1 or later, or removes the dependency. |
+| `esbuild-plugin-pino` | 2.3.3 declares peer `esbuild: >=0.25.0 <=0.25.8`. | The security-fixed esbuild 0.28.1 is outside the peer range; no newer plugin release was available in the registry snapshot. | Project owner; revisit when the plugin publishes a release with a peer range including the fixed esbuild line, or when the project no longer uses this plugin. |
+| `github-actionlint` | 1.7.12 declares `adm-zip: ^0.5.16`. | The current fixed release is adm-zip 0.6.1, outside the declared range; no newer actionlint release was available in the registry snapshot. | Project owner; revisit when actionlint supports adm-zip 0.6.1 or later. |
+
+Evidence was checked against the installed consumer manifests, `pnpm-lock.yaml`, the exact exception tuples in `scripts/src/check-override-compatibility.mjs`, and current npm registry metadata on 2026-11-05:
+
+- [PostCSS 8.5.32 registry metadata](https://registry.npmjs.org/postcss/8.5.32) and [release history](https://deps.dev/npm/postcss/8.5.32/versions).
+- [Typography latest registry metadata](https://registry.npmjs.org/@tailwindcss%2ftypography/latest).
+- [Drizzle Kit latest registry metadata](https://registry.npmjs.org/drizzle-kit/latest).
+- [esbuild-plugin-pino latest registry metadata](https://registry.npmjs.org/esbuild-plugin-pino/latest).
+- [github-actionlint latest registry metadata](https://registry.npmjs.org/github-actionlint/latest).
+- [Vite latest registry metadata](https://registry.npmjs.org/vite/latest).
+- [esbuild 0.28.1 security-fix release](https://github.com/evanw/esbuild/releases/tag/v0.28.1) and [adm-zip 0.6.1 security fixes](https://github.com/cthackers/adm-zip/releases/tag/v0.6.1).
+
+Verification after the approved PostCSS change:
+
+- `pnpm install --lockfile-only` — PASS; the lockfile resolves PostCSS 8.5.32.
+- `pnpm install --frozen-lockfile` — PASS.
+- `pnpm --filter @workspace/scripts run test:override-compatibility` — PASS; 9 tests passed, 146 consumer edges checked, and only the four retained exceptions were reported.
+- `pnpm --filter @workspace/run-calculator run test:vite-config-loading` — PASS; 3 tests passed.
+- Vite production build for `@workspace/run-calculator` — PASS, including service-worker generation.
+- `PORT=5000 BASE_PATH=/ pnpm --filter @workspace/mockup-sandbox run build` — PASS.
+- `pnpm run typecheck` — PASS across the workspace.
+- `git diff --check` — PASS.

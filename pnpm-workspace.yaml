@@ -163,7 +163,7 @@ overrides:
   # qs.stringify can crash with a TypeError on malformed comma-format arrays (DoS)
   qs: "^6.16.0"
   # postcss has an XSS via unescaped </style> in stringified output
-  postcss: "8.5.23"
+  postcss: "8.5.32"
   # source-map-js <1.2.2 is vulnerable to event-loop denial of service.
   source-map-js: "1.2.2"
   # Tailwind Typography pins a vulnerable parser; confine the patched major to that plugin.

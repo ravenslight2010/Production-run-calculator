@@ -320,15 +320,6 @@ const APPROVED_COMPATIBILITY_EXCEPTIONS = [
     kind: "dependency",
     reason: "Owner-approved exact exception; shown as a compatibility caveat, not a supported-range claim.",
   },
-  {
-    override: "postcss",
-    parent: "vite@8.3.4",
-    dependency: "postcss",
-    resolved: "8.5.23",
-    declaredRange: "^8.5.29",
-    kind: "dependency",
-    reason: "Owner-approved exact exception; shown as a compatibility caveat, not a supported-range claim.",
-  },
 ];
 
 function addFinding(findings, approvedExceptions, override, parent, dependency, version, range, kind) {
