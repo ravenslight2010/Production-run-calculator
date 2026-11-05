@@ -421,9 +421,6 @@ import {
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping";
-import FactoryResetCard from "../components/FactoryResetCard";
-import AuditLogCard from "../components/AuditLogCard";
-import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
 import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
 import {
   buildSyncDiagnosticReport,
@@ -439,7 +436,6 @@ import {
 } from "../syncDiagnostics";
 import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
-import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
 import IngredientAllergenMappingManager from "../components/IngredientAllergenMappingManager";
 import ReorderCard from "../components/ReorderCard";
@@ -933,6 +929,10 @@ const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
 const loadImportGoldLabCard = () => import("@/components/ImportGoldLabCard");
 const loadImportGoldRetentionCard = () => import("@/components/ImportGoldRetentionCard");
 const loadImportGoldApprovalsCard = () => import("@/components/ImportGoldApprovalsCard");
+const loadFactoryResetCard = () => import("@/components/FactoryResetCard");
+const loadSyncConflictStatsCard = () => import("@/components/SyncConflictStatsCard");
+const loadAuditLogCard = () => import("@/components/AuditLogCard");
+const loadAiCorrectionsCard = () => import("@/components/AiCorrectionsCard");
 const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
 const loadScreenModeView = () => import("../components/ScreenModeView");
 const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
@@ -18451,7 +18451,13 @@ export default function Home() {
                 {manageCategory === "staff" && (canManageStaff || canApproveResets) && (
                   <div className="space-y-4">
                     <DeferredStaffManagementSurface />
-                    {canManageStaff && <FactoryResetCard />}
+                    {canManageStaff && (
+                      <DeferredSurface
+                        label="factory reset controls"
+                        load={loadFactoryResetCard}
+                        componentProps={{}}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -18470,8 +18476,16 @@ export default function Home() {
                         },
                       }}
                     />
-                    <SyncConflictStatsCard />
-                    <AuditLogCard />
+                    <DeferredSurface
+                      label="sync conflict statistics"
+                      load={loadSyncConflictStatsCard}
+                      componentProps={{}}
+                    />
+                    <DeferredSurface
+                      label="audit log"
+                      load={loadAuditLogCard}
+                      componentProps={{}}
+                    />
                     <DeferredSurface
                       label="import gold evaluation lab"
                       load={loadImportGoldLabCard}
@@ -18498,7 +18512,13 @@ export default function Home() {
                 )}
 
                 {/* AI corrections memory — manager-only view + delete */}
-                {manageCategory === "ai-corrections" && canManageStaff && <AiCorrectionsCard />}
+                {manageCategory === "ai-corrections" && canManageStaff && (
+                  <DeferredSurface
+                    label="AI corrections"
+                    load={loadAiCorrectionsCard}
+                    componentProps={{}}
+                  />
+                )}
 
                 {/* Manage runs — supervisor-only panel to remove individual or blank runs */}
                 {manageCategory === "runs" && canManageFactorySettings && <ManageRunsPanel />}

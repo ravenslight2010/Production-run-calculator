@@ -475,6 +475,8 @@ test("Home opens each deferred panel in the selected browser and viewport", asyn
     "cycle-count schedules",
     settingsDialog.getByText("Cycle-Count Schedules", { exact: true }),
   );
+  await settingsDialog.getByRole("button", { name: "Staff", exact: true }).click();
+  await expect(settingsDialog.getByTestId("button-factory-reset")).toBeVisible();
   await settingsDialog.getByRole("button", {
     name: "Data Health & Audit",
     exact: true,
@@ -483,6 +485,16 @@ test("Home opens each deferred panel in the selected browser and viewport", asyn
     page,
     "data health",
     settingsDialog.getByTestId("data-health-workspace"),
+  );
+  await expect(
+    settingsDialog.getByText("Sync conflict monitor", { exact: true }),
+  ).toBeVisible();
+  await expect(settingsDialog.getByText("Audit Log", { exact: true })).toBeVisible();
+  await settingsDialog.getByRole("button", { name: "AI Memory", exact: true }).click();
+  await expectDeferredPanel(
+    page,
+    "AI corrections",
+    settingsDialog.getByText("Name Equivalences", { exact: true }),
   );
   await settingsDialog.getByRole("button", { name: "Close settings" }).click();
 

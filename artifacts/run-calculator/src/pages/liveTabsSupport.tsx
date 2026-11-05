@@ -348,9 +348,6 @@ import {
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping";
-import FactoryResetCard from "../components/FactoryResetCard";
-import AuditLogCard from "../components/AuditLogCard";
-import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
 import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
 import {
   buildSyncDiagnosticReport,
@@ -364,7 +361,6 @@ import {
 } from "../syncDiagnostics";
 import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
-import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";

@@ -10,7 +10,7 @@ const PACKAGE_MANIFEST = JSON.parse(
   fs.readFileSync(PACKAGE_MANIFEST_PATH, "utf8"),
 );
 
-test("production build runs the emitted Home boundary checker after Vite", () => {
+test("production build runs emitted bundle checks after Vite", () => {
   const buildScript = PACKAGE_MANIFEST.scripts?.build;
   assert.equal(
     typeof buildScript,
@@ -21,18 +21,19 @@ test("production build runs the emitted Home boundary checker after Vite", () =>
   const viteBuildIndex = buildCommands.findIndex((command) =>
     command.startsWith("vite build "),
   );
-  const homeBoundaryCheckerIndex = buildCommands.indexOf(
+  const checkerCommands = [
+    "node scripts/check-workbook-boundary.mjs",
     "node scripts/check-home-deferred-boundary.mjs",
-  );
+    "node scripts/check-client-bundle-budget.mjs",
+  ];
 
   assert.notEqual(viteBuildIndex, -1, "production build must invoke Vite");
-  assert.notEqual(
-    homeBoundaryCheckerIndex,
-    -1,
-    "production build must invoke the emitted Home boundary checker",
-  );
-  assert.ok(
-    homeBoundaryCheckerIndex > viteBuildIndex,
-    "Home boundary checker must run after Vite emits the production bundle",
-  );
+  for (const checkerCommand of checkerCommands) {
+    const checkerIndex = buildCommands.indexOf(checkerCommand);
+    assert.notEqual(checkerIndex, -1, `production build must run ${checkerCommand}`);
+    assert.ok(
+      checkerIndex > viteBuildIndex,
+      `${checkerCommand} must run after Vite emits the production bundle`,
+    );
+  }
 });
