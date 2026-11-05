@@ -9,6 +9,18 @@ const MAX_ADVISORIES = 20;
 const MAX_PATHS_PER_ADVISORY = 5;
 const MAX_TEXT_LENGTH = 240;
 const MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024;
+const REGISTRY_UNAVAILABLE_WARNING =
+  "::warning::Full-workspace dependency audit is unavailable because the package registry or network could not be reached. The advisory check was not verified; CI remains non-blocking.";
+
+export function getWorkspaceAuditWarning(report) {
+  if (
+    report?.status === "unavailable" &&
+    report.failure?.kind === "registry/network failure"
+  ) {
+    return REGISTRY_UNAVAILABLE_WARNING;
+  }
+  return null;
+}
 
 function cleanText(value) {
   return String(value ?? "")
@@ -261,6 +273,11 @@ export function runWorkspaceAudit() {
     }
   } else {
     process.stdout.write(report.markdown);
+  }
+
+  const warning = getWorkspaceAuditWarning(report);
+  if (warning && process.env.GITHUB_ACTIONS === "true") {
+    process.stdout.write(`${warning}\n`);
   }
 
   process.stdout.write(`Workspace audit report status: ${report.status}.\n`);
