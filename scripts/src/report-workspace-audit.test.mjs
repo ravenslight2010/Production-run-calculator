@@ -556,13 +556,84 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
   }
 });
 
+test("emits one sanitized non-blocking warning for malformed audit output", () => {
+  const privateDetails =
+    "https://user:password@audit.example.invalid/a?token=sensitive response-body=private";
+  const cases = [
+    {
+      name: "invalid JSON",
+      response: `not json ${privateDetails}`,
+    },
+    {
+      name: "unexpected audit shape",
+      response: JSON.stringify({
+        advisories: "unexpected",
+        detail: privateDetails,
+      }),
+    },
+  ];
+
+  for (const { name, response } of cases) {
+    const testDirectory = mkdtempSync(
+      join(tmpdir(), "workspace-audit-malformed-warning-"),
+    );
+    try {
+      const binDirectory = join(testDirectory, "bin");
+      const summaryPath = join(testDirectory, "summary.md");
+      const callCountPath = join(testDirectory, "pnpm-calls.txt");
+      const fakePnpmPath = join(binDirectory, "pnpm");
+
+      mkdirSync(binDirectory);
+      writeFileSync(
+        fakePnpmPath,
+        '#!/bin/sh\nprintf \'x\' >> "$FAKE_PNPM_AUDIT_CALLS"\nprintf \'%s\\n\' "$FAKE_PNPM_AUDIT_RESPONSE"\nexit 0\n',
+        { mode: 0o700 },
+      );
+
+      const result = spawnSync(process.execPath, [reportScript], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FAKE_PNPM_AUDIT_RESPONSE: response,
+          FAKE_PNPM_AUDIT_CALLS: callCountPath,
+          GITHUB_ACTIONS: "true",
+          GITHUB_STEP_SUMMARY: summaryPath,
+          PATH: `${binDirectory}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        },
+      });
+
+      assert.equal(result.status, 0, `${name}: ${result.stderr}`);
+      assert.equal(readFileSync(callCountPath, "utf8"), "x", `${name}: no retry`);
+      assert.equal(
+        (result.stdout.match(/^::warning::/gmu) ?? []).length,
+        1,
+        `${name}: exactly one warning`,
+      );
+      const combinedOutput = `${result.stdout}\n${readFileSync(summaryPath, "utf8")}`;
+      assert.match(
+        combinedOutput,
+        /Workspace audit report status: unavailable\./u,
+        `${name}: unavailable status`,
+      );
+      assert.doesNotMatch(combinedOutput, /Status: CLEAN/u, `${name}: not clean`);
+      assert.doesNotMatch(
+        combinedOutput,
+        /audit\.example\.invalid|user:password|sensitive|response-body=private/u,
+        `${name}: private details are redacted`,
+      );
+    } finally {
+      rmSync(testDirectory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("treats malformed output and exit-one empty results as unavailable", () => {
   for (const [input, expectsWarning] of [
     [{ stdout: "not json", stderr: "ECONNRESET", exitCode: 1 }, true],
-    [{ stdout: JSON.stringify(cleanAudit), exitCode: 1 }, false],
+    [{ stdout: JSON.stringify(cleanAudit), exitCode: 1 }, true],
     [
       { stdout: JSON.stringify({ advisories: "unexpected" }), exitCode: 0 },
-      false,
+      true,
     ],
   ]) {
     const report = buildWorkspaceAuditReport(input);
@@ -652,6 +723,7 @@ test("marks malformed base audit output unavailable", () => {
   assert.equal(delta.status, "unavailable");
   assert.match(delta.markdown, /Status: UNAVAILABLE/u);
   assert.match(delta.markdown, /does not affect CI success/u);
+  assert.match(getWorkspaceAuditWarning(baseReport), /^::warning::/u);
 });
 
 test("keeps registry failure details out of unavailable comparison output", () => {
@@ -901,26 +973,27 @@ process.exit(Object.keys(payload.advisories ?? {}).length ? 1 : 0);
       chmodSync(join(binDirectory, executable), 0o755);
     }
 
+    const auditEnvironment = {
+      ...process.env,
+      PATH: `${binDirectory}${delimiter}${process.env.PATH ?? ""}`,
+      WORKSPACE_AUDIT_BASE_SHA: "a".repeat(40),
+      WORKSPACE_AUDIT_DELTA_PATH: deltaPath,
+      WORKSPACE_AUDIT_REVISION: "b".repeat(40),
+      GITHUB_STEP_SUMMARY: summaryPath,
+      AUDIT_TEST_BASE_LOCKFILE: baseLockfilePath,
+      AUDIT_TEST_BASE_REPORT: baseAuditPath,
+      AUDIT_TEST_HEAD_REPORT: headAuditPath,
+      AUDIT_TEST_OBSERVATION: observationPath,
+      AUDIT_TEST_WORKSPACE_ROOT: workspaceRoot,
+      NPM_TOKEN: "must-not-reach-base-audit",
+      NODE_AUTH_TOKEN: "must-not-reach-base-audit",
+      GITHUB_TOKEN: "must-not-reach-base-audit",
+      NPM_CONFIG_REGISTRY: "https://private.invalid/",
+    };
     const result = spawnSync(process.execPath, [reportScript], {
       cwd: workspaceRoot,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${binDirectory}${delimiter}${process.env.PATH ?? ""}`,
-        WORKSPACE_AUDIT_BASE_SHA: "a".repeat(40),
-        WORKSPACE_AUDIT_DELTA_PATH: deltaPath,
-        WORKSPACE_AUDIT_REVISION: "b".repeat(40),
-        GITHUB_STEP_SUMMARY: summaryPath,
-        AUDIT_TEST_BASE_LOCKFILE: baseLockfilePath,
-        AUDIT_TEST_BASE_REPORT: baseAuditPath,
-        AUDIT_TEST_HEAD_REPORT: headAuditPath,
-        AUDIT_TEST_OBSERVATION: observationPath,
-        AUDIT_TEST_WORKSPACE_ROOT: workspaceRoot,
-        NPM_TOKEN: "must-not-reach-base-audit",
-        NODE_AUTH_TOKEN: "must-not-reach-base-audit",
-        GITHUB_TOKEN: "must-not-reach-base-audit",
-        NPM_CONFIG_REGISTRY: "https://private.invalid/",
-      },
+      env: auditEnvironment,
       timeout: 15_000,
     });
 
@@ -961,6 +1034,42 @@ process.exit(Object.keys(payload.advisories ?? {}).length ? 1 : 0);
     assert.doesNotMatch(
       readFileSync(deltaPath, "utf8"),
       /base-package|Base-only finding|workspace>tool>package/u,
+    );
+
+    const privateDetails =
+      "https://user:password@audit.example.invalid/a?token=private";
+    writeFileSync(
+      baseAuditPath,
+      JSON.stringify({
+        advisories: "unexpected",
+        detail: privateDetails,
+      }),
+    );
+    writeFileSync(summaryPath, "");
+    auditEnvironment.GITHUB_ACTIONS = "true";
+    const malformedBaseResult = spawnSync(process.execPath, [reportScript], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: auditEnvironment,
+      timeout: 15_000,
+    });
+
+    assert.equal(malformedBaseResult.status, 0, malformedBaseResult.stderr);
+    assert.equal(
+      (malformedBaseResult.stdout.match(/^::warning::/gmu) ?? []).length,
+      1,
+    );
+    const malformedBaseOutput = `${malformedBaseResult.stdout}\n${readFileSync(summaryPath, "utf8")}`;
+    assert.match(
+      malformedBaseOutput,
+      /Workspace advisory comparison status: unavailable\./u,
+    );
+    assert.doesNotMatch(malformedBaseOutput, /audit\.example\.invalid|user:password|private/u);
+    const unavailableDelta = JSON.parse(readFileSync(deltaPath, "utf8"));
+    assert.equal(unavailableDelta.status, "unavailable");
+    assert.doesNotMatch(
+      readFileSync(deltaPath, "utf8"),
+      /audit\.example\.invalid|user:password|private/u,
     );
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });

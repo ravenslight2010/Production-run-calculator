@@ -38,15 +38,14 @@ const TRANSIENT_PNPM_FETCH_CODES = new Set([
 ]);
 const REGISTRY_UNAVAILABLE_WARNING =
   "::warning::Full-workspace dependency audit is unavailable because the package registry or network could not be reached. The advisory check was not verified; CI remains non-blocking.";
+const AUDIT_UNAVAILABLE_WARNING =
+  "::warning::Full-workspace dependency audit output was malformed or unavailable. The advisory check was not verified; CI remains non-blocking.";
 
 export function getWorkspaceAuditWarning(report) {
-  if (
-    report?.status === "unavailable" &&
-    report.failure?.kind === "registry/network failure"
-  ) {
-    return REGISTRY_UNAVAILABLE_WARNING;
-  }
-  return null;
+  if (report?.status !== "unavailable") return null;
+  return report.failure?.kind === "registry/network failure"
+    ? REGISTRY_UNAVAILABLE_WARNING
+    : AUDIT_UNAVAILABLE_WARNING;
 }
 
 function cleanText(value) {
@@ -516,6 +515,7 @@ export function runWorkspaceAudit() {
 
   let markdown = report.markdown;
   let delta = createUnavailableDeltaReport();
+  let warningReport = report;
   const baseSha = process.env.WORKSPACE_AUDIT_BASE_SHA;
   if (baseSha) {
     let baseReport;
@@ -551,6 +551,14 @@ export function runWorkspaceAudit() {
         baseReport = auditBaseLockfile(baseLockfile);
       }
     }
+    if (
+      baseReport?.status === "unavailable" &&
+      (warningReport.status !== "unavailable" ||
+        (warningReport.failure?.kind !== "registry/network failure" &&
+          baseReport.failure?.kind === "registry/network failure"))
+    ) {
+      warningReport = baseReport;
+    }
     delta = buildWorkspaceAuditDeltaReport({
       baseReport,
       headReport: report,
@@ -580,7 +588,7 @@ export function runWorkspaceAudit() {
     process.stdout.write(markdown);
   }
 
-  const warning = getWorkspaceAuditWarning(report);
+  const warning = getWorkspaceAuditWarning(warningReport);
   if (warning && process.env.GITHUB_ACTIONS === "true") {
     process.stdout.write(`${warning}\n`);
   }
