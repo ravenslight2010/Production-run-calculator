@@ -185,11 +185,17 @@ type SseClient = {
 const clients = new Set<SseClient>();
 let manualSectionFailureHook: (() => void) | undefined;
 let manualSectionBarrierHook: (() => Promise<void>) | undefined;
+let serverTickNoWorkSkipBarrierHook: (() => Promise<void>) | undefined;
 export function setManualSectionFailureHookForTest(hook: (() => void) | undefined): void {
   manualSectionFailureHook = hook;
 }
 export function setManualSectionBarrierHookForTest(hook: (() => Promise<void>) | undefined): void {
   manualSectionBarrierHook = hook;
+}
+export function setServerTickNoWorkSkipBarrierHookForTest(
+  hook: (() => Promise<void>) | undefined,
+): void {
+  serverTickNoWorkSkipBarrierHook = hook;
 }
 
 function broadcastManualSectionEvent(
@@ -4177,6 +4183,7 @@ export async function runAutoTrackServerTicks(opts: {
     const claimIdNamespace = `tick-${randomUUID()}`;
     const preflight = classifyServerAutoTrackDate(row.data, nowMs, claimIdNamespace);
     if (preflight.kind === "skip") {
+      await serverTickNoWorkSkipBarrierHook?.();
       outcomes.noWorkSkipped = (outcomes.noWorkSkipped ?? 0) + 1;
       backoff.recordSuccess(nowMs);
       continue;

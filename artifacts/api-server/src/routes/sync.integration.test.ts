@@ -74,6 +74,8 @@ let getSharedAutoTrackDeferredDiagnostic:
   typeof import("../lib/backgroundOperations")["getSharedAutoTrackDeferredDiagnostic"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
+let setServerTickNoWorkSkipBarrierHookForTest:
+  typeof import("./sync")["setServerTickNoWorkSkipBarrierHookForTest"];
 let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
 let executeAutoTrackClaim: typeof import("../lib/autoTrackClaimService")["executeAutoTrackClaim"];
 let autoTrackClaimDependencies: AutoTrackClaimServiceDependencies;
@@ -158,6 +160,7 @@ beforeAll(async () => {
     backgroundOperationsMod.getSharedAutoTrackDeferredDiagnostic;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
+  setServerTickNoWorkSkipBarrierHookForTest = syncMod.setServerTickNoWorkSkipBarrierHookForTest;
   derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
   executeAutoTrackClaim = autoTrackClaimServiceMod.executeAutoTrackClaim;
   autoTrackClaimDependencies = {
@@ -241,6 +244,7 @@ async function seedCanonicalSync(date: string, data: unknown, canonicalRevision 
 beforeEach(async () => {
   injectedSseWriteFailures = 0;
   clearServerTickDateBackoffsForTests();
+  setServerTickNoWorkSkipBarrierHookForTest(undefined);
   await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${mixesTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
@@ -2482,6 +2486,140 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
     expect(afterIdleBeat.updatedAt.getTime()).toBe(beforeIdleBeat.updatedAt.getTime());
     expect(afterIdleBeat.canonicalRevision).toBe(beforeIdleBeat.canonicalRevision);
     expect(afterIdleBeat.data).toEqual(beforeIdleBeat.data);
+  });
+
+  it("preserves a same-date sync edit racing an idle skip and accepts its due claim once", async () => {
+    await seedServerApplicatorRun();
+    const [seeded] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const data = seeded.data as any;
+    data.dayState.runs[0] = {
+      ...data.dayState.runs[0],
+      startedAt: TICK_NOW - 120_000,
+      metaUpdatedAt: TICK_NOW - 120_000,
+    };
+    data.runValues[TICK_RUN] = {
+      ...data.runValues[TICK_RUN],
+      app1Type: "",
+      app1OzPerPizza: 0,
+      app1BatchLbs: 0,
+    };
+    await db.update(dailySyncTable).set({ data })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const setupTick = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    expect(setupTick.dateTransactions).toBe(1);
+    expect((await db.select().from(operationalIntentLedgerTable))
+      .filter((entry) => entry.commandType === "auto-track"
+        && (entry.actionData as any)?.channel === "app1-batch")).toHaveLength(0);
+
+    let reachedSkip!: () => void;
+    const atSkip = new Promise<void>((resolve) => { reachedSkip = resolve; });
+    let allowSkip!: () => void;
+    const continueSkip = new Promise<void>((resolve) => { allowSkip = resolve; });
+    setServerTickNoWorkSkipBarrierHookForTest(async () => {
+      setServerTickNoWorkSkipBarrierHookForTest(undefined);
+      reachedSkip();
+      await continueSkip;
+    });
+
+    const racingTick = runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    try {
+      await atSkip;
+
+      const baselineResponse = await fetch(
+        `${baseUrl}/api/sync/today?today=${TICK_DATE}`,
+        { headers: authHeaders() },
+      );
+      expect(baselineResponse.status).toBe(200);
+      const baseline = await baselineResponse.json() as Record<string, any>;
+      const snapshotId = baselineResponse.headers.get("X-Sync-Snapshot");
+      expect(snapshotId).toBeTruthy();
+      const editedValues = {
+        ...baseline.runValues[TICK_RUN],
+        app1Type: "Cheese",
+        app1OzPerPizza: 2,
+        app1BatchLbs: 50,
+      };
+      const syncWrite = await fetch(
+        `${baseUrl}/api/sync/today?today=${TICK_DATE}`,
+        {
+          method: "PUT",
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          body: JSON.stringify({
+            senderId: "idle-skip-race-writer",
+            snapshotId,
+            payload: {
+              ...baseline,
+              runValues: { ...baseline.runValues, [TICK_RUN]: editedValues },
+              runValuesUpdatedAt: {
+                ...baseline.runValuesUpdatedAt,
+                [TICK_RUN]: (baseline.runValuesUpdatedAt?.[TICK_RUN] ?? 0) + 1,
+              },
+              syncVersion: 1,
+              completeness: "complete",
+              baseSnapshotId: snapshotId,
+            },
+          }),
+        },
+      );
+      expect(syncWrite.status).toBe(200);
+      const acceptedEdit = await syncWrite.json() as Record<string, any>;
+      expect(acceptedEdit.data.runValues[TICK_RUN]).toMatchObject({
+        app1Type: "Cheese",
+        app1OzPerPizza: 2,
+        app1BatchLbs: 50,
+      });
+
+      allowSkip();
+      const skipped = await racingTick;
+      expect(skipped.dateTransactions).toBe(0);
+      expect(skipped.outcomes.noWorkSkipped).toBe(1);
+
+      const [afterSkip] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect(afterSkip.canonicalRevision).toBe(acceptedEdit.canonicalRevision);
+      expect((afterSkip.data as any).runValues[TICK_RUN]).toMatchObject({
+        app1Type: "Cheese",
+        app1OzPerPizza: 2,
+        app1BatchLbs: 50,
+      });
+
+      const laterTick = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+      expect(laterTick.accepted).toBeGreaterThan(0);
+      const [afterClaim] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect((afterClaim.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(1);
+      const acceptedBatchClaims = (await db.select().from(operationalIntentLedgerTable))
+        .filter((entry) => entry.commandType === "auto-track"
+          && (entry.actionData as any)?.channel === "app1-batch");
+      expect(acceptedBatchClaims).toHaveLength(1);
+      expect((await db.select().from(applicatorBatchEvidenceTable))
+        .filter((entry) => entry.source === "automatic-observation")).toHaveLength(1);
+
+      const repeatTick = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+      expect(repeatTick.outcomes.error).toBeUndefined();
+      const [afterRepeat] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect((afterRepeat.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(1);
+      expect((await db.select().from(operationalIntentLedgerTable))
+        .filter((entry) => entry.commandType === "auto-track"
+          && (entry.actionData as any)?.channel === "app1-batch")).toHaveLength(1);
+      expect((await db.select().from(applicatorBatchEvidenceTable))
+        .filter((entry) => entry.source === "automatic-observation")).toHaveLength(1);
+    } finally {
+      allowSkip();
+      setServerTickNoWorkSkipBarrierHookForTest(undefined);
+      await racingTick;
+    }
   });
 
   it("uses a transaction to persist a draining-run baseline even when no claims are due", async () => {
