@@ -6,9 +6,27 @@ const webkit = webkitLaunchOptions();
 const remainingOnly = process.env.BREAK_VERIFICATION_REMAINING_ONLY === "1";
 const fullJourney = /touch break planning/;
 const keyboard = /break planning enlarged-text keyboard controls/;
+const localServers = releaseBrowserWebServers();
+const testReportSigningKeys = JSON.stringify({
+  activeKeyId: "break-planning-e2e",
+  keys: {
+    "break-planning-e2e": "break-planning-e2e-signing-key-not-for-production-0001",
+  },
+});
+const webServer = Array.isArray(localServers)
+  ? localServers.map((server, index) => index === 0
+    ? {
+      ...server,
+      env: {
+        ...server.env,
+        OPERATIONAL_REPORT_SIGNING_KEYS: testReportSigningKeys,
+      },
+    }
+    : server)
+  : localServers;
 
 export default defineConfig({
-  webServer: releaseBrowserWebServers(),
+  webServer,
   testDir: "./e2e",
   testMatch: "accessibility-smoke.spec.ts",
   timeout: 120_000,

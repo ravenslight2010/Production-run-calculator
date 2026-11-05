@@ -1055,7 +1055,7 @@ test.describe("accessibility smoke", () => {
     await operatorPage.close();
   });
 
-  test("touch break planning opens above Schedule and retains the saved draft", async ({ page }) => {
+  test("touch break planning retains its saved estimate, report, and manager notifications", async ({ page }) => {
     const errors: string[] = [];
     const failedResponses: string[] = [];
     const knownManagerDiagnostics404: string[] = [];
@@ -1323,6 +1323,93 @@ test.describe("accessibility smoke", () => {
     requestPhase = "post-auth journey";
     if (test.info().project.name === "android-touch") {
       await page.getByTestId("day-timeline").screenshot({ path: "../../.local/evidence/break-planning/break-summary.png" });
+    }
+
+    // Finalized reports are immutable and scoped to one day. Run this joined
+    // report/notification journey once, while every configured viewport still
+    // exercises the saved break estimate and reload above.
+    if (test.info().project.name === "desktop-chromium") {
+      const now = new Date();
+      const planDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const apiUrl = (path: string) => new URL(path, page.url()).toString();
+
+      const finalized = await page.request.post(apiUrl("/api/reports/operational/finalize"), {
+        data: { scope: "day", date: planDate },
+      });
+      const finalizedText = await finalized.text();
+      expect(
+        finalized.status(),
+        `Canonical report finalization returned ${finalized.status()}: ${finalizedText.slice(0, 1_000)}`,
+      ).toBe(201);
+      const finalizedBody = JSON.parse(finalizedText) as {
+        id: string;
+        proofStatus: string;
+        report: { productionRows: Array<{ run: string }> };
+      };
+      expect(finalizedBody.proofStatus).toBe("verified");
+      expect(finalizedBody.report.productionRows.map(row => row.run)).toEqual(
+        expect.arrayContaining(["Break E2E One Morning", "Break E2E Two Afternoon"]),
+      );
+
+      // The incident route is record-first and does not deliver external push.
+      // This synthetic issue verifies the manager's durable in-app attention
+      // count without subscribing a browser or invoking a push provider.
+      const beforeCountResponse = await page.request.get(apiUrl("/api/incidents/unreviewed-count"));
+      expect(beforeCountResponse.status()).toBe(200);
+      const beforeCount = (await beforeCountResponse.json() as { count: number }).count;
+      const syntheticIssue = await page.request.post(apiUrl("/api/incidents"), {
+        data: {
+          source: "user_report",
+          screen: "Run",
+          appPlatform: "web",
+          description: "Synthetic break-planning persistence verification.",
+        },
+      });
+      expect(syntheticIssue.status()).toBe(200);
+      expect(await syntheticIssue.json()).toMatchObject({
+        diagnosis: null,
+        workaround: null,
+        aiGenerated: false,
+      });
+      const afterCountResponse = await page.request.get(apiUrl("/api/incidents/unreviewed-count"));
+      expect(afterCountResponse.status()).toBe(200);
+      expect((await afterCountResponse.json() as { count: number }).count).toBe(beforeCount + 1);
+
+      await page.getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Alerts & Floor Mode", exact: true }).click();
+      const runCompleteSwitch = page.getByTestId("switch-notif-runComplete");
+      await expect(runCompleteSwitch).toBeChecked();
+      const savedPreferenceResponse = page.waitForResponse(response =>
+        response.url().endsWith("/api/me/notification-prefs")
+        && response.request().method() === "POST",
+      );
+      await runCompleteSwitch.click();
+      expect((await savedPreferenceResponse).status()).toBe(200);
+      await expect(runCompleteSwitch).not.toBeChecked();
+
+      await page.keyboard.press("Escape");
+      requestPhase = "persistence reload";
+      markNavigation();
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      requestPhase = "post-auth journey";
+
+      const persistedReport = await page.request.get(
+        apiUrl(`/api/reports/operational/finalized/${finalizedBody.id}`),
+      );
+      expect(persistedReport.status()).toBe(200);
+      expect(await persistedReport.json()).toMatchObject({
+        id: finalizedBody.id,
+        proofStatus: "verified",
+        report: { productionRows: finalizedBody.report.productionRows },
+      });
+      const persistedCount = await page.request.get(apiUrl("/api/incidents/unreviewed-count"));
+      expect(persistedCount.status()).toBe(200);
+      expect((await persistedCount.json() as { count: number }).count).toBe(beforeCount + 1);
+
+      await page.getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Alerts & Floor Mode", exact: true }).click();
+      await expect(page.getByTestId("switch-notif-runComplete")).not.toBeChecked();
     }
 
     console.log("known out-of-scope manager diagnostics 404s:", {
