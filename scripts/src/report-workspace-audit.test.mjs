@@ -60,6 +60,23 @@ test("reports a valid empty audit as clean with zero severity counts", () => {
   assert.equal(getWorkspaceAuditWarning(report), null);
 });
 
+test("reports one attempt for a first-attempt clean audit", () => {
+  let attempts = 0;
+  const report = runWorkspaceAuditWithRetry({
+    executeAudit: () => {
+      attempts += 1;
+      return { stdout: JSON.stringify(cleanAudit), status: 0 };
+    },
+    now: () => 0,
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(report.attempts, 1);
+  assert.equal(report.status, "clean");
+  assert.match(report.markdown, /Audit attempts: 1 of 3\./u);
+  assert.doesNotMatch(report.markdown, /recovered/u);
+});
+
 test("reports advisory counts and dependency paths from pnpm JSON", () => {
   const audit = {
     advisories: {
@@ -174,20 +191,27 @@ test("retries a structured transient registry failure and returns the recovered 
   let attempts = 0;
   let currentTime = 0;
   const delays = [];
+  const privateDetails =
+    "https://user:password@registry.example.invalid/path?token=do-not-print";
   const report = runWorkspaceAuditWithRetry({
     executeAudit: () => {
       attempts += 1;
       currentTime += 10;
       if (attempts === 1) {
         return {
-          stdout: JSON.stringify({ error: { code: "ETIMEDOUT" } }),
+          stdout: JSON.stringify({
+            error: { code: "ETIMEDOUT", detail: privateDetails },
+          }),
           status: 1,
         };
       }
       if (attempts === 2) {
         return {
           stdout: JSON.stringify({
-            error: { code: "ERR_PNPM_FETCH_503" },
+            error: {
+              code: "ERR_PNPM_FETCH_503",
+              detail: privateDetails,
+            },
           }),
           status: 1,
         };
@@ -203,7 +227,52 @@ test("retries a structured transient registry failure and returns the recovered 
 
   assert.equal(attempts, 3);
   assert.deepEqual(delays, [250, 500]);
+  assert.equal(report.attempts, 3);
   assert.equal(report.status, "clean");
+  assert.match(
+    report.markdown,
+    /Audit attempts: 3 of 3; recovered after a transient registry\/network interruption\./u,
+  );
+  assert.doesNotMatch(
+    report.markdown,
+    /registry\.example\.invalid|user:password|do-not-print/u,
+  );
+  assert.equal(getWorkspaceAuditWarning(report), null);
+});
+
+test("preserves advisory status when the audit recovers after a registry failure", () => {
+  let attempts = 0;
+  const report = runWorkspaceAuditWithRetry({
+    executeAudit: () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          stdout: JSON.stringify({ error: { code: "ERR_PNPM_FETCH_503" } }),
+          status: 1,
+        };
+      }
+      return {
+        stdout: JSON.stringify({
+          advisories: [
+            {
+              module_name: "pkg",
+              severity: "low",
+              title: "Advisory",
+              findings: [{ paths: ["workspace>pkg"] }],
+            },
+          ],
+        }),
+        status: 1,
+      };
+    },
+    sleep: () => {},
+    now: () => 0,
+  });
+
+  assert.equal(report.attempts, 2);
+  assert.equal(report.status, "advisories");
+  assert.match(report.markdown, /Status: ADVISORIES FOUND/u);
+  assert.match(report.markdown, /Audit attempts: 2 of 3; recovered/u);
   assert.equal(getWorkspaceAuditWarning(report), null);
 });
 
@@ -326,8 +395,63 @@ test("caps transient retries at three attempts and the shared timeout budget", (
   assert.deepEqual(timeouts, [60_000, 60_000, 59_250]);
   assert.deepEqual(delays, [250, 500]);
   assert.equal(currentTime, 180_000);
+  assert.equal(report.attempts, 3);
   assert.equal(report.status, "unavailable");
+  assert.match(report.markdown, /Audit attempts: 3 of 3\./u);
   assert.match(getWorkspaceAuditWarning(report), /^::warning::/u);
+});
+
+test("recovered registry failures appear in the report without warning or blocking CI", () => {
+  const testDirectory = mkdtempSync(
+    join(tmpdir(), "workspace-audit-recovered-"),
+  );
+  try {
+    const binDirectory = join(testDirectory, "bin");
+    const summaryPath = join(testDirectory, "summary.md");
+    const callCountPath = join(testDirectory, "pnpm-calls.txt");
+    const fakePnpmPath = join(binDirectory, "pnpm");
+    const privateDetails =
+      "https://user:password@registry.example.invalid/a?token=sensitive";
+    const transientFailure = JSON.stringify({
+      error: { code: "ERR_PNPM_FETCH_503", detail: privateDetails },
+    });
+
+    mkdirSync(binDirectory);
+    writeFileSync(
+      fakePnpmPath,
+      '#!/bin/sh\nprintf \'x\' >> "$FAKE_PNPM_AUDIT_CALLS"\nif [ "$(wc -c < "$FAKE_PNPM_AUDIT_CALLS")" -eq 1 ]; then printf \'%s\\n\' "$FAKE_PNPM_AUDIT_FAILURE"; exit 1; fi\nprintf \'%s\\n\' "$FAKE_PNPM_AUDIT_SUCCESS"\nexit 0\n',
+      { mode: 0o700 },
+    );
+
+    const result = spawnSync(process.execPath, [reportScript], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_PNPM_AUDIT_FAILURE: transientFailure,
+        FAKE_PNPM_AUDIT_SUCCESS: JSON.stringify(cleanAudit),
+        FAKE_PNPM_AUDIT_CALLS: callCountPath,
+        GITHUB_ACTIONS: "true",
+        GITHUB_STEP_SUMMARY: summaryPath,
+        PATH: `${binDirectory}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(callCountPath, "utf8"), "xx");
+    assert.doesNotMatch(result.stdout, /^::warning::/mu);
+    assert.match(
+      result.stdout,
+      /Workspace audit report status: clean\./u,
+    );
+    const combinedOutput = `${result.stdout}\n${readFileSync(summaryPath, "utf8")}`;
+    assert.match(combinedOutput, /Audit attempts: 2 of 3; recovered/u);
+    assert.doesNotMatch(
+      combinedOutput,
+      /registry\.example\.invalid|user:password|sensitive/u,
+    );
+  } finally {
+    rmSync(testDirectory, { recursive: true, force: true });
+  }
 });
 
 test("emits exactly one sanitized GitHub warning for a registry failure", () => {

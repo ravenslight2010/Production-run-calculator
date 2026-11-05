@@ -595,6 +595,21 @@ function isRetryableTransientFailure(report, result) {
   );
 }
 
+function addRetrySummary(report, attempts) {
+  const recoveryText =
+    report.status !== "unavailable" && attempts > 1
+      ? "; recovered after a transient registry/network interruption"
+      : "";
+  const attemptSummary =
+    `**Audit attempts: ${attempts} of ${MAX_AUDIT_ATTEMPTS}${recoveryText}.**`;
+
+  return {
+    ...report,
+    attempts,
+    markdown: `${report.markdown.trimEnd()}\n\n${attemptSummary}\n`,
+  };
+}
+
 export function runWorkspaceAuditWithRetry({
   executeAudit,
   sleep = sleepSynchronously,
@@ -602,6 +617,7 @@ export function runWorkspaceAuditWithRetry({
 }) {
   const deadline = now() + MAX_AUDIT_TOTAL_MS;
   let report;
+  let attempts = 0;
 
   for (let attempt = 0; attempt < MAX_AUDIT_ATTEMPTS; attempt += 1) {
     const remainingMs = deadline - now();
@@ -617,6 +633,7 @@ export function runWorkspaceAuditWithRetry({
     } catch (error) {
       result = { stdout: "", stderr: "", status: null, error };
     }
+    attempts += 1;
     result ??= { stdout: "", stderr: "", status: null };
 
     report = buildWorkspaceAuditReport({
@@ -631,7 +648,7 @@ export function runWorkspaceAuditWithRetry({
       attempt === MAX_AUDIT_ATTEMPTS - 1 ||
       !isRetryableTransientFailure(report, result)
     ) {
-      return report;
+      return addRetrySummary(report, attempts);
     }
 
     const delayMs = Math.min(
@@ -642,7 +659,7 @@ export function runWorkspaceAuditWithRetry({
     sleep(delayMs);
   }
 
-  return report ?? buildWorkspaceAuditReport({});
+  return addRetrySummary(report ?? buildWorkspaceAuditReport({}), attempts);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
