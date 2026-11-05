@@ -12,6 +12,7 @@ NIGHTLY_LARGE_SPEC_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/nightly-large
 DEPARTMENT_NAVIGATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/department-navigation.yml"
 RELEASE_CONCURRENCY_CALIBRATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-concurrency-calibration.yml"
 STABLE_BRANCH_PROTECTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/stable-branch-protection.yml"
+WORKSPACE_AUDIT_RERUN_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/workspace-audit-rerun.yml"
 WORKFLOW_LINT_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/workflow-lint.yml"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
@@ -405,6 +406,59 @@ test_ci_reports_workspace_advisories_without_changing_production_gate() {
   assert_contains "$root_package" \
     '"audit:prod:release": "pnpm audit --prod --audit-level high"'
   echo "PASS: reports workspace advisories without changing the production gate"
+}
+
+test_workspace_audit_rerun_isolated_and_non_blocking() {
+  local workflow_content
+  local audit_step
+  local run_count
+  workflow_content=$(<"$WORKSPACE_AUDIT_RERUN_WORKFLOW")
+
+  assert_contains "$workflow_content" "  workflow_dispatch:"
+  assert_contains "$workflow_content" "permissions:"
+  assert_contains "$workflow_content" "  contents: read"
+  assert_contains "$workflow_content" "      contents: read"
+  assert_contains "$workflow_content" "name: Checkout selected workflow revision"
+  assert_contains "$workflow_content" "ref: \${{ github.sha }}"
+  assert_contains "$workflow_content" "persist-credentials: false"
+  assert_contains "$workflow_content" \
+    "run: pnpm --filter @workspace/scripts run audit:workspace-report"
+  assert_contains "$workflow_content" "continue-on-error: true"
+
+  if [[ "$workflow_content" == *"inputs:"* ||
+    "$workflow_content" == *"secret"* ||
+    "$workflow_content" == *"write"* ||
+    "$workflow_content" == *"  push:"* ||
+    "$workflow_content" == *"  pull_request:"* ||
+    "$workflow_content" == *"  schedule:"* ||
+    "$workflow_content" == *"  workflow_call:"* ||
+    "$workflow_content" == *"pnpm install"* ||
+    "$workflow_content" == *"audit:prod"* ||
+    "$workflow_content" == *"pnpm run build"* ||
+    "$workflow_content" == *"pnpm test"* ]]; then
+    printf 'Workspace audit rerun must not accept user inputs or invoke secrets, installs, production audit, builds, or tests.\n' >&2
+    return 1
+  fi
+
+  run_count=$(grep -cE '^[[:space:]]+run:' "$WORKSPACE_AUDIT_RERUN_WORKFLOW")
+  if [[ "$run_count" != "1" ]]; then
+    printf 'Workspace audit rerun must have exactly one command step; found %s.\n' "$run_count" >&2
+    return 1
+  fi
+
+  audit_step=$(awk '
+    $0 == "      - name: Report full-workspace dependency advisories" {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^      - / { exit }
+    found { print }
+  ' "$WORKSPACE_AUDIT_RERUN_WORKFLOW")
+  assert_contains "$audit_step" "continue-on-error: true"
+  assert_contains "$audit_step" \
+    "run: pnpm --filter @workspace/scripts run audit:workspace-report"
+  echo "PASS: manual workspace audit is revision-bound, read-only, and non-blocking"
 }
 
 test_ci_runs_routine_scripts_tests() {
@@ -1826,6 +1880,7 @@ test_rejects_non_positive_remaining_workflow_job_timeout
 test_department_navigation_readiness_contract
 test_ci_runs_routine_scripts_tests
 test_ci_reports_workspace_advisories_without_changing_production_gate
+test_workspace_audit_rerun_isolated_and_non_blocking
 test_ci_docker_images_are_build_only_and_runtime_checked
 test_release_build_identity_is_prepared_for_container_and_browser_smoke
 test_docker_executable_targets_default_to_nonroot
