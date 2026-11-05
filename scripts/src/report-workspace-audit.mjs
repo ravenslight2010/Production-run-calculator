@@ -1,5 +1,6 @@
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,7 @@ import { tmpdir } from "node:os";
 const WORKSPACE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SEVERITIES = ["critical", "high", "moderate", "low", "info"];
 const MAX_ADVISORIES = 20;
+const MAX_DELTA_JSON_BYTES = 32 * 1024;
 const MAX_PATHS_PER_ADVISORY = 5;
 const MAX_TEXT_LENGTH = 240;
 const MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -325,6 +327,87 @@ export function buildWorkspaceAuditDeltaReport({ baseReport, headReport }) {
   };
 }
 
+function createUnavailableDeltaReport() {
+  return buildWorkspaceAuditDeltaReport({
+    baseReport: null,
+    headReport: null,
+  });
+}
+
+function getPublicAdvisoryId(advisory) {
+  const identifier = advisory.identifier?.trim().toUpperCase();
+  if (
+    identifier &&
+    (/^GHSA-[A-Z0-9-]{5,}$/u.test(identifier) ||
+      /^CVE-\d{4}-\d{4,}$/u.test(identifier))
+  ) {
+    return identifier.slice(0, 64);
+  }
+  return null;
+}
+
+function toPublicDeltaAdvisory(advisory, outcome) {
+  return {
+    outcome,
+    identity: `sha256:${createHash("sha256")
+      .update(advisory.identity)
+      .digest("hex")}`,
+    advisoryId: getPublicAdvisoryId(advisory),
+    severity: advisory.severity,
+    ...(advisory.previousSeverity
+      ? { previousSeverity: advisory.previousSeverity }
+      : {}),
+  };
+}
+
+export function buildWorkspaceAuditDeltaJson(delta) {
+  const compared = delta?.status === "compared";
+  const categories = ["introduced", "resolved", "unchanged"];
+  const advisories = [];
+  const counts = {};
+  const truncated = {};
+
+  for (const outcome of categories) {
+    const records = compared ? delta[outcome] : [];
+    const total = compared ? delta.counts[outcome] : null;
+    const exported = records.slice(0, MAX_ADVISORIES);
+    advisories.push(
+      ...exported.map((advisory) => toPublicDeltaAdvisory(advisory, outcome)),
+    );
+    counts[outcome] = total;
+    truncated[outcome] = compared ? total - exported.length : 0;
+  }
+  counts.unavailable = compared ? 0 : 1;
+
+  const report = {
+    schemaVersion: 1,
+    status: compared ? "compared" : "unavailable",
+    counts,
+    advisories,
+    truncated,
+    unavailableReason: compared ? null : "base_or_head_audit_unavailable",
+  };
+  const json = `${JSON.stringify(report, null, 2)}\n`;
+  if (Buffer.byteLength(json, "utf8") > MAX_DELTA_JSON_BYTES) {
+    throw new Error("Workspace advisory delta JSON exceeded its size limit.");
+  }
+  return json;
+}
+
+function writeWorkspaceAuditDeltaJson(path, delta) {
+  if (!path) return;
+  try {
+    writeFileSync(path, buildWorkspaceAuditDeltaJson(delta), {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  } catch {
+    process.stderr.write(
+      "Could not write the sanitized workspace advisory delta artifact.\n",
+    );
+  }
+}
+
 function renderUnavailable(failure) {
   const reason = failure.code
     ? ` Registry/network error code: \`${failure.code}\`.`
@@ -417,6 +500,7 @@ export function runWorkspaceAudit() {
   });
 
   let markdown = report.markdown;
+  let delta = createUnavailableDeltaReport();
   const baseSha = process.env.WORKSPACE_AUDIT_BASE_SHA;
   if (baseSha) {
     let baseReport;
@@ -452,7 +536,7 @@ export function runWorkspaceAudit() {
         baseReport = auditBaseLockfile(baseLockfile);
       }
     }
-    const delta = buildWorkspaceAuditDeltaReport({
+    delta = buildWorkspaceAuditDeltaReport({
       baseReport,
       headReport: report,
     });
@@ -461,6 +545,11 @@ export function runWorkspaceAudit() {
       `Workspace advisory comparison status: ${delta.status}.\n`,
     );
   }
+
+  writeWorkspaceAuditDeltaJson(
+    process.env.WORKSPACE_AUDIT_DELTA_PATH,
+    delta,
+  );
 
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (summaryPath) {

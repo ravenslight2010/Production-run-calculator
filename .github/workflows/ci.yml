@@ -415,7 +415,17 @@ jobs:
         continue-on-error: true
         env:
           WORKSPACE_AUDIT_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          WORKSPACE_AUDIT_DELTA_PATH: ${{ runner.temp }}/workspace-advisory-delta.json
         run: pnpm --filter @workspace/scripts run audit:workspace-report
+      - name: Retain sanitized workspace advisory delta
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: workspace-advisory-delta-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/workspace-advisory-delta.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   docker:
     name: Docker image

@@ -15,6 +15,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  buildWorkspaceAuditDeltaJson,
   buildWorkspaceAuditDeltaReport,
   buildWorkspaceAuditReport,
   getWorkspaceAuditWarning,
@@ -459,6 +460,7 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
   try {
     const binDirectory = join(testDirectory, "bin");
     const summaryPath = join(testDirectory, "summary.md");
+    const deltaPath = join(testDirectory, "workspace-advisory-delta.json");
     const callCountPath = join(testDirectory, "pnpm-calls.txt");
     const fakePnpmPath = join(binDirectory, "pnpm");
     const privateDetails =
@@ -485,6 +487,7 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
         FAKE_PNPM_AUDIT_CALLS: callCountPath,
         GITHUB_ACTIONS: "true",
         GITHUB_STEP_SUMMARY: summaryPath,
+        WORKSPACE_AUDIT_DELTA_PATH: deltaPath,
         PATH: `${binDirectory}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
       },
     });
@@ -499,6 +502,18 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
     const combinedOutput = `${result.stdout}\n${readFileSync(summaryPath, "utf8")}`;
     assert.doesNotMatch(
       combinedOutput,
+      /registry\.example\.invalid|user:password|sensitive|request-id=private|body=secret/u,
+    );
+    const delta = JSON.parse(readFileSync(deltaPath, "utf8"));
+    assert.equal(delta.status, "unavailable");
+    assert.deepEqual(delta.counts, {
+      introduced: null,
+      resolved: null,
+      unchanged: null,
+      unavailable: 1,
+    });
+    assert.doesNotMatch(
+      readFileSync(deltaPath, "utf8"),
       /registry\.example\.invalid|user:password|sensitive|request-id=private|body=secret/u,
     );
   } finally {
@@ -627,6 +642,157 @@ test("keeps registry failure details out of unavailable comparison output", () =
   assert.doesNotMatch(delta.markdown, /do-not-print/u);
 });
 
+test("exports only stable advisory identities and bounded outcome counts", () => {
+  const privateDetails =
+    "https://user:password@registry.example.invalid/path?token=do-not-export";
+  const baseReport = auditReport({
+    "GHSA-gone-1234-efgh": advisory(
+      "private-package-name",
+      privateDetails,
+      [`workspace>${privateDetails}`],
+    ),
+    "GHSA-stay-1234-efgh": advisory(
+      "another-private-package",
+      "Original private title",
+    ),
+  });
+  const headReport = auditReport({
+    "GHSA-new-1234-efgh": advisory(
+      "new-private-package",
+      "New private title",
+    ),
+    "GHSA-stay-1234-efgh": advisory(
+      "another-private-package",
+      "Updated private title",
+    ),
+  });
+  const delta = buildWorkspaceAuditDeltaReport({ baseReport, headReport });
+  const json = buildWorkspaceAuditDeltaJson(delta);
+  const parsed = JSON.parse(json);
+
+  assert.deepEqual(
+    {
+      schemaVersion: parsed.schemaVersion,
+      status: parsed.status,
+      counts: parsed.counts,
+      truncated: parsed.truncated,
+      unavailableReason: parsed.unavailableReason,
+    },
+    {
+      schemaVersion: 1,
+      status: "compared",
+      counts: { introduced: 1, resolved: 1, unchanged: 1, unavailable: 0 },
+      truncated: { introduced: 0, resolved: 0, unchanged: 0 },
+      unavailableReason: null,
+    },
+  );
+  assert.deepEqual(
+    parsed.advisories.map(
+      ({ outcome, advisoryId, severity, previousSeverity }) => ({
+        outcome,
+        advisoryId,
+        severity,
+        ...(previousSeverity ? { previousSeverity } : {}),
+      }),
+    ),
+    [
+      {
+        outcome: "introduced",
+        advisoryId: "GHSA-NEW-1234-EFGH",
+        severity: "moderate",
+      },
+      {
+        outcome: "resolved",
+        advisoryId: "GHSA-GONE-1234-EFGH",
+        severity: "moderate",
+      },
+      {
+        outcome: "unchanged",
+        advisoryId: "GHSA-STAY-1234-EFGH",
+        severity: "moderate",
+        previousSeverity: "moderate",
+      },
+    ],
+  );
+  assert.ok(parsed.advisories.every(({ identity }) =>
+    /^sha256:[a-f0-9]{64}$/u.test(identity),
+  ));
+  assert.doesNotMatch(
+    json,
+    /private-package|private title|registry\.example\.invalid|password|do-not-export|workspace>/u,
+  );
+  assert.ok(Buffer.byteLength(json, "utf8") <= 32 * 1024);
+});
+
+test("caps exported records while preserving full counts and truncation totals", () => {
+  const makeAdvisories = (prefix) =>
+    Object.fromEntries(
+      Array.from({ length: 23 }, (_, index) => [
+        `GHSA-${prefix}${index}-1234-efgh`,
+        advisory(`package-${prefix}-${index}`, `Title ${index}`),
+      ]),
+    );
+  const baseReport = auditReport({
+    ...makeAdvisories("resolved"),
+    ...makeAdvisories("stays"),
+  });
+  const headReport = auditReport({
+    ...makeAdvisories("introduced"),
+    ...makeAdvisories("stays"),
+  });
+  const parsed = JSON.parse(
+    buildWorkspaceAuditDeltaJson(
+      buildWorkspaceAuditDeltaReport({ baseReport, headReport }),
+    ),
+  );
+
+  assert.deepEqual(parsed.counts, {
+    introduced: 23,
+    resolved: 23,
+    unchanged: 23,
+    unavailable: 0,
+  });
+  assert.deepEqual(parsed.truncated, {
+    introduced: 3,
+    resolved: 3,
+    unchanged: 3,
+  });
+  assert.equal(parsed.advisories.length, 60);
+  assert.ok(Buffer.byteLength(JSON.stringify(parsed), "utf8") <= 32 * 1024);
+});
+
+test("exports unavailable comparisons without failure details or false zero counts", () => {
+  const baseReport = buildWorkspaceAuditReport({
+    stdout: JSON.stringify({
+      error: {
+        code: "ERR_PNPM_FETCH_503",
+        detail: "https://user:password@private.invalid/?token=secret",
+      },
+    }),
+    exitCode: 1,
+  });
+  const delta = buildWorkspaceAuditDeltaReport({
+    baseReport,
+    headReport: auditReport({}),
+  });
+  const json = buildWorkspaceAuditDeltaJson(delta);
+  const parsed = JSON.parse(json);
+
+  assert.equal(parsed.status, "unavailable");
+  assert.deepEqual(parsed.counts, {
+    introduced: null,
+    resolved: null,
+    unchanged: null,
+    unavailable: 1,
+  });
+  assert.deepEqual(parsed.advisories, []);
+  assert.equal(
+    parsed.unavailableReason,
+    "base_or_head_audit_unavailable",
+  );
+  assert.doesNotMatch(json, /ERR_PNPM|private\.invalid|password|secret/u);
+});
+
 test("audits only the base lockfile in a credential-isolated temporary project", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "workspace-audit-comparison-test-"),
@@ -635,6 +801,7 @@ test("audits only the base lockfile in a credential-isolated temporary project",
     const binDirectory = join(temporaryDirectory, "bin");
     const fixtureDirectory = join(temporaryDirectory, "fixtures");
     const summaryPath = join(temporaryDirectory, "summary.md");
+    const deltaPath = join(temporaryDirectory, "workspace-advisory-delta.json");
     const observationPath = join(
       temporaryDirectory,
       "base-audit-observation.json",
@@ -706,6 +873,7 @@ process.exit(Object.keys(payload.advisories ?? {}).length ? 1 : 0);
         ...process.env,
         PATH: `${binDirectory}${delimiter}${process.env.PATH ?? ""}`,
         WORKSPACE_AUDIT_BASE_SHA: "a".repeat(40),
+        WORKSPACE_AUDIT_DELTA_PATH: deltaPath,
         GITHUB_STEP_SUMMARY: summaryPath,
         AUDIT_TEST_BASE_LOCKFILE: baseLockfilePath,
         AUDIT_TEST_BASE_REPORT: baseAuditPath,
@@ -740,6 +908,23 @@ process.exit(Object.keys(payload.advisories ?? {}).length ? 1 : 0);
     const summary = readFileSync(summaryPath, "utf8");
     assert.match(summary, /resolved 1/u);
     assert.doesNotMatch(summary, /must-not-reach-base-audit/u);
+    const delta = JSON.parse(readFileSync(deltaPath, "utf8"));
+    assert.equal(delta.status, "compared");
+    assert.deepEqual(delta.counts, {
+      introduced: 0,
+      resolved: 1,
+      unchanged: 0,
+      unavailable: 0,
+    });
+    assert.equal(delta.advisories[0].outcome, "resolved");
+    assert.equal(
+      delta.advisories[0].advisoryId,
+      "GHSA-TEST-1234-ABCD",
+    );
+    assert.doesNotMatch(
+      readFileSync(deltaPath, "utf8"),
+      /base-package|Base-only finding|workspace>tool>package/u,
+    );
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
