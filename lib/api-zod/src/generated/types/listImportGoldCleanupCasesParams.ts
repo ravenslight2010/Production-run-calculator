@@ -7,9 +7,9 @@
  */
 
 export type ListImportGoldCleanupCasesParams = {
-/**
- * Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
- * @maxLength 512
- */
-cursor?: string;
+  /**
+   * Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
+   * @maxLength 512
+   */
+  cursor?: string;
 };

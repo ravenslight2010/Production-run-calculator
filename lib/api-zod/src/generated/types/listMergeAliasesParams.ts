@@ -8,12 +8,8 @@
 import type { MergeSuggestCategory } from './mergeSuggestCategory';
 
 export type ListMergeAliasesParams = {
-/**
- * Which merge tab's pool to scope the alias list to. Defaults to "ingredient" for backward compatibility.
- */
-category?: MergeSuggestCategory;
-/**
- * When category is "flavor", scopes the alias list to a single brand's flavor pool. Ignored for every other category.
- */
-brand?: string;
+  /** Which merge tab's pool to scope the alias list to. Defaults to "ingredient" for backward compatibility. */
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", scopes the alias list to a single brand's flavor pool. Ignored for every other category. */
+  brand?: string;
 };

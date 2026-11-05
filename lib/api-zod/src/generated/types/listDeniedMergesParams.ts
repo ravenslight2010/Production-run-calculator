@@ -8,12 +8,8 @@
 import type { MergeSuggestCategory } from './mergeSuggestCategory';
 
 export type ListDeniedMergesParams = {
-/**
- * Which merge tab's pool to scope the denied-pair list to. Defaults to "ingredient" for backward compatibility.
- */
-category?: MergeSuggestCategory;
-/**
- * When category is "flavor", scopes the denied-pair list to a single brand's flavor pool. Ignored for every other category.
- */
-brand?: string;
+  /** Which merge tab's pool to scope the denied-pair list to. Defaults to "ingredient" for backward compatibility. */
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", scopes the denied-pair list to a single brand's flavor pool. Ignored for every other category. */
+  brand?: string;
 };

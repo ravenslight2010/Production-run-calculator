@@ -8,5 +8,5 @@
 import type { ClientTodayParameter } from './clientTodayParameter';
 
 export type SubmitManualSectionEditParams = {
-today?: ClientTodayParameter;
+  today?: ClientTodayParameter;
 };

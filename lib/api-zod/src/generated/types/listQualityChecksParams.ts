@@ -9,12 +9,8 @@ import type { ListQualityChecksProductType } from './listQualityChecksProductTyp
 import type { ListQualityChecksStatus } from './listQualityChecksStatus';
 
 export type ListQualityChecksParams = {
-/**
- * Only return checks for this product type
- */
-productType?: ListQualityChecksProductType;
-/**
- * Only return checks with this verdict
- */
-status?: ListQualityChecksStatus;
+  /** Only return checks for this product type */
+  productType?: ListQualityChecksProductType;
+  /** Only return checks with this verdict */
+  status?: ListQualityChecksStatus;
 };

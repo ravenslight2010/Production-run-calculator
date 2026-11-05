@@ -7,8 +7,6 @@
  */
 
 export type ListOperationalIntentReceiptsParams = {
-/**
- * @minimum 0
- */
-after?: number;
+  /** @minimum 0 */
+  after?: number;
 };

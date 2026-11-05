@@ -7,16 +7,14 @@
  */
 
 export type ExportAuditLogsCsvParams = {
-/**
- * Exact event type, applied before the export row limit.
- * @maxLength 100
- * @pattern ^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$
- */
-action?: string;
-startDate?: Date;
-endDate?: Date;
-/**
- * Maximum 5000 rows per export; defaults to 5000.
- */
-limit?: number;
+  /**
+   * Exact event type, applied before the export row limit.
+   * @maxLength 100
+   * @pattern ^$|^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$
+   */
+  action?: string;
+  startDate?: Date;
+  endDate?: Date;
+  /** Maximum 5000 rows per export; defaults to 5000. */
+  limit?: number;
 };

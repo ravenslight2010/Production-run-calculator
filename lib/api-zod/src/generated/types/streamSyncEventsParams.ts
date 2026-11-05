@@ -8,10 +8,8 @@
 import type { ClientTodayParameter } from './clientTodayParameter';
 
 export type StreamSyncEventsParams = {
-today?: ClientTodayParameter;
-clientId: string;
-/**
- * @pattern ^[a-f0-9]{64}$
- */
-snapshot?: string;
+  today?: ClientTodayParameter;
+  clientId: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshot?: string;
 };

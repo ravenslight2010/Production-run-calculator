@@ -7,13 +7,11 @@
  */
 
 export type ListQcRecipeReviewStatusesParams = {
-/**
- * @maxLength 240
- */
-cursor?: string;
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
+  /** @maxLength 240 */
+  cursor?: string;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };

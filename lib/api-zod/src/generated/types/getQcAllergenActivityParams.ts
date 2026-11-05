@@ -7,8 +7,6 @@
  */
 
 export type GetQcAllergenActivityParams = {
-/**
- * Facility production date in YYYY-MM-DD form; defaults to the current facility date.
- */
-date?: Date;
+  /** Facility production date in YYYY-MM-DD form; defaults to the current facility date. */
+  date?: Date;
 };

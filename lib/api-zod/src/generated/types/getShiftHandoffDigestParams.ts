@@ -7,5 +7,5 @@
  */
 
 export type GetShiftHandoffDigestParams = {
-date: Date;
+  date: Date;
 };

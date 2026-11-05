@@ -8,6 +8,6 @@
 import type { ListFinalizedOperationalReportsScope } from './listFinalizedOperationalReportsScope';
 
 export type ListFinalizedOperationalReportsParams = {
-scope: ListFinalizedOperationalReportsScope;
-date: Date;
+  scope: ListFinalizedOperationalReportsScope;
+  date: Date;
 };

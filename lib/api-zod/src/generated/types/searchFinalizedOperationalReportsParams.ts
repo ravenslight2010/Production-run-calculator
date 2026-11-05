@@ -8,12 +8,12 @@
 import type { SearchFinalizedOperationalReportsScope } from './searchFinalizedOperationalReportsScope';
 
 export type SearchFinalizedOperationalReportsParams = {
-startDate: Date;
-endDate: Date;
-scope?: SearchFinalizedOperationalReportsScope;
-/**
- * @minimum 1
- * @maximum 100
- */
-limit?: number;
+  startDate: Date;
+  endDate: Date;
+  scope?: SearchFinalizedOperationalReportsScope;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
 };
