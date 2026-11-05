@@ -25,4 +25,6 @@ jobs:
           node-version: 24.21.0
       - name: Report full-workspace dependency advisories
         continue-on-error: true
+        env:
+          WORKSPACE_AUDIT_REVISION: ${{ github.sha }}
         run: pnpm --filter @workspace/scripts run audit:workspace-report

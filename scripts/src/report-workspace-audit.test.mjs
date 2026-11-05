@@ -43,6 +43,7 @@ test("reports a valid empty audit as clean with zero severity counts", () => {
   const report = buildWorkspaceAuditReport({
     stdout: JSON.stringify(cleanAudit),
     exitCode: 0,
+    revision: "0123456789abcdef0123456789abcdef01234567",
   });
 
   assert.equal(report.status, "clean");
@@ -54,6 +55,10 @@ test("reports a valid empty audit as clean with zero severity counts", () => {
     info: 0,
   });
   assert.match(report.markdown, /Status: CLEAN/u);
+  assert.match(
+    report.markdown,
+    /\*\*Revision:\*\* `0123456789abcdef0123456789abcdef01234567`/u,
+  );
   assert.match(
     report.markdown,
     /critical 0 · high 0 · moderate 0 · low 0 · info 0/u,
@@ -76,6 +81,27 @@ test("reports one attempt for a first-attempt clean audit", () => {
   assert.equal(report.status, "clean");
   assert.match(report.markdown, /Audit attempts: 1 of 3\./u);
   assert.doesNotMatch(report.markdown, /recovered/u);
+});
+
+test("marks missing and malformed audit revisions unavailable without echoing input", () => {
+  for (const [name, revision] of [
+    ["missing", undefined],
+    ["malformed", "sha-from-untrusted-input\n::warning::injected"],
+  ]) {
+    const report = buildWorkspaceAuditReport({
+      stdout: JSON.stringify(cleanAudit),
+      exitCode: 0,
+      ...(revision === undefined ? {} : { revision }),
+    });
+
+    assert.equal(report.status, "clean", name);
+    assert.match(report.markdown, /\*\*Revision:\*\* unavailable/u, name);
+    assert.doesNotMatch(
+      report.markdown,
+      /sha-from-untrusted-input|injected/u,
+      name,
+    );
+  }
 });
 
 test("reports advisory counts and dependency paths from pnpm JSON", () => {
@@ -113,12 +139,16 @@ test("reports advisory counts and dependency paths from pnpm JSON", () => {
   const report = buildWorkspaceAuditReport({
     stdout: JSON.stringify(audit),
     exitCode: 1,
+    revision: "a".repeat(64),
   });
 
   assert.equal(report.status, "advisories");
   assert.equal(report.counts.moderate, 2);
   assert.equal(report.counts.low, 1);
   assert.match(report.markdown, /3 workspace advisory records/u);
+  assert.ok(
+    report.markdown.includes(`**Revision:** \`${"a".repeat(64)}\``),
+  );
   assert.match(report.markdown, /app&gt;build\\-tool&gt;glob/u);
   assert.match(report.markdown, /scripts&gt;test\\-tool&gt;glob/u);
   assert.match(report.markdown, /version 11\\\.1\\\.0/u);
@@ -165,12 +195,17 @@ test("does not report registry errors as a clean audit or expose raw response te
     }),
     stderr: privateRegistryDetail,
     exitCode: 1,
+    revision: "abcdef0123456789abcdef0123456789abcdef01",
   });
 
   assert.equal(report.status, "unavailable");
   assert.match(report.markdown, /UNAVAILABLE/u);
   assert.match(report.markdown, /registry\/network failure/u);
   assert.match(report.markdown, /ERR_PNPM_FETCH_503/u);
+  assert.match(
+    report.markdown,
+    /\*\*Revision:\*\* `abcdef0123456789abcdef0123456789abcdef01`/u,
+  );
   assert.match(report.markdown, /not a clean audit/u);
   assert.doesNotMatch(report.markdown, /registry\.example\.invalid/u);
   assert.doesNotMatch(report.markdown, /do-not-print/u);
@@ -874,6 +909,7 @@ process.exit(Object.keys(payload.advisories ?? {}).length ? 1 : 0);
         PATH: `${binDirectory}${delimiter}${process.env.PATH ?? ""}`,
         WORKSPACE_AUDIT_BASE_SHA: "a".repeat(40),
         WORKSPACE_AUDIT_DELTA_PATH: deltaPath,
+        WORKSPACE_AUDIT_REVISION: "b".repeat(40),
         GITHUB_STEP_SUMMARY: summaryPath,
         AUDIT_TEST_BASE_LOCKFILE: baseLockfilePath,
         AUDIT_TEST_BASE_REPORT: baseAuditPath,
@@ -907,6 +943,7 @@ process.exit(Object.keys(payload.advisories ?? {}).length ? 1 : 0);
     assert.deepEqual(observation.npmConfigKeys, []);
     const summary = readFileSync(summaryPath, "utf8");
     assert.match(summary, /resolved 1/u);
+    assert.ok(summary.includes(`**Revision:** \`${"b".repeat(40)}\``));
     assert.doesNotMatch(summary, /must-not-reach-base-audit/u);
     const delta = JSON.parse(readFileSync(deltaPath, "utf8"));
     assert.equal(delta.status, "compared");

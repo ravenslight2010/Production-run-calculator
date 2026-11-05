@@ -12,6 +12,7 @@ const MAX_ADVISORIES = 20;
 const MAX_DELTA_JSON_BYTES = 32 * 1024;
 const MAX_PATHS_PER_ADVISORY = 5;
 const MAX_TEXT_LENGTH = 240;
+const REVISION_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu;
 const MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_BASE_AUDIT_TIME_MS = 2 * 60 * 1000;
 const MAX_AUDIT_ATTEMPTS = 3;
@@ -148,6 +149,7 @@ export function buildWorkspaceAuditReport({
   exitCode = null,
   signal = null,
   error = null,
+  revision = null,
 }) {
   const sourceText = `${stdout}\n${stderr}\n${error?.code ?? ""}\n${error?.message ?? ""}`;
   let payload;
@@ -158,7 +160,7 @@ export function buildWorkspaceAuditReport({
     return {
       status: "unavailable",
       failure,
-      markdown: renderUnavailable(failure),
+      markdown: renderUnavailable(failure, revision),
     };
   }
 
@@ -169,7 +171,7 @@ export function buildWorkspaceAuditReport({
     return {
       status: "unavailable",
       failure,
-      markdown: renderUnavailable(failure),
+      markdown: renderUnavailable(failure, revision),
     };
   }
 
@@ -179,7 +181,7 @@ export function buildWorkspaceAuditReport({
     return {
       status: "unavailable",
       failure,
-      markdown: renderUnavailable(failure),
+      markdown: renderUnavailable(failure, revision),
     };
   }
 
@@ -191,7 +193,7 @@ export function buildWorkspaceAuditReport({
     return {
       status: "unavailable",
       failure,
-      markdown: renderUnavailable(failure),
+      markdown: renderUnavailable(failure, revision),
     };
   }
 
@@ -200,7 +202,7 @@ export function buildWorkspaceAuditReport({
     return {
       status: "unavailable",
       failure,
-      markdown: renderUnavailable(failure),
+      markdown: renderUnavailable(failure, revision),
     };
   }
 
@@ -209,7 +211,7 @@ export function buildWorkspaceAuditReport({
     return {
       status: "unavailable",
       failure,
-      markdown: renderUnavailable(failure),
+      markdown: renderUnavailable(failure, revision),
     };
   }
 
@@ -223,8 +225,16 @@ export function buildWorkspaceAuditReport({
     status,
     counts,
     advisories,
-    markdown: renderAuditSummary(status, counts, advisories),
+    markdown: renderAuditSummary(status, counts, advisories, revision),
   };
+}
+
+function renderRevision(revision) {
+  const value =
+    typeof revision === "string" && REVISION_PATTERN.test(revision)
+      ? `\`${revision}\``
+      : "unavailable";
+  return `**Revision:** ${value}`;
 }
 
 function renderAdvisoryList(title, advisories) {
@@ -408,12 +418,14 @@ function writeWorkspaceAuditDeltaJson(path, delta) {
   }
 }
 
-function renderUnavailable(failure) {
+function renderUnavailable(failure, revision) {
   const reason = failure.code
     ? ` Registry/network error code: \`${failure.code}\`.`
     : "";
   return [
     "## Full-workspace dependency audit (report-only)",
+    "",
+    renderRevision(revision),
     "",
     `**Status: UNAVAILABLE — ${failure.kind}. This is not a clean audit.**${reason}`,
     "",
@@ -422,7 +434,7 @@ function renderUnavailable(failure) {
   ].join("\n");
 }
 
-function renderAuditSummary(status, counts, advisories) {
+function renderAuditSummary(status, counts, advisories, revision) {
   const total = advisories.length;
   const statusText =
     status === "clean"
@@ -430,6 +442,8 @@ function renderAuditSummary(status, counts, advisories) {
       : `ADVISORIES FOUND — ${total} workspace advisory record${total === 1 ? "" : "s"}.`;
   const lines = [
     "## Full-workspace dependency audit (report-only)",
+    "",
+    renderRevision(revision),
     "",
     `**Status: ${statusText}**`,
     "",
@@ -483,6 +497,7 @@ function renderAuditSummary(status, counts, advisories) {
 
 export function runWorkspaceAudit() {
   const report = runWorkspaceAuditWithRetry({
+    revision: process.env.WORKSPACE_AUDIT_REVISION,
     executeAudit: (timeout) => {
       try {
         return spawnSync("pnpm", ["audit", "--json"], {
@@ -703,6 +718,7 @@ export function runWorkspaceAuditWithRetry({
   executeAudit,
   sleep = sleepSynchronously,
   now = () => performance.now(),
+  revision = null,
 }) {
   const deadline = now() + MAX_AUDIT_TOTAL_MS;
   let report;
@@ -731,6 +747,7 @@ export function runWorkspaceAuditWithRetry({
       exitCode: result.status,
       signal: result.signal,
       error: result.error,
+      revision,
     });
 
     if (
@@ -748,7 +765,10 @@ export function runWorkspaceAuditWithRetry({
     sleep(delayMs);
   }
 
-  return addRetrySummary(report ?? buildWorkspaceAuditReport({}), attempts);
+  return addRetrySummary(
+    report ?? buildWorkspaceAuditReport({ revision }),
+    attempts,
+  );
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

@@ -416,6 +416,7 @@ jobs:
         env:
           WORKSPACE_AUDIT_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
           WORKSPACE_AUDIT_DELTA_PATH: ${{ runner.temp }}/workspace-advisory-delta.json
+          WORKSPACE_AUDIT_REVISION: ${{ github.sha }}
         run: pnpm --filter @workspace/scripts run audit:workspace-report
       - name: Retain sanitized workspace advisory delta
         if: always()

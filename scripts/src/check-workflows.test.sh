@@ -402,6 +402,8 @@ test_ci_reports_workspace_advisories_without_changing_production_gate() {
   ' "$CI_WORKFLOW")
   assert_contains "$workspace_step" "continue-on-error: true"
   assert_contains "$workspace_step" \
+    "WORKSPACE_AUDIT_REVISION: \${{ github.sha }}"
+  assert_contains "$workspace_step" \
     "WORKSPACE_AUDIT_BASE_SHA: \${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}"
   assert_contains "$root_package" \
     '"audit:prod:release": "pnpm audit --prod --audit-level high"'
@@ -456,6 +458,8 @@ test_workspace_audit_rerun_isolated_and_non_blocking() {
     found { print }
   ' "$WORKSPACE_AUDIT_RERUN_WORKFLOW")
   assert_contains "$audit_step" "continue-on-error: true"
+  assert_contains "$audit_step" \
+    "WORKSPACE_AUDIT_REVISION: \${{ github.sha }}"
   assert_contains "$audit_step" \
     "run: pnpm --filter @workspace/scripts run audit:workspace-report"
   echo "PASS: manual workspace audit is revision-bound, read-only, and non-blocking"
