@@ -1,6 +1,7 @@
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
@@ -11,6 +12,27 @@ const MAX_PATHS_PER_ADVISORY = 5;
 const MAX_TEXT_LENGTH = 240;
 const MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_BASE_AUDIT_TIME_MS = 2 * 60 * 1000;
+const MAX_AUDIT_ATTEMPTS = 3;
+const MAX_AUDIT_TOTAL_MS = 3 * 60 * 1000;
+const MAX_AUDIT_ATTEMPT_MS = 60 * 1000;
+const AUDIT_RETRY_DELAYS_MS = [250, 500];
+const TRANSIENT_NETWORK_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EAI_AGAIN",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ETIMEDOUT",
+]);
+const TRANSIENT_PNPM_FETCH_CODES = new Set([
+  "ERR_PNPM_FETCH_408",
+  "ERR_PNPM_FETCH_429",
+  "ERR_PNPM_FETCH_500",
+  "ERR_PNPM_FETCH_502",
+  "ERR_PNPM_FETCH_503",
+  "ERR_PNPM_FETCH_504",
+]);
 const REGISTRY_UNAVAILABLE_WARNING =
   "::warning::Full-workspace dependency audit is unavailable because the package registry or network could not be reached. The advisory check was not verified; CI remains non-blocking.";
 
@@ -42,7 +64,7 @@ function escapeMarkdown(value) {
 
 function detectRegistryFailure(text) {
   const code = text.match(
-    /\b(?:ERR_PNPM_[A-Z0-9_]+|ECONN[A-Z]+|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|CERT_[A-Z_]+|SELF_SIGNED_CERT_IN_CHAIN)\b/u,
+    /\b(?:ERR_PNPM_[A-Z0-9_]+|ECONN[A-Z]+|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|CERT_[A-Z_]+|SELF_SIGNED_CERT_IN_CHAIN)\b/u,
   )?.[0];
   if (code) return { kind: "registry/network failure", code };
   if (
@@ -125,7 +147,7 @@ export function buildWorkspaceAuditReport({
   signal = null,
   error = null,
 }) {
-  const sourceText = `${stdout}\n${stderr}\n${error?.message ?? ""}`;
+  const sourceText = `${stdout}\n${stderr}\n${error?.code ?? ""}\n${error?.message ?? ""}`;
   let payload;
   try {
     payload = JSON.parse(stdout);
@@ -377,24 +399,21 @@ function renderAuditSummary(status, counts, advisories) {
 }
 
 export function runWorkspaceAudit() {
-  let result;
-  try {
-    result = spawnSync("pnpm", ["audit", "--json"], {
-      cwd: WORKSPACE_ROOT,
-      encoding: "utf8",
-      maxBuffer: MAX_AUDIT_OUTPUT_BYTES,
-      timeout: 6 * 60 * 1000,
-    });
-  } catch (error) {
-    result = { stdout: "", stderr: "", status: null, error };
-  }
-
-  const report = buildWorkspaceAuditReport({
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-    exitCode: result.status,
-    signal: result.signal,
-    error: result.error,
+  const report = runWorkspaceAuditWithRetry({
+    executeAudit: (timeout) => {
+      try {
+        return spawnSync("pnpm", ["audit", "--json"], {
+          cwd: WORKSPACE_ROOT,
+          encoding: "utf8",
+          maxBuffer: MAX_AUDIT_OUTPUT_BYTES,
+          timeout,
+        });
+      } catch (error) {
+        return { stdout: "", stderr: "", status: null, error };
+      }
+    },
+    sleep: sleepSynchronously,
+    now: () => performance.now(),
   });
 
   let markdown = report.markdown;
@@ -533,9 +552,99 @@ function auditBaseLockfile(lockfile) {
   }
 }
 
-if (
-  process.argv[1] &&
-  fileURLToPath(import.meta.url) === resolve(process.argv[1])
-) {
+function sleepSynchronously(delayMs) {
+  if (delayMs <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+}
+
+function getStructuredAuditError(stdout) {
+  if (!stdout) return null;
+  try {
+    const payload = JSON.parse(stdout);
+    return payload && typeof payload === "object" && payload.error
+      ? payload.error
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRetryableTransientFailure(report, result) {
+  if (
+    report?.status !== "unavailable" ||
+    report.failure?.kind !== "registry/network failure"
+  ) {
+    return false;
+  }
+
+  if (result.stdout?.trim()) {
+    const structuredError = getStructuredAuditError(result.stdout);
+    if (!structuredError) return false;
+
+    const code = report.failure.code ?? structuredError.code;
+    return (
+      TRANSIENT_NETWORK_CODES.has(code) ||
+      TRANSIENT_PNPM_FETCH_CODES.has(code)
+    );
+  }
+
+  return (
+    !result.signal &&
+    !result.error?.killed &&
+    TRANSIENT_NETWORK_CODES.has(result.error?.code)
+  );
+}
+
+export function runWorkspaceAuditWithRetry({
+  executeAudit,
+  sleep = sleepSynchronously,
+  now = () => performance.now(),
+}) {
+  const deadline = now() + MAX_AUDIT_TOTAL_MS;
+  let report;
+
+  for (let attempt = 0; attempt < MAX_AUDIT_ATTEMPTS; attempt += 1) {
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) break;
+
+    const timeout = Math.floor(
+      Math.min(MAX_AUDIT_ATTEMPT_MS, remainingMs),
+    );
+    if (timeout <= 0) break;
+    let result;
+    try {
+      result = executeAudit(timeout);
+    } catch (error) {
+      result = { stdout: "", stderr: "", status: null, error };
+    }
+    result ??= { stdout: "", stderr: "", status: null };
+
+    report = buildWorkspaceAuditReport({
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      exitCode: result.status,
+      signal: result.signal,
+      error: result.error,
+    });
+
+    if (
+      attempt === MAX_AUDIT_ATTEMPTS - 1 ||
+      !isRetryableTransientFailure(report, result)
+    ) {
+      return report;
+    }
+
+    const delayMs = Math.min(
+      AUDIT_RETRY_DELAYS_MS[attempt],
+      Math.max(0, deadline - now()),
+    );
+    if (delayMs <= 0) break;
+    sleep(delayMs);
+  }
+
+  return report ?? buildWorkspaceAuditReport({});
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   runWorkspaceAudit();
 }
