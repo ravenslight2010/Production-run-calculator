@@ -6,6 +6,7 @@ import { isManualSection, type ManualSection } from "@workspace/sync-contract";
 import type { Scope } from "./requestScope";
 import { logger } from "./logger";
 import { createOutboxDatabaseObserver } from "./outboxDatabaseTelemetry";
+import { withPoolAcquisitionOperation } from "./capacityTelemetry";
 import {
   boundedDurationMs,
   classifyBackgroundFailure,
@@ -509,43 +510,45 @@ export function startSyncOutboxListener(
   };
 
   async function connect(): Promise<void> {
-    if (stopped || listener) return;
-    let client: PoolClient | undefined;
-    try {
-      client = await pool.connect();
-      if (stopped) {
-        client.release();
-        return;
+    return withPoolAcquisitionOperation("outbox", async () => {
+      if (stopped || listener) return;
+      let client: PoolClient | undefined;
+      try {
+        client = await pool.connect();
+        if (stopped) {
+          client.release();
+          return;
+        }
+        listener = client;
+        notificationHandler = (message) => {
+          if (message.channel !== NOTIFY_CHANNEL) return;
+          // Payload is a bounded wake-up hint, never event data.
+          scheduleDrain();
+        };
+        errorHandler = (error) => disconnect(client!, error);
+        client.on("notification", notificationHandler);
+        client.on("error", errorHandler);
+        await client.query(`LISTEN ${NOTIFY_CHANNEL}`);
+        retryDelayMs = 500;
+        const knownScopes = await pool.query<{ scope: string; cursor: string | number }>(
+          "SELECT scope, cursor FROM sync_outbox_cursors ORDER BY scope ASC",
+        );
+        for (const row of knownScopes.rows) {
+          if (!cursors.has(row.scope)) cursors.set(row.scope, Number(row.cursor));
+        }
+        await drainAll();
+        logger.info({ event: "sync_outbox_listener", outcome: "connected" }, "Sync outbox listener connected");
+      } catch {
+        if (client) {
+          if (listener === client) listener = undefined;
+          try { client.release(true); } catch {}
+        }
+        if (!stopped) {
+          logger.warn({ event: "sync_outbox_listener", outcome: "retry" }, "Sync outbox listener disconnected; durable catch-up will retry");
+          scheduleReconnect();
+        }
       }
-      listener = client;
-      notificationHandler = (message) => {
-        if (message.channel !== NOTIFY_CHANNEL) return;
-        // Payload is a bounded wake-up hint, never event data.
-        scheduleDrain();
-      };
-      errorHandler = (error) => disconnect(client!, error);
-      client.on("notification", notificationHandler);
-      client.on("error", errorHandler);
-      await client.query(`LISTEN ${NOTIFY_CHANNEL}`);
-      retryDelayMs = 500;
-      const knownScopes = await pool.query<{ scope: string; cursor: string | number }>(
-        "SELECT scope, cursor FROM sync_outbox_cursors ORDER BY scope ASC",
-      );
-      for (const row of knownScopes.rows) {
-        if (!cursors.has(row.scope)) cursors.set(row.scope, Number(row.cursor));
-      }
-      await drainAll();
-      logger.info({ event: "sync_outbox_listener", outcome: "connected" }, "Sync outbox listener connected");
-    } catch {
-      if (client) {
-        if (listener === client) listener = undefined;
-        try { client.release(true); } catch {}
-      }
-      if (!stopped) {
-        logger.warn({ event: "sync_outbox_listener", outcome: "retry" }, "Sync outbox listener disconnected; durable catch-up will retry");
-        scheduleReconnect();
-      }
-    }
+    });
   }
 
   if (process.env.NODE_ENV !== "test" || process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED === "1") {
@@ -553,13 +556,13 @@ export function startSyncOutboxListener(
     const poll = setInterval(scheduleDrain, DRAIN_INTERVAL_MS);
     poll.unref();
     retentionTimer = setInterval(() => {
-      void pool.query(
+      void withPoolAcquisitionOperation("outbox", () => pool.query(
         `DELETE FROM sync_outbox_events
          WHERE created_at < NOW() - ($1::text || ' days')::interval`,
         [String(RETENTION_DAYS)],
       ).catch(() => {
         logger.warn({ event: "sync_outbox_retention", outcome: "degraded" }, "Sync outbox retention cleanup failed");
-      });
+      }));
     }, RETENTION_INTERVAL_MS);
     retentionTimer.unref();
   }

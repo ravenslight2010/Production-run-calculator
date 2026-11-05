@@ -1,4 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Pool, PoolClient } from "pg";
+import {
+  capacityTelemetrySnapshot,
+  clearCapacityTelemetryForTests,
+  installPoolTelemetry,
+} from "./capacityTelemetry";
 import {
   CACHE_MAINTENANCE_FAILURE_THRESHOLD,
   CACHE_MAINTENANCE_FAILURE_MAX_EVENTS,
@@ -60,6 +66,43 @@ describe("observability", () => {
     expect(operationType("/api")).toBe("health");
     expect(isHealthProbePath("/api/livez")).toBe(true);
     expect(isHealthProbePath("/api/sync/today")).toBe(false);
+  });
+
+  it("attributes health and foreground sync checkouts at the request boundary", async () => {
+    clearCapacityTelemetryForTests();
+    const pool = {
+      options: {},
+      totalCount: 1,
+      idleCount: 1,
+      waitingCount: 0,
+      connect: () => Promise.resolve({ release: vi.fn() } as unknown as PoolClient),
+    } as unknown as Pool;
+    installPoolTelemetry(pool);
+
+    const invoke = (path: string) => new Promise<void>((resolve, reject) => {
+      const next = vi.fn(() => {
+        void pool.connect().then((client) => {
+          client.release();
+          resolve();
+        }, reject);
+      });
+      const res = { setHeader: vi.fn(), once: vi.fn() };
+      observabilityMiddleware({ path } as never, res as never, next);
+    });
+
+    try {
+      await invoke("/api/readyz");
+      await invoke("/api/sync/today");
+      await invoke("/api/unknown");
+
+      expect(capacityTelemetrySnapshot().counters).toMatchObject({
+        "db.pool.acquisition.health_check.success.count": 1,
+        "db.pool.acquisition.foreground_sync.success.count": 1,
+        "db.pool.acquisition.unknown.success.count": 1,
+      });
+    } finally {
+      clearCapacityTelemetryForTests();
+    }
   });
 
   it("only emits bounded machine-readable error codes", () => {

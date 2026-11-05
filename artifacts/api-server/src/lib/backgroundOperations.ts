@@ -6,6 +6,10 @@ import {
 } from "@workspace/db";
 import { randomUUID } from "node:crypto";
 import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
+import {
+  withPoolAcquisitionOperation,
+  type PoolAcquisitionOperation,
+} from "./capacityTelemetry";
 
 export const BACKGROUND_OPERATION_FAILURE_THRESHOLD = 3;
 export const BACKGROUND_OPERATION_RETRY_DELAY_MS = 100;
@@ -41,6 +45,12 @@ export type BackgroundOperationName =
   | "server-job-prune"
   | "web-push-schedule"
   | "sync-outbox-drain";
+
+function poolAcquisitionOperation(name: BackgroundOperationName): PoolAcquisitionOperation {
+  if (name === "server-auto-track-tick") return "auto_track";
+  if (name === "sync-outbox-drain") return "outbox";
+  return "server_job";
+}
 
 type OperationState = {
   failureTimes: number[];
@@ -384,8 +394,9 @@ export async function runBackgroundOperation<T>(
   // should not silently abandon its one recovery attempt.
   const delay = options.delay ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? Date.now;
+  const run = () => withPoolAcquisitionOperation(poolAcquisitionOperation(name), operation);
   try {
-    const result = await operation();
+    const result = await run();
     if (options.recordSuccess !== false) recordSuccess(name, now());
     return result;
   } catch (firstError) {
@@ -395,7 +406,7 @@ export async function runBackgroundOperation<T>(
     }
     await delay(BACKGROUND_OPERATION_RETRY_DELAY_MS);
     try {
-      const result = await operation();
+      const result = await run();
       if (options.recordSuccess !== false) recordSuccess(name, now());
       return result;
     } catch (retryError) {

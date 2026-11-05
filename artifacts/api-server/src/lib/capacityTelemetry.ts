@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { Pool, PoolClient } from "pg";
 import type { Logger } from "pino";
@@ -14,6 +15,15 @@ const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 export const LEGACY_SYNC_READINESS_WINDOW_MS = 24 * 60 * 60 * 1_000;
 export const LEGACY_SYNC_EVIDENCE_TTL_MS = 5 * 60 * 1_000;
 const LEGACY_SYNC_BUCKET_MS = 60_000;
+const POOL_ACQUISITION_OPERATIONS = [
+  "auto_track",
+  "outbox",
+  "server_job",
+  "health_check",
+  "foreground_sync",
+  "unknown",
+] as const;
+export type PoolAcquisitionOperation = typeof POOL_ACQUISITION_OPERATIONS[number];
 
 export type SyncPutMode = "complete" | "partial" | "fallback" | "unchanged";
 export type SseFrameMode = "complete" | "partial";
@@ -59,6 +69,7 @@ let windowStartedAt = Date.now();
 let lastReportAt = windowStartedAt;
 let latestPool = { total: 0, idle: 0, waiting: 0 };
 const installedPools = new WeakSet<Pool>();
+const poolAcquisitionOperationContext = new AsyncLocalStorage<PoolAcquisitionOperation>();
 let legacyObservationStartedAt = windowStartedAt;
 const legacySyncBuckets = new Map<number, { accepted: number; rejected: number }>();
 
@@ -273,37 +284,79 @@ function poolSnapshot(pool: Pool): void {
   observe("db.pool.waiting", latestPool.waiting);
 }
 
+/**
+ * Attach one fixed operation class to existing pool checkouts. Unscoped work
+ * remains explicitly unknown; caller-provided strings never become metric keys.
+ */
+export function withPoolAcquisitionOperation<T>(
+  operation: PoolAcquisitionOperation,
+  callback: () => T,
+): T {
+  const safeOperation = POOL_ACQUISITION_OPERATIONS.includes(operation) ? operation : "unknown";
+  return poolAcquisitionOperationContext.run(safeOperation, callback);
+}
+
+function currentPoolAcquisitionOperation(): PoolAcquisitionOperation {
+  const operation = poolAcquisitionOperationContext.getStore();
+  return operation && POOL_ACQUISITION_OPERATIONS.includes(operation) ? operation : "unknown";
+}
+
+function safePerformanceNow(): number {
+  try {
+    return performance.now();
+  } catch {
+    return 0;
+  }
+}
+
+function recordPoolAcquisition(
+  pool: Pool,
+  operation: PoolAcquisitionOperation,
+  startedAt: number,
+  phaseCheckout: (error?: unknown) => void,
+  outcome: "success" | "error",
+  error?: unknown,
+): void {
+  try {
+    phaseCheckout(outcome === "error" ? error : undefined);
+    const elapsedMs = Math.max(0, safePerformanceNow() - startedAt);
+    observe("db.pool.acquisition_ms", elapsedMs);
+    observe(`db.pool.acquisition.${operation}.duration_ms`, elapsedMs);
+    incrementBounded(`db.pool.acquisition.${operation}.${outcome}.count`);
+    if (outcome === "error") incrementBounded("db.pool.acquisition_error.count");
+    poolSnapshot(pool);
+    maybeReport();
+  } catch {
+    // Pool telemetry is best-effort and must never change a checkout result.
+  }
+}
+
 export function installPoolTelemetry(pool: Pool): void {
   if (installedPools.has(pool)) return;
   installedPools.add(pool);
   const originalConnect = pool.connect.bind(pool);
   pool.connect = ((callback?: (err: Error | undefined, client: PoolClient | undefined, release: (releaseError?: Error | boolean) => void) => void) => {
-    const startedAt = performance.now();
-    const phaseCheckout = startDatabasePhaseCheckout(pool.options?.connectionTimeoutMillis);
+    const startedAt = safePerformanceNow();
+    const operation = currentPoolAcquisitionOperation();
+    let phaseCheckout: (error?: unknown) => void = () => {};
+    try {
+      phaseCheckout = startDatabasePhaseCheckout(pool.options?.connectionTimeoutMillis);
+    } catch {
+      // A missing diagnostic scope must not prevent the underlying checkout.
+    }
     if (callback) {
       return originalConnect((error, client, release) => {
-        phaseCheckout(error);
-        observe("db.pool.acquisition_ms", performance.now() - startedAt);
-        if (error) increment("db.pool.acquisition_error.count");
-        poolSnapshot(pool);
-        maybeReport();
+        recordPoolAcquisition(pool, operation, startedAt, phaseCheckout, error ? "error" : "success", error);
         callback(error, client, release);
       });
     }
     return originalConnect().then(
       (client) => {
-        phaseCheckout();
-        observe("db.pool.acquisition_ms", performance.now() - startedAt);
-        poolSnapshot(pool);
-        maybeReport();
+        recordPoolAcquisition(pool, operation, startedAt, phaseCheckout, "success");
         return client;
       },
       (error) => {
-        phaseCheckout(error);
-        increment("db.pool.acquisition_error.count");
-        observe("db.pool.acquisition_ms", performance.now() - startedAt);
-        poolSnapshot(pool);
-        maybeReport();
+        recordPoolAcquisition(pool, operation, startedAt, phaseCheckout, "error", error);
         throw error;
       },
     );

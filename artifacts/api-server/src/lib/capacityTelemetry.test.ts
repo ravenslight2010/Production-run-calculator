@@ -16,7 +16,9 @@ import {
   reportCapacityTelemetry,
   syncRunCountBucket,
   syncPeerFrameTelemetrySnapshot,
+  withPoolAcquisitionOperation,
 } from "./capacityTelemetry";
+import { runBackgroundOperation } from "./backgroundOperations";
 
 beforeEach(() => clearCapacityTelemetryForTests());
 
@@ -193,6 +195,122 @@ describe("capacity telemetry", () => {
       heldClient?.release();
       await pool.end();
     }
+  });
+
+  it("summarizes pool acquisitions by fixed operation class and preserves unknown callers", async () => {
+    const pool = new Pool({
+      Client: SyntheticPgClient as never,
+      max: 1,
+      connectionTimeoutMillis: 15,
+      idleTimeoutMillis: 0,
+    });
+    installPoolTelemetry(pool);
+
+    let heldClient: PoolClient | undefined;
+    try {
+      heldClient = await withPoolAcquisitionOperation("outbox", () => pool.connect());
+      await expect(withPoolAcquisitionOperation("auto_track", () => pool.connect()))
+        .rejects.toThrow("timeout exceeded when trying to connect");
+
+      const callbackFailure = withPoolAcquisitionOperation("health_check", () =>
+        new Promise<void>((resolve, reject) => {
+          pool.connect((error, client, release) => {
+            if (error) return reject(error);
+            if (!client || !release) return reject(new Error("Expected a checked-out test client"));
+            release();
+            resolve();
+          });
+        }),
+      );
+      await expect(callbackFailure).rejects.toThrow("timeout exceeded when trying to connect");
+
+      heldClient.release();
+      heldClient = undefined;
+      const jobClient = await withPoolAcquisitionOperation("server_job", () => pool.connect());
+      jobClient.release();
+      const syncClient = await withPoolAcquisitionOperation("foreground_sync", () => pool.connect());
+      syncClient.release();
+      const unknownClient = await pool.connect();
+      unknownClient.release();
+
+      // Exercise the actual background operation mapping, not just the context helper.
+      await runBackgroundOperation("server-auto-track-tick", async () => {
+        const client = await pool.connect();
+        client.release();
+      }, { recordSuccess: false });
+      await runBackgroundOperation("sync-outbox-drain", async () => {
+        const client = await pool.connect();
+        client.release();
+      }, { recordSuccess: false });
+
+      const snapshot = capacityTelemetrySnapshot();
+      expect(snapshot.counters).toMatchObject({
+        "db.pool.acquisition.outbox.success.count": 2,
+        "db.pool.acquisition.auto_track.error.count": 1,
+        "db.pool.acquisition.health_check.error.count": 1,
+        "db.pool.acquisition.server_job.success.count": 1,
+        "db.pool.acquisition.foreground_sync.success.count": 1,
+        "db.pool.acquisition.unknown.success.count": 1,
+        "db.pool.acquisition.auto_track.success.count": 1,
+        "db.pool.acquisition_error.count": 2,
+      });
+      for (const operation of [
+        "outbox", "auto_track", "health_check", "server_job",
+        "foreground_sync", "unknown",
+      ]) {
+        expect(snapshot.distributions[`db.pool.acquisition.${operation}.duration_ms`]?.count)
+          .toBeGreaterThan(0);
+      }
+      expect(snapshot.distributions["db.pool.acquisition_ms"]?.count).toBe(8);
+      expect(JSON.stringify(snapshot)).not.toMatch(/payload|runId|recipe|user|facility|errorText|SQL|token/i);
+    } finally {
+      heldClient?.release();
+      await pool.end();
+    }
+  });
+
+  it("keeps checkout callback results intact and excludes sensitive errors from telemetry", async () => {
+    const sensitiveError = Object.assign(new Error("private SQL and request content"), {
+      code: "XX000",
+      query: "SELECT private_value",
+      values: ["private-user"],
+    });
+    const pool = {
+      options: { connectionTimeoutMillis: 10 },
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
+      connect(callback: (error?: Error, client?: PoolClient, release?: (error?: Error | boolean) => void) => void) {
+        queueMicrotask(() => callback(sensitiveError));
+      },
+    } as unknown as Pool;
+    installPoolTelemetry(pool);
+
+    const callbackError = await withPoolAcquisitionOperation("health_check", () =>
+      new Promise<Error | undefined>((resolve) => pool.connect((error) => resolve(error))),
+    );
+    expect(callbackError).toBe(sensitiveError);
+
+    // Invalid runtime labels collapse to the explicit unknown bucket.
+    const unknownError = await withPoolAcquisitionOperation("private-scope" as never, () =>
+      new Promise<Error | undefined>((resolve) => pool.connect((error) => resolve(error))),
+    );
+    expect(unknownError).toBe(sensitiveError);
+    const snapshot = capacityTelemetrySnapshot();
+    expect(snapshot.counters).toMatchObject({
+      "db.pool.acquisition.health_check.error.count": 1,
+      "db.pool.acquisition.unknown.error.count": 1,
+    });
+    expect(JSON.stringify(snapshot)).not.toMatch(/private SQL|private_value|private-user|XX000/);
+    expect(Object.keys(snapshot.distributions).filter((key) => key.startsWith("db.pool.acquisition."))
+      .every((key) => [
+        "db.pool.acquisition.auto_track.duration_ms",
+        "db.pool.acquisition.outbox.duration_ms",
+        "db.pool.acquisition.server_job.duration_ms",
+        "db.pool.acquisition.health_check.duration_ms",
+        "db.pool.acquisition.foreground_sync.duration_ms",
+        "db.pool.acquisition.unknown.duration_ms",
+      ].includes(key))).toBe(true);
   });
 
   it("requires a complete zero-write window before declaring the legacy cutoff ready", () => {

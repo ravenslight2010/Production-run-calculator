@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
 import { cacheMaintenanceEventsTable, db, pool } from "@workspace/db";
 import { logger } from "./logger";
-import { installPoolTelemetry } from "./capacityTelemetry";
+import { installPoolTelemetry, withPoolAcquisitionOperation } from "./capacityTelemetry";
 import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
 import type { StartupHealthSnapshot } from "./startupHealth";
 import type { GeminiFallbackTrigger, GeminiRequestResult } from "@workspace/integrations-openai-ai-server";
@@ -516,7 +516,12 @@ export function observabilityMiddleware(req: Request, res: Response, next: NextF
       ...(res.getHeader("X-Sync-Convergence") ? { syncConvergence: res.getHeader("X-Sync-Convergence") } : {}),
     });
   });
-  next();
+  const poolOperation = isHealthProbePath(req.path)
+    ? "health_check"
+    : operationType(req.path) === "sync"
+      ? "foreground_sync"
+      : "unknown";
+  withPoolAcquisitionOperation(poolOperation, next);
 }
 
 export function recordStartupEvent(

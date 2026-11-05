@@ -45,6 +45,14 @@ If a workspace-wide typecheck exceeds its shell time limit while another lock-he
 
 **How to apply:** Check the runner lock and active validation workflows before retrying; report focused package results and workspace-wide status separately.
 
+## Shared diagnostic-test concurrency
+
+API tests that persist and clear shared diagnostic records can interfere when several files run in parallel. A background-operation diagnostics assertion failed in a combined focused run, then passed when run alone and when the same targeted files ran serially.
+
+**Why:** Process-local telemetry may be isolated while its database-backed diagnostic rows remain shared across test workers.
+
+**How to apply:** When a diagnostic persistence test fails only in a multi-file run, preserve that failure, rerun the failed file alone, and then run the focused set serially before deciding whether the change caused a regression. Report the combined-run failure separately from passing serial evidence.
+
 Generated API checks can fail earlier if Orval output drifts from the OpenAPI source. Compare temporary generated output with the tracked files; regenerate only when the source contract supports the difference, then rerun the full check to reveal later failures.
 
 **Why:** A clean focused check does not close a configured workspace-wide gate, and generated-contract drift can mask a separate compiler failure.
