@@ -407,6 +407,11 @@ jobs:
         # informational CI lane; the release gate fails closed on either.
         continue-on-error: true
         run: pnpm run audit:prod:ci
+      - name: Report full-workspace dependency advisories
+        # Report build/test dependency findings without changing the production
+        # audit threshold or blocking CI when the registry is unavailable.
+        continue-on-error: true
+        run: pnpm --filter @workspace/scripts run audit:workspace-report
 
 
   docker:

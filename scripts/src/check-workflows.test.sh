@@ -356,6 +356,52 @@ ci_schema_safe_rollback_job_block() {
   ' "$CI_WORKFLOW"
 }
 
+ci_security_audit_job_block() {
+  awk '
+    $0 == "  security-audit:" {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^  [[:alnum:]_-]+:/ {
+      exit
+    }
+    found {
+      print
+    }
+  ' "$CI_WORKFLOW"
+}
+
+test_ci_reports_workspace_advisories_without_changing_production_gate() {
+  local audit_block
+  local root_package
+  audit_block=$(ci_security_audit_job_block)
+  root_package=$(<"${SCRIPT_DIR}/../../package.json")
+
+  assert_contains "$audit_block" \
+    "name: Report high-severity production dependency advisories"
+  assert_contains "$audit_block" "run: pnpm run audit:prod:ci"
+  assert_contains "$audit_block" \
+    "name: Report full-workspace dependency advisories"
+  assert_contains "$audit_block" \
+    "run: pnpm --filter @workspace/scripts run audit:workspace-report"
+
+  local workspace_step
+  workspace_step=$(awk '
+    $0 == "      - name: Report full-workspace dependency advisories" {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^      - name: / { exit }
+    found { print }
+  ' "$CI_WORKFLOW")
+  assert_contains "$workspace_step" "continue-on-error: true"
+  assert_contains "$root_package" \
+    '"audit:prod:release": "pnpm audit --prod --audit-level high"'
+  echo "PASS: reports workspace advisories without changing the production gate"
+}
+
 test_ci_runs_routine_scripts_tests() {
   local typecheck_block
   local ipv6_step_line
@@ -1774,6 +1820,7 @@ test_rejects_missing_remaining_workflow_job_timeout
 test_rejects_non_positive_remaining_workflow_job_timeout
 test_department_navigation_readiness_contract
 test_ci_runs_routine_scripts_tests
+test_ci_reports_workspace_advisories_without_changing_production_gate
 test_ci_docker_images_are_build_only_and_runtime_checked
 test_release_build_identity_is_prepared_for_container_and_browser_smoke
 test_docker_executable_targets_default_to_nonroot
