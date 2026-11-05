@@ -384,10 +384,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-
   security-audit:
     name: Security audit (prod deps)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # Includes dependency installation and a network-bound audit with a
     # bounded cap so registry stalls cannot hold a runner indefinitely.
     timeout-minutes: 10
@@ -395,6 +396,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       # pnpm version is read from the "packageManager" field in package.json
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -411,8 +413,9 @@ jobs:
         # Report build/test dependency findings without changing the production
         # audit threshold or blocking CI when the registry is unavailable.
         continue-on-error: true
+        env:
+          WORKSPACE_AUDIT_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: pnpm --filter @workspace/scripts run audit:workspace-report
-
 
   docker:
     name: Docker image

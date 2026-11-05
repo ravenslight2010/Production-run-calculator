@@ -1,7 +1,8 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const WORKSPACE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SEVERITIES = ["critical", "high", "moderate", "low", "info"];
@@ -9,6 +10,7 @@ const MAX_ADVISORIES = 20;
 const MAX_PATHS_PER_ADVISORY = 5;
 const MAX_TEXT_LENGTH = 240;
 const MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024;
+const MAX_BASE_AUDIT_TIME_MS = 2 * 60 * 1000;
 const REGISTRY_UNAVAILABLE_WARNING =
   "::warning::Full-workspace dependency audit is unavailable because the package registry or network could not be reached. The advisory check was not verified; CI remains non-blocking.";
 
@@ -43,7 +45,9 @@ function detectRegistryFailure(text) {
     /\b(?:ERR_PNPM_[A-Z0-9_]+|ECONN[A-Z]+|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|CERT_[A-Z_]+|SELF_SIGNED_CERT_IN_CHAIN)\b/u,
   )?.[0];
   if (code) return { kind: "registry/network failure", code };
-  if (/\b(?:registry|network|fetch|socket|connect|TLS|certificate)\b/iu.test(text)) {
+  if (
+    /\b(?:registry|network|fetch|socket|connect|TLS|certificate)\b/iu.test(text)
+  ) {
     return { kind: "registry/network failure" };
   }
   return { kind: "audit unavailable" };
@@ -51,14 +55,16 @@ function detectRegistryFailure(text) {
 
 function readAdvisories(payload) {
   const advisories = payload?.advisories;
-  if (Array.isArray(advisories)) return advisories;
+  if (Array.isArray(advisories)) {
+    return advisories.map((advisory) => [null, advisory]);
+  }
   if (advisories && typeof advisories === "object") {
-    return Object.values(advisories);
+    return Object.entries(advisories);
   }
   return null;
 }
 
-function normalizeAdvisory(advisory) {
+function normalizeAdvisory(advisory, advisoryKey = null) {
   if (
     !advisory ||
     typeof advisory !== "object" ||
@@ -70,6 +76,22 @@ function normalizeAdvisory(advisory) {
     return null;
   }
 
+  const urlIdentifier =
+    typeof advisory.url === "string"
+      ? advisory.url.match(/\b(?:GHSA-[A-Z0-9-]+|CVE-\d{4}-\d{4,})\b/iu)?.[0]
+      : null;
+  const identifier = [
+    advisory.github_advisory_id,
+    advisory.ghsa_id,
+    advisory.cve,
+    advisory.id,
+    urlIdentifier,
+    advisoryKey,
+  ].find((value) => typeof value === "string" || typeof value === "number");
+  const stableIdentifier =
+    identifier === undefined || String(identifier).trim() === ""
+      ? `fallback:${advisory.severity}:${advisory.title}`
+      : `advisory:${String(identifier).trim().toUpperCase()}`;
   const paths = [];
   for (const finding of advisory.findings) {
     if (!finding || typeof finding !== "object") return null;
@@ -90,6 +112,8 @@ function normalizeAdvisory(advisory) {
     moduleName: advisory.module_name,
     severity: advisory.severity,
     title: advisory.title,
+    identifier: identifier === undefined ? null : String(identifier),
+    identity: `${advisory.module_name}\u0000${stableIdentifier}`,
     paths,
   };
 }
@@ -135,7 +159,9 @@ export function buildWorkspaceAuditReport({
     };
   }
 
-  const advisories = rawAdvisories.map(normalizeAdvisory);
+  const advisories = rawAdvisories.map(([key, advisory]) =>
+    normalizeAdvisory(advisory, key),
+  );
   if (advisories.some((advisory) => advisory === null)) {
     const failure = { kind: "audit unavailable" };
     return {
@@ -163,7 +189,9 @@ export function buildWorkspaceAuditReport({
     };
   }
 
-  const counts = Object.fromEntries(SEVERITIES.map((severity) => [severity, 0]));
+  const counts = Object.fromEntries(
+    SEVERITIES.map((severity) => [severity, 0]),
+  );
   for (const advisory of advisories) counts[advisory.severity] += 1;
 
   const status = advisories.length > 0 ? "advisories" : "clean";
@@ -172,6 +200,106 @@ export function buildWorkspaceAuditReport({
     counts,
     advisories,
     markdown: renderAuditSummary(status, counts, advisories),
+  };
+}
+
+function renderAdvisoryList(title, advisories) {
+  const lines = [`### ${title}`];
+  if (advisories.length === 0) {
+    lines.push("- None.");
+    return lines;
+  }
+  for (const advisory of advisories.slice(0, MAX_ADVISORIES)) {
+    const identifier = advisory.identifier
+      ? ` — ${escapeMarkdown(advisory.identifier)}`
+      : "";
+    const previousSeverity =
+      advisory.previousSeverity &&
+      advisory.previousSeverity !== advisory.severity
+        ? ` (was ${escapeMarkdown(advisory.previousSeverity)})`
+        : "";
+    lines.push(
+      `- **${escapeMarkdown(advisory.moduleName)}** (${escapeMarkdown(advisory.severity)}${previousSeverity})${identifier} — ${escapeMarkdown(advisory.title)}`,
+    );
+  }
+  if (advisories.length > MAX_ADVISORIES) {
+    lines.push(
+      `- ${advisories.length - MAX_ADVISORIES} additional finding(s) omitted.`,
+    );
+  }
+  return lines;
+}
+
+export function buildWorkspaceAuditDeltaReport({ baseReport, headReport }) {
+  if (
+    !baseReport ||
+    !headReport ||
+    !["clean", "advisories"].includes(baseReport.status) ||
+    !["clean", "advisories"].includes(headReport.status)
+  ) {
+    const unavailableSide =
+      baseReport?.status === "unavailable"
+        ? "base revision"
+        : headReport?.status === "unavailable"
+          ? "proposed revision"
+          : "base or proposed revision";
+    return {
+      status: "unavailable",
+      markdown: [
+        "## Pull-request workspace advisory comparison",
+        "",
+        `**Status: UNAVAILABLE — the ${unavailableSide} audit could not be verified.**`,
+        "",
+        "This informational comparison does not affect CI success, the production audit threshold, or release behavior.",
+        "",
+      ].join("\n"),
+    };
+  }
+
+  const baseByIdentity = new Map(
+    baseReport.advisories.map((advisory) => [advisory.identity, advisory]),
+  );
+  const headByIdentity = new Map(
+    headReport.advisories.map((advisory) => [advisory.identity, advisory]),
+  );
+  const introduced = headReport.advisories.filter(
+    (advisory) => !baseByIdentity.has(advisory.identity),
+  );
+  const resolved = baseReport.advisories.filter(
+    (advisory) => !headByIdentity.has(advisory.identity),
+  );
+  const unchanged = headReport.advisories
+    .filter((advisory) => baseByIdentity.has(advisory.identity))
+    .map((advisory) => ({
+      ...advisory,
+      previousSeverity: baseByIdentity.get(advisory.identity).severity,
+    }));
+  const counts = {
+    introduced: introduced.length,
+    resolved: resolved.length,
+    unchanged: unchanged.length,
+  };
+  const markdown = [
+    "## Pull-request workspace advisory comparison",
+    "",
+    `**Status: COMPARED — introduced ${counts.introduced} · resolved ${counts.resolved} · unchanged ${counts.unchanged}.**`,
+    "",
+    ...renderAdvisoryList("Introduced", introduced),
+    "",
+    ...renderAdvisoryList("Resolved", resolved),
+    "",
+    ...renderAdvisoryList("Unchanged", unchanged),
+    "",
+    "_Informational only; registry or comparison failures do not change CI success, the production audit threshold, or release behavior._",
+    "",
+  ].join("\n");
+  return {
+    status: "compared",
+    counts,
+    introduced,
+    resolved,
+    unchanged,
+    markdown,
   };
 }
 
@@ -217,8 +345,13 @@ function renderAuditSummary(status, counts, advisories) {
           ]),
         ).values(),
       ];
-      for (const { path, version } of uniquePaths.slice(0, MAX_PATHS_PER_ADVISORY)) {
-        const versionText = version ? ` (version ${escapeMarkdown(version)})` : "";
+      for (const { path, version } of uniquePaths.slice(
+        0,
+        MAX_PATHS_PER_ADVISORY,
+      )) {
+        const versionText = version
+          ? ` (version ${escapeMarkdown(version)})`
+          : "";
         lines.push(`  - Path: ${escapeMarkdown(path)}${versionText}`);
       }
       if (uniquePaths.length > MAX_PATHS_PER_ADVISORY) {
@@ -228,7 +361,10 @@ function renderAuditSummary(status, counts, advisories) {
       }
     }
     if (total > MAX_ADVISORIES) {
-      lines.push("", `${total - MAX_ADVISORIES} additional advisory record(s) omitted.`);
+      lines.push(
+        "",
+        `${total - MAX_ADVISORIES} additional advisory record(s) omitted.`,
+      );
     }
   }
 
@@ -261,18 +397,64 @@ export function runWorkspaceAudit() {
     error: result.error,
   });
 
+  let markdown = report.markdown;
+  const baseSha = process.env.WORKSPACE_AUDIT_BASE_SHA;
+  if (baseSha) {
+    let baseReport;
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(baseSha)) {
+      baseReport = { status: "unavailable" };
+    } else {
+      let baseLockfile;
+      try {
+        const baseResult = spawnSync(
+          "git",
+          ["show", `${baseSha}:pnpm-lock.yaml`],
+          {
+            cwd: WORKSPACE_ROOT,
+            encoding: "utf8",
+            maxBuffer: MAX_AUDIT_OUTPUT_BYTES,
+            timeout: 15 * 1000,
+          },
+        );
+        if (
+          baseResult.status !== 0 ||
+          baseResult.error ||
+          Buffer.byteLength(baseResult.stdout ?? "", "utf8") === 0
+        ) {
+          baseReport = { status: "unavailable" };
+        } else {
+          baseLockfile = baseResult.stdout;
+        }
+      } catch {
+        baseReport = { status: "unavailable" };
+      }
+
+      if (baseLockfile !== undefined) {
+        baseReport = auditBaseLockfile(baseLockfile);
+      }
+    }
+    const delta = buildWorkspaceAuditDeltaReport({
+      baseReport,
+      headReport: report,
+    });
+    markdown += delta.markdown;
+    process.stdout.write(
+      `Workspace advisory comparison status: ${delta.status}.\n`,
+    );
+  }
+
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (summaryPath) {
     try {
-      appendFileSync(summaryPath, report.markdown, { encoding: "utf8", mode: 0o600 });
+      appendFileSync(summaryPath, markdown, { encoding: "utf8", mode: 0o600 });
     } catch {
       process.stderr.write(
         "Could not append the full-workspace dependency audit report to the job summary.\n",
       );
-      process.stdout.write(report.markdown);
+      process.stdout.write(markdown);
     }
   } else {
-    process.stdout.write(report.markdown);
+    process.stdout.write(markdown);
   }
 
   const warning = getWorkspaceAuditWarning(report);
@@ -284,6 +466,76 @@ export function runWorkspaceAudit() {
   return report;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+function auditBaseLockfile(lockfile) {
+  let temporaryDirectory;
+  try {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "workspace-audit-base-"));
+    writeFileSync(join(temporaryDirectory, "pnpm-lock.yaml"), lockfile, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    writeFileSync(
+      join(temporaryDirectory, "package.json"),
+      JSON.stringify({
+        name: "workspace-audit-base-snapshot",
+        version: "0.0.0",
+        private: true,
+      }),
+      { encoding: "utf8", mode: 0o600 },
+    );
+
+    const env = { ...process.env };
+    for (const key of Object.keys(env)) {
+      if (
+        /^(?:npm_config_|NPM_CONFIG_|NPM_TOKEN$|NODE_AUTH_TOKEN$|GH_TOKEN$|GITHUB_TOKEN$|ACTIONS_ID_TOKEN_REQUEST_)/iu.test(
+          key,
+        )
+      ) {
+        delete env[key];
+      }
+    }
+    env.HOME = temporaryDirectory;
+    env.XDG_CONFIG_HOME = join(temporaryDirectory, ".config");
+
+    const result = spawnSync(
+      "pnpm",
+      [
+        "--registry=https://registry.npmjs.org",
+        "--npmrc-auth-file=/dev/null",
+        "audit",
+        "--json",
+      ],
+      {
+        cwd: temporaryDirectory,
+        encoding: "utf8",
+        env,
+        maxBuffer: MAX_AUDIT_OUTPUT_BYTES,
+        timeout: MAX_BASE_AUDIT_TIME_MS,
+      },
+    );
+    return buildWorkspaceAuditReport({
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      exitCode: result.status,
+      signal: result.signal,
+      error: result.error,
+    });
+  } catch (error) {
+    return buildWorkspaceAuditReport({
+      stdout: "",
+      stderr: "",
+      error,
+    });
+  } finally {
+    if (temporaryDirectory) {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  }
+}
+
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   runWorkspaceAudit();
 }

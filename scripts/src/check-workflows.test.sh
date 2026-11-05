@@ -378,6 +378,9 @@ test_ci_reports_workspace_advisories_without_changing_production_gate() {
   audit_block=$(ci_security_audit_job_block)
   root_package=$(<"${SCRIPT_DIR}/../../package.json")
 
+  assert_contains "$audit_block" "    permissions:"
+  assert_contains "$audit_block" "      contents: read"
+  assert_contains "$audit_block" "          fetch-depth: 2"
   assert_contains "$audit_block" \
     "name: Report high-severity production dependency advisories"
   assert_contains "$audit_block" "run: pnpm run audit:prod:ci"
@@ -397,6 +400,8 @@ test_ci_reports_workspace_advisories_without_changing_production_gate() {
     found { print }
   ' "$CI_WORKFLOW")
   assert_contains "$workspace_step" "continue-on-error: true"
+  assert_contains "$workspace_step" \
+    "WORKSPACE_AUDIT_BASE_SHA: \${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}"
   assert_contains "$root_package" \
     '"audit:prod:release": "pnpm audit --prod --audit-level high"'
   echo "PASS: reports workspace advisories without changing the production gate"
