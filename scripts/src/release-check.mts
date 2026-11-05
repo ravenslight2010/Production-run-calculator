@@ -562,6 +562,7 @@ export function validateTypescript7ComparisonEvidence(
   );
   const expectedCommands = new Set([
     "frozen-install",
+    "typescript-peer-audit",
     "typescript-6-clean",
     ...typescript7ExpectedMeasurementCommandNames(),
   ]);

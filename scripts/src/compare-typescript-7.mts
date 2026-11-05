@@ -44,7 +44,7 @@ export { TYPESCRIPT_7_RESOURCE_BUDGETS } from "./typescript-7-resource-contract.
 export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
-type CommandEvidence = {
+export type CommandEvidence = {
   name: string;
   exitCode: number;
   elapsedMs: number;
@@ -497,6 +497,28 @@ export function normalizeDiagnostics(
     .sort();
 }
 
+export async function frozenInstallAndAuditPeers(
+  checkout: string,
+  execute: typeof run = run,
+): Promise<CommandEvidence[]> {
+  const frozenInstall = await execute(
+    "frozen-install",
+    "pnpm",
+    ["install", "--frozen-lockfile", "--ignore-scripts"],
+    checkout,
+  );
+  if (frozenInstall.exitCode !== 0) {
+    throw new Error("Disposable frozen pnpm install failed.");
+  }
+  const peerAudit = await execute(
+    "typescript-peer-audit",
+    "pnpm",
+    ["peers"],
+    checkout,
+  );
+  return [frozenInstall, peerAudit];
+}
+
 export function typescript7ProjectMeasurementCommands(
   mode: string,
   projects: readonly Typescript7MeasuredProject[] = TYPESCRIPT_7_MEASURED_PROJECTS,
@@ -779,16 +801,7 @@ async function main(): Promise<void> {
           ),
       });
     }
-    const frozenInstall = await run(
-      "frozen-install",
-      "pnpm",
-      ["install", "--frozen-lockfile", "--ignore-scripts"],
-      checkout,
-    );
-    commands.push(frozenInstall);
-    if (frozenInstall.exitCode !== 0) {
-      throw new Error("Disposable frozen pnpm install failed.");
-    }
+    commands.push(...(await frozenInstallAndAuditPeers(checkout)));
 
     const ts6 = resolve(checkout, "node_modules/typescript/bin/tsc");
     const ts7 = resolve(checkout, "node_modules/typescript-native/bin/tsc");

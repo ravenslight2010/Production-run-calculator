@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -8,6 +9,7 @@ import {
   declarationManifest,
   editorServiceEvidenceFromResult,
   EDITOR_TYPESCRIPT_CHECK_TIMEOUT_MS,
+  frozenInstallAndAuditPeers,
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
   typescript7ProjectMeasurementCommands,
@@ -48,6 +50,91 @@ import {
 } from "./typescript-7-resource-contract.mts";
 import { generateTypescript7ResourceApprovalEvidence } from "./generate-typescript-7-resource-approval.mts";
 import { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
+
+test("peer audit catches TypeDoc 0.28.20 with TypeScript 7 after frozen install", async () => {
+  const fixture = await mkdtemp(
+    resolve(tmpdir(), "typescript-peer-audit-"),
+  );
+  const typedocPeerRange =
+    "5.0.x || 5.1.x || 5.2.x || 5.3.x || 5.4.x || 5.5.x || 5.6.x || 5.7.x || 5.8.x || 5.9.x || 6.0.x";
+
+  async function makeGraph(typescriptVersion: string): Promise<string> {
+    const graph = resolve(fixture, `typescript-${typescriptVersion}`);
+    const typedoc = resolve(graph, "packages/typedoc");
+    const typescript = resolve(graph, "packages/typescript");
+    await mkdir(typedoc, { recursive: true });
+    await mkdir(typescript, { recursive: true });
+    await writeFile(
+      resolve(graph, "package.json"),
+      JSON.stringify({
+        name: "typescript-peer-audit-fixture",
+        version: "1.0.0",
+        private: true,
+        dependencies: {
+          typedoc: "workspace:*",
+          typescript: "workspace:*",
+        },
+      }),
+    );
+    await writeFile(
+      resolve(graph, "pnpm-workspace.yaml"),
+      "packages:\n  - packages/*\n",
+    );
+    await writeFile(
+      resolve(typedoc, "package.json"),
+      JSON.stringify({
+        name: "typedoc",
+        version: "0.28.20",
+        peerDependencies: { typescript: typedocPeerRange },
+      }),
+    );
+    await writeFile(
+      resolve(typescript, "package.json"),
+      JSON.stringify({ name: "typescript", version: typescriptVersion }),
+    );
+    const lockfile = spawnSync(
+      "pnpm",
+      [
+        "--dir",
+        graph,
+        "install",
+        "--lockfile-only",
+        "--ignore-scripts",
+      ],
+      { cwd: graph, encoding: "utf8" },
+    );
+    assert.equal(
+      lockfile.status,
+      0,
+      `fixture lockfile generation failed:\n${lockfile.stdout}\n${lockfile.stderr}`,
+    );
+    return graph;
+  }
+
+  try {
+    const unsupportedGraph = await makeGraph("7.0.2");
+    const unsupportedCommands =
+      await frozenInstallAndAuditPeers(unsupportedGraph);
+    assert.deepEqual(
+      unsupportedCommands.map(({ name, exitCode }) => [name, exitCode]),
+      [
+        ["frozen-install", 0],
+        ["typescript-peer-audit", 1],
+      ],
+    );
+    const supportedGraph = await makeGraph("6.0.3");
+    const supportedCommands = await frozenInstallAndAuditPeers(supportedGraph);
+    assert.deepEqual(
+      supportedCommands.map(({ name, exitCode }) => [name, exitCode]),
+      [
+        ["frozen-install", 0],
+        ["typescript-peer-audit", 0],
+      ],
+    );
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
 
 test("normalizes diagnostic paths and ordering", () => {
   assert.deepEqual(
@@ -637,7 +724,8 @@ test("resource approval generator derives compact deterministic samples", () => 
       logicalCpuCount: 4, memoryGiB: 16,
     },
     commands: [
-      command("frozen-install"), command("typescript-6-clean"),
+      command("frozen-install"), command("typescript-peer-audit"),
+      command("typescript-6-clean"),
       ...["cold", "warm"].flatMap((mode) => checks.flatMap((check, index) => [
         command(`typescript-6-${check}-${mode}`, 10, 100),
         {
@@ -868,6 +956,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
     },
     commands: [
       command("frozen-install"),
+      command("typescript-peer-audit"),
       command("typescript-6-clean"),
       ...["cold", "warm"].flatMap((mode) =>
         checks.flatMap((check) => [
