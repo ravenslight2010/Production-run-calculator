@@ -6,7 +6,7 @@
   "scripts": {
     "compare:local-release": "tsx ./src/compare-local-release.mts",
     "test:local-release-compare": "tsx --test ./src/compare-local-release.test.mts",
-    "pretest": "pnpm run test:publication-authority",
+    "pretest": "pnpm run test:publication-authority && pnpm run test:override-compatibility",
     "sse-capacity-report": "tsx ./src/sse-capacity-report.mts",
     "audit:source-snapshot": "tsx ./src/capture-source-audit-snapshot.mts",
     "audit:workspace-report": "node ./src/report-workspace-audit.mjs",
@@ -59,6 +59,8 @@
     "check:app-dependencies": "node ./src/check-app-dependencies.mjs",
     "check:app-dependencies:strict": "node ./src/check-app-dependencies.mjs --strict",
     "test:app-dependencies": "node --test ./src/check-app-dependencies.test.mjs && pnpm run check:app-dependencies:strict",
+    "check:override-compatibility": "node ./src/check-override-compatibility.mjs",
+    "test:override-compatibility": "node --test ./src/check-override-compatibility.test.mjs && pnpm run check:override-compatibility",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
     "audit:report-key-rotation": "tsx ./src/report-key-rotation-preflight.mts",
     "audit:maintain": "tsx ./src/maintain-audit-log.mts",

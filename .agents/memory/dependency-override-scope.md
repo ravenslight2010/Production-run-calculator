@@ -14,3 +14,9 @@ When consumers require different major versions, do not use one global override 
 **Why:** jsdom 30 requires Undici 8, while an older Scalar package pinned Undici 7 exactly. A workspace-wide Undici 7 override silently crossed that compatibility boundary and kept jsdom on an unsupported major.
 
 **How to apply:** Compare every installed consumer's declared range with the resolved version before retaining or changing a global override; use the parent package's fixed release where available.
+
+For pnpm v9 lockfiles, ordinary dependency ranges are usually absent from the lockfile; resolved snapshot edges alone cannot establish compatibility. Join those edges to installed consumer manifests, and use lockfile peer declarations and importer specifiers where available. Any approved incompatibility exception must match the exact override, consumer version, resolved version, declared range, and dependency kind, and stay visible in the check output.
+
+**Why:** A lockfile-only comparison would miss regular dependency constraints, while a broad override-level exception could silently hide new consumers or version changes.
+
+**How to apply:** Fail when a consumer leaves an approved exact exception tuple. Keep normal mismatches blocking; never exempt an entire package or parent chain.
