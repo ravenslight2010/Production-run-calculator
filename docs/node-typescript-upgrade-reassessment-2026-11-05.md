@@ -67,7 +67,7 @@ platform-specific build packages on its intended runner.
 
 ### Retained Node comparison and qualification boundary
 
-The only retained Node comparison reviewed is
+The October 6 retained Node comparison is
 [`node-26-compatibility-comparison-2026-10-06.json`](node-26-compatibility-comparison-2026-10-06.json),
 SHA-256 `feda0095e9d09e0a122298177ad627f024139afc02d65b584bab915d980cfa83`. It records
 GitHub Actions run `37506619630`, attempt 1, source revision
@@ -88,6 +88,60 @@ describes workspace modules in `.replit` and deployment build/run configuration 
 but does not confirm a Node 26 workspace module or Node 26 Autoscale runtime support.
 **Replit Node 26 deployment support remains unknown.** Production qualification has not
 been performed.
+
+### November 5 execution record and readiness decision
+
+The latest official exact patches available on 2026-11-05 are Node `24.22.2` and `26.13.0`,
+both released on 2026-10-28. They have been available longer than the repository's
+24-hour package release-age window; that pnpm policy applies to npm packages, not Node
+runtime binaries. Node's official notice announces new 24.x and 26.x security releases on
+or shortly after 2026-11-11, with HIGH as the highest severity, but does not yet publish
+the patched versions. The advisory inputs were therefore left unchanged: selecting the
+then-current post-release patches now would be premature, and the October versions are
+not a substitute.
+
+The authorized GitHub Actions read found a November 5 advisory run
+([`41966901422`](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/41966901422),
+attempt 1). Its retained artifact was captured at `2026-11-05T04:32:22.484Z` and records
+source revision `fc9d38ee6c32a46e8c7e095010375f66cf4ed2e4` and lockfile SHA-256
+`d103dfa4b08910fa7b095739c62ada16acc3af7b840238fe04df288c658c9d83`, which matches the
+current lockfile. It still compared Node `24.21.0` with `26.10.0`, not the current patches.
+Install, typecheck, database creation/schema, and API integration shard 1 passed on both
+versions; `run-calculator-budget` and `production-build` failed on both. The artifact
+retains only exit codes and measurements; the workflow deletes command output. This is one
+same-run comparison on a different source revision with stale runtime inputs, not either
+of the two required clean successful candidate comparisons. The task revision reviewed
+here is `d58368fd3cf947e3bbedad1045eef4429ab99da6`.
+
+Task-scoped local verification used the current revision and lockfile:
+
+| Check | Result | Evidence and boundary |
+|---|---|---|
+| `CI=true bash scripts/src/run-release-node.sh pnpm run typecheck` | **PASS** | Ran with the pinned Node `24.21.0` and pnpm `12.8.1`; Node 24 coverage remains present in CI and release workflows. |
+| `node --test scripts/src/node-compatibility-advisory.test.mjs` | **PASS** | Four harness tests passed under the workspace's Node `24.22.1`; this validates helper logic only, not either runtime comparison. |
+| `pnpm --filter @workspace/run-calculator run test:budget` | **FAIL** | One test failed: the paused packaging-drain case expected 64 total cases but received 63. This is a common product/test failure, not evidence of a Node-specific incompatibility. Its `useAutoTrack.ts` surface overlaps active Task #3795 (phone controls after background wake); do not modify that shared code in this task. Task #3795's owner should resolve or classify the failing case, then the comparison can be rerun. |
+| `pnpm run build` with the advisory's production environment | **FAIL locally; hosted cause unknown** | The local run stopped before compilation because the workspace's ignored prepared-source record did not match the current source fingerprint. That workspace-only identity issue does not explain the clean hosted run, whose command output was discarded. The hosted build failure remains unresolved; the Node advisory workflow maintainer owns retaining bounded, sanitized diagnostic summaries and explaining it. No source identity was refreshed as release preparation is outside this task. |
+| Complete standard release suite | **NOT RUN** | This task makes no runtime or release-evidence changes. The retained standard state is dated 2026-10-24 and already records failed gates; it is not a current pass. A full release rerun is not substituted for the missing post-security-release comparison. |
+
+Replit's official configuration documentation describes Nix-managed packages. A targeted
+Replit documentation search returned only conditional Node 26 capability (“if supported
+by the channel”), not confirmation for this app. The authorized available-module list in
+this workspace showed Node 20, 22, and 24 (currently Node 24.22.1) but no Node 26 module.
+The deployment documentation reviewed does not establish a Node 26 option for this app's
+Autoscale deployment. No production deployment was queried, consistent with the task's
+access boundary.
+**Replit Node 26 deployment support is therefore unknown, not supported or unsupported.**
+
+**Dated readiness recommendation: NO-GO for Node 26 promotion.** Node 26 is officially
+Active LTS, but this repository has no two clean passing comparisons on current exact
+patches, the shared budget-test failure is unresolved by its owning task, the hosted build
+failure has no retained cause, and Replit deployment support is unverified. Keep the
+authoritative Node 24 pins and required Node 24 coverage. After the announced November 11
+security releases, the Node advisory workflow maintainer should recheck the official
+patches and release-age status, update only the advisory inputs, retain bounded sanitized
+diagnostics, explain shared failures, and obtain two clean hosted comparisons on one
+revision and lockfile. Complete applicable release checks and obtain authoritative Replit
+runtime evidence before any separately approved promotion.
 
 Before any separately approved Node 26 promotion:
 
@@ -185,6 +239,10 @@ Official sources checked 2026-11-05:
   [22.23.4](https://nodejs.org/en/blog/release/v22.23.4) release notes.
 - [October 21, 2026 security releases](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
   and [announced November 11, 2026 security releases](https://nodejs.org/en/blog/vulnerability/november-2026-security-releases).
+- [Replit App Configuration](https://docs.replit.com/features/project-setup/configuration)
+  and [Deployment types](https://docs.replit.com/features/publishing/deployment-types);
+  documentation search and the available Node module list did not verify Node 26
+  deployment support for this app.
 - [Microsoft TypeScript releases](https://github.com/microsoft/TypeScript/releases),
   [TypeScript 7.1 beta announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-1-beta/),
   [API status discussion](https://github.com/microsoft/TypeScript/issues/64709), and
