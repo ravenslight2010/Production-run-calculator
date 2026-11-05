@@ -3595,6 +3595,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       receivedAt: number;
       status: number;
       outcome?: string;
+      claimSequence?: number;
+      stateSequence?: number;
+      generationMatchesState?: boolean;
     }> = [];
     page.on("request", (request) => {
       if (new URL(request.url()).pathname !== "/api/sync/auto-track/claim") return;
@@ -3612,13 +3615,21 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         || new URL(response.url()).pathname !== "/api/sync/auto-track/claim"
       ) return;
       try {
-        const body = request.postDataJSON() as { claim?: { channel?: string } };
+        const body = request.postDataJSON() as {
+          claim?: { channel?: string; sequence?: number; generation?: string };
+        };
         if (body.claim?.channel !== "case") return;
-        const result = await response.json() as { outcome?: string };
+        const result = await response.json() as {
+          outcome?: string;
+          state?: { generation?: string; sequence?: number };
+        };
         caseClaimResponses.push({
           receivedAt: Date.now(),
           status: response.status(),
           outcome: result.outcome,
+          claimSequence: body.claim.sequence,
+          stateSequence: result.state?.sequence,
+          generationMatchesState: result.state?.generation === body.claim.generation,
         });
       } catch {
         caseClaimResponses.push({
@@ -3816,7 +3827,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     expect(holdRemaining, "canonical manual correction hold")
       .toBeLessThanOrEqual(60_500);
     let dueNowMs = 0;
-    let clientCaseClaim: { outcome?: string } | null = null;
+    let clientCaseClaim: (typeof caseClaimResponses)[number] | null = null;
     await simulateScreenOff(page);
     await page.waitForTimeout(holdRemaining);
     // Keep the browser clock moving with real time while it is screen-off so
@@ -3898,6 +3909,22 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         && claim.receivedAt >= holdUntil,
     ) ?? null;
     expect(clientCaseClaim?.outcome).toBe("accepted");
+    const acceptedWakeClaimIndex = caseClaimResponses.findIndex(
+      (claim) => claim === clientCaseClaim,
+    );
+    expect(acceptedWakeClaimIndex).toBeGreaterThan(0);
+    const acceptedBeforeWakeClaim = caseClaimResponses
+      .slice(0, acceptedWakeClaimIndex)
+      .filter((claim) => claim.status === 200 && claim.outcome === "accepted");
+    const previousAcceptedCaseClaim = acceptedBeforeWakeClaim[
+      acceptedBeforeWakeClaim.length - 1
+    ];
+    expect(previousAcceptedCaseClaim?.stateSequence, "wake must follow an accepted same-run claim")
+      .toBeGreaterThan(0);
+    expect(clientCaseClaim?.claimSequence).toBe(
+      Number(previousAcceptedCaseClaim?.stateSequence ?? 0) + 1,
+    );
+    expect(clientCaseClaim?.generationMatchesState).toBe(true);
     dueNowMs = Date.now();
     const readAfterDueBeat = async () => page.evaluate(async (runId) => {
       const response = await fetch(

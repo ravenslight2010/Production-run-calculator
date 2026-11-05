@@ -676,7 +676,9 @@ useEffect(() => {
     elapsedBatchSec,
   ]);
 
-  const resetBookkeeping = useCallback(() => {
+  const resetBookkeeping = useCallback((options?: {
+    preserveCoordinationSequence?: boolean;
+  }) => {
     caseNextDueMsRef.current = 0;
     trayNextDueMsRef.current = 0;
     batchNextDueMsRef.current = 0;
@@ -693,7 +695,9 @@ useEffect(() => {
     formResetSkippedRef.current = false;
     previousPackagingDrainActiveRef.current = false;
     previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
-    coordinationSequenceRef.current = {};
+    if (!options?.preserveCoordinationSequence) {
+      coordinationSequenceRef.current = {};
+    }
     coordinationRetryEventRef.current = {};
     blockedAutomaticClaimsRef.current.clear();
     coordinationPendingRef.current.clear();
@@ -1329,7 +1333,10 @@ useEffect(() => {
     if (autoTrackBlocked) {
       if (autoTrackWakeRebaseReason !== null) {
         foregroundRebaseRequestedRef.current = true;
-        resetBookkeeping();
+        // Wake recovery resets timer/counter baselines, but the accepted
+        // per-channel sequence belongs to this run generation and must survive
+        // the barrier. The canonical snapshot can advance it while waking.
+        resetBookkeeping({ preserveCoordinationSequence: true });
       }
     } else if (previouslyBlockedRef.current && foregroundRebaseRequestedRef.current) {
       rebaseAfterForegroundSync();
