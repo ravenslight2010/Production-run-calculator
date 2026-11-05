@@ -4034,49 +4034,67 @@ function isServerTickRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+type ServerTickTransactionReason = "dueClaims" | "wallClockBookkeeping" | "uncertainSnapshot";
+
+type ServerTickPreflight =
+  | { kind: "skip" }
+  | { kind: "transaction"; reason: ServerTickTransactionReason };
+
 /**
  * Avoid opening a per-date transaction only when the fetched snapshot proves
  * there is no due work and no wall-clock state to persist. Any malformed or
  * uncertain shape falls through to the existing locked transaction.
  */
-function canSkipIdleServerAutoTrackDate(
+function classifyServerAutoTrackDate(
   raw: unknown,
   nowMs: number,
   claimIdNamespace: string,
-): boolean {
-  if (!isServerTickRecord(raw)) return false;
+): ServerTickPreflight {
+  const uncertain = (): ServerTickPreflight => ({
+    kind: "transaction",
+    reason: "uncertainSnapshot",
+  });
+  if (!isServerTickRecord(raw)) return uncertain();
   const dayState = raw.dayState;
-  if (!isServerTickRecord(dayState) || !Array.isArray(dayState.runs)) return false;
-  if (raw.runValues !== undefined && !isServerTickRecord(raw.runValues)) return false;
-  if (raw.autoTrackServerState !== undefined && !isServerTickRecord(raw.autoTrackServerState)) return false;
-  if (raw.autoTrackCoordination !== undefined && !isServerTickRecord(raw.autoTrackCoordination)) return false;
+  if (!isServerTickRecord(dayState) || !Array.isArray(dayState.runs)) return uncertain();
+  if (raw.runValues !== undefined && !isServerTickRecord(raw.runValues)) return uncertain();
+  if (raw.autoTrackServerState !== undefined && !isServerTickRecord(raw.autoTrackServerState)) return uncertain();
+  if (raw.autoTrackCoordination !== undefined && !isServerTickRecord(raw.autoTrackCoordination)) return uncertain();
   const serverState = raw.autoTrackServerState as Record<string, any> | undefined;
   const existingBookkeeping = serverState?.wallClockBookkeeping;
-  if (existingBookkeeping !== undefined && !isServerTickRecord(existingBookkeeping)) return false;
+  if (existingBookkeeping !== undefined && !isServerTickRecord(existingBookkeeping)) return uncertain();
   for (const run of dayState.runs) {
-    if (!isServerTickRecord(run) || typeof run.id !== "string") return false;
-    if (run.startedAt !== undefined && typeof run.startedAt !== "number") return false;
+    if (!isServerTickRecord(run) || typeof run.id !== "string") return uncertain();
+    if (run.startedAt !== undefined && typeof run.startedAt !== "number") return uncertain();
     if (typeof run.startedAt === "number" && run.startedAt > 0
-      && !isServerTickRecord(raw.runValues?.[run.id])) return false;
+      && !isServerTickRecord(raw.runValues?.[run.id])) return uncertain();
   }
 
   try {
-    if (buildNetSecondServerClaims(raw, nowMs, claimIdNamespace).length > 0) return false;
+    if (buildNetSecondServerClaims(raw, nowMs, claimIdNamespace).length > 0) {
+      return { kind: "transaction", reason: "dueClaims" };
+    }
     const wallPlans = buildServerWallClockPlans(raw, nowMs, claimIdNamespace);
-    if (wallPlans.some((wall) => wall.claims.length > 0)) return false;
-    return !wallPlans.some((wall) =>
+    if (wallPlans.some((wall) => wall.claims.length > 0)) {
+      return { kind: "transaction", reason: "dueClaims" };
+    }
+    if (wallPlans.some((wall) =>
       !isDeepStrictEqual(existingBookkeeping?.[wall.runId] ?? {}, wall.bookkeeping),
-    );
+    )) {
+      return { kind: "transaction", reason: "wallClockBookkeeping" };
+    }
+    return { kind: "skip" };
   } catch {
     // The current locked path is the authority whenever preflight cannot
     // safely classify the fetched row.
-    return false;
+    return uncertain();
   }
 }
 
 export type ServerTickSummary = {
   examinedDates: number;
   dateTransactions: number;
+  transactionReasons: Record<ServerTickTransactionReason, number>;
   builtClaims: number;
   accepted: number;
   outcomes: Record<string, number>;
@@ -4104,6 +4122,11 @@ export async function runAutoTrackServerTicks(opts: {
   let dateTransactions = 0;
   let builtClaims = 0;
   let accepted = 0;
+  const transactionReasons: Record<ServerTickTransactionReason, number> = {
+    dueClaims: 0,
+    wallClockBookkeeping: 0,
+    uncertainSnapshot: 0,
+  };
   // Scoped invocations can recover their own date, but cannot certify health
   // for dates or scopes they did not examine.
   let passComplete = opts.scope === undefined && opts.date === undefined;
@@ -4132,11 +4155,13 @@ export async function runAutoTrackServerTicks(opts: {
     }
     // Keep one identity across preflight and the authoritative locked rebuild.
     const claimIdNamespace = `tick-${randomUUID()}`;
-    if (canSkipIdleServerAutoTrackDate(row.data, nowMs, claimIdNamespace)) {
+    const preflight = classifyServerAutoTrackDate(row.data, nowMs, claimIdNamespace);
+    if (preflight.kind === "skip") {
       outcomes.noWorkSkipped = (outcomes.noWorkSkipped ?? 0) + 1;
       backoff.recordSuccess(nowMs);
       continue;
     }
+    transactionReasons[preflight.reason] += 1;
     let failureStage: "date-transaction" | "peer-broadcast" = "date-transaction";
     try {
       // A transaction retry must keep the same event identity. If the database
@@ -4360,7 +4385,14 @@ export async function runAutoTrackServerTicks(opts: {
   if (passComplete && outcomes.error === undefined) {
     recordBackgroundOperationSuccess("server-auto-track-tick");
   }
-  return { examinedDates: rows.length, dateTransactions, builtClaims, accepted, outcomes };
+  return {
+    examinedDates: rows.length,
+    dateTransactions,
+    transactionReasons,
+    builtClaims,
+    accepted,
+    outcomes,
+  };
 }
 
 export function startAutoTrackServerTicks(): NodeJS.Timeout {
@@ -4380,6 +4412,7 @@ export function startAutoTrackServerTicks(): NodeJS.Timeout {
         durationMs: Math.max(0, completedAt - startedAt),
         examinedDates: summary.examinedDates,
         dateTransactions: summary.dateTransactions,
+        transactionReasons: summary.transactionReasons,
         builtClaims: summary.builtClaims,
         accepted: summary.accepted,
         outcomes: summary.outcomes,

@@ -2431,6 +2431,11 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
 
     expect(result.dateTransactions).toBe(0);
     expect(result.outcomes.noWorkSkipped).toBe(1);
+    expect(result.transactionReasons).toEqual({
+      dueClaims: 0,
+      wallClockBookkeeping: 0,
+      uncertainSnapshot: 0,
+    });
     const [afterTick] = await db.select().from(dailySyncTable)
       .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
     expect(afterTick.updatedAt.getTime()).toBe(beforeTick.updatedAt.getTime());
@@ -2467,11 +2472,87 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
     });
     expect(idleBeat.dateTransactions).toBe(0);
     expect(idleBeat.outcomes.noWorkSkipped).toBe(1);
+    expect(idleBeat.transactionReasons).toEqual({
+      dueClaims: 0,
+      wallClockBookkeeping: 0,
+      uncertainSnapshot: 0,
+    });
     const [afterIdleBeat] = await db.select().from(dailySyncTable)
       .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
     expect(afterIdleBeat.updatedAt.getTime()).toBe(beforeIdleBeat.updatedAt.getTime());
     expect(afterIdleBeat.canonicalRevision).toBe(beforeIdleBeat.canonicalRevision);
     expect(afterIdleBeat.data).toEqual(beforeIdleBeat.data);
+  });
+
+  it("uses a transaction to persist a draining-run baseline even when no claims are due", async () => {
+    await seedServerApplicatorRun();
+    const [seeded] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const data = seeded.data as any;
+    const pausedAt = TICK_NOW - 20_000;
+    data.dayState.runs[0] = {
+      ...data.dayState.runs[0],
+      pausedAt,
+      metaUpdatedAt: pausedAt,
+      stoppages: [{ type: "pause", startedAt: pausedAt, stopTunnel: false }],
+    };
+    data.runValues[TICK_RUN] = {
+      ...data.runValues[TICK_RUN],
+      casesNeeded: 0,
+      freezerTime: 3,
+      preTunnelMin: 0.5,
+      postTunnelMin: 0.5,
+      traysOnLine: 7,
+      batchesReady: 2,
+      app1Type: "",
+      app1OzPerPizza: 0,
+      app1BatchLbs: 0,
+    };
+    await db.update(dailySyncTable).set({ data })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const result = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+
+    expect(result.dateTransactions).toBe(1);
+    expect(result.builtClaims).toBe(0);
+    expect(result.accepted).toBe(0);
+    expect(result.transactionReasons).toEqual({
+      dueClaims: 0,
+      wallClockBookkeeping: 1,
+      uncertainSnapshot: 0,
+    });
+    expect(Object.values(result.transactionReasons).reduce((sum, count) => sum + count, 0))
+      .toBe(result.dateTransactions);
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect((after.data as any).autoTrackServerState.wallClockBookkeeping[TICK_RUN]).toBeDefined();
+  });
+
+  it("keeps malformed snapshots on the locked path and counts them as uncertain", async () => {
+    await seedServerApplicatorRun();
+    const [seeded] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const data = seeded.data as any;
+    data.runValues = [];
+    await db.update(dailySyncTable).set({ data })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const result = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+
+    expect(result.dateTransactions).toBe(1);
+    expect(result.builtClaims).toBe(0);
+    expect(result.accepted).toBe(0);
+    expect(result.transactionReasons).toEqual({
+      dueClaims: 0,
+      wallClockBookkeeping: 0,
+      uncertainSnapshot: 1,
+    });
+    expect(Object.values(result.transactionReasons).reduce((sum, count) => sum + count, 0))
+      .toBe(result.dateTransactions);
   });
 
   it("commits server-owned applicator progress and evidence together, with retry idempotency", async () => {
@@ -2481,6 +2562,13 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
     });
     expect(first.dateTransactions).toBe(1);
     expect(first.accepted).toBeGreaterThan(0);
+    expect(first.transactionReasons).toEqual({
+      dueClaims: 1,
+      wallClockBookkeeping: 0,
+      uncertainSnapshot: 0,
+    });
+    expect(Object.values(first.transactionReasons).reduce((sum, count) => sum + count, 0))
+      .toBe(first.dateTransactions);
     const firstEvidence = await db.select().from(applicatorBatchEvidenceTable);
     expect(firstEvidence.filter((row) => row.source === "automatic-observation")).toHaveLength(1);
     const [afterFirst] = await db.select().from(dailySyncTable)
