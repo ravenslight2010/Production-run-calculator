@@ -18,6 +18,7 @@ import {
   buildWorkspaceAuditDeltaJson,
   buildWorkspaceAuditDeltaReport,
   buildWorkspaceAuditReport,
+  buildWorkspaceAuditSnapshot,
   getWorkspaceAuditWarning,
   runWorkspaceAuditWithRetry,
 } from "./report-workspace-audit.mjs";
@@ -221,6 +222,50 @@ test("does not report registry errors as a clean audit or expose raw response te
   assert.doesNotMatch(warning, /do-not-print/u);
   assert.doesNotMatch(warning, /ERR_PNPM_FETCH_503/u);
   assert.doesNotMatch(warning, /user:password|private-request|private-body/u);
+});
+
+test("snapshot adds bounded provenance metadata around the existing sanitized summary", () => {
+  const report = buildWorkspaceAuditReport({
+    stdout: JSON.stringify({
+      error: {
+        code: "ERR_PNPM_FETCH_503",
+        detail:
+          "https://user:password@registry.example.invalid/path?token=hidden request-id=private",
+      },
+    }),
+    exitCode: 1,
+    revision: "a".repeat(40),
+  });
+  const originalSha = process.env.GITHUB_SHA;
+  const originalActions = process.env.GITHUB_ACTIONS;
+  const originalEventName = process.env.GITHUB_EVENT_NAME;
+  process.env.GITHUB_SHA = "a".repeat(40);
+  process.env.GITHUB_ACTIONS = "true";
+  process.env.GITHUB_EVENT_NAME = "workflow_dispatch";
+
+  try {
+    const snapshot = buildWorkspaceAuditSnapshot(
+      report,
+      "2026-11-05T12:00:00.000Z",
+    );
+
+    assert.match(snapshot, /Captured at \(UTC\): 2026-11-05T12:00:00\.000Z/u);
+    assert.match(snapshot, /Environment: GitHub Actions workflow_dispatch/u);
+    assert.match(snapshot, new RegExp(`Revision: ${"a".repeat(40)}`, "u"));
+    assert.match(snapshot, /Result: unavailable/u);
+    assert.ok(snapshot.endsWith(report.markdown));
+    assert.doesNotMatch(
+      snapshot,
+      /registry\.example\.invalid|user:password|token=hidden|request-id=private/u,
+    );
+  } finally {
+    if (originalSha === undefined) delete process.env.GITHUB_SHA;
+    else process.env.GITHUB_SHA = originalSha;
+    if (originalActions === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = originalActions;
+    if (originalEventName === undefined) delete process.env.GITHUB_EVENT_NAME;
+    else process.env.GITHUB_EVENT_NAME = originalEventName;
+  }
 });
 
 test("retries a structured transient registry failure and returns the recovered audit", () => {
@@ -496,6 +541,7 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
     const binDirectory = join(testDirectory, "bin");
     const summaryPath = join(testDirectory, "summary.md");
     const deltaPath = join(testDirectory, "workspace-advisory-delta.json");
+    const snapshotPath = join(testDirectory, "workspace-audit-report.md");
     const callCountPath = join(testDirectory, "pnpm-calls.txt");
     const fakePnpmPath = join(binDirectory, "pnpm");
     const privateDetails =
@@ -521,8 +567,12 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
         FAKE_PNPM_AUDIT_RESPONSE: auditFailure,
         FAKE_PNPM_AUDIT_CALLS: callCountPath,
         GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "workflow_dispatch",
+        GITHUB_SHA: "b".repeat(40),
         GITHUB_STEP_SUMMARY: summaryPath,
         WORKSPACE_AUDIT_DELTA_PATH: deltaPath,
+        WORKSPACE_AUDIT_REPORT_PATH: snapshotPath,
+        WORKSPACE_AUDIT_REVISION: "b".repeat(40),
         PATH: `${binDirectory}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
       },
     });
@@ -535,8 +585,9 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
       /Workspace audit report status: unavailable\./u,
     );
     const combinedOutput = `${result.stdout}\n${readFileSync(summaryPath, "utf8")}`;
+    const snapshot = readFileSync(snapshotPath, "utf8");
     assert.doesNotMatch(
-      combinedOutput,
+      `${combinedOutput}\n${snapshot}`,
       /registry\.example\.invalid|user:password|sensitive|request-id=private|body=secret/u,
     );
     const delta = JSON.parse(readFileSync(deltaPath, "utf8"));
@@ -551,6 +602,48 @@ test("emits exactly one sanitized GitHub warning for a registry failure", () => 
       readFileSync(deltaPath, "utf8"),
       /registry\.example\.invalid|user:password|sensitive|request-id=private|body=secret/u,
     );
+    assert.match(snapshot, /Environment: GitHub Actions workflow_dispatch/u);
+    assert.match(snapshot, new RegExp(`Revision: ${"b".repeat(40)}`, "u"));
+    assert.match(snapshot, /Result: unavailable/u);
+    assert.ok(snapshot.endsWith(readFileSync(summaryPath, "utf8")));
+  } finally {
+    rmSync(testDirectory, { recursive: true, force: true });
+  }
+});
+
+test("snapshot write failures stay report-only and do not fail the audit command", () => {
+  const testDirectory = mkdtempSync(
+    join(tmpdir(), "workspace-audit-snapshot-failure-"),
+  );
+  try {
+    const binDirectory = join(testDirectory, "bin");
+    const missingDirectory = join(testDirectory, "missing");
+    const fakePnpmPath = join(binDirectory, "pnpm");
+    mkdirSync(binDirectory);
+    writeFileSync(
+      fakePnpmPath,
+      "#!/bin/sh\nprintf '%s\\n' '{\"advisories\":{}}'\n",
+      { mode: 0o700 },
+    );
+
+    const result = spawnSync(process.execPath, [reportScript], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "workflow_dispatch",
+        WORKSPACE_AUDIT_REPORT_PATH: join(missingDirectory, "report.md"),
+        PATH: `${binDirectory}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(
+      result.stderr,
+      /Could not write the full-workspace dependency audit snapshot/u,
+    );
+    assert.match(result.stdout, /Workspace audit report status: clean\./u);
+    assert.doesNotMatch(result.stderr, /missing\/report\.md/u);
   } finally {
     rmSync(testDirectory, { recursive: true, force: true });
   }

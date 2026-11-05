@@ -1,4 +1,9 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
@@ -417,6 +422,35 @@ function writeWorkspaceAuditDeltaJson(path, delta) {
   }
 }
 
+export function buildWorkspaceAuditSnapshot(
+  report,
+  capturedAt = new Date().toISOString(),
+) {
+  const revision =
+    process.env.WORKSPACE_AUDIT_REVISION ?? process.env.GITHUB_SHA ?? "";
+  const safeRevision = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(revision)
+    ? revision
+    : "unknown";
+  const environment =
+    process.env.GITHUB_ACTIONS === "true" &&
+    process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
+      ? "GitHub Actions workflow_dispatch"
+      : "Local execution";
+
+  return [
+    "# Full-workspace dependency audit snapshot",
+    "",
+    `- Captured at (UTC): ${capturedAt}`,
+    `- Environment: ${environment}`,
+    `- Revision: ${safeRevision}`,
+    "- Producer: pnpm --filter @workspace/scripts run audit:workspace-report",
+    "- Sanitization: bounded advisory summary only; raw audit responses, credentials, and request details are excluded.",
+    `- Result: ${report.status}`,
+    "",
+    report.markdown,
+  ].join("\n");
+}
+
 function renderUnavailable(failure, revision) {
   const reason = failure.code
     ? ` Registry/network error code: \`${failure.code}\`.`
@@ -573,6 +607,23 @@ export function runWorkspaceAudit() {
     process.env.WORKSPACE_AUDIT_DELTA_PATH,
     delta,
   );
+  const reportPath = process.env.WORKSPACE_AUDIT_REPORT_PATH;
+  if (reportPath) {
+    try {
+      writeFileSync(
+        reportPath,
+        buildWorkspaceAuditSnapshot(report),
+        {
+          encoding: "utf8",
+          mode: 0o600,
+        },
+      );
+    } catch {
+      process.stderr.write(
+        "Could not write the full-workspace dependency audit snapshot; the report-only audit remains non-blocking.\n",
+      );
+    }
+  }
 
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (summaryPath) {

@@ -27,4 +27,14 @@ jobs:
         continue-on-error: true
         env:
           WORKSPACE_AUDIT_REVISION: ${{ github.sha }}
+          WORKSPACE_AUDIT_REPORT_PATH: workspace-audit-report.md
         run: pnpm --filter @workspace/scripts run audit:workspace-report
+      - name: Upload sanitized workspace audit snapshot
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: workspace-audit-report
+          path: workspace-audit-report.md
+          if-no-files-found: ignore
+          retention-days: 14

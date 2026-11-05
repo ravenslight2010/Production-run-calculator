@@ -426,6 +426,15 @@ test_workspace_audit_rerun_isolated_and_non_blocking() {
   assert_contains "$workflow_content" \
     "run: pnpm --filter @workspace/scripts run audit:workspace-report"
   assert_contains "$workflow_content" "continue-on-error: true"
+  assert_contains "$workflow_content" \
+    "WORKSPACE_AUDIT_REPORT_PATH: workspace-audit-report.md"
+  assert_contains "$workflow_content" \
+    "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
+  assert_contains "$workflow_content" "name: Upload sanitized workspace audit snapshot"
+  assert_contains "$workflow_content" "if: always()"
+  assert_contains "$workflow_content" "path: workspace-audit-report.md"
+  assert_contains "$workflow_content" "if-no-files-found: ignore"
+  assert_contains "$workflow_content" "retention-days: 14"
 
   if [[ "$workflow_content" == *"inputs:"* ||
     "$workflow_content" == *"secret"* ||
@@ -462,7 +471,21 @@ test_workspace_audit_rerun_isolated_and_non_blocking() {
     "WORKSPACE_AUDIT_REVISION: \${{ github.sha }}"
   assert_contains "$audit_step" \
     "run: pnpm --filter @workspace/scripts run audit:workspace-report"
-  echo "PASS: manual workspace audit is revision-bound, read-only, and non-blocking"
+  local upload_step
+  upload_step=$(awk '
+    $0 == "      - name: Upload sanitized workspace audit snapshot" {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^      - / { exit }
+    found { print }
+  ' "$WORKSPACE_AUDIT_RERUN_WORKFLOW")
+  assert_contains "$upload_step" "if: always()"
+  assert_contains "$upload_step" "continue-on-error: true"
+  assert_contains "$upload_step" "path: workspace-audit-report.md"
+  assert_contains "$upload_step" "retention-days: 14"
+  echo "PASS: manual workspace audit is revision-bound, read-only, non-blocking, and retained"
 }
 
 test_ci_runs_routine_scripts_tests() {
