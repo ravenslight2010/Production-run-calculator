@@ -1,6 +1,10 @@
 # TypeScript 7 Migration Research
 
-**Background comparison date:** unresolved; latest reassessment: 2026-10-15 (see final section)
+**Latest readiness reassessment:** 2026-11-05 ([source-identified report](typescript-7-readiness-2026-11-05.md)).
+The research below preserves historical evidence and assessments; consult the linked report
+for the current TypeScript 7.1 release, API, and ecosystem decision.
+
+**Background comparison date:** unresolved; latest detailed historical reassessment: 2026-10-15 (see final section)
 **Current compiler:** TypeScript 6.0.3  
 **Compared compiler:** TypeScript 7.0.2  
 **Recommendation:** **Keep TypeScript 6 authoritative; retain TypeScript 7 only as the parallel CLI pilot.**
