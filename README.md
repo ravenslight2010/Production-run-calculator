@@ -105,7 +105,7 @@ image identities, and an unchanged normalized schema fingerprint.
 
 ## Local development
 
-Prerequisites: Node.js 24.21.0, pnpm 12.8.1, a PostgreSQL 16 database.
+Prerequisites: Node.js 24.22.2, pnpm 12.8.1, a PostgreSQL 16 database.
 
 The exact local Node patch is declared in `.nvmrc` and must stay aligned with
 the explicit CI pin and retained validation evidence. Activate it before
@@ -151,7 +151,7 @@ current tracked notes.
 
 The launcher independently checks the exact evidence-bound version and puts
 its executable first on `PATH` for pnpm and its child scripts. It uses the
-local runtime when it matches, otherwise obtains `node@24.21.0` through npx;
+local runtime when it matches, otherwise obtains `node@24.22.2` through npx;
 if unavailable, the command fails rather than running with the wrong version.
 Interactive shell selection does not change the release runner or production
 runtime.

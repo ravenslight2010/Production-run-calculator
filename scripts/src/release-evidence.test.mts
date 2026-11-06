@@ -800,7 +800,7 @@ async function run(): Promise<void> {
     assert.ok(job.source, `${job.name} release job must be present`);
     assert.match(
       job.source!,
-      /node-version:\s*"24\.21\.0"/,
+      /node-version:\s*"24\.22\.2"/,
       `${job.name} release job must use the retained Node.js version`,
     );
     assert.match(
