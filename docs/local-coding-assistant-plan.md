@@ -39,7 +39,9 @@ OpenCode can use local Ollama models, load reusable `SKILL.md` instructions, and
 
 Do not rely on permissive defaults. Configure an explicit read-only agent first: allow repository reads/search, deny edits and shell by default, and do not load write-capable GitHub tools. Later modes may grant narrowly scoped capabilities, but edits stay in a disposable worktree and shell commands require approval or an explicit allowlist. Push, merge, publish, database migration, and production operations remain blocked unless separately approved by the owner.
 
-Choose a model only after measuring the actual Windows host's CPU, RAM, GPU/VRAM, disk, and app workload. Download required model weights once while online; verify that normal app operation remains responsive during inference. No silent cloud fallback. An offline host can continue local repository work and local tests, but GitHub reads/writes and remote CI require internet.
+Choose a model only after measuring the actual Windows host's CPU, RAM, GPU/VRAM, disk, and app workload. Pin both the primary and auxiliary/small models to local providers. The [OpenCode provider documentation](https://opencode.ai/docs/providers) notes that some workflows may use a separate small model for tasks such as session-title generation; choosing a local primary model alone is not proof that all inference stays local. Review providers, plugins, sharing, model discovery, and other network behavior for the exact OpenCode version. Verify outbound traffic before making any no-cloud/privacy claim. Block external inference endpoints unless Donald explicitly opts in. No silent cloud fallback.
+
+Download required model weights once while online; verify that normal app operation remains responsive during inference. An offline host can continue local repository work and local tests, but GitHub reads/writes and remote CI require internet.
 
 ### 4. GitHub and secrets
 
@@ -56,14 +58,15 @@ Use the repository's existing validation rather than inventing a parallel test f
 ## Phased delivery
 
 1. **Phase 0 — design and host inventory:** confirm the tool boundary and inventory Windows hardware, Docker/runtime setup, and available storage. No app or production changes.
-2. **Phase 1 — local read-only prototype:** OpenCode + Ollama; repository Q&A and search only. Verify offline startup after model download and prove edits, shell execution, and GitHub writes are unavailable.
+2. **Phase 1 — local read-only prototype:** OpenCode + Ollama; repository Q&A and search only. Pin auxiliary model work locally too, audit outbound requests, verify offline startup after model download, and prove edits, shell execution, and GitHub writes are unavailable.
 3. **Phase 2 — sanitized diagnostics:** add a small, read-only MCP bridge for approved health/sync/incident summaries. Test authorization, field allowlists, size limits, redaction, and prompt-injection resistance.
 4. **Phase 3 — isolated patch workflow:** enable edits only within a temporary worktree, then approved test commands. Require owner review before commit/push/PR.
 5. **Later, only if useful:** an authenticated local web interface, reviewer agent, or GitHub PR/check integration. These are not prerequisites for the first useful prototype.
 
 ## Phase 1 acceptance criteria
 
-- OpenCode uses a local model and can answer questions about a fresh repository checkout without sending source to a cloud model.
+- OpenCode uses local primary and auxiliary models and can answer questions about a fresh repository checkout without sending source, prompts, or selected incident text to cloud inference.
+- A network-egress check confirms which external endpoints the chosen OpenCode version contacts; any required outbound content path blocks the no-cloud acceptance until removed or explicitly approved.
 - The agent cannot edit files, execute shell commands, read secrets, access production data, or write to GitHub.
 - Model download is not part of ordinary app startup; a stopped/unavailable model does not take down the production app.
 - Offline repository Q&A works after model files and dependencies are cached; GitHub/CI capabilities are clearly reported unavailable offline.
