@@ -1,4 +1,4 @@
-import { isHeicFile } from "./inventoryShared";
+import { HEIC_UNSUPPORTED_MESSAGE, isHeicFile } from "./inventoryShared";
 
 type HeicConverter = (file: File) => Promise<Blob | Blob[]>;
 
@@ -23,5 +23,21 @@ export async function prepareImageSource(
     return Array.isArray(converted) ? converted[0] ?? file : converted;
   } catch {
     return file;
+  }
+}
+
+export async function decodeImageWithHeicFallback<T>(
+  file: File,
+  decode: (source: Blob) => Promise<T>,
+  convert: HeicConverter = convertHeicToJpeg,
+): Promise<{ source: Blob; decoded: T }> {
+  if (!isHeicFile(file)) return { source: file, decoded: await decode(file) };
+
+  try {
+    return { source: file, decoded: await decode(file) };
+  } catch {
+    const converted = await prepareImageSource(file, convert);
+    if (converted === file) throw new Error(HEIC_UNSUPPORTED_MESSAGE);
+    return { source: converted, decoded: await decode(converted) };
   }
 }

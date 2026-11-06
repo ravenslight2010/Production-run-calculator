@@ -203,6 +203,15 @@ vi.mock("./QualityHistoryTab", () => ({ default: () => null }));
 vi.mock("./QcImportReview", () => ({
   default: () => <section data-testid="qc-import-review-panel" />,
 }));
+vi.mock("./QcRecipeReview", () => ({
+  default: () => <section data-testid="qc-recipe-review-panel" />,
+}));
+vi.mock("./QcPlanningView", () => ({
+  default: () => <section data-testid="qc-planning-view" />,
+}));
+vi.mock("./QcIntelligenceReport", () => ({
+  default: () => <section data-testid="qc-intelligence-report" />,
+}));
 // Date-code form and comparison have their own focused hook/state tests.
 vi.mock("./QcDateCodeVerification", () => ({
   default: () => <section data-testid="qc-date-code-verification" />,
@@ -389,10 +398,31 @@ function renderTab(options: RenderOptions = {}) {
   };
 }
 describe("QC workflow UI", () => {
-  it("opens the Import review section when requested from the global badge", () => {
+  it("opens the Import review section when requested from the global badge", async () => {
     renderTab({ canManageQc: true, openImportReviewRequestId: 1 });
     expect(screen.getByTestId("button-toggle-qc-import-review").textContent).toContain("Hide import review");
-    expect(screen.getByTestId("qc-import-review-panel")).toBeTruthy();
+    expect(await screen.findByTestId("qc-import-review-panel")).toBeTruthy();
+  });
+
+  it("loads optional QC reports and reviews only when opened", async () => {
+    renderTab({ canManageQc: true });
+    expect(screen.queryByTestId("qc-planning-view")).toBeNull();
+    expect(screen.queryByTestId("qc-intelligence-report")).toBeNull();
+    expect(screen.queryByTestId("qc-recipe-review-panel")).toBeNull();
+    expect(screen.queryByTestId("qc-import-review-panel")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("button-toggle-qc-planning"));
+    expect(await screen.findByTestId("qc-planning-view")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("button-toggle-qc-intelligence"));
+    expect(await screen.findByTestId("qc-intelligence-report")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("button-toggle-qc-intelligence"));
+    fireEvent.click(screen.getByTestId("button-toggle-qc-recipe-review"));
+    expect(await screen.findByTestId("qc-recipe-review-panel")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("button-toggle-qc-import-review"));
+    expect(await screen.findByTestId("qc-import-review-panel")).toBeTruthy();
   });
 
   it("lets QC staff save observed label text without an approved reference or client-supplied expected values", () => {
@@ -567,11 +597,11 @@ describe("QC workflow UI", () => {
     });
   });
 
-  it("shows a read-only daily report with separate manual and derived states", () => {
+  it("shows a read-only daily report with separate manual and derived states", async () => {
     renderTab();
     fireEvent.click(screen.getByTestId("button-toggle-allergen-activity"));
 
-    expect(screen.getByRole("heading", { name: "Daily allergen activity" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Daily allergen activity" })).toBeTruthy();
     expect(screen.getByTestId("text-manual-allergen-run-1").textContent).toContain("none · recorded");
     expect(screen.getByTestId("text-derived-review-run-1").textContent).toBe("No review recorded");
     expect(screen.getByText(/does not establish cleaning between runs/)).toBeTruthy();
@@ -579,7 +609,7 @@ describe("QC workflow UI", () => {
       .toBeTruthy();
   });
 
-  it("shows audit reasons and recorded actors only to QC managers without revealing redacted notes", () => {
+  it("shows audit reasons and recorded actors only to QC managers without revealing redacted notes", async () => {
     qcMocks.activity.data = {
       date: "2026-10-16",
       sources: {
@@ -650,6 +680,7 @@ describe("QC workflow UI", () => {
 
     renderTab({ canManageQc: true });
     fireEvent.click(screen.getByTestId("button-toggle-allergen-activity"));
+    await screen.findByText("Correct the allergen review");
     expect(screen.getByText("Correct the allergen review")).toBeTruthy();
     expect(screen.getByText("Correct the cleaning method")).toBeTruthy();
     expect(screen.getByText("Remove verification note")).toBeTruthy();
@@ -661,6 +692,7 @@ describe("QC workflow UI", () => {
     cleanup();
     renderTab();
     fireEvent.click(screen.getByTestId("button-toggle-allergen-activity"));
+    await screen.findByRole("heading", { name: "Daily allergen activity" });
     expect(screen.queryByText("Correct the allergen review")).toBeNull();
     expect(screen.queryByText("Correct the cleaning method")).toBeNull();
     expect(screen.queryByText("Remove verification note")).toBeNull();

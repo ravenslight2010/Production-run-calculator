@@ -24,17 +24,24 @@ The production build checks UTF-8 byte counts from the emitted, minified
 JavaScript chunks. Static imports are counted once per graph; dynamic imports
 are excluded until the feature that requests them is opened. The check keeps
 separate limits for the signed-out app shell and the first authenticated Home
-view, plus a limit for the Home chunk itself:
+view, plus limits for Home and the optional QC and HEIC first-use graphs:
 
 | JavaScript graph or chunk | Maximum |
 | --- | ---: |
 | App-shell static graph | 750,000 bytes |
 | Authenticated startup static graph | 2,070,000 bytes |
 | Home chunk | 950,000 bytes |
+| QC first-use static graph | 500,000 bytes |
+| HEIC converter chunk | 1,400,000 bytes |
+
+The latest development-identity production build measured 706,527 bytes for the
+app shell, 2,043,714 bytes for authenticated startup, 942,830 bytes for Home,
+133,168 bytes for QC first use, and 1,352,145 bytes for the HEIC converter.
 
 Workbook conversion and QC workflow chunks remain on demand and are guarded by
 the deferred-feature boundary checks; they are not part of the startup byte
-totals.
+totals. The HEIC converter remains dynamically loaded and is requested only if
+the browser cannot decode the selected HEIC image natively.
 
 The full calculator Vitest suite has a 150-second wall-clock validation budget.
 The standard validation lane requires at least four available CPU workers and

@@ -42,7 +42,7 @@ import {
 import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
 import { createUpdateCoordinator, type UpdateState } from "./pwaUpdateCoordinator";
 import { AppUpdateControl } from "./components/AppUpdateControl";
-import { QcImportReviewBadge } from "./components/QcImportReview";
+import { QcImportReviewBadge } from "./components/QcImportReviewBadge";
 import {
   RECIPE_QC_REVIEW_NOTICE_EVENT,
   type RecipeQcReviewAcknowledgement,

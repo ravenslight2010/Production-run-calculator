@@ -71,15 +71,17 @@ import {
   hasConfiguredQcWeightReminderTarget,
   QC_WEIGHT_CHECK_OVERDUE_GRACE_MS,
 } from "../qcWeightCheckSchedule";
-import QcAllergenActivityReport from "./QcAllergenActivityReport";
+import { DeferredSurface } from "../departments/DeferredDepartmentSurface";
 import QcLabelVerification, { QcLabelComparison } from "./QcLabelVerification";
 import QcDateCodeVerification, { QcDateCodeComparison } from "./QcDateCodeVerification";
 import QualityHistoryTab from "./QualityHistoryTab";
-import QcImportReview from "./QcImportReview";
-import QcRecipeReview from "./QcRecipeReview";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
-import QcPlanningView from "./QcPlanningView";
-import QcIntelligenceReport from "./QcIntelligenceReport";
+
+const loadQcAllergenActivityReport = () => import("./QcAllergenActivityReport");
+const loadQcImportReview = () => import("./QcImportReview");
+const loadQcRecipeReview = () => import("./QcRecipeReview");
+const loadQcPlanningView = () => import("./QcPlanningView");
+const loadQcIntelligenceReport = () => import("./QcIntelligenceReport");
 
 export type QcWorkflowTabProps = {
   runId: string;
@@ -974,14 +976,23 @@ export default function QcWorkflowTab({
       </header>
 
       {showIntelligence && canManageQc ? (
-        <QcIntelligenceReport canManageQc={canManageQc} />
+        <DeferredSurface
+          label="QC intelligence"
+          load={loadQcIntelligenceReport}
+          componentProps={{ canManageQc }}
+        />
       ) : showDailyActivity ? (
-        <QcAllergenActivityReport
-          canRead={canRecordQc || canManageQc}
-          canManageQc={canManageQc}
+        <DeferredSurface
+          label="daily allergen activity"
+          load={loadQcAllergenActivityReport}
+          componentProps={{ canRead: canRecordQc || canManageQc, canManageQc }}
         />
       ) : showPlanning ? (
-        <QcPlanningView />
+        <DeferredSurface
+          label="upcoming production"
+          load={loadQcPlanningView}
+          componentProps={{}}
+        />
       ) : (
       <>
       {(canRecordQc || canManageQc) && (
@@ -995,7 +1006,13 @@ export default function QcWorkflowTab({
           >
             <ClipboardCheck className="h-4 w-4" /> {showRecipeReview ? "Hide recipe review" : "Recipe review"}
           </button>
-          {showRecipeReview && <QcRecipeReview canManageQc={canManageQc} />}
+          {showRecipeReview && (
+            <DeferredSurface
+              label="recipe review"
+              load={loadQcRecipeReview}
+              componentProps={{ canManageQc }}
+            />
+          )}
         </div>
       )}
       {canManageQc && (
@@ -1009,7 +1026,13 @@ export default function QcWorkflowTab({
           >
             <FileClock className="h-4 w-4" /> {showImportReview ? "Hide import review" : "Import review"}
           </button>
-          {showImportReview && <QcImportReview canManageQc={canManageQc} />}
+          {showImportReview && (
+            <DeferredSurface
+              label="import review"
+              load={loadQcImportReview}
+              componentProps={{ canManageQc }}
+            />
+          )}
         </div>
       )}
       {!canRecordQc && !canManageQc ? (

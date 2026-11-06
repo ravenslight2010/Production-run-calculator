@@ -85,8 +85,6 @@ import {
   type LabelVerdict,
   type LabelFieldMatch,
   MAX_IMAGE_BASE64_CHARS,
-  isHeicFile,
-  HEIC_UNSUPPORTED_MESSAGE,
   photoErrorMessage,
   InventoryApiError,
   rankCandidatesByName,
@@ -102,7 +100,7 @@ import {
   type InventoryCategory,
 } from "../inventoryShared";
 import { setPhotoAliasesCache, usePhotoAliases } from "../photoAliasesStore";
-import { prepareImageSource } from "../inventoryImage";
+import { decodeImageWithHeicFallback } from "../inventoryImage";
 import { useWarehouseSnapshot, refreshWarehouseSnapshot } from "../warehouseSnapshotClient";
 import { useMe } from "../useRole";
 import type { FormValues } from "../types";
@@ -1468,34 +1466,38 @@ function encodeJpeg(img: HTMLImageElement, maxEdge: number, quality: number): st
   return canvas.toDataURL("image/jpeg", quality).split(",")[1] ?? "";
 }
 
+function decodeImageBlob(source: Blob): Promise<HTMLImageElement> {
+  const objectUrl = URL.createObjectURL(source);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const finish = (callback: () => void) => {
+      URL.revokeObjectURL(objectUrl);
+      callback();
+    };
+    image.onload = () => finish(() => resolve(image));
+    image.onerror = () => finish(() => reject(new Error("Failed to load image")));
+    image.src = objectUrl;
+  });
+}
+
+function blobToDataUrl(source: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(source);
+  });
+}
+
 // Downscale/compress a chosen image to a JPEG and return its base64 payload,
 // guaranteed (best-effort) to stay under the server's size cap. Starts at a
 // sensible edge/quality and progressively shrinks dimensions and quality until
 // the payload fits, so oversized originals are handled gracefully instead of
 // being rejected with a 413 after the upload.
 async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
-  // iPhones often hand the picker a HEIC/HEIF photo that most desktop browsers
-  // can't decode via <img>/canvas. Transparently convert it to a JPEG Blob
-  // first so intake just works; if conversion fails we fall through to the
-  // <img> decode below, which surfaces the actionable HEIC guidance.
-  const source = await prepareImageSource(file);
-
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result as string);
-    fr.onerror = () => reject(new Error("Failed to read file"));
-    fr.readAsDataURL(source);
-  });
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const i = new Image();
-    i.onload = () => resolve(i);
-    // HEIC/HEIF from iPhones can't be decoded by <img> in most desktop
-    // browsers; if we get here the conversion above didn't succeed, so surface
-    // actionable guidance instead of a cryptic failure.
-    i.onerror = () =>
-      reject(new Error(isHeicFile(file) ? HEIC_UNSUPPORTED_MESSAGE : "Failed to load image"));
-    i.src = dataUrl;
-  });
+  // Try native decoding first. Browsers that support HEIC avoid downloading the
+  // optional converter; unsupported browsers load it only after decode fails.
+  const { source, decoded: img } = await decodeImageWithHeicFallback(file, decodeImageBlob);
 
   // Each step reduces the max edge and/or quality. The last step is small
   // enough that essentially any image will fit under the cap.
@@ -1510,7 +1512,7 @@ async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
   let last = "";
   for (const { edge, quality } of steps) {
     last = encodeJpeg(img, edge, quality);
-    if (!last) return dataUrl.split(",")[1] ?? "";
+    if (!last) return (await blobToDataUrl(source)).split(",")[1] ?? "";
     if (last.length <= MAX_IMAGE_BASE64_CHARS) return last;
   }
   // Even the smallest step exceeded the cap (extremely unlikely): return it

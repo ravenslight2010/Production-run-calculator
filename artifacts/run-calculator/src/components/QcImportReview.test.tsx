@@ -23,7 +23,8 @@ vi.mock("@workspace/api-client-react", () => ({
   }),
 }));
 
-import QcImportReview, { QcImportReviewBadge } from "./QcImportReview";
+import QcImportReview from "./QcImportReview";
+import { QcImportReviewBadge } from "./QcImportReviewBadge";
 
 const hash = "a".repeat(64);
 function base() {

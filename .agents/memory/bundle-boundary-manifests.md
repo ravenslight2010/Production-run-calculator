@@ -16,3 +16,9 @@ Measure bundle budgets from the written output files after the build finishes, u
 **Why:** Later output plugins can change chunk contents after an earlier `generateBundle` hook observes them, so in-hook `chunk.code` byte counts can understate the files users download.
 
 **How to apply:** Run the budget check after the bundler writes its output, stat each reachable emitted asset, and keep separate caps for the app shell, authenticated startup graph, and individual route chunks.
+
+When a feature module exports both a small shell-level badge and a large on-demand panel, place the badge in a separate module. A static shell import of one export can otherwise pull the panel into the startup graph and prevent the panel from becoming a true dynamic entry.
+
+**Why:** QC’s counts-only import badge was imported by the app shell from the same module as its full review panel, so the panel was not emitted as an independent deferred chunk.
+
+**How to apply:** Before trusting a lazy-load budget, search all static importers of the feature module. Split shell-needed exports from the deferred panel, then verify the bundle manifest has distinct dynamic entries and measure their static closures.

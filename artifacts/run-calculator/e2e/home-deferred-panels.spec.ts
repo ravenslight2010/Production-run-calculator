@@ -269,8 +269,14 @@ test("Home opens each deferred panel in the selected browser and viewport", asyn
   const username = uniqueTestId("e2e_home_deferred");
   const pageErrors: string[] = [];
   const failedScriptRequests: string[] = [];
+  const scriptRequests: string[] = [];
   testUsernames.add(username);
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("request", (request) => {
+    if (request.resourceType() === "script") {
+      scriptRequests.push(new URL(request.url()).pathname);
+    }
+  });
   page.on("response", (response) => {
     if (
       response.request().resourceType() === "script" &&
@@ -393,9 +399,32 @@ test("Home opens each deferred panel in the selected browser and viewport", asyn
   await expect(page.getByTestId("downtime-trends-tab")).toBeVisible();
   await expect(page.getByText("Loading quality tools…", { exact: true })).toHaveCount(0);
 
+  const scriptsBeforeQc = scriptRequests.length;
   await openMoreItem(page, "QC workflows & history");
   await expect(page.getByTestId("qc-workflow-tab")).toBeVisible();
   await expect(page.getByText("Loading quality tools…", { exact: true })).toHaveCount(0);
+  const qcFirstOpenScripts = scriptRequests.slice(scriptsBeforeQc);
+  expect(qcFirstOpenScripts.some((url) => /\/QcWorkflowTab-[\w-]+\.js$/.test(url))).toBe(true);
+  for (const deferredPanel of [
+    "QcAllergenActivityReport",
+    "QcImportReview",
+    "QcRecipeReview",
+    "QcPlanningView",
+    "QcIntelligenceReport",
+  ]) {
+    expect(
+      qcFirstOpenScripts.some((url) => url.includes(`${deferredPanel}-`)),
+      `${deferredPanel} should wait until its QC panel is opened`,
+    ).toBe(false);
+  }
+
+  const scriptsBeforeIntelligence = scriptRequests.length;
+  await page.getByTestId("button-toggle-qc-intelligence").click();
+  await expect(page.getByTestId("qc-intelligence-report")).toBeVisible();
+  await expect.poll(() =>
+    scriptRequests.slice(scriptsBeforeIntelligence)
+      .some((url) => url.includes("QcIntelligenceReport-")),
+  ).toBe(true);
 
   await openMoreItem(page, "Staff roster");
   await expect(page.getByRole("heading", { name: "Staff Roster", exact: true })).toBeVisible();
