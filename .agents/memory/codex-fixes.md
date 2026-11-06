@@ -1469,3 +1469,17 @@ typechecks, recovery audit, applicability matrix, and full failure ledger.
 3,518 passed / 1 existing skipped; workspace typecheck passed, including calculator
 checks after rebuilding stale library declarations; recovery audit unchanged at
 9 pass / 1 documented difference / 0 missing.
+
+## Auto-track wall-clock boundary test
+
+**Date**: 2026-11-06
+**Files changed**:
+- `artifacts/api-server/src/lib/autoTrackServerTicks.test.ts`
+
+**What was wrong**: Two sequencing tests expected a case claim exactly at the persisted timer arm, although that arm could precede the floored whole-case production estimate by one millisecond.
+
+**What the fix was**: Asserted that the early boundary emits no case claim, then verified sequence continuation at the first eligible millisecond. Runtime claim and cadence logic were unchanged.
+
+**Why it was needed**: Tests must preserve the invariant that canonical elapsed production authorizes a case before a claim is emitted; loosening the runtime check would permit premature tracking.
+
+**Verification**: Focused background/sync suites passed (102 tests); API-server typecheck passed.

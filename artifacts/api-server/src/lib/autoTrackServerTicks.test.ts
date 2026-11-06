@@ -883,7 +883,13 @@ describe("server auto-track claim builders", () => {
       version: 1,
       wallClockBookkeeping: { [RUN]: first.bookkeeping },
     };
-    const secondAt = first.bookkeeping.caseNextDueMs;
+    // The persisted arm can land one millisecond before the floored
+    // elapsed-production projection reaches its next whole case. Do not claim
+    // at that early boundary; the next millisecond is the first eligible tick.
+    const nominalSecondAt = first.bookkeeping.caseNextDueMs;
+    const earlySecond = buildWallClockServerClaims(data, nominalSecondAt)!;
+    expect(earlySecond.claims.find((claim) => claim.channel === "case")).toBeUndefined();
+    const secondAt = nominalSecondAt + 1;
     const second = buildWallClockServerClaims(data, secondAt)!;
     const caseClaim = second.claims.find((claim) => claim.channel === "case")!;
     expect(caseClaim.sequence).toBe(2);
@@ -907,7 +913,10 @@ describe("server auto-track claim builders", () => {
       ...applied.data,
       autoTrackServerState: { wallClockBookkeeping: { [RUN]: takeover.bookkeeping } },
     };
-    const continued = buildWallClockServerClaims(data, takeover.bookkeeping.caseNextDueMs)!;
+    const nominalNextAt = takeover.bookkeeping.caseNextDueMs;
+    const earlyNext = buildWallClockServerClaims(data, nominalNextAt)!;
+    expect(earlyNext.claims.find((item) => item.channel === "case")).toBeUndefined();
+    const continued = buildWallClockServerClaims(data, nominalNextAt + 1)!;
     expect(continued.claims.find((item) => item.channel === "case")?.sequence).toBe(3);
   });
 
