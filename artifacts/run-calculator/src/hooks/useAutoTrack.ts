@@ -23,6 +23,7 @@ import {
   depleteSauceStock,
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
+  advanceCaseDueAtAfterTick,
   capCaseExpectedRawByDueIntervals,
   computeCaseTickWrite,
   computeSauceRunRequirement,
@@ -1909,7 +1910,11 @@ useEffect(() => {
       const expectedCases = v.casesNeeded > 0
         ? Math.min(v.casesNeeded, expectedRaw)
         : expectedRaw;
-      caseNextDueMsRef.current = nowMs + casePeriodMs;
+      caseNextDueMsRef.current = advanceCaseDueAtAfterTick(
+        scheduledDueAtMs,
+        nowMs,
+        casePeriodMs,
+      );
       lastExpectedCasesRef.current = expectedRaw;
       // Freeze tunnel baseline advances on EVERY case tick (even suppressed / while
       // running) so the drain delta is always measured from the latest tunnel

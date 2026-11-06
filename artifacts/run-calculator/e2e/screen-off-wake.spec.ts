@@ -44,10 +44,9 @@
  *   docs/screen-off-wake-test-protocol.md  (manual tablet test protocol)
  *
  * Run with:
- *   PLAYWRIGHT_BASE_URL=https://<dev-domain> \
- *   STAFF_SIGNUP_CODE=<code> \
- *   PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$(which chromium) \
- *   pnpm --filter @workspace/run-calculator exec playwright test screen-off-wake
+ *   bash scripts/src/run-isolated-browser-suite.sh \
+ *     --playwright-config=playwright.wake-retry.config.ts \
+ *     --grep 'two live sessions converge through visible retry after an offline wake'
  */
 
 import {
@@ -68,6 +67,7 @@ import {
   freshMasterDataSeedHeaders,
   type E2ECapability,
 } from "./isolation";
+import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -76,8 +76,7 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-const API_BASE =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const API_BASE = requireLocalFixtureApiOrigin("screen-off wake fixtures");
 let authorizedFixtures: AuthorizedBrowserFixtures;
 
 test.beforeAll(async ({ playwright }) => {
@@ -554,8 +553,13 @@ async function followRealDateNow(page: Page): Promise<void> {
     };
     if (!w.__origDate || w.__testFollowRealTimer) return;
     const originalDate = w.__origDate;
+    const realNowMs = originalDate.now();
+    const fakeNowMs = Number.isFinite(w.__testFakeMs)
+      ? w.__testFakeMs as number
+      : realNowMs;
+    const offsetMs = fakeNowMs - realNowMs;
     w.__testFollowRealTimer = window.setInterval(() => {
-      w.__testFakeMs = originalDate.now();
+      w.__testFakeMs = originalDate.now() + offsetMs;
     }, 100);
   });
 }
@@ -3213,21 +3217,26 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .toBeVisible({ timeout: 15_000 });
       await expect(activeStatus).not.toContainText("Still recovering");
       await page.getByTestId("resume-run").click();
-      await expect.poll(
-        async () => {
-          if (await page.getByTestId("pause-run").count()) return "applied";
-          const resume = page.getByTestId("resume-run");
-          if (!(await resume.count())) return "transitioning";
-          const text = await resume.innerText();
-          return (await resume.isDisabled()) && /RESUME REQUESTED/i.test(text)
-            ? "queued"
-            : "unacknowledged";
-        },
-        {
-          timeout: 5_000,
-          message: "Resume tap was neither applied nor visibly queued behind the pending update",
-        },
-      ).not.toBe("unacknowledged");
+      let resumeTapError: unknown;
+      try {
+        await expect.poll(
+          async () => {
+            if (await page.getByTestId("pause-run").count()) return "applied";
+            const resume = page.getByTestId("resume-run");
+            if (!(await resume.count())) return "transitioning";
+            const text = await resume.innerText();
+            return (await resume.isDisabled()) && /RESUME REQUESTED/i.test(text)
+              ? "queued"
+              : "unacknowledged";
+          },
+          {
+            timeout: 5_000,
+            message: "Resume tap was neither applied nor visibly queued behind the pending update",
+          },
+        ).not.toBe("unacknowledged");
+      } catch (error) {
+        resumeTapError = error;
+      }
       const resumeQueueDiagnostics = await page.evaluate(() => {
         const prefix = "run-calculator:operational-intent-outbox:v1";
         const intents: Array<{
@@ -3287,6 +3296,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         body: Buffer.from(JSON.stringify(resumeQueueDiagnostics, null, 2)),
         contentType: "application/json",
       });
+      if (resumeTapError) throw resumeTapError;
       await expect(page.getByTestId("pause-run")).toBeVisible({ timeout: 15_000 });
       await expect.poll(
         async () => (await readLiveRunMeta(page)).pausedAt ?? 0,
@@ -4523,6 +4533,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       page,
       workerRecoveryAtMs,
     );
+    // Keep the client clock advancing while it waits for the server-owned
+    // canonical deadline. Preserve its simulated offset instead of freezing
+    // Date.now() before that deadline arrives.
+    await followRealDateNow(page);
     const firstServerTimeMs = Number(firstServerTick.serverTime ?? 0);
     expect(firstServerTimeMs, "the fixture tick must return canonical server time")
       .toBeGreaterThan(0);
@@ -4691,7 +4705,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       Number(afterDuplicateTick.book?.caseNextDueMs ?? 0),
     );
     expect(nextClientCaseDueMs).toBeGreaterThan(clientRecoveryAtMs);
+    await stopFollowingRealDateNow(page);
     await mockDateNow(page, nextClientCaseDueMs, { tick: false });
+    await followRealDateNow(page);
     const duplicateTickServerTimeMs = Number(duplicateTick.serverTime ?? 0);
     expect(
       duplicateTickServerTimeMs,

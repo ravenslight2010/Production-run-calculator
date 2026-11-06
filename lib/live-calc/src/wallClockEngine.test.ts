@@ -50,5 +50,6 @@ describe("tickWallClock", () => {
       { field: "casesOnCurrentSkid", from: 46, to: 7 },
     ]);
     expect(result.next.lastExpectedCases).toBe(55);
+    expect(result.next.caseNextDueMs).toBe(66_000);
   });
 });

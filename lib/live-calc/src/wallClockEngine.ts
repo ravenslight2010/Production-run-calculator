@@ -1,4 +1,14 @@
-import { capCaseExpectedRawByDueIntervals, clampWebPeriodMs, computeBatchTick, computeCaseTickWrite, computeTrayTick, getAutoTrackTiming, suggestedDoughStaging, type AutoTrackTiming } from "./autoTrackEngine";
+import {
+  advanceCaseDueAtAfterTick,
+  capCaseExpectedRawByDueIntervals,
+  clampWebPeriodMs,
+  computeBatchTick,
+  computeCaseTickWrite,
+  computeTrayTick,
+  getAutoTrackTiming,
+  suggestedDoughStaging,
+  type AutoTrackTiming,
+} from "./autoTrackEngine";
 
 export type WallClockRunStatus = "pending" | "running" | "paused" | "ended";
 export type WallClockChannel = "case" | "tray-consume" | "tray-produce" | "batch-consume" | "batch-produce" | "hopper";
@@ -30,7 +40,11 @@ export function tickWallClock(input: WallClockTickInput): { next: WallClockBookk
   if (caseActive && input.calc.ppm > 0 && input.v.pizzasPerCase > 0 && input.nowMs >= next.caseNextDueMs) {
     const dueAt = input.nowMs;
     const scheduledDueAtMs = next.caseNextDueMs;
-    next.caseNextDueMs = input.nowMs + clampWebPeriodMs(input.v.pizzasPerCase / input.calc.ppm * 60000);
+    next.caseNextDueMs = advanceCaseDueAtAfterTick(
+      scheduledDueAtMs,
+      input.nowMs,
+      input.timing.caseMs || clampWebPeriodMs(input.v.pizzasPerCase / input.calc.ppm * 60000),
+    );
     const prevExpected = next.lastExpectedCases, prevFreezer = next.drainFreezer;
     const expectedCasesRaw = capCaseExpectedRawByDueIntervals({
       previousExpected: prevExpected,

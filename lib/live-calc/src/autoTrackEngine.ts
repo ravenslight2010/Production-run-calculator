@@ -190,6 +190,37 @@ export type CaseTickWriteDecision =
   | { action: "write"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: boolean }
   | { action: "reset-skip"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: true }
   | { action: "none"; newTotal: number; caseClaimRetryReset: false; formResetSkippedNew: boolean };
+export function dueCaseIntervals(nextDueAtMs: number, nowMs: number, periodMs: number): number {
+  if (
+    !Number.isFinite(nextDueAtMs)
+    || nextDueAtMs <= 0
+    || !Number.isFinite(nowMs)
+    || !Number.isFinite(periodMs)
+    || periodMs <= 0
+    || nowMs < nextDueAtMs
+  ) return 0;
+  return Math.floor((nowMs - nextDueAtMs) / periodMs) + 1;
+}
+/**
+ * Advance from the scheduled arm, not the late callback time. Re-anchoring on
+ * every delayed render accumulates timer drift and drops whole case intervals.
+ */
+export function advanceCaseDueAtAfterTick(
+  scheduledDueAtMs: number,
+  nowMs: number,
+  periodMs: number,
+): number {
+  if (!Number.isFinite(nowMs) || !Number.isFinite(periodMs) || periodMs <= 0) {
+    return scheduledDueAtMs;
+  }
+  if (!Number.isFinite(scheduledDueAtMs) || scheduledDueAtMs <= 0) {
+    return nowMs + periodMs;
+  }
+  const intervals = dueCaseIntervals(scheduledDueAtMs, nowMs, periodMs);
+  return intervals > 0
+    ? scheduledDueAtMs + intervals * periodMs
+    : scheduledDueAtMs;
+}
 /**
  * Keep an elapsed-time projection from creating more case increments than the
  * scheduled cadence has actually made due. The projection's phase is anchored
@@ -215,9 +246,11 @@ export function capCaseExpectedRawByDueIntervals(input: {
   ) {
     return Math.floor(input.expectedRaw);
   }
-  const elapsedDueIntervals = input.nowMs < input.nextDueAtMs
-    ? 0
-    : Math.floor((input.nowMs - input.nextDueAtMs) / input.periodMs) + 1;
+  const elapsedDueIntervals = dueCaseIntervals(
+    input.nextDueAtMs,
+    input.nowMs,
+    input.periodMs,
+  );
   return Math.min(
     Math.floor(input.expectedRaw),
     Math.floor(input.previousExpected) + elapsedDueIntervals,
