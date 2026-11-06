@@ -182,10 +182,6 @@ author = "agent"
 task = "workflow.run"
 args = "release:standard"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:client"
-
 [[workflows.workflow]]
 name = "browser-full-159"
 author = "agent"
