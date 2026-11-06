@@ -9,6 +9,7 @@ import {
   discoverRetainedEvaluationPaths,
   readAllCiNodeVersions,
   readCiNodeVersions,
+  readCurrentEvaluationNodeVersion,
   readNodeSelectorVersion,
   readRequiredNodeVersion,
   readRequiredNodeVersionEntries,
@@ -56,6 +57,24 @@ test("reads the required version without changing retained evidence", () => {
   try {
     assert.equal(readRequiredNodeVersion(evidencePath), "24.20.0");
     assert.equal(fs.readFileSync(evidencePath, "utf8"), contents);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reads the canonical current evaluation manifest version", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
+  const manifestPath = path.join(directory, "evaluation-manifest.json");
+  fs.writeFileSync(
+    manifestPath,
+    JSON.stringify({
+      manifestVersion: 1,
+      dependencies: { node: "24.22.2" },
+    }),
+  );
+
+  try {
+    assert.equal(readCurrentEvaluationNodeVersion(manifestPath), "24.22.2");
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -280,61 +299,72 @@ test("fails when a discovered retained manifest lacks runtime metadata", () => {
   }
 });
 
-test("accepts matching selector, CI pins, and retained evidence", () => {
+test("accepts matching selector, CI pins, and the current manifest", () => {
   assert.doesNotThrow(() =>
     checkRepositoryNodeVersionContract({
-      requiredVersions: ["24.20.0", "24.20.0"],
-      selectorVersion: "24.20.0",
-      ciVersions: ["24.20.0", "24.20.0"],
+      currentVersion: "24.22.2",
+      selectorVersion: "24.22.2",
+      ciVersions: ["24.22.2", "24.22.2"],
     }),
   );
 });
 
-test("rejects selector or CI pins that drift from retained evidence", () => {
+test("rejects selector or CI pins that drift from the current manifest", () => {
   assert.throws(
     () =>
       checkRepositoryNodeVersionContract({
-        requiredVersions: ["24.20.0", "24.20.0"],
-        selectorVersion: "24.19.1",
-        ciVersions: ["24.20.0", "24.21.0"],
+        currentVersion: "24.22.2",
+        selectorVersion: "24.22.1",
+        ciVersions: ["24.22.2", "24.22.1"],
       }),
     (error) => {
-      assert.match(error.message, /Retained evidence: 24\.20\.0/);
-      assert.match(error.message, /\.nvmrc selector: 24\.19\.1/);
-      assert.match(error.message, /Explicit CI pins: 24\.20\.0, 24\.21\.0/);
-      assert.match(error.message, /without rewriting retained evidence/);
+      assert.match(error.message, /Current evaluation manifest: 24\.22\.2/);
+      assert.match(error.message, /\.nvmrc selector: 24\.22\.1/);
+      assert.match(error.message, /Explicit CI pins: 24\.22\.2, 24\.22\.1/);
+      assert.match(error.message, /Preserve dated evidence as historical provenance/);
       return true;
     },
   );
 });
 
-test("rejects retained manifests that disagree with each other", () => {
-  const matchingPath = "/retained/matching-manifest.json";
-  const mismatchedPath = "/retained/mismatched-manifest.json";
-
-  assert.throws(
-    () =>
-      checkRepositoryNodeVersionContract({
-        requiredVersionEntries: [
-          { evidencePath: matchingPath, requiredVersion: "24.20.0" },
-          { evidencePath: mismatchedPath, requiredVersion: "24.19.1" },
-        ],
-        selectorVersion: "24.20.0",
-        ciVersions: ["24.20.0"],
-      }),
-    (error) => {
-      assert.match(error.message, /Retained evidence: 24\.20\.0, 24\.19\.1/);
-      assert.match(
-        error.message,
-        new RegExp(
-          `Mismatched retained manifests:\\n- ${mismatchedPath}: 24\\.19\\.1`,
-        ),
-      );
-      assert.doesNotMatch(error.message, new RegExp(matchingPath));
-      assert.match(error.message, /every retained manifest/);
-      return true;
-    },
+test("historical manifest versions remain readable without controlling current pins", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
+  const evidencePaths = ["current.json", "dated.json"].map((name) =>
+    path.join(directory, name),
   );
+  const contents = [
+    JSON.stringify({
+      manifestVersion: 1,
+      dependencies: { node: "24.22.2" },
+    }),
+    JSON.stringify({
+      manifestVersion: 1,
+      dependencies: { node: "24.21.0" },
+    }),
+  ];
+  evidencePaths.forEach((evidencePath, index) => {
+    fs.writeFileSync(evidencePath, contents[index]);
+  });
+
+  try {
+    assert.deepEqual(readRequiredNodeVersions(evidencePaths), [
+      "24.22.2",
+      "24.21.0",
+    ]);
+    assert.equal(
+      checkRepositoryNodeVersionContract({
+        currentVersion: "24.22.2",
+        selectorVersion: "24.22.2",
+        ciVersions: ["24.22.2"],
+      }),
+      "24.22.2",
+    );
+    evidencePaths.forEach((evidencePath, index) => {
+      assert.equal(fs.readFileSync(evidencePath, "utf8"), contents[index]);
+    });
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("reads the local selector and every explicit CI Node pin", () => {

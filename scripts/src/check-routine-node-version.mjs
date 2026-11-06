@@ -6,15 +6,16 @@ import { fileURLToPath } from "node:url";
 import {
   discoverRetainedEvaluationPaths as discoverSharedRetainedEvaluationPaths,
   evaluationManifestFromEvidence,
+  RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
   retainedEvaluationDirectories,
 } from "./retained-evaluation-contract.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "../..");
 const RETAINED_EVIDENCE_DIRECTORIES = retainedEvaluationDirectories(REPO_ROOT);
-const EVIDENCE_PATH = path.join(
+const CURRENT_EVALUATION_MANIFEST_PATH = path.join(
   REPO_ROOT,
-  "docs/second-pass-reviewer-benchmark-2026-10-06.json",
+  RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
 );
 const NODE_SELECTOR_PATH = path.join(REPO_ROOT, ".nvmrc");
 const CI_WORKFLOW_PATHS = [
@@ -55,7 +56,9 @@ export function checkRoutineNodeVersion({
 }
 
 
-export function readRequiredNodeVersion(evidencePath = EVIDENCE_PATH) {
+export function readRequiredNodeVersion(
+  evidencePath = CURRENT_EVALUATION_MANIFEST_PATH,
+) {
   const evidence = readRetainedEvaluationJson(evidencePath);
   const manifest = evaluationManifestFromEvidence(evidence);
   const requiredVersion = manifest?.dependencies?.node;
@@ -67,6 +70,12 @@ export function readRequiredNodeVersion(evidencePath = EVIDENCE_PATH) {
   }
 
   return requiredVersion;
+}
+
+export function readCurrentEvaluationNodeVersion(
+  evidencePath = CURRENT_EVALUATION_MANIFEST_PATH,
+) {
+  return readRequiredNodeVersion(evidencePath);
 }
 
 function readRetainedEvaluationJson(evidencePath) {
@@ -151,98 +160,52 @@ export function readAllCiNodeVersions(ciWorkflowPaths = CI_WORKFLOW_PATHS) {
 }
 
 export function checkRepositoryNodeVersionContract({
-  requiredVersion,
-  requiredVersions,
-  requiredVersionEntries,
+  currentVersion,
   selectorVersion,
   ciVersions,
 }) {
   if (
-    requiredVersionEntries !== undefined
-    && (
-      !Array.isArray(requiredVersionEntries)
-      || requiredVersionEntries.length === 0
-      || requiredVersionEntries.some(
-        ({ evidencePath, requiredVersion: entryVersion } = {}) =>
-          typeof evidencePath !== "string"
-          || evidencePath.trim() === ""
-          || typeof entryVersion !== "string"
-          || entryVersion.trim() === "",
-      )
-    )
-  ) {
-    throw new TypeError(
-      "requiredVersionEntries must contain evidence paths and non-empty versions",
-    );
-  }
-
-  const retainedVersions =
-    requiredVersionEntries?.map(({ requiredVersion: entryVersion }) => entryVersion)
-    ?? requiredVersions
-    ?? [requiredVersion];
-  if (
-    !Array.isArray(retainedVersions) ||
-    retainedVersions.length === 0 ||
-    retainedVersions.some(
-      (version) => typeof version !== "string" || version.trim() === "",
-    ) ||
+    typeof currentVersion !== "string" ||
+    currentVersion.trim() === "" ||
     typeof selectorVersion !== "string" ||
     !Array.isArray(ciVersions) ||
     ciVersions.length === 0
   ) {
     throw new TypeError(
-      "requiredVersions, selectorVersion, and non-empty ciVersions are required",
+      "currentVersion, selectorVersion, and non-empty ciVersions are required",
     );
   }
 
-  const requiredVersionsSet = new Set(retainedVersions);
-  const requiredNodeVersion = retainedVersions[0];
-  const mismatchedRetainedEntries =
-    requiredVersionEntries?.filter(
-      ({ requiredVersion: entryVersion }) =>
-        entryVersion !== requiredNodeVersion,
-    ) ?? [];
   const mismatchedCiVersions = ciVersions.filter(
-    (version) => version !== requiredNodeVersion,
+    (version) => version !== currentVersion,
   );
   if (
-    requiredVersionsSet.size > 1 ||
-    selectorVersion !== requiredNodeVersion ||
+    selectorVersion !== currentVersion ||
     mismatchedCiVersions.length > 0
   ) {
     throw new Error(
       [
         "Repository Node version contract is out of sync.",
-        `Retained evidence: ${[...requiredVersionsSet].join(", ")}`,
-        ...(mismatchedRetainedEntries.length > 0
-          ? [
-              "Mismatched retained manifests:",
-              ...mismatchedRetainedEntries.map(
-                ({ evidencePath, requiredVersion: entryVersion }) =>
-                  `- ${evidencePath}: ${entryVersion}`,
-              ),
-            ]
-          : []),
+        `Current evaluation manifest: ${currentVersion}`,
         `.nvmrc selector: ${selectorVersion}`,
         `Explicit CI pins: ${[...new Set(ciVersions)].join(", ")}`,
-        "Align every retained manifest, the selector, and every explicit CI pin without rewriting retained evidence.",
+        "Align the canonical current evaluation manifest, selector, and explicit CI pins. Preserve dated evidence as historical provenance.",
       ].join("\n"),
     );
   }
 
-  return requiredNodeVersion;
+  return currentVersion;
 }
 
 export function main() {
-  const retainedVersionEntries = readRequiredNodeVersionEntries();
-  const requiredVersion = checkRepositoryNodeVersionContract({
-    requiredVersionEntries: retainedVersionEntries,
+  const currentVersion = checkRepositoryNodeVersionContract({
+    currentVersion: readCurrentEvaluationNodeVersion(),
     selectorVersion: readNodeSelectorVersion(),
     ciVersions: readAllCiNodeVersions(),
   });
   checkRoutineNodeVersion({
     actualVersion: process.versions.node,
-    requiredVersion,
+    requiredVersion: currentVersion,
   });
 }
 
