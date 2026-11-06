@@ -38,3 +38,9 @@ Successful validation with an independently provisioned pinned package manager d
 **Why:** An obsolete Corepack symlink selected older Nix pnpm, which recursively attempted manager installation and exhausted threads while the independently provisioned exact manager ran the same checks successfully. Provisioning the repository-pinned manager in the existing user-tools PATH resolved selection without changing project dependencies. These are different launcher paths, not evidence that the application or checks fail.
 
 **How to apply:** Verify pinned-manager selection and ordinary workflow resolution separately, preserving repository engine requirements and HTTPS verification. Inspect launcher targets and preserve dangling launchers before reprovisioning. pnpm's current self-update installs its launcher under `PNPM_HOME/bin`; verify the resulting executable's actual PATH precedence instead of assuming the requested prefix is already the binary directory. Do not change project dependencies to work around a local launcher failure.
+
+The runtime pin check should compare the selector and CI pins with the canonical current evaluation manifest, not require dated evaluation records to report the same Node patch.
+
+**Why:** Historical reports describe the runtime used at capture time. Treating those records as current pins makes safe runtime updates impossible without rewriting or misrepresenting prior evidence.
+
+**How to apply:** Update and regenerate only the canonical current manifest under the selected exact Node version. Keep dated reports byte-for-byte intact and continue validating each manifest's structure and provenance independently.
