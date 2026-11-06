@@ -17,6 +17,8 @@ import { fetchWithDiagnostics } from "./performanceDiagnostics";
 export const IMPORT_WAKE_HINT =
   "The server didn't respond before the client timeout. If you were saving data, check whether it was saved before trying again. If the app sat idle, it may have been waking up.";
 
+export const FOREGROUND_RECOVERY_TIMEOUT_MS = 10_000;
+
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit,

@@ -247,6 +247,52 @@ export function fifteenArm(data: unknown, nowMs: number): string | null {
   return context && context.calc.adjustedTimeSec > 900 ? context.key : null;
 }
 
+function alertArmIdentity(kind: "fifteenMin" | "freezerEmpty", runKey: string): string {
+  return `${kind}:${runKey}`;
+}
+
+function candidateHasRequiredArm(candidate: Candidate, activeArms: ReadonlySet<string>): boolean {
+  if (candidate.kind !== "fifteenMin" && candidate.kind !== "freezerEmpty") return true;
+  return !!candidate.armKey && activeArms.has(alertArmIdentity(candidate.kind, candidate.armKey));
+}
+
+export function scheduledAlertCandidateCount(
+  data: unknown,
+  date: string,
+  nowMs: number,
+  activeArms: ReadonlySet<string>,
+): number {
+  return [
+    ...alertCandidates(data, date, nowMs),
+    ...freezerCandidates(data, date, nowMs),
+  ].filter((candidate) => candidateHasRequiredArm(candidate, activeArms)).length;
+}
+
+export function scheduledAlertDateNeedsEvaluation(
+  data: unknown,
+  date: string,
+  nowMs: number,
+  activeArms: ReadonlySet<string>,
+  existingAlertIds: ReadonlySet<string>,
+  hasPendingDeferredDelivery: boolean,
+): boolean {
+  if (hasPendingDeferredDelivery) return true;
+
+  const fifteenMinuteArm = fifteenArm(data, nowMs);
+  if (fifteenMinuteArm && !activeArms.has(alertArmIdentity("fifteenMin", fifteenMinuteArm))) return true;
+  for (const runKey of pendingFreezerArms(data, nowMs)) {
+    if (!activeArms.has(alertArmIdentity("freezerEmpty", runKey))) return true;
+  }
+
+  const candidates = [
+    ...alertCandidates(data, date, nowMs),
+    ...freezerCandidates(data, date, nowMs),
+  ];
+  return candidates.some((candidate) =>
+    !existingAlertIds.has(candidate.id) && candidateHasRequiredArm(candidate, activeArms),
+  );
+}
+
 type DeliveryStatus = "no-subscriptions" | "vapid-unconfigured" | "delivered" | "failed";
 const DEFERRED_DELIVERY_CLAIM_MS = 90_000;
 
@@ -384,7 +430,7 @@ async function deliverDeferredAlerts(scope: Scope, date: string, nowMs: number, 
 
 export async function runWebPushAlerts(
   nowMs = Date.now(),
-  target?: { scope: Scope; date: string; signal?: AbortSignal },
+  target?: { scope: Scope; date: string; signal?: AbortSignal; pruneExpired?: boolean },
 ): Promise<{ examined: number; candidates: number }> {
   const query = db.select().from(dailySyncTable);
   const rows = target
@@ -464,6 +510,11 @@ export async function runWebPushAlerts(
         .where(eq(scheduledAlertRecordsTable.id, record.id));
     }
   }
+  if (target?.pruneExpired !== false) await pruneExpiredWebPushData(nowMs);
+  return { examined: rows.length, candidates };
+}
+
+export async function pruneExpiredWebPushData(nowMs = Date.now()): Promise<void> {
   const cutoff = new Date(nowMs);
   await Promise.all([
     db.delete(webPushDeliveriesTable).where(lt(webPushDeliveriesTable.expiresAt, cutoff)),
@@ -475,7 +526,6 @@ export async function runWebPushAlerts(
     )),
     db.delete(webPushSubscriptionsTable).where(and(eq(webPushSubscriptionsTable.enabled, false), lt(webPushSubscriptionsTable.updatedAt, new Date(nowMs - RETENTION_MS)))),
   ]);
-  return { examined: rows.length, candidates };
 }
 
 /**
@@ -536,27 +586,76 @@ registerServerJob("scheduled-evaluation", {
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(10, "Evaluating scheduled production alerts");
     const scope = context.job.scope as Scope;
-    const dates = typeof input.date === "string"
-      ? [{ date: input.date }]
-      : await db.select({ date: dailySyncTable.date })
+    const requestedDate = typeof input.date === "string" ? input.date : undefined;
+    const dateRows: Array<{ date: string; data?: unknown }> = requestedDate
+      ? [{ date: requestedDate }]
+      : await db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
         .from(dailySyncTable)
         .where(eq(dailySyncTable.scope, scope))
         .orderBy(asc(dailySyncTable.date));
-    let examined = 0;
+    let examined = requestedDate ? 0 : dateRows.length;
     let candidates = 0;
+    let datesToEvaluate = dateRows;
+    if (!requestedDate && dateRows.length > 0) {
+      const nowMs = Date.now();
+      const [recordRows, armRows] = await Promise.all([
+        db.select({
+          alertId: scheduledAlertRecordsTable.alertId,
+          date: scheduledAlertRecordsTable.date,
+          status: scheduledAlertRecordsTable.status,
+          evaluatedAt: scheduledAlertRecordsTable.evaluatedAt,
+        }).from(scheduledAlertRecordsTable).where(and(
+          eq(scheduledAlertRecordsTable.scope, scope),
+          gt(scheduledAlertRecordsTable.expiresAt, new Date(nowMs)),
+        )),
+        db.select({
+          runKey: webPushAlertArmsTable.runKey,
+          alertKind: webPushAlertArmsTable.alertKind,
+        }).from(webPushAlertArmsTable).where(and(
+          eq(webPushAlertArmsTable.scope, scope),
+          gt(webPushAlertArmsTable.expiresAt, new Date(nowMs)),
+        )),
+      ]);
+      const existingAlertIds = new Set(recordRows.map((row) => row.alertId));
+      const activeArms = new Set(armRows.map((row) =>
+        alertArmIdentity(row.alertKind as "fifteenMin" | "freezerEmpty", row.runKey),
+      ));
+      candidates = dateRows.reduce<number>((total, row) => total
+        + scheduledAlertCandidateCount(row.data, row.date, nowMs, activeArms), 0);
+      const pendingDeferredDates = new Set(!quietHours(nowMs)
+        ? recordRows.filter((row) => row.status === "deferred"
+          || (row.status === "delivering"
+            && row.evaluatedAt instanceof Date
+            && row.evaluatedAt.getTime() < nowMs - DEFERRED_DELIVERY_CLAIM_MS))
+          .map((row) => row.date)
+        : []);
+      datesToEvaluate = dateRows.filter((row) => scheduledAlertDateNeedsEvaluation(
+        row.data,
+        row.date,
+        nowMs,
+        activeArms,
+        existingAlertIds,
+        pendingDeferredDates.has(row.date),
+      ));
+    }
     // Keep each date's alert effects in its own commit. Besides preserving the
     // former transaction size, logical alert claims make retries safe if a
     // later date fails after earlier dates have completed.
-    for (const row of dates) {
+    for (const row of datesToEvaluate) {
       if (await context.isCancellationRequested()) throw new Error("Cancelled");
       const result = await context.commit(() => runWebPushAlerts(Date.now(), {
         scope,
         date: row.date,
         signal: context.signal,
+        pruneExpired: false,
       }));
-      examined += result.examined;
-      candidates += result.candidates;
+      if (requestedDate) {
+        examined += result.examined;
+        candidates += result.candidates;
+      }
     }
+    if (await context.isCancellationRequested()) throw new Error("Cancelled");
+    await context.commit(() => pruneExpiredWebPushData(Date.now()));
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(100, "Scheduled production alerts evaluated");
     return { examined, candidates };

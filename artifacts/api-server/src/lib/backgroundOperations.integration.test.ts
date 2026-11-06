@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,8 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let serverJobsTable: DbModule["serverJobsTable"];
 let serverJobAttemptsTable: DbModule["serverJobAttemptsTable"];
+let webPushDeliveriesTable: DbModule["webPushDeliveriesTable"];
+let webPushSubscriptionsTable: DbModule["webPushSubscriptionsTable"];
 let webPushAlertArmsTable: DbModule["webPushAlertArmsTable"];
 let scheduledAlertRecordsTable: DbModule["scheduledAlertRecordsTable"];
 let backgroundOperationEventsTable: DbModule["backgroundOperationEventsTable"];
@@ -99,6 +101,8 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   serverJobsTable = dbMod.serverJobsTable;
   serverJobAttemptsTable = dbMod.serverJobAttemptsTable;
+  webPushDeliveriesTable = dbMod.webPushDeliveriesTable;
+  webPushSubscriptionsTable = dbMod.webPushSubscriptionsTable;
   webPushAlertArmsTable = dbMod.webPushAlertArmsTable;
   scheduledAlertRecordsTable = dbMod.scheduledAlertRecordsTable;
   backgroundOperationEventsTable = dbMod.backgroundOperationEventsTable;
@@ -1078,6 +1082,37 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(completedJob).toMatchObject({ type: "scheduled-evaluation", status: "succeeded", attempt: 1 });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
+  });
+
+  it("prunes web-push retention tables once after a multi-date evaluation", async () => {
+    const dates = [ALERT_DATE, "2030-04-02"];
+    await db.insert(dailySyncTable).values(dates.map((date) => ({
+      date,
+      scope: SCOPE,
+      data: { dayState: { date, runs: [] }, runValues: {} },
+    })));
+    const scheduledAt = Date.parse("2030-04-02T12:00:00.000Z");
+    await expect(enqueueScheduledWebPushAlerts(scheduledAt)).resolves.toEqual({ examined: 1, enqueued: 1 });
+
+    const deleteSpy = vi.spyOn(db, "delete");
+    let cleanupTables: unknown[] = [];
+    try {
+      expect(await new ServerJobWorker("single-cleanup-worker").runOnce()).toBe(true);
+      cleanupTables = deleteSpy.mock.calls.map(([table]) => table);
+    } finally {
+      deleteSpy.mockRestore();
+    }
+
+    expect(cleanupTables).toHaveLength(5);
+    expect(cleanupTables).toEqual([
+      webPushDeliveriesTable,
+      webPushAlertArmsTable,
+      scheduledAlertRecordsTable,
+      webPushSubscriptionsTable,
+      webPushSubscriptionsTable,
+    ]);
+    const [job] = await db.select().from(serverJobsTable);
+    expect(job.result).toMatchObject({ examined: 2, candidates: 0 });
   });
 
   it("recovers queued job cancellation without running scheduled evaluation", async () => {

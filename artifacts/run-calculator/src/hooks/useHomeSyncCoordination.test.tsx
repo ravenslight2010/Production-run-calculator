@@ -5,6 +5,7 @@ import {
   useHomeSyncCoordination,
   type ForegroundRecoveryAttemptContext,
 } from "./useHomeSyncCoordination";
+import { FOREGROUND_RECOVERY_TIMEOUT_MS } from "../fetchWithTimeout";
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -362,6 +363,47 @@ describe("useHomeSyncCoordination", () => {
     expect(recover).toHaveBeenCalledTimes(2);
     registration.dispose();
     unmount();
+  });
+
+  it("restarts an expired recovery on foreground when visibility change was missed", async () => {
+    const now = Date.now();
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(now);
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const attempts: ForegroundRecoveryAttemptContext[] = [];
+    let foregroundRun!: () => Promise<boolean>;
+    const scheduler = {
+      register: (task: { run: () => boolean | Promise<boolean> }) => {
+        foregroundRun = () => Promise.resolve(task.run());
+        return () => {};
+      },
+    };
+    const recover = vi.fn(async (context: ForegroundRecoveryAttemptContext) => {
+      attempts.push(context);
+      if (attempts.length === 1) {
+        await new Promise<void>((resolve) => {
+          context.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        context.classify("cancelled");
+        return false;
+      }
+      return !context.signal.aborted;
+    });
+    const registration = result.current.registerForegroundRecovery(scheduler, recover);
+    const firstWake = registration.reconcile();
+    await Promise.resolve();
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.signal.aborted).toBe(false);
+
+    dateNow.mockReturnValue(now + FOREGROUND_RECOVERY_TIMEOUT_MS);
+    await expect(foregroundRun()).resolves.toBe(true);
+    await expect(firstWake).resolves.toBe(true);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]!.signal.aborted).toBe(true);
+    expect(attempts[1]!.signal.aborted).toBe(false);
+
+    registration.dispose();
+    unmount();
+    dateNow.mockRestore();
   });
 
   it("coalesces duplicate wakes, clears retries on success and never retries permanent failures", async () => {

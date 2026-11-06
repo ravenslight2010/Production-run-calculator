@@ -24,7 +24,8 @@ import {
   webPushDeliveriesTable, webPushSubscriptionsTable,
 } from "@workspace/db/schema";
 import {
-  alertCandidates, fifteenArm, freezerCandidates, pendingFreezerArms, runWebPushAlerts,
+  alertCandidates, fifteenArm, freezerCandidates, pendingFreezerArms,
+  pruneExpiredWebPushData, runWebPushAlerts, scheduledAlertDateNeedsEvaluation,
 } from "./webPush";
 
 const NOW = Date.parse("2030-04-01T12:00:00Z");
@@ -135,9 +136,64 @@ describe("canonical background alert lifecycle with real calculations", () => {
     }]);
     expect(pendingFreezerArms(data, NOW + 30_000)).toEqual([]);
   });
+
+  it("skips idle dates but retains missing arms, new alerts, and deferred deliveries", () => {
+    const emptyData = { dayState: { runs: [] }, runValues: {} };
+    expect(scheduledAlertDateNeedsEvaluation(emptyData, DATE, NOW, new Set(), new Set(), false)).toBe(false);
+    expect(scheduledAlertDateNeedsEvaluation(emptyData, DATE, NOW, new Set(), new Set(), true)).toBe(true);
+
+    const data = fixture();
+    const activeRun = data.dayState.runs[1]!;
+    data.dayState.runs = [activeRun];
+    data.dayState.runs[0]!.autoTrackDisabled = false;
+    data.runValues.active.casesNeeded = 200;
+    const arm = fifteenArm(data, NOW)!;
+    expect(arm).toBeTruthy();
+    expect(scheduledAlertDateNeedsEvaluation(data, DATE, NOW, new Set(), new Set(), false)).toBe(true);
+    expect(scheduledAlertDateNeedsEvaluation(
+      data, DATE, NOW, new Set([`fifteenMin:${arm}`]), new Set(), false,
+    )).toBe(false);
+
+    const dueData = fixture();
+    const dueRun = dueData.dayState.runs[1]!;
+    dueData.dayState.runs = [dueRun];
+    const candidates = [...alertCandidates(dueData, DATE, NOW), ...freezerCandidates(dueData, DATE, NOW)];
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(scheduledAlertDateNeedsEvaluation(
+      dueData, DATE, NOW, new Set(), new Set(candidates.map((candidate) => candidate.id)), false,
+    )).toBe(false);
+  });
 });
 
 describe("canonical fifteen-minute durable claim wiring", () => {
+  it("can defer expired-record cleanup until a scheduled date batch finishes", async () => {
+    vi.stubEnv("WEB_PUSH_QUIET_HOURS", "");
+    const emptyData = { dayState: { runs: [] }, runValues: {} };
+    mocks.select.mockImplementation(() => ({
+      from: (table: unknown) => ({
+        where: async () => table === dailySyncTable
+          ? [{ scope: "live", date: DATE, data: emptyData }]
+          : [],
+      }),
+    }));
+    mocks.delete.mockImplementation(() => ({ where: async () => {} }));
+
+    await runWebPushAlerts(NOW, {
+      scope: "live", date: DATE, pruneExpired: false,
+    });
+    expect(mocks.delete).not.toHaveBeenCalled();
+
+    await pruneExpiredWebPushData(NOW);
+    expect(mocks.delete).toHaveBeenCalledTimes(5);
+    expect(mocks.delete.mock.calls.map(([table]) => table)).toEqual([
+      webPushDeliveriesTable,
+      webPushAlertArmsTable,
+      scheduledAlertRecordsTable,
+      webPushSubscriptionsTable,
+      webPushSubscriptionsTable,
+    ]);
+  });
+
   it("looks up the active arm, deduplicates reevaluation, and preserves opt-outs without sends", async () => {
     vi.stubEnv("WEB_PUSH_QUIET_HOURS", "");
     const data = fixture();

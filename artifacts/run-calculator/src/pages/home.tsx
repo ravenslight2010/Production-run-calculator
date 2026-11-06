@@ -198,7 +198,7 @@ import {
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { reconcileLiveScheduleSave } from "../scheduleLiveReconciliation";
-import { fetchAndConsumeWithTimeout, fetchWithTimeout } from "../fetchWithTimeout";
+import { FOREGROUND_RECOVERY_TIMEOUT_MS, fetchAndConsumeWithTimeout, fetchWithTimeout } from "../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import {
   buildMixRunSnapshotUpdates,
@@ -9345,7 +9345,7 @@ export default function Home() {
           const recovery = await fetchAndConsumeWithTimeout(
             syncTodayRequest.url,
             { ...syncTodayRequest.init, signal },
-            10_000,
+            FOREGROUND_RECOVERY_TIMEOUT_MS,
             async (res, requestSignal) => {
           failurePhase = "response-validation";
           permanentHttpFailure = !res.ok && !isRetryableRecoveryStatus(res.status);
@@ -9485,6 +9485,10 @@ export default function Home() {
                 ? "non-retryable-http"
                 : "connectivity-retry",
             );
+            if (signal.aborted || !isCurrentRecovery()) {
+              classify("cancelled");
+              return false;
+            }
             // Failed pulls are not successful reconciliation. Keep the barrier
            // raised: releasing it here would let hidden-time auto-track or a
            // queued lifecycle write publish stale state. The wake guard clears

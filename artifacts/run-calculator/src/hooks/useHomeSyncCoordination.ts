@@ -8,7 +8,7 @@ import type {
 import { SingleFlightSyncQueue } from "../syncPushQueue";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
-import { fetchWithTimeout } from "../fetchWithTimeout";
+import { FOREGROUND_RECOVERY_TIMEOUT_MS, fetchWithTimeout } from "../fetchWithTimeout";
 import type { SyncPayload } from "../types";
 import type {
   SyncMeasurementTrigger,
@@ -359,6 +359,7 @@ export function useHomeSyncCoordination() {
     let retryConnectivity = false;
     let boundaryGeneration = 0;
     let attemptController: AbortController | null = null;
+    let attemptStartedAtMs: number | null = null;
     let recoveryInFlight = false;
     let wasHidden = document.hidden;
     const invalidateBoundary = () => {
@@ -410,6 +411,7 @@ export function useHomeSyncCoordination() {
       const attemptBoundary = boundaryGeneration;
       const controller = new AbortController();
       attemptController = controller;
+      attemptStartedAtMs = Date.now();
       recordDiagnosticSafely({
         attempts: episode.attempts,
         durationMs: Math.max(0, Date.now() - episode.startedAt),
@@ -435,6 +437,10 @@ export function useHomeSyncCoordination() {
             message: "Couldn't finish recovery. Your local work is retained and tracking remains paused. Retry recovery when connected.",
           });
         }
+      } finally {
+        if (attemptController === controller) {
+          attemptStartedAtMs = null;
+        }
       }
       // A successful response from BEFORE a second sleep/offline transition
       // cannot settle the next wake. Let the coalesced signal pull again.
@@ -456,6 +462,20 @@ export function useHomeSyncCoordination() {
     const requestRecovery = async (trigger: WakeRecoveryTrigger): Promise<boolean> => {
       if (disposed) return false;
       clearRetry();
+      // A phone browser may resume with a focus event but omit the matching
+      // visibility boundary. In that case the old request's timer can remain
+      // suspended, and normal single-flight coalescing would queue this wake
+      // behind a read that cannot settle. Once its shared deadline has elapsed,
+      // invalidate that attempt; its generation fence prevents late adoption,
+      // and the queued wake performs one fresh canonical read.
+      if (
+        trigger !== "retry"
+        && recoveryInFlight
+        && attemptStartedAtMs !== null
+        && Date.now() - attemptStartedAtMs >= FOREGROUND_RECOVERY_TIMEOUT_MS
+      ) {
+        invalidateBoundary();
+      }
       if (trigger !== "retry" && !recoveryInFlight) retries = 0;
       unreconciled = true;
       if (!episode) nextTrigger = trigger;
