@@ -516,6 +516,7 @@ async function mockDateNow(
 async function tickServerWithoutAdvancingBrowserClock(
   page: Page,
   fakeMs: number,
+  options: { startOffsetMs?: number } = {},
 ): Promise<Record<string, unknown>> {
   await page.waitForTimeout(750);
   const fixtureDate = await page.evaluate(() => {
@@ -526,7 +527,14 @@ async function tickServerWithoutAdvancingBrowserClock(
   });
   const response = await page.request.post(
     `/api/sync/e2e/auto-track-tick?today=${fixtureDate}`,
-    { data: { nowMs: fakeMs + 1 } },
+    {
+      data: {
+        nowMs: fakeMs + 1,
+        ...(options.startOffsetMs
+          ? { rearm: true, startOffsetMs: options.startOffsetMs }
+          : {}),
+      },
+    },
   );
   expect(
     response.ok(),
@@ -3220,6 +3228,65 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           message: "Resume tap was neither applied nor visibly queued behind the pending update",
         },
       ).not.toBe("unacknowledged");
+      const resumeQueueDiagnostics = await page.evaluate(() => {
+        const prefix = "run-calculator:operational-intent-outbox:v1";
+        const intents: Array<{
+          action?: string;
+          state?: string;
+          attempts?: number;
+          failure?: string;
+          retryInMs?: number;
+        }> = [];
+        const terminalCounts: Record<string, number> = {};
+        try {
+          for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index);
+            if (!key?.startsWith(`${prefix}:pending:`) && !key?.startsWith(`${prefix}:terminal:`)) {
+              continue;
+            }
+            const item = JSON.parse(localStorage.getItem(key) ?? "null");
+            if (!item || typeof item !== "object") continue;
+            if (key.startsWith(`${prefix}:terminal:`)) {
+              const state = typeof item.state === "string" ? item.state : "unknown";
+              terminalCounts[state] = (terminalCounts[state] ?? 0) + 1;
+              continue;
+            }
+            intents.push({
+              action: typeof item.action === "string" ? item.action : "unknown",
+              state: typeof item.state === "string" ? item.state : "unknown",
+              attempts: Number.isSafeInteger(item.attempts) ? item.attempts : undefined,
+              failure: typeof item.failure === "string" ? item.failure : undefined,
+              retryInMs: Number.isFinite(item.nextRetryAt)
+                ? Math.max(0, item.nextRetryAt - Date.now())
+                : undefined,
+            });
+          }
+        } catch {
+          intents.push({ action: "diagnostic-read", state: "unavailable" });
+        }
+        const status = document.querySelector('[data-testid="foreground-recovery-status"]');
+        const sync = document.querySelector('[data-testid="sync-status-button"]');
+        const resume = document.querySelector('[data-testid="resume-run"]') as HTMLButtonElement | null;
+        return {
+          visibility: document.visibilityState,
+          online: navigator.onLine,
+          resumeButton: resume ? {
+            disabled: resume.disabled,
+            label: resume.innerText.replace(/\s+/g, " ").trim(),
+          } : null,
+          pauseButtonVisible: !!document.querySelector('[data-testid="pause-run"]'),
+          recoveryText: status?.textContent?.replace(/\s+/g, " ").trim() ?? null,
+          recoveryState: status?.getAttribute("data-foreground-recovery-state") ?? null,
+          foregroundSyncAck: status?.getAttribute("data-foreground-sync-ack") ?? null,
+          syncStatus: sync?.getAttribute("aria-label") ?? null,
+          intents,
+          terminalCounts,
+        };
+      });
+      await testInfo.attach("resume-queue-diagnostics.json", {
+        body: Buffer.from(JSON.stringify(resumeQueueDiagnostics, null, 2)),
+        contentType: "application/json",
+      });
       await expect(page.getByTestId("pause-run")).toBeVisible({ timeout: 15_000 });
       await expect.poll(
         async () => (await readLiveRunMeta(page)).pausedAt ?? 0,
@@ -3247,17 +3314,16 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
       const resumedMeta = await readLiveRunMeta(page);
       canonicalResumeDiagnostics = resumedMeta;
-      const resumeScheduleStartMs = Number(
-        resumedMeta.metaUpdatedAt ?? resumedMeta.startedAt ?? safeBaseMs,
-      );
-      const advancedAt = Math.max(safeBaseMs, resumeScheduleStartMs) + 16 * 60_000;
-      // Seed due times for the new lifecycle generation, then advance
-      // canonical state without making the active browser replay 16 minutes
-      // of local claims. Client-side catch-up is covered by dedicated cases.
+      const advancedAt = Date.now();
+      // Use the isolated fixture's bounded run-start offset instead of
+      // advancing its clock into the future. Future-dated canonical stamps can
+      // make a sleeping client look newer than the server after a wake.
       serverAutoTrackScheduleSeedDiagnostics =
-        await tickServerWithoutAdvancingBrowserClock(page, resumeScheduleStartMs);
-      serverAutoTrackTickDiagnostics =
         await tickServerWithoutAdvancingBrowserClock(page, advancedAt);
+      serverAutoTrackTickDiagnostics =
+        await tickServerWithoutAdvancingBrowserClock(page, advancedAt, {
+          startOffsetMs: 15 * 60_000,
+        });
       expect(
         Number(serverAutoTrackTickDiagnostics.builtClaims ?? 0),
         "the resumed server schedule did not build any due claims",
@@ -3399,8 +3465,14 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         // Advance the active client and authoritative fixture to the same retry
         // instant before waking the peer, so the test does not compare clients
         // whose synthetic clocks are six seconds apart.
-        const retryAt = advancedAt + 6_000;
-        serverAutoTrackRetryTickDiagnostics = await mockDateNow(page, retryAt);
+        const retryDueAt = advancedAt + 6_000;
+        if (Date.now() < retryDueAt) {
+          await page.waitForTimeout(retryDueAt - Date.now());
+        }
+        const retryAt = Date.now();
+        await mockDateNow(page, retryAt, { tick: false });
+        serverAutoTrackRetryTickDiagnostics =
+          await tickServerWithoutAdvancingBrowserClock(page, Date.now());
         const canonicalAtRetry = await readLiveRunSnapshot(page);
         counterSnapshots = {
           ...(counterSnapshots ?? {}),
@@ -3480,6 +3552,20 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         batchesReady: activeFinal.batchesReady,
       });
 
+        // Verify the first intended post-recovery touch on a station tab, not
+        // only Run-tab lifecycle buttons. This is a synthetic phone viewport;
+        // the isolated fixture makes the Packaging correction reversible.
+        await sleepingPage.getByTestId("tab-packaging").click();
+        const phoneCases = sleepingPage.getByTestId("text-casesOnCurrentSkid");
+        await expect(phoneCases).toBeVisible();
+        const casesBeforePhoneTap = Number((await phoneCases.innerText()).trim());
+        const phoneIncrement = sleepingPage.getByTestId("btn-inc-casesOnCurrentSkid");
+        await expect(phoneIncrement).toBeEnabled();
+        await phoneIncrement.click();
+        await expect(phoneCases).toHaveText(String(casesBeforePhoneTap + 1), {
+          timeout: 10_000,
+        });
+
       await testInfo.attach("offline-wake-retry-summary.json", {
         body: JSON.stringify(
           {
@@ -3489,6 +3575,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
             retryAdoptedCanonicalState: true,
             duplicateSauceOrFrontlineClaims: 0,
             hiddenProgressWhileFenced: 0,
+              firstPostRecoveryStationTap: "packaging increment applied",
           },
           null,
           2,
