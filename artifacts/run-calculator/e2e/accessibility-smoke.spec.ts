@@ -974,6 +974,24 @@ test.describe("accessibility smoke", () => {
         exact: true,
       }),
     ).toBeVisible();
+    const breakRunPicker = breakEditor.getByLabel("Break 1 run", { exact: true });
+    if (await breakRunPicker.evaluate((node) => node.tagName === "BUTTON")) {
+      await breakRunPicker.click();
+      const runPickerDialog = page.getByRole("dialog", { name: "Break 1 run", exact: true });
+      await expect(
+        runPickerDialog.getByRole("option", { name: "Run 1 — Break E2E One — Morning" }),
+      ).toBeVisible();
+      await expect(
+        runPickerDialog.getByRole("option", { name: "Run 2 — Break E2E Two — Afternoon" }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+    } else {
+      await expect(breakRunPicker.locator("option")).toHaveText([
+        "Select run…",
+        "Run 1 — Break E2E One — Morning",
+        "Run 2 — Break E2E Two — Afternoon",
+      ]);
+    }
 
     for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
       await breakEditor
@@ -1245,7 +1263,7 @@ test.describe("accessibility smoke", () => {
         const runControl = editor.getByRole("button", { name: `Break ${slot} run`, exact: true });
         await runControl.click();
         const runOption = page.getByRole("dialog", { name: `Break ${slot} run`, exact: true })
-          .getByRole("option", { name: /Run 1 — Break E2E One/ });
+          .getByRole("option", { name: "Run 1 — Break E2E One — Morning", exact: true });
         await expect(runOption).toBeVisible();
         await runOption.click();
         await trigger.click();
@@ -1258,7 +1276,7 @@ test.describe("accessibility smoke", () => {
       } else {
         await trigger.selectOption("after-run");
         const runControl = editor.getByLabel(`Break ${slot} run`, { exact: true });
-        await expect(runControl.locator("option").nth(1)).toHaveText(/Run 1 — Break E2E One/);
+        await expect(runControl.locator("option").nth(1)).toHaveText("Run 1 — Break E2E One — Morning");
         await runControl.selectOption({ index: 1 });
       }
       await choose(slot, "at-time", "At a clock time");

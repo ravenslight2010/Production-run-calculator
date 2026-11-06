@@ -20579,7 +20579,14 @@ export default function Home() {
                                   className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
                                 >
                                   <option value="">Select run…</option>
-                                  {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
+                                  {scheduleEditorRuns.map((run, runIndex) => {
+                                    const flavor = run.flavor.trim();
+                                    return (
+                                      <option key={run.id} value={run.id}>
+                                        Run {runIndex + 1} — {run.brand || "Unnamed"}{flavor ? ` — ${flavor}` : ""}
+                                      </option>
+                                    );
+                                  })}
                                 </TouchSelect>
                               ) : (
                                 <input
