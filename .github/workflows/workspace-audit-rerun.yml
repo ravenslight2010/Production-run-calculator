@@ -3,6 +3,10 @@ name: Full-workspace dependency audit (report-only)
 on:
   workflow_dispatch:
 
+concurrency:
+  group: workspace-audit-rerun-${{ github.run_id }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
