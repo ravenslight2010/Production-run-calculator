@@ -25,7 +25,7 @@ NODE_ENV = "production"
 
 [services.production.run]
 # Apply raw SQL protections before the API can report readiness.
-args = ["sh", "-c", "bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
+args = ["bash", "-c", "source scripts/src/select-replit-shell-node.sh && bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
 
 [services.production.run.env]
 PORT = "8080"

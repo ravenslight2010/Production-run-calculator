@@ -4,8 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  checkDeclaredRuntimeInputs,
+  checkNodeCompatibilityWorkflow,
   checkRepositoryNodeVersionContract,
   checkRoutineNodeVersion,
+  checkWorkspacePackageManagerContract,
+  discoverCiWorkflowPaths,
   discoverRetainedEvaluationPaths,
   readAllCiNodeVersions,
   readCiNodeVersions,
@@ -396,4 +400,156 @@ test("reads the local selector and every explicit CI Node pin", () => {
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("resolves CI node-version-file pins from the project selector", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "node-contract-"));
+  const workflowPath = path.join(directory, "ci.yml");
+  fs.writeFileSync(
+    workflowPath,
+    [
+      "steps:",
+      "  - uses: actions/setup-node@pinned",
+      "    with:",
+      "      node-version-file: .nvmrc",
+      "  - uses: actions/setup-node@pinned",
+      "    with:",
+      "      node-version-file: .nvmrc",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    assert.deepEqual(
+      readCiNodeVersions(workflowPath, "24.22.2"),
+      ["24.22.2", "24.22.2"],
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("requires each CI setup-node step to use exactly one recognized pin", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "node-contract-"));
+  const workflowPath = path.join(directory, "ci.yml");
+  fs.writeFileSync(
+    workflowPath,
+    [
+      "steps:",
+      "  - uses: actions/setup-node@pinned",
+      "    with:",
+      "      node-version-file: .node-version",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    assert.throws(
+      () => readCiNodeVersions(workflowPath, "24.22.2"),
+      /CI Node pins must use \.nvmrc/,
+    );
+    fs.writeFileSync(
+      workflowPath,
+      [
+        "steps:",
+        "  - uses: actions/setup-node@pinned",
+        "    with:",
+        "",
+      ].join("\n"),
+    );
+    assert.throws(
+      () => readCiNodeVersions(workflowPath, "24.22.2"),
+      /Every actions\/setup-node step must declare exactly one Node pin/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("keeps the separate Node compatibility comparison explicit", () => {
+  assert.doesNotThrow(() =>
+    checkNodeCompatibilityWorkflow({
+      currentVersion: "24.22.2",
+      versions: ["24.22.2", "26.10.0"],
+    }),
+  );
+  assert.throws(
+    () =>
+      checkNodeCompatibilityWorkflow({
+        currentVersion: "24.22.2",
+        versions: ["24.22.1", "26.10.0"],
+      }),
+    /must test the pinned project runtime first/,
+  );
+});
+
+test("checks exact pnpm identity against the lockfile bootstrap", () => {
+  const lockfileContents = [
+    "  .:",
+    "    configDependencies: {}",
+    "    packageManagerDependencies:",
+    "      pnpm:",
+    "        specifier: 12.8.1",
+    "        version: 12.8.1",
+    "",
+  ].join("\n");
+  assert.equal(
+    checkWorkspacePackageManagerContract({
+      packageManager: "pnpm@12.8.1",
+      lockfileContents,
+    }),
+    "12.8.1",
+  );
+  assert.throws(
+    () =>
+      checkWorkspacePackageManagerContract({
+        packageManager: "pnpm@12.8.2",
+        lockfileContents,
+      }),
+    /package manager version contract is out of sync/,
+  );
+});
+
+test("checks declared Replit, Nix, Python, and Docker runtime inputs", () => {
+  const inputs = {
+    nodeVersion: "24.22.2",
+    replitConfig: [
+      'modules = ["nodejs-24", "python-3.11"]',
+      "",
+      "[nix]",
+      'channel = "stable-25_05"',
+    ].join("\n"),
+    nixPackageFile: "{pkgs}: {\n  deps = [ pkgs.curl ];\n}\n",
+    pyproject: 'requires-python = ">=3.11"\ndependencies = []\n',
+    dockerfile: [
+      "ARG NODE_IMAGE=node:24.22.2-slim@sha256:" + "a".repeat(64),
+      "RUN snapshot=20260824T000000Z \\",
+      "",
+    ].join("\n"),
+  };
+  assert.deepEqual(checkDeclaredRuntimeInputs(inputs), {
+    nodeVersion: "24.22.2",
+    pythonVersion: "3.11",
+    nixChannel: "stable-25_05",
+  });
+  assert.throws(
+    () =>
+      checkDeclaredRuntimeInputs({
+        ...inputs,
+        replitConfig: inputs.replitConfig.replace("nodejs-24", "nodejs-22"),
+      }),
+    /Declared runtime and system dependency inputs are inconsistent/,
+  );
+});
+
+test("discovers all GitHub workflows except the deliberate compatibility matrix", () => {
+  const paths = discoverCiWorkflowPaths();
+  assert.ok(paths.length > 0);
+  assert.ok(paths.every((workflowPath) => workflowPath.endsWith(".yml") || workflowPath.endsWith(".yaml")));
+  assert.ok(
+    paths.every(
+      (workflowPath) =>
+        path.basename(workflowPath) !== "node-compatibility-advisory.yml",
+    ),
+  );
 });

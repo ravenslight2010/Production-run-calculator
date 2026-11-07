@@ -4,7 +4,7 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 router = "application"
 deploymentTarget = "autoscale"
 build = "bash scripts/src/run-project-pnpm.sh run publish:ready"
-run = ["sh", "-c", "bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
+run = ["bash", "-c", "source scripts/src/select-replit-shell-node.sh && bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
 
 [deployment.postBuild]
 args = ["bash", "scripts/src/run-project-pnpm.sh", "store", "prune"]

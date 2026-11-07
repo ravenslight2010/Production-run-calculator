@@ -5,6 +5,11 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 cd "$REPO_ROOT"
 
+# Replit exposes Node by major-version module, which may lag the exact patch
+# pinned by the project. Select that exact runtime before any Node or pnpm work.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/select-replit-shell-node.sh"
+
 use_retained_startup_tools=0
 if [[ "${1:-}" == "--use-retained-startup-tools" ]]; then
   use_retained_startup_tools=1

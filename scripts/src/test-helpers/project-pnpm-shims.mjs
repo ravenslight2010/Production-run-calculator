@@ -21,6 +21,10 @@ function createFixture(t, root, version, mode) {
     fs.copyFileSync(path.join(root, "scripts/src", name),
       path.join(workspace, "scripts/src", name));
   }
+  fs.writeFileSync(
+    path.join(workspace, "scripts/src/select-replit-shell-node.sh"),
+    "return 0\n",
+  );
   const previousShim = "#!/usr/bin/env bash\nprintf 'old-system-manager\\n'\n";
   fs.writeFileSync(path.join(shims, "pnpm"), previousShim, { mode: 0o755 });
   // A broken generated shim must never escape to the host's real installer.

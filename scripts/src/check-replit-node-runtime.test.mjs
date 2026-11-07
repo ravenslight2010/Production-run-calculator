@@ -24,6 +24,13 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function installNoopNodeSelector(fixture) {
+  fs.writeFileSync(
+    path.join(fixture, "scripts/src/select-replit-shell-node.sh"),
+    "return 0\n",
+  );
+}
+
 test("every Replit validation command selects Node before launching children", () => {
   const config = fs.readFileSync(path.join(root, ".replit"), "utf8");
   const sections = config.split("[[workflows.workflow]]").slice(1);
@@ -48,8 +55,26 @@ test("deployment, post-merge, and artifact entry points use the pinned selector"
   const deployment = replit.split("[deployment]")[1]?.split("[workflows]")[0];
   assert.ok(deployment);
   assert.match(deployment, /build = "bash scripts\/src\/run-project-pnpm\.sh /);
-  assert.match(deployment, /run = \["sh", "-c", "bash scripts\/src\/run-project-pnpm\.sh /);
+  assert.match(
+    deployment,
+    /run = \["bash", "-c", "source scripts\/src\/select-replit-shell-node\.sh && bash scripts\/src\/run-project-pnpm\.sh /,
+  );
   assert.match(deployment, /args = \["bash", "scripts\/src\/run-project-pnpm\.sh", "store", "prune"\]/);
+
+  const projectPnpm = fs.readFileSync(
+    path.join(root, "scripts/src/run-project-pnpm.sh"),
+    "utf8",
+  );
+  const nodeSelection = projectPnpm.indexOf(
+    'source "${SCRIPT_DIR}/select-replit-shell-node.sh"',
+  );
+  const firstNodeUse = projectPnpm.indexOf(
+    'node "${SCRIPT_DIR}/runtime-tool-cache.mjs"',
+  );
+  assert.ok(
+    nodeSelection >= 0 && firstNodeUse > nodeSelection,
+    "project package-manager entry point must select Node before Node scripts",
+  );
 
   const postMerge = fs.readFileSync(path.join(root, "scripts", "post-merge.sh"), "utf8");
   assert.match(postMerge, /bash scripts\/src\/run-project-pnpm\.sh/);
@@ -105,6 +130,7 @@ function makePostMergeFixture(t) {
     path.join(root, "scripts", "src", "run-project-pnpm.sh"),
     path.join(fixture, "scripts", "src", "run-project-pnpm.sh"),
   );
+  installNoopNodeSelector(fixture);
 
   const executables = {
     "scripts/src/run-release-node.sh": `#!/usr/bin/env bash
@@ -577,6 +603,7 @@ test("direct and nested pnpm calls select the root pin with workspace-local XDG 
     path.join(root, "scripts", "src", "run-project-pnpm.sh"),
     path.join(fixture, "scripts", "src", "run-project-pnpm.sh"),
   );
+  installNoopNodeSelector(fixture);
   fs.writeFileSync(
     path.join(fixture, "bin", "corepack"),
     `#!/usr/bin/env bash
@@ -702,6 +729,7 @@ test("real Corepack cold start ignores an older system pnpm with workspace-local
     path.join(root, "scripts", "src", "run-project-pnpm.sh"),
     path.join(fixture, "scripts", "src", "run-project-pnpm.sh"),
   );
+  installNoopNodeSelector(fixture);
   const legacyPnpmCalls = path.join(fixtureParent, "legacy-pnpm-calls.log");
   fs.writeFileSync(
     path.join(bin, "pnpm"),
@@ -767,6 +795,7 @@ test("unsafe workspace-local Corepack caches fail before manager startup", (t) =
     path.join(root, "scripts", "src", "run-project-pnpm.sh"),
     path.join(fixture, "scripts", "src", "run-project-pnpm.sh"),
   );
+  installNoopNodeSelector(fixture);
   fs.writeFileSync(
     path.join(fixture, "bin", "corepack"),
     "#!/usr/bin/env bash\nprintf 'unexpected corepack call\\n' >&2\nexit 95\n",

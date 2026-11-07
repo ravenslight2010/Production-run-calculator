@@ -37,6 +37,7 @@ select_replit_shell_node() {
   local selector repo_root required_version current_node current_version
   local store_root candidate selected_node selected_version selected_node_dir
   local cache_path cache_root npm_cache_root cache_owner lock_file lock_fd npm_bin
+  local npm_user_config npm_global_config config_path
   local guarded_node_options
 
   repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd) || {
@@ -138,6 +139,20 @@ select_replit_shell_node() {
     fi
     mkdir -p -- "$npm_cache_root" || return 1
     chmod 700 -- "$npm_cache_root" || return 1
+    npm_user_config="${cache_root}/npm-user.npmrc"
+    npm_global_config="${cache_root}/npm-global.npmrc"
+    for config_path in "$npm_user_config" "$npm_global_config"; do
+      if [[ -L "$config_path" || ( -e "$config_path" && ! -f "$config_path" ) ]]; then
+        printf 'Cannot provision interactive Node v%s: npm config files must be regular files.\n' \
+          "$required_version" >&2
+        return 1
+      fi
+      (
+        umask 077
+        : >>"$config_path"
+      ) || return 1
+      chmod 600 -- "$config_path" || return 1
+    done
 
     # Serialize only cache provisioning. Interactive shells must not hold the
     # workspace validation lock for their lifetime.
@@ -178,8 +193,8 @@ select_replit_shell_node() {
             RELEASE_NODE_VERSION="$required_version" \
             npm_config_cache="$npm_cache_root" \
             npm_config_registry="https://registry.npmjs.org/" \
-            npm_config_userconfig=/dev/null \
-            npm_config_globalconfig=/dev/null \
+             npm_config_userconfig="$npm_user_config" \
+             npm_config_globalconfig="$npm_global_config" \
             npm_config_audit=false \
             npm_config_fund=false \
             npm_config_update_notifier=false \
