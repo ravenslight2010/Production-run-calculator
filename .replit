@@ -182,6 +182,18 @@ author = "agent"
 task = "workflow.run"
 args = "release:standard"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "client-tests"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "clean-start"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "api-unit"
+
 [[workflows.workflow]]
 name = "browser-full-159"
 author = "agent"
@@ -189,6 +201,39 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "bash scripts/src/run-release-node.sh bash scripts/src/run-isolated-browser-suite.sh"
+
+[[workflows.workflow]]
+name = "client-tests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/run-calculator run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "clean-start"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/src/run-release-node.sh env CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "api-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/src/run-release-node.sh env NODE_ENV=test E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 pnpm --filter @workspace/api-server run test:release:unit"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 
 [agent]
