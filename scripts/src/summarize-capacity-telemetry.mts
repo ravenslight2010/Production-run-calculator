@@ -1,5 +1,10 @@
 import { createReadStream } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
+import {
+  readCoverageManifest,
+  summarizeCoverage,
+  type CoverageManifest,
+} from "./offline-log-coverage.mts";
 
 // Offline only. Never print paths, rejected records, or parse errors with content.
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -167,6 +172,9 @@ async function main(): Promise<void> {
   let invalidRecords = 0;
   let ignoredRecords = 0;
   let invalidMetricValues = 0;
+  let invalidCoverageManifests = 0;
+  let coverageManifest: CoverageManifest | undefined;
+  let hasCoverageManifest = false;
   let pending = "";
   const decoder = new StringDecoder("utf8");
   const windows: WindowSummary[] = [];
@@ -185,6 +193,16 @@ async function main(): Promise<void> {
 
     if (!isRecord(parsed)) {
       invalidRecords += 1;
+      return;
+    }
+    const coverage = readCoverageManifest(parsed);
+    if (coverage.kind !== "not-manifest") {
+      if (coverage.kind === "invalid" || hasCoverageManifest) {
+        invalidCoverageManifests += 1;
+      } else {
+        coverageManifest = coverage.manifest;
+        hasCoverageManifest = true;
+      }
       return;
     }
     if (parsed.event !== "capacity_telemetry") {
@@ -225,13 +243,20 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({
     format: "capacity_telemetry_pool_waits_v1",
     windows,
+    coverage: summarizeCoverage(coverageManifest, invalidCoverageManifests, {
+      capacity_telemetry: windows.map(({ observedFrom, observedUntil }) => ({
+        from: observedFrom,
+        until: observedUntil,
+      })),
+    }),
     invalidJsonLines,
     invalidRecords,
     ignoredRecords,
     invalidMetricValues,
+    invalidCoverageManifests,
     provenance: "offline_input_environment_and_revision_not_verified",
   }, null, 2));
-  if (invalidJsonLines || invalidRecords || invalidMetricValues) process.exitCode = 1;
+  if (invalidJsonLines || invalidRecords || invalidMetricValues || invalidCoverageManifests) process.exitCode = 1;
 }
 
 main().catch(() => {

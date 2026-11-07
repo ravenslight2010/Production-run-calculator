@@ -122,6 +122,77 @@ records are not comparable populations. Environment/revision provenance is
 explicitly unverified by the summary. Preserve separately authorized build and
 capture-window evidence; this utility cannot certify production attribution.
 
+### Supplying sanitized capture coverage
+
+Append one `offline_log_capture_manifest` JSON object as a line in the same
+sanitized JSONL file. Do not include raw provider responses, filters, request
+values, host/process names, or credentials. The accepted streams are
+`capacity_telemetry`, `database_phase`, `endpoint_metrics`, `auto_track`,
+`queue_monitor`, `database_capacity_sample`, and `event_loop`.
+
+```json
+{
+  "event": "offline_log_capture_manifest",
+  "version": 1,
+  "captureFrom": "2026-11-06T23:35:00.000Z",
+  "captureUntil": "2026-11-07T00:00:00.000Z",
+  "expectedStreams": ["database_phase", "endpoint_metrics"],
+  "windows": [
+    {
+      "stream": "database_phase",
+      "from": "2026-11-06T23:35:00.000Z",
+      "until": "2026-11-07T00:00:00.000Z",
+      "queryComplete": true,
+      "pagesComplete": true,
+      "truncated": false,
+      "observedFrom": "2026-11-06T23:35:02.000Z",
+      "observedUntil": "2026-11-06T23:59:58.000Z"
+    },
+    {
+      "stream": "endpoint_metrics",
+      "from": "2026-11-06T23:35:00.000Z",
+      "until": "2026-11-06T23:45:00.000Z",
+      "queryComplete": true,
+      "pagesComplete": true,
+      "truncated": false,
+      "observedFrom": null,
+      "observedUntil": null
+    }
+  ]
+}
+```
+
+`captureFrom`/`captureUntil` are the overall requested range. Include every
+expected stream even if it returned no records; list each query/page interval
+for that stream. Query intervals should tile the requested range without gaps
+or overlap. `queryComplete`, `pagesComplete`, and `truncated` are independent
+provider/query results; do not infer them from returned record counts. Set both
+observed bounds to `null` when a complete query returned no observations.
+Otherwise provide the UTC bounds actually observed for that interval.
+
+The summary reports `coverage.status` as `complete` only when every expected
+stream has full non-overlapping query intervals and each query is complete,
+pagination is complete, and truncation is false. Gaps, duplicates, overlaps,
+incomplete queries/pages, or truncation make it `partial`; absent, invalid, or
+duplicate manifests make it `unknown`. Missing/overlapping intervals are
+reported as bounded timestamp samples and counts. Observed bounds describe the
+supplied observations only; they are not proof of continuous activity. The
+capacity summary also checks its actual telemetry record windows for gaps,
+duplicates, and overlap against the requested capture bounds; those findings
+make that stream partial. The top-level scope explicitly says that completeness
+applies only to `expectedStreams` declared in the manifest, not every possible
+log stream. A complete empty query is distinct from a missing query. The
+manifest is ignored as an input metric record and is projected to fixed stream
+names, statuses, counts, and timestamps only. Older sanitized JSONL files
+remain readable, but their coverage status is `unknown`, not complete.
+
+Run the focused checks with:
+
+```sh
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run test:offline-log-summaries
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run typecheck
+```
+
 ## Controlled operator handoff — not executed
 
 Production effectiveness remains **UNVERIFIED**. If the operator chooses to

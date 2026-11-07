@@ -50,6 +50,50 @@ test("offline CLI summarizes only allowlisted evidence and flags malformed JSON 
   }
 });
 
+test("offline CLI applies sanitized query coverage and excludes the manifest from phase counts", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "phase-summary-fixture-"));
+  try {
+    const input = path.join(directory, "synthetic.jsonl");
+    writeFileSync(input, [
+      JSON.stringify({
+        event: "background_database_phase",
+        databasePhase: {
+          version: 1, stage: "status_aggregate", coverage: "complete",
+          phase: "post_checkout", outcome: "success",
+          observedFrom: "2026-10-24T00:00:00.000Z", observedUntil: "2026-10-24T00:00:00.125Z",
+          elapsedMs: 125, acquisitionMs: 25, postCheckoutMs: 100, timeoutOverrunMs: null,
+        },
+      }),
+      JSON.stringify({
+        event: "offline_log_capture_manifest",
+        version: 1,
+        captureFrom: "2026-10-24T00:00:00.000Z",
+        captureUntil: "2026-10-24T00:01:00.000Z",
+        expectedStreams: ["database_phase"],
+        windows: [{
+          stream: "database_phase",
+          from: "2026-10-24T00:00:00.000Z",
+          until: "2026-10-24T00:01:00.000Z",
+          queryComplete: true,
+          pagesComplete: true,
+          truncated: false,
+          observedFrom: "2026-10-24T00:00:00.000Z",
+          observedUntil: "2026-10-24T00:00:00.125Z",
+        }],
+      }),
+    ].join("\n"));
+    const result = run(input);
+    assert.equal(result.status, 0, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.records, 1);
+    assert.equal(summary.coverage.status, "complete");
+    assert.equal(summary.coverage.streams[0].observedUntil, "2026-10-24T00:00:00.125Z");
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic\.jsonl|phase-summary-fixture/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("offline CLI fails closed on oversized input lines and unreadable paths without echoing content or paths", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "phase-summary-fixture-"));
   try {

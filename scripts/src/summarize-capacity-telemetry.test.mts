@@ -80,6 +80,35 @@ test("projects allowlisted pool acquisition data per original observation window
   });
 });
 
+test("accepts sanitized capture coverage metadata without mixing it into telemetry records", () => {
+  const coverage = {
+    event: "offline_log_capture_manifest",
+    version: 1,
+    captureFrom: "2026-10-24T00:00:00.000Z",
+    captureUntil: "2026-10-24T00:01:00.000Z",
+    expectedStreams: ["capacity_telemetry"],
+    windows: [{
+      stream: "capacity_telemetry",
+      from: "2026-10-24T00:00:00.000Z",
+      until: "2026-10-24T00:01:00.000Z",
+      queryComplete: true,
+      pagesComplete: true,
+      truncated: false,
+      observedFrom: "2026-10-24T00:00:00.000Z",
+      observedUntil: "2026-10-24T00:01:00.000Z",
+    }],
+  };
+  withInput([JSON.stringify(capacityRecord()), JSON.stringify(coverage)], (input) => {
+    const result = run(input);
+    assert.equal(result.status, 0, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.windows.length, 1);
+    assert.equal(summary.coverage.status, "complete");
+    assert.equal(summary.coverage.streams[0].stream, "capacity_telemetry");
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic\.jsonl|capacity-summary-fixture/);
+  });
+});
+
 test("counts malformed input safely and omits unknown labels and fields", () => {
   const unknownOnly = capacityRecord({
     counters: { "db.pool.acquisition.private_operation.success.count": 999 },
@@ -114,6 +143,58 @@ test("counts malformed input safely and omits unknown labels and fields", () => 
     assert.deepEqual(Object.keys(summary.windows[0].operations), ["auto_track"]);
     assert.deepEqual(summary.windows[0].operations.auto_track, { successCount: 1 });
     assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_FIXTURE|private_operation|password|sql|payload/i);
+  });
+});
+
+test("missing or invalid coverage metadata is never reported as complete", () => {
+  withInput([JSON.stringify(capacityRecord())], (input) => {
+    const missing = run(input);
+    assert.equal(missing.status, 0);
+    assert.equal(JSON.parse(missing.stdout).coverage.status, "unknown");
+  });
+  const invalidCoverage = {
+    event: "offline_log_capture_manifest",
+    version: 1,
+    captureFrom: "bad",
+    captureUntil: "also-bad",
+    expectedStreams: ["capacity_telemetry"],
+    windows: [],
+    requestBody: "PRIVATE_FIXTURE",
+  };
+  withInput([JSON.stringify(invalidCoverage)], (input) => {
+    const invalid = run(input);
+    assert.equal(invalid.status, 1);
+    assert.equal(JSON.parse(invalid.stdout).coverage.status, "unknown");
+    assert.equal(JSON.parse(invalid.stdout).invalidCoverageManifests, 1);
+    assert.doesNotMatch(invalid.stdout + invalid.stderr, /PRIVATE_FIXTURE|requestBody|synthetic\.jsonl/);
+  });
+});
+
+test("duplicate manifests invalidate coverage without exposing their contents", () => {
+  const valid = {
+    event: "offline_log_capture_manifest",
+    version: 1,
+    captureFrom: "2026-10-24T00:00:00.000Z",
+    captureUntil: "2026-10-24T00:01:00.000Z",
+    expectedStreams: ["capacity_telemetry"],
+    windows: [{
+      stream: "capacity_telemetry",
+      from: "2026-10-24T00:00:00.000Z",
+      until: "2026-10-24T00:01:00.000Z",
+      queryComplete: true,
+      pagesComplete: true,
+      truncated: false,
+      observedFrom: "2026-10-24T00:00:00.000Z",
+      observedUntil: "2026-10-24T00:01:00.000Z",
+    }],
+  };
+  withInput([JSON.stringify(valid), JSON.stringify(valid)], (input) => {
+    const result = run(input);
+    assert.equal(result.status, 1);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.coverage.status, "unknown");
+    assert.equal(summary.invalidCoverageManifests, 1);
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic\.jsonl|capacity-summary-fixture/);
   });
 });
 

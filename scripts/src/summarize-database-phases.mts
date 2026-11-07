@@ -1,4 +1,9 @@
 import { createReadStream } from "node:fs";
+import {
+  readCoverageManifest,
+  summarizeCoverage,
+  type CoverageManifest,
+} from "./offline-log-coverage.mts";
 
 // Load the pure summarizer at runtime, preserving scripts' separate TS root.
 const { summarizeDatabasePhaseRecords } = await import(
@@ -34,18 +39,36 @@ async function main() {
     lines.push(pending);
   }
   let invalidJsonLines = 0;
+  let invalidCoverageManifests = 0;
+  let coverageManifest: CoverageManifest | undefined;
+  let hasCoverageManifest = false;
   function* records() {
     for (const line of lines) {
-      try { yield JSON.parse(line) as unknown; }
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        const coverage = readCoverageManifest(parsed);
+        if (coverage.kind !== "not-manifest") {
+          if (coverage.kind === "invalid" || hasCoverageManifest) {
+            invalidCoverageManifests += 1;
+          } else {
+            coverageManifest = coverage.manifest;
+            hasCoverageManifest = true;
+          }
+          continue;
+        }
+        yield parsed;
+      }
       catch { invalidJsonLines++; }
     }
   }
   const summary = summarizeDatabasePhaseRecords(records());
   console.log(JSON.stringify({
     ...summary, invalidJsonLines,
+    coverage: summarizeCoverage(coverageManifest, invalidCoverageManifests),
+    invalidCoverageManifests,
     provenance: "offline_input_environment_and_revision_not_verified",
   }, null, 2));
-  if (invalidJsonLines) process.exitCode = 1;
+  if (invalidJsonLines || invalidCoverageManifests) process.exitCode = 1;
 }
 
 main().catch(() => {

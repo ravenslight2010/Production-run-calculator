@@ -68,6 +68,21 @@ processing. A suspended browser can accumulate long elapsed time while the
 server request completes quickly, and an aggregate route metric cannot identify
 which side accounted for a particular wait.
 
+## Offline summary coverage metadata
+
+The offline database-phase and capacity summaries accept a sanitized
+`offline_log_capture_manifest` JSONL line that records requested capture bounds,
+expected stream windows, query/page completeness, provider truncation, and
+observed time bounds. The manifest is documented in
+[the database-phase evidence contract](background-database-phase-contract.md#supplying-sanitized-capture-coverage).
+When metadata is absent, invalid, truncated, or contains missing/overlapping
+query intervals, the summaries report coverage as `unknown` or `partial`; they
+do not treat missing endpoint buckets or records as zero activity.
+
+This historical review did not retain a manifest alongside its sanitized
+records. Its documented broad-query truncation and missing route buckets remain
+limitations; the new format cannot reconstruct or upgrade that earlier capture.
+
 ## Recommendation and minimum next evidence
 
 Do not change background cadence, pool size, or checkout timeouts on this
