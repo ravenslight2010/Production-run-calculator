@@ -352,6 +352,53 @@ describe("auto-track coordination", () => {
     expect(result.values.casesOnCurrentSkid).toBe(10);
   });
 
+  it("does not accept a case claim before the prior canonical case deadline", () => {
+    const nextDueAt = NOW + 6_000;
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
+      runValues: { "run-1": { skidsCompleted: 0, casesOnCurrentSkid: 10, casesNeeded: 200, casesPerSkid: 48 } },
+      runValuesUpdatedAt: { "run-1": NOW - 1 },
+      packagingProgress: {
+        "run-1": {
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 10,
+          correctionGeneration: 0,
+          manualOverrideUntil: 0,
+          updatedAt: NOW - 1,
+        },
+      },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          "run-1": {
+            case: {
+              generation: "run-1:2",
+              sequence: 1,
+              nextDueAt,
+              acceptedEventId: "server:case:1",
+              acceptedRunValuesUpdatedAt: NOW - 1,
+            },
+          },
+        },
+      },
+    };
+    const result = applyAutoTrackClaim(stored, claim({
+      channel: "case",
+      generation: "run-1:2",
+      sequence: 2,
+      eventId: "client:case:2",
+      dueAt: NOW + 1,
+      nextDueAt: NOW + 6_001,
+      baseUpdatedAt: NOW - 1,
+      correctionGeneration: 0,
+      mutations: [{ field: "casesOnCurrentSkid", from: 10, to: 11 }],
+    }), NOW);
+
+    expect(result.outcome).toBe("conflict");
+    expect(result.values.casesOnCurrentSkid).toBe(10);
+    expect(result.channelState.nextDueAt).toBe(nextDueAt);
+  });
+
   it("rejects a queued claim when any ordinary edit advanced the canonical stamp", () => {
     const stored = {
       dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },

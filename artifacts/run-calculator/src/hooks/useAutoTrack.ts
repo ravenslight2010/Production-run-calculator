@@ -943,7 +943,15 @@ useEffect(() => {
               ...(latestInputs.v as unknown as Record<string, unknown>),
               ...result.values,
             };
-            if (channel === "sauce-stock") {
+            if (channel === "case") {
+              // A server may claim the same scheduled case while this client
+              // wakes. Wait for its canonical deadline; retry bounds use the
+              // returned physical total, not the run-start projection.
+              dueRef.current = result.state.nextDueAt;
+              lastExpectedCasesRef.current = -1;
+              formResetSkippedRef.current = false;
+              caseClaimRetryRef.current = true;
+            } else if (channel === "sauce-stock") {
               const anchor = Math.max(0, Number(canonicalValues.sauceStockAnchorNetSec) || 0);
               const cadence = computeSauceStockStepSeconds(
                 Number(canonicalValues.sauceOzPerPizza) || 0,
@@ -979,11 +987,6 @@ useEffect(() => {
               } else {
                 dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
               }
-            }
-            if (channel === "case") {
-              lastExpectedCasesRef.current = -1;
-              formResetSkippedRef.current = false;
-              caseClaimRetryRef.current = true;
             }
             applyValues(result.values);
             setCoordinationDelayed(false);
@@ -1894,6 +1897,14 @@ useEffect(() => {
         machine,
       ).caseMs;
       const prevExpected = lastExpectedCasesRef.current;
+      const curTotal =
+        (Number(form.getValues("skidsCompleted")) || 0) * v.casesPerSkid
+        + (Number(form.getValues("casesOnCurrentSkid")) || 0);
+      // A conflict/uncertain retry has no trustworthy projection baseline.
+      // Bound it from the physical total so a long-running run cannot seed the
+      // entire elapsed projection after one rejected or unacknowledged tick.
+      const previousExpectedForCap =
+        prevExpected < 0 && caseClaimRetryRef.current ? curTotal : prevExpected;
       // Baseline the incremental delta off the UNCLAMPED total so the count keeps
       // advancing even after the time-based estimate saturates at casesNeeded (e.g.
       // the estimate ran ahead, the operator corrected the count down, then hit
@@ -1901,7 +1912,7 @@ useEffect(() => {
       // the count would never climb again.
       const scheduledDueAtMs = caseNextDueMsRef.current;
       const expectedRaw = capCaseExpectedRawByDueIntervals({
-        previousExpected: prevExpected,
+        previousExpected: previousExpectedForCap,
         expectedRaw: autoTrackSuggestion.expectedCasesRaw,
         nextDueAtMs: scheduledDueAtMs,
         nowMs,
@@ -1925,9 +1936,6 @@ useEffect(() => {
 
       if (!caseSuppressed && !serverOwnsChannel("case")) {
         const cps = v.casesPerSkid;
-        const curTotal =
-          (Number(form.getValues("skidsCompleted")) || 0) * cps +
-          (Number(form.getValues("casesOnCurrentSkid")) || 0);
         const decision = computeCaseTickWrite({
           prevExpected, expectedRaw, expectedCases, prevFreezer,
           nextFreezer: drainFreezerRef.current, curTotal, casesPerSkid: cps,

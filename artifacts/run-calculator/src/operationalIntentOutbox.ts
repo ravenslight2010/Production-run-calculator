@@ -33,6 +33,7 @@ export const MAX_MANUAL_SECTION_RETRY_ATTEMPTS = 6;
 const LOCK_LEASE_MS = 30_000;
 const LOCK_RENEW_MS = 10_000;
 let activeFlush: Promise<void> | undefined;
+let flushRequestedWhileActive = false;
 let retryTimer: number | undefined;
 let activeOwner: string | undefined;
 let identityGeneration = 0;
@@ -1178,17 +1179,34 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
     }
 }
 export async function flushOperationalIntentOutbox(senderId = getOperationalDeviceId()): Promise<void> {
-  if (activeFlush) return activeFlush;
+  if (activeFlush) {
+    // The current pass iterates a snapshot of the outbox. If a new command is
+    // queued during a network wait, remember the request so that it is drained
+    // after the current pass instead of being stranded in `pending`.
+    flushRequestedWhileActive = true;
+    return activeFlush;
+  }
   activeFlush = (async () => {
-    const locks = typeof navigator !== "undefined"
-      ? (navigator as Navigator & { locks?: { request: (name: string, callback: () => Promise<void>) => Promise<void> } }).locks
-      : undefined;
-    if (locks && activeOwner) {
-      await locks.request(`operational-intent-outbox:${activeOwner}`, () => flushWithStorageLock(senderId));
-    } else {
-      await flushWithStorageLock(senderId);
+    do {
+      flushRequestedWhileActive = false;
+      const locks = typeof navigator !== "undefined"
+        ? (navigator as Navigator & { locks?: { request: (name: string, callback: () => Promise<void>) => Promise<void> } }).locks
+        : undefined;
+      if (locks && activeOwner) {
+        await locks.request(`operational-intent-outbox:${activeOwner}`, () => flushWithStorageLock(senderId));
+      } else {
+        await flushWithStorageLock(senderId);
+      }
+    } while (flushRequestedWhileActive);
+  })().finally(() => {
+    activeFlush = undefined;
+    // Cover a request queued at the end of the last pass, after its loop
+    // condition was checked but before this completion handler ran.
+    if (flushRequestedWhileActive) {
+      flushRequestedWhileActive = false;
+      void flushOperationalIntentOutbox(senderId);
     }
-  })().finally(() => { activeFlush = undefined; });
+  });
   return activeFlush;
 }
 

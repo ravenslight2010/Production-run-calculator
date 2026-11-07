@@ -80,3 +80,9 @@ Synthetic auto-track ticks in browser tests must not move canonical anchors ahea
 **Why:** A test that injected a tick at run-start plus 60 seconds while the server clock was only about 10 seconds past start correctly hit the server's future-anchor guard; it was a fixture time-travel error, not evidence for weakening production validation.
 
 **How to apply:** Align the fixture's start time and injected tick to the same clock before testing a following manual edit or pause.
+
+The owner observed on 2026-11-06 that wake problems were more frequent during active runs than between runs; a no-production day with one app open and no run started still showed background failures, and waking a second app could worsen the already-foreground app. Treat these as correlations, not established causes.
+
+**Why:** These reports distinguish idle/background activity from active-run recovery and show that a single-device test may miss cross-device interference.
+
+**How to apply:** Compare active-run and between-run wakes, include idle/no-run periods, and exercise two clients. Do not infer server overload or active-run state as the cause without aligned evidence.

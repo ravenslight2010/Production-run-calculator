@@ -809,6 +809,35 @@ describe("operational intent outbox", () => {
     expect(operationalIntentSummary().accepted).toBe(1);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+  it("flushes an intent queued while another outbox flush is already running", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    let releaseFirst!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => { releaseFirst = resolve; });
+    const fetch = vi.fn()
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValueOnce(new Response(JSON.stringify(confirmed()), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    const first = queueOperationalIntent({
+      runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause",
+    });
+    const firstFlush = flushOperationalIntentOutbox();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+    const second = queueOperationalIntent({
+      runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 2,
+      action: "control", control: { kind: "auto-track", enabled: false },
+    });
+    const joinedFlush = flushOperationalIntentOutbox();
+    releaseFirst(new Response(JSON.stringify(confirmed()), { status: 200 }));
+    await Promise.all([firstFlush, joinedFlush]);
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(readOperationalIntentOutbox()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: first.id, state: "accepted" }),
+      expect.objectContaining({ id: second.id, state: "accepted" }),
+    ]));
+  });
   it("pauses on token expiry and resumes only after explicit auth retry", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn()

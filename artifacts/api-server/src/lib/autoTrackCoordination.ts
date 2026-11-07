@@ -447,6 +447,15 @@ export function applyAutoTrackClaim(
       outcome = "stale";
     } else if (typeof previous.sequence === "number" && claim.sequence !== previous.sequence + 1) {
       outcome = "stale";
+    } else if (
+      isCaseChannel
+      && typeof previous.nextDueAt === "number"
+      && now < previous.nextDueAt
+    ) {
+      // A server tick can take over a due client sequence. A client that
+      // wakes with its old case timer must not then advance that same cadence
+      // again from the newly accepted server sequence.
+      outcome = "conflict";
     }
   } else if (outcome === "accepted" && previous.generation !== claim.generation) {
     if (claim.sequence !== 1) outcome = "stale";
