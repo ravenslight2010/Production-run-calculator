@@ -39,6 +39,7 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let freezerAlertRunProjectionTable: DbModule["freezerAlertRunProjectionTable"];
+let auditFreezerAlertProjection: typeof import("../lib/freezerAlertProjection")["auditFreezerAlertProjection"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
 let usersTable: DbModule["usersTable"];
@@ -119,6 +120,7 @@ beforeAll(async () => {
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
   const syncMod = await import("./sync");
+  auditFreezerAlertProjection = (await import("../lib/freezerAlertProjection")).auditFreezerAlertProjection;
   const autoTrackClaimServiceMod = await import("../lib/autoTrackClaimService");
   const applicatorEvidenceMod = await import("./applicatorBatchEvidence");
   const inventoryMod = await import("./inventory");
@@ -247,7 +249,7 @@ beforeEach(async () => {
   injectedSseWriteFailures = 0;
   clearServerTickDateBackoffsForTests();
   setServerTickNoWorkSkipBarrierHookForTest(undefined);
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${mixesTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${freezerAlertRunProjectionTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${mixesTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -5339,6 +5341,10 @@ describe("POST /sync/schedule-move — atomic run relocation", () => {
     expect((destination.data as any).brands).toEqual(destinationData.brands);
     expect(source.canonicalRevision).toBe(5);
     expect(destination.canonicalRevision).toBe(9);
+    await expect(auditFreezerAlertProjection("live", [sourceDate, destinationDate])).resolves.toMatchObject({
+      counts: { missing: 0, extra: 0, mismatch: 0 },
+      findings: [],
+    });
     const events = await db.select().from(syncOutboxEventsTable)
       .where(eq(syncOutboxEventsTable.scope, "live"));
     expect(events.filter((event) => event.kind === "day-state").map((event) => event.date).sort())
@@ -5481,6 +5487,16 @@ describe("/sync/today — client-local-date keying", () => {
   });
 
   it("PUT writes to the client-supplied `today` row, never the server's UTC date", async () => {
+    await db.insert(freezerAlertRunProjectionTable).values({
+      scope: "live",
+      date: "2030-03-20",
+      runId: "stale-projection",
+      startedAt: null,
+      endedAt: 1_900_000_000_000,
+      freezerTime: 30,
+      dueAt: 1_900_001_800_000,
+      isActive: false,
+    });
     const payload = { dayState: { runs: [{ id: "live-run" }] }, runValues: { "live-run": { casesNeeded: 42 } } };
     const put = await fetch(`${baseUrl}/api/sync/today?today=2030-03-20`, {
       method: "PUT",
@@ -5492,6 +5508,10 @@ describe("/sync/today — client-local-date keying", () => {
     const back = await fetch(`${baseUrl}/api/sync/2030-03-20`, { headers: authHeaders() });
     const data = (await back.json()) as { runValues?: Record<string, { casesNeeded?: number }> } | null;
     expect(data?.runValues?.["live-run"]?.casesNeeded).toBe(42);
+    await expect(auditFreezerAlertProjection("live", ["2030-03-20"])).resolves.toMatchObject({
+      counts: { missing: 0, extra: 0, mismatch: 0 },
+      findings: [],
+    });
     // A pre-existing future scheduled day is left untouched (not clobbered).
     const sched = await fetch(`${baseUrl}/api/sync/scheduled?today=2030-03-19`, { headers: authHeaders() });
     const days = (await sched.json()) as Array<{ date: string }>;

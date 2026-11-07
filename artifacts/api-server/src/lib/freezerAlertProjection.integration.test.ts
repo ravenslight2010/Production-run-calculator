@@ -13,6 +13,8 @@ let freezerAlertRunProjectionTable: DbModule["freezerAlertRunProjectionTable"];
 let replaceFreezerAlertProjection: typeof import("./freezerAlertProjection")["replaceFreezerAlertProjection"];
 let deleteFreezerAlertProjection: typeof import("./freezerAlertProjection")["deleteFreezerAlertProjection"];
 let backfillFreezerAlertProjection: typeof import("./freezerAlertProjection")["backfillFreezerAlertProjection"];
+let auditFreezerAlertProjection: typeof import("./freezerAlertProjection")["auditFreezerAlertProjection"];
+let lowesNaturalPepNameRepair: typeof import("./repairs/historicalProfileAndContaminationRepairs")["lowesNaturalPepNameRepair"];
 let readScheduledAlertSnapshotRows: typeof import("./webPush")["readScheduledAlertSnapshotRows"];
 let freezerCandidates: typeof import("./webPush")["freezerCandidates"];
 let pendingFreezerArms: typeof import("./webPush")["pendingFreezerArms"];
@@ -56,6 +58,8 @@ beforeAll(async () => {
   replaceFreezerAlertProjection = projectionMod.replaceFreezerAlertProjection;
   deleteFreezerAlertProjection = projectionMod.deleteFreezerAlertProjection;
   backfillFreezerAlertProjection = projectionMod.backfillFreezerAlertProjection;
+  auditFreezerAlertProjection = projectionMod.auditFreezerAlertProjection;
+  lowesNaturalPepNameRepair = (await import("./repairs/historicalProfileAndContaminationRepairs")).lowesNaturalPepNameRepair;
   readScheduledAlertSnapshotRows = webPushMod.readScheduledAlertSnapshotRows;
   freezerCandidates = webPushMod.freezerCandidates;
   pendingFreezerArms = webPushMod.pendingFreezerArms;
@@ -99,6 +103,96 @@ async function writeSnapshot(scope: string, date: string, data: unknown): Promis
 }
 
 describe("freezer alert run projection", () => {
+  it("reports missing, extra, and mismatched facts for selected dates without writing", async () => {
+    const dates = ["2031-01-10", "2031-01-11", "2031-01-12"];
+    const missingActive = {
+      dayState: { runs: [{ id: "missing-active", startedAt: NOW - 60_000 }] },
+      runValues: { "missing-active": { freezerTime: 2 } },
+    };
+    const dueSnapshot = snapshot("mismatched-due", NOW - 120_000, 1);
+    await db.insert(dailySyncTable).values([
+      { scope: "live", date: dates[0]!, data: missingActive },
+      { scope: "live", date: dates[1]!, data: dueSnapshot },
+      { scope: "sandbox", date: dates[2]!, data: snapshot("sandbox-only", NOW - 120_000, 1) },
+    ]);
+    await db.insert(freezerAlertRunProjectionTable).values([
+      {
+        scope: "live",
+        date: dates[1]!,
+        runId: "mismatched-due",
+        startedAt: NOW - 180_000,
+        endedAt: NOW - 120_000,
+        freezerTime: 1,
+        dueAt: NOW - 30_000,
+        isActive: true,
+      },
+      {
+        scope: "live",
+        date: dates[2]!,
+        runId: "extra-projection",
+        startedAt: null,
+        endedAt: NOW - 120_000,
+        freezerTime: 1,
+        dueAt: NOW - 60_000,
+        isActive: false,
+      },
+    ]);
+
+    const dailyBefore = await db.select().from(dailySyncTable);
+    const projectionBefore = await db.select().from(freezerAlertRunProjectionTable);
+    const result = await auditFreezerAlertProjection("live", dates, { maxFindings: 3 });
+    const boundedResult = await auditFreezerAlertProjection("live", dates, { maxFindings: 1 });
+
+    expect(result).toMatchObject({
+      scope: "live",
+      dates,
+      examinedDays: 3,
+      counts: { missing: 1, extra: 1, mismatch: 1 },
+      truncated: false,
+      findings: [
+        { kind: "missing", date: dates[0], runId: "missing-active" },
+        { kind: "mismatch", date: dates[1], runId: "mismatched-due", fields: ["dueAt", "isActive"] },
+        { kind: "extra", date: dates[2], runId: "extra-projection" },
+      ],
+    });
+    expect(boundedResult).toMatchObject({
+      counts: result.counts,
+      findings: [{ kind: "missing", date: dates[0], runId: "missing-active" }],
+      truncated: true,
+    });
+    expect(await db.select().from(dailySyncTable)).toEqual(dailyBefore);
+    expect(await db.select().from(freezerAlertRunProjectionTable)).toEqual(projectionBefore);
+  });
+
+  it("rejects invalid or oversized date selections and finding limits", async () => {
+    await expect(auditFreezerAlertProjection("live", [])).rejects.toThrow(/between 1 and/);
+    await expect(auditFreezerAlertProjection("live", ["2031-02-30"])).rejects.toThrow(/valid YYYY-MM-DD/);
+    await expect(auditFreezerAlertProjection("live", ["2031-01-10", "2031-01-10"])).rejects.toThrow(/unique/);
+    const oversizedDates = Array.from({ length: 101 }, (_, index) =>
+      `2031-${String(Math.floor(index / 28) + 1).padStart(2, "0")}-${String((index % 28) + 1).padStart(2, "0")}`);
+    await expect(auditFreezerAlertProjection("live", oversizedDates)).rejects.toThrow(/between 1 and 100/);
+    await expect(auditFreezerAlertProjection("live", ["2031-01-10"], { maxFindings: 101 }))
+      .rejects.toThrow(/maxFindings/);
+  });
+
+  it("keeps the projection aligned when a historical repair changes a snapshot", async () => {
+    const date = "2026-08-20";
+    const data = {
+      dayState: { runs: [{ id: "repair-run", startedAt: NOW - 60_000 }] },
+      runValues: { "repair-run": { freezerTime: 2, pep1Type: "Natural" } },
+    };
+    await db.insert(dailySyncTable).values({ scope: "live", date, data });
+
+    const result = await db.transaction((tx) => lowesNaturalPepNameRepair.execute(tx));
+
+    expect(result).toMatchObject({ healedDays: 1 });
+    await expect(auditFreezerAlertProjection("live", [date])).resolves.toMatchObject({
+      counts: { missing: 0, extra: 0, mismatch: 0 },
+      findings: [],
+      truncated: false,
+    });
+  });
+
   it("backfills old snapshots and selects pending/due milestones without unrelated history", async () => {
     const dueAt = NOW - 30 * 60_000;
     const pendingAt = NOW + 45 * 60_000;

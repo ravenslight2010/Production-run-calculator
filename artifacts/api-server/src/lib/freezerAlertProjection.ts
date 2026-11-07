@@ -4,9 +4,12 @@ import {
   freezerAlertProjectionStatusTable,
   freezerAlertRunProjectionTable,
 } from "@workspace/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 type ProjectionTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+const MAX_FREEZER_PROJECTION_AUDIT_DATES = 100;
+const MAX_FREEZER_PROJECTION_AUDIT_FINDINGS = 100;
 
 type SnapshotRun = {
   id?: unknown;
@@ -58,6 +61,137 @@ function projectionRows(scope: string, date: string, snapshot: unknown) {
   }
 
   return rows;
+}
+
+type ProjectionFact = ReturnType<typeof projectionRows>[number];
+type ProjectionFactField = "startedAt" | "endedAt" | "freezerTime" | "dueAt" | "isActive";
+
+export type FreezerAlertProjectionAuditFinding =
+  | { kind: "missing"; scope: string; date: string; runId: string; expected: ProjectionFact }
+  | { kind: "extra"; scope: string; date: string; runId: string; actual: ProjectionFact }
+  | {
+      kind: "mismatch";
+      scope: string;
+      date: string;
+      runId: string;
+      fields: ProjectionFactField[];
+      expected: ProjectionFact;
+      actual: ProjectionFact;
+    };
+
+export type FreezerAlertProjectionAuditResult = {
+  scope: string;
+  dates: string[];
+  examinedDays: number;
+  counts: { missing: number; extra: number; mismatch: number };
+  findings: FreezerAlertProjectionAuditFinding[];
+  truncated: boolean;
+};
+
+function validAuditDate(date: unknown): date is string {
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+/**
+ * Compare the compact alert projection with canonical snapshots for explicit
+ * dates. This diagnostic is read-only: it never repairs, backfills, or marks a
+ * scope complete. Date and finding limits keep both database reads and reports
+ * bounded for operational use.
+ */
+export async function auditFreezerAlertProjection(
+  scope: string,
+  dates: readonly string[],
+  options: { maxFindings?: number } = {},
+): Promise<FreezerAlertProjectionAuditResult> {
+  if (typeof scope !== "string" || !scope.trim() || scope.length > 128) {
+    throw new TypeError("scope must be a non-empty string of at most 128 characters");
+  }
+  if (!Array.isArray(dates) || dates.length === 0 || dates.length > MAX_FREEZER_PROJECTION_AUDIT_DATES) {
+    throw new RangeError(`dates must contain between 1 and ${MAX_FREEZER_PROJECTION_AUDIT_DATES} dates`);
+  }
+  const selectedDates = [...dates];
+  if (selectedDates.some((date) => !validAuditDate(date))) {
+    throw new TypeError("every audit date must be a valid YYYY-MM-DD calendar date");
+  }
+  if (new Set(selectedDates).size !== selectedDates.length) {
+    throw new TypeError("audit dates must be unique");
+  }
+
+  const maxFindings = options.maxFindings ?? MAX_FREEZER_PROJECTION_AUDIT_FINDINGS;
+  if (!Number.isInteger(maxFindings) || maxFindings < 0 || maxFindings > MAX_FREEZER_PROJECTION_AUDIT_FINDINGS) {
+    throw new RangeError(`maxFindings must be an integer between 0 and ${MAX_FREEZER_PROJECTION_AUDIT_FINDINGS}`);
+  }
+
+  const [canonicalRows, projectionRowsForDates] = await Promise.all([
+    db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
+      .from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, selectedDates))),
+    db.select({
+      date: freezerAlertRunProjectionTable.date,
+      runId: freezerAlertRunProjectionTable.runId,
+      startedAt: freezerAlertRunProjectionTable.startedAt,
+      endedAt: freezerAlertRunProjectionTable.endedAt,
+      freezerTime: freezerAlertRunProjectionTable.freezerTime,
+      dueAt: freezerAlertRunProjectionTable.dueAt,
+      isActive: freezerAlertRunProjectionTable.isActive,
+    })
+      .from(freezerAlertRunProjectionTable)
+      .where(and(
+        eq(freezerAlertRunProjectionTable.scope, scope),
+        inArray(freezerAlertRunProjectionTable.date, selectedDates),
+      )),
+  ]);
+
+  const expectedByDate = new Map<string, Map<string, ProjectionFact>>();
+  for (const date of selectedDates) expectedByDate.set(date, new Map());
+  for (const row of canonicalRows) {
+    const expected = expectedByDate.get(row.date)!;
+    for (const fact of projectionRows(scope, row.date, row.data)) expected.set(fact.runId, fact);
+  }
+
+  const actualByDate = new Map<string, Map<string, ProjectionFact>>();
+  for (const date of selectedDates) actualByDate.set(date, new Map());
+  for (const row of projectionRowsForDates) {
+    actualByDate.get(row.date)!.set(row.runId, { scope, ...row });
+  }
+
+  const counts = { missing: 0, extra: 0, mismatch: 0 };
+  const findings: FreezerAlertProjectionAuditFinding[] = [];
+  const addFinding = (finding: FreezerAlertProjectionAuditFinding) => {
+    counts[finding.kind]++;
+    if (findings.length < maxFindings) findings.push(finding);
+  };
+
+  for (const date of selectedDates) {
+    const expected = expectedByDate.get(date)!;
+    const actual = actualByDate.get(date)!;
+    for (const [runId, expectedFact] of expected) {
+      const actualFact = actual.get(runId);
+      if (!actualFact) {
+        addFinding({ kind: "missing", scope, date, runId, expected: expectedFact });
+        continue;
+      }
+      const fields = (["startedAt", "endedAt", "freezerTime", "dueAt", "isActive"] as const)
+        .filter((field) => !Object.is(expectedFact[field], actualFact[field]));
+      if (fields.length) {
+        addFinding({ kind: "mismatch", scope, date, runId, fields: [...fields], expected: expectedFact, actual: actualFact });
+      }
+    }
+    for (const [runId, actualFact] of actual) {
+      if (!expected.has(runId)) addFinding({ kind: "extra", scope, date, runId, actual: actualFact });
+    }
+  }
+
+  return {
+    scope,
+    dates: selectedDates,
+    examinedDays: selectedDates.length,
+    counts,
+    findings,
+    truncated: findings.length < counts.missing + counts.extra + counts.mismatch,
+  };
 }
 
 /**

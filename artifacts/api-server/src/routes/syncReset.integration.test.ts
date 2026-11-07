@@ -21,6 +21,7 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let freezerAlertRunProjectionTable: DbModule["freezerAlertRunProjectionTable"];
+let auditFreezerAlertProjection: typeof import("../lib/freezerAlertProjection")["auditFreezerAlertProjection"];
 let dataResetTable: DbModule["dataResetTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
@@ -67,6 +68,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
+  auditFreezerAlertProjection = (await import("../lib/freezerAlertProjection")).auditFreezerAlertProjection;
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
@@ -356,6 +358,10 @@ describe("POST /sync/reset", () => {
     const rows = await db.select().from(dailySyncTable);
     expect(rows).toHaveLength(0);
     expect(await db.select().from(freezerAlertRunProjectionTable)).toEqual([]);
+    await expect(auditFreezerAlertProjection("live", ["2030-03-10"])).resolves.toMatchObject({
+      counts: { missing: 0, extra: 0, mismatch: 0 },
+      findings: [],
+    });
 
     const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(OPERATOR) });
     expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1, rollover: false });
@@ -443,6 +449,10 @@ describe("POST /sync/purge-all — full factory purge", () => {
 
     expect(await db.select().from(dailySyncTable)).toHaveLength(0);
     expect(await db.select().from(freezerAlertRunProjectionTable)).toEqual([]);
+    await expect(auditFreezerAlertProjection("live", ["2030-03-10"])).resolves.toMatchObject({
+      counts: { missing: 0, extra: 0, mismatch: 0 },
+      findings: [],
+    });
     expect(await db.select().from(dbMod.operationalIntentLedgerTable)).toHaveLength(0);
     expect(await db.select().from(dbMod.cheeseRecipesTable)).toHaveLength(0);
     expect(await db.select().from(dbMod.mixesTable)).toHaveLength(0);

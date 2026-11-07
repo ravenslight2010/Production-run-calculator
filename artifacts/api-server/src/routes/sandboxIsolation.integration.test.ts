@@ -67,6 +67,7 @@ let savedSpecSheetsTable: DbModule["savedSpecSheetsTable"];
 let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
 let backfillFreezerAlertProjection: typeof import("../lib/freezerAlertProjection")["backfillFreezerAlertProjection"];
+let auditFreezerAlertProjection: typeof import("../lib/freezerAlertProjection")["auditFreezerAlertProjection"];
 let SANDBOX_USERNAME: string;
 let clearUserValidityCache: () => void;
 let clearSessionBoundaryCache: () => void;
@@ -146,7 +147,9 @@ beforeAll(async () => {
   savedSpecSheetsTable = dbMod.savedSpecSheetsTable;
   seedRoles = rolesMod.seedRoles;
   seedSandboxUser = sandboxMod.seedSandboxUser;
-  backfillFreezerAlertProjection = (await import("../lib/freezerAlertProjection")).backfillFreezerAlertProjection;
+  const freezerProjectionMod = await import("../lib/freezerAlertProjection");
+  backfillFreezerAlertProjection = freezerProjectionMod.backfillFreezerAlertProjection;
+  auditFreezerAlertProjection = freezerProjectionMod.auditFreezerAlertProjection;
   SANDBOX_USERNAME = sandboxMod.SANDBOX_USERNAME;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   clearSessionBoundaryCache = sessionBoundaryMod.clearSessionBoundaryCache;
@@ -706,6 +709,14 @@ describe("POST /sandbox/reset re-copies live → sandbox", () => {
     ]);
     expect(await db.select().from(freezerAlertProjectionStatusTable)
       .where(eq(freezerAlertProjectionStatusTable.scope, "sandbox"))).toHaveLength(1);
+    await expect(auditFreezerAlertProjection("live", ["2000-01-01"])).resolves.toMatchObject({
+      counts: { missing: 0, extra: 0, mismatch: 0 },
+      findings: [],
+    });
+    await expect(auditFreezerAlertProjection("sandbox", ["2000-01-01"])).resolves.toMatchObject({
+      counts: { missing: 0, extra: 0, mismatch: 0 },
+      findings: [],
+    });
 
     // The sandbox now mirrors live: divergent edits gone, live's rows copied in.
     const sandboxAfter = await getDayState(sandboxUserId) as Record<string, unknown>;
