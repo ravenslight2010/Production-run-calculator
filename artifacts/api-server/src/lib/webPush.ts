@@ -516,17 +516,49 @@ export async function runWebPushAlerts(
 
 export async function pruneExpiredWebPushData(nowMs = Date.now()): Promise<void> {
   const cutoff = new Date(nowMs);
-  await Promise.all([
-    db.delete(webPushDeliveriesTable).where(lt(webPushDeliveriesTable.expiresAt, cutoff)),
-    db.delete(webPushAlertArmsTable).where(lt(webPushAlertArmsTable.expiresAt, cutoff)),
-    db.delete(scheduledAlertRecordsTable).where(lt(scheduledAlertRecordsTable.expiresAt, cutoff)),
-    db.delete(webPushSubscriptionsTable).where(and(
-      eq(webPushSubscriptionsTable.enabled, true),
-      lt(webPushSubscriptionsTable.expiresAt, cutoff),
-    )),
-    db.delete(webPushSubscriptionsTable).where(and(eq(webPushSubscriptionsTable.enabled, false), lt(webPushSubscriptionsTable.updatedAt, new Date(nowMs - RETENTION_MS)))),
-  ]);
+  // Retention cleanup is idempotent. Run each table sweep separately so one
+  // background job never fans out five simultaneous database checkouts.
+  await db.delete(webPushDeliveriesTable).where(lt(webPushDeliveriesTable.expiresAt, cutoff));
+  await db.delete(webPushAlertArmsTable).where(lt(webPushAlertArmsTable.expiresAt, cutoff));
+  await db.delete(scheduledAlertRecordsTable).where(lt(scheduledAlertRecordsTable.expiresAt, cutoff));
+  await db.delete(webPushSubscriptionsTable).where(and(
+    eq(webPushSubscriptionsTable.enabled, true),
+    lt(webPushSubscriptionsTable.expiresAt, cutoff),
+  ));
+  await db.delete(webPushSubscriptionsTable).where(and(
+    eq(webPushSubscriptionsTable.enabled, false),
+    lt(webPushSubscriptionsTable.updatedAt, new Date(nowMs - RETENTION_MS)),
+  ));
 }
+
+const WEB_PUSH_RETENTION_PRUNE_INTERVAL_MS = 60 * 60_000;
+
+/**
+ * Coalesce cleanup across overlapping jobs and avoid repeating retention
+ * sweeps on every minute-bucketed alert evaluation. A failed sweep is retryable
+ * on the next call; the interval starts only after success.
+ */
+export function createWebPushRetentionPruner(
+  prune: (nowMs: number) => Promise<void>,
+  intervalMs = WEB_PUSH_RETENTION_PRUNE_INTERVAL_MS,
+): (nowMs?: number) => Promise<void> {
+  let lastSuccessfulAt: number | undefined;
+  let inFlight: Promise<void> | undefined;
+  return (nowMs = Date.now()) => {
+    if (inFlight) return inFlight;
+    if (lastSuccessfulAt !== undefined && nowMs - lastSuccessfulAt < intervalMs) {
+      return Promise.resolve();
+    }
+    const run = Promise.resolve()
+      .then(() => prune(nowMs))
+      .then(() => { lastSuccessfulAt = nowMs; })
+      .finally(() => { inFlight = undefined; });
+    inFlight = run;
+    return run;
+  };
+}
+
+const pruneExpiredWebPushDataIfDue = createWebPushRetentionPruner(pruneExpiredWebPushData);
 
 /**
  * Optional UTC quiet period, e.g. WEB_PUSH_QUIET_HOURS=22-06. Evaluation and
@@ -655,7 +687,9 @@ registerServerJob("scheduled-evaluation", {
       }
     }
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
-    await context.commit(() => pruneExpiredWebPushData(Date.now()));
+    // Retention cleanup is maintenance, not a user-visible alert effect. Keep
+    // it outside the protected alert transaction and rate-limit it to hourly.
+    await pruneExpiredWebPushDataIfDue(Date.now());
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(100, "Scheduled production alerts evaluated");
     return { examined, candidates };

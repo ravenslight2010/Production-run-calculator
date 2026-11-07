@@ -43,6 +43,7 @@ vi.mock("./backgroundOperations", async (importOriginal) => {
 const {
   alertCandidates,
   classifyPushSubscription,
+  createWebPushRetentionPruner,
   deferredCandidate,
   enqueueScheduledWebPushAlerts,
   freezerCandidates,
@@ -139,6 +140,43 @@ describe("web-push endpoint validation", () => {
     }, "payload")).rejects.toThrow("Invalid push endpoint");
 
     expect(webpushMock.sendNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe("web-push retention cleanup scheduling", () => {
+  it("coalesces overlapping sweeps and runs again only after the interval", async () => {
+    let release!: () => void;
+    let calls = 0;
+    const prune = vi.fn(() => {
+      calls++;
+      return calls === 1
+        ? new Promise<void>((resolve) => { release = resolve; })
+        : Promise.resolve();
+    });
+    const runPrune = createWebPushRetentionPruner(prune, 1_000);
+
+    const first = runPrune(10_000);
+    const overlapping = runPrune(10_500);
+    await Promise.resolve();
+    expect(prune).toHaveBeenCalledTimes(1);
+
+    release();
+    await Promise.all([first, overlapping]);
+    await runPrune(10_999);
+    expect(prune).toHaveBeenCalledTimes(1);
+    await runPrune(11_000);
+    expect(prune).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a failed sweep instead of starting the cooldown", async () => {
+    const prune = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary database failure"))
+      .mockResolvedValueOnce(undefined);
+    const runPrune = createWebPushRetentionPruner(prune, 1_000);
+
+    await expect(runPrune(10_000)).rejects.toThrow("temporary database failure");
+    await runPrune(10_001);
+    expect(prune).toHaveBeenCalledTimes(2);
   });
 });
 
