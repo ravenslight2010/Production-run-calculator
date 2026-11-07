@@ -920,6 +920,150 @@ describe("background operation PostgreSQL reconnection", () => {
     ]);
   });
 
+  it("keeps a historical active run while excluding unrelated idle snapshots", async () => {
+    const now = Date.now();
+    const activeDate = new Date(now - 2 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+    const idleRows = Array.from({ length: 97 }, (_, index) => {
+      const date = new Date(now - (index + 3) * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+      return {
+        date,
+        scope: SCOPE,
+        data: { dayState: { date, runs: [] }, runValues: {} },
+      };
+    });
+    const runId = "historical-active-alert-run";
+    const activeRun = {
+      date: activeDate,
+      scope: SCOPE,
+      data: {
+        dayState: {
+          date: activeDate,
+          runs: [{
+            id: runId,
+            subTab: "crusts",
+            startedAt: now - 120_000,
+            autoTrackDisabled: false,
+          }],
+        },
+        runValues: {
+          [runId]: {
+            approxLineSpeed: 60,
+            pizzasPerCase: 6,
+            casesNeeded: 200,
+            casesPerSkid: 60,
+            crustsPerCase: 60,
+            freezerTime: 0,
+          },
+        },
+      },
+    };
+    await db.insert(dailySyncTable).values([...idleRows, activeRun]);
+    await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "historical-alert-regression",
+      type: "scheduled-evaluation",
+      idempotencyKey: `historical-active:${now}`,
+      input: { scheduledFor: now },
+    });
+
+    expect(await new ServerJobWorker("historical-active-worker").runOnce()).toBe(true);
+    const [job] = await db.select().from(serverJobsTable);
+    expect(job).toMatchObject({
+      status: "succeeded",
+      result: { examined: 1 },
+    });
+    expect(await db.select().from(webPushAlertArmsTable)).toMatchObject([
+      { scope: SCOPE, alertKind: "fifteenMin" },
+    ]);
+  });
+
+  it("evaluates a due freezer milestone from a historical compact summary", async () => {
+    const now = Date.now();
+    const date = new Date(now - 2 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+    const endedAt = now - 120_000;
+    const dueAt = endedAt + 60_000;
+    const runId = "historical-freezer-alert-run";
+    await db.insert(dailySyncTable).values({
+      date,
+      scope: SCOPE,
+      data: {
+        dayState: { date, runs: [{ id: runId, startedAt: now - 300_000, endedAt }] },
+        runValues: { [runId]: { freezerTime: 1 } },
+      },
+    });
+    await runWebPushAlerts(dueAt - 1, { scope: SCOPE, date, pruneExpired: false });
+    await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "historical-freezer-regression",
+      type: "scheduled-evaluation",
+      idempotencyKey: `historical-freezer:${now}`,
+      input: { scheduledFor: now },
+    });
+
+    expect(await new ServerJobWorker("historical-freezer-worker").runOnce()).toBe(true);
+    const [job] = await db.select().from(serverJobsTable);
+    expect(job).toMatchObject({
+      status: "succeeded",
+      result: { examined: 1, candidates: 1 },
+    });
+    expect(await db.select().from(scheduledAlertRecordsTable)).toMatchObject([
+      { scope: SCOPE, date, alertKind: "freezerEmpty", status: "no-subscriptions" },
+    ]);
+  });
+
+  it("recovers historical deferred alerts without reading their daily snapshot", async () => {
+    const now = Date.now();
+    const date = new Date(now - 30 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+    await db.insert(scheduledAlertRecordsTable).values({
+      id: "historical-deferred-alert-record",
+      scope: SCOPE,
+      alertId: "historical-deferred-alert",
+      alertKind: "freezerEmpty",
+      date,
+      dueAt: new Date(now - 60_000),
+      status: "deferred",
+      evaluatedAt: new Date(now - 60_000),
+      expiresAt: new Date(now + 60_000),
+    });
+    await db.insert(scheduledAlertRecordsTable).values({
+      id: "historical-stale-delivery-claim",
+      scope: SCOPE,
+      alertId: "historical-stale-delivery",
+      alertKind: "freezerEmpty",
+      date,
+      dueAt: new Date(now - 120_000),
+      status: "delivering",
+      evaluatedAt: new Date(now - 120_000),
+      expiresAt: new Date(now + 60_000),
+    });
+    await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "deferred-alert-recovery-one",
+      type: "scheduled-evaluation",
+      idempotencyKey: `deferred-recovery:one:${now}`,
+      input: { scheduledFor: now },
+    });
+
+    expect(await new ServerJobWorker("deferred-recovery-worker-one").runOnce()).toBe(true);
+    expect(await db.select().from(scheduledAlertRecordsTable)).toMatchObject([
+      { id: "historical-deferred-alert-record", status: "no-subscriptions" },
+      { id: "historical-stale-delivery-claim", status: "no-subscriptions" },
+    ]);
+    await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "deferred-alert-recovery-two",
+      type: "scheduled-evaluation",
+      idempotencyKey: `deferred-recovery:two:${now}`,
+      input: { scheduledFor: now },
+    });
+    expect(await new ServerJobWorker("deferred-recovery-worker-two").runOnce()).toBe(true);
+    expect(await db.select().from(scheduledAlertRecordsTable)).toMatchObject([
+      { id: "historical-deferred-alert-record", status: "no-subscriptions" },
+      { id: "historical-stale-delivery-claim", status: "no-subscriptions" },
+    ]);
+    expect(await db.select().from(dailySyncTable)).toEqual([]);
+  });
+
   it("keeps one queued scheduled job when enqueue confirmation is lost", async () => {
     const now = Date.now();
     const bucketStart = Math.floor(now / 60_000) * 60_000;

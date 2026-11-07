@@ -236,6 +236,30 @@ export async function measureBackgroundLoad(stage, profile) {
   const date = chicagoDate();
   const measurements = [];
   const emptyData = { dayState: { date, currentIndex: 0, runs: [] }, runValues: {} };
+  const historicalRows = Array.from({ length: 97 }, (_, index) => {
+    const historicalDate = new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1_000)
+      .toISOString()
+      .slice(0, 10);
+    return {
+      date: historicalDate,
+      data: {
+        dayState: { date: historicalDate, currentIndex: 0, runs: [] },
+        runValues: {},
+        measurementPadding: "x".repeat(34_600),
+      },
+    };
+  });
+  const historicalParams = historicalRows.flatMap((row) => [row.date, JSON.stringify(row.data)]);
+  const historicalValues = historicalRows.map((_, index) =>
+    `($${index * 2 + 1}, 'live', $${index * 2 + 2}::jsonb, 0)`,
+  ).join(", ");
+  await stage.query(
+    `INSERT INTO daily_sync (date, scope, data, canonical_revision)
+     VALUES ${historicalValues}
+     ON CONFLICT (date, scope) DO UPDATE
+     SET data = EXCLUDED.data, canonical_revision = 0, updated_at = now()`,
+    historicalParams,
+  );
   await stage.query(
     `INSERT INTO daily_sync (date, scope, data, canonical_revision)
      VALUES ($1, 'live', $2::jsonb, 0)
@@ -254,7 +278,7 @@ export async function measureBackgroundLoad(stage, profile) {
 
   return {
     profile,
-    scope: "synthetic isolated database only",
+    scope: "synthetic isolated database only; each scenario includes 97 historical snapshots of about 34.7 KB each",
     idleWindowMs: IDLE_WINDOW_MS,
     syncRecoveryRequestCountPerScenario: SYNC_RECOVERY_REQUESTS,
     measurements,

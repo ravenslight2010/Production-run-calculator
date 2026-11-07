@@ -6,7 +6,7 @@ import {
   createBackgroundOperationBackoff,
   runBackgroundOperation,
 } from "./backgroundOperations";
-import { and, asc, eq, gt, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
 import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
   dailySyncTable, scheduledAlertRecordsTable,
@@ -16,6 +16,7 @@ import { logger } from "./logger";
 import type { Scope } from "./requestScope";
 import { getUserCapabilities } from "./roles";
 import { computeAutoTrackElapsedMs } from "@workspace/live-calc";
+import { facilityDate } from "./facilityTime";
 import {
   enqueueServerJob,
   markScheduledEvaluationQueueSampleUnavailable,
@@ -430,7 +431,13 @@ async function deliverDeferredAlerts(scope: Scope, date: string, nowMs: number, 
 
 export async function runWebPushAlerts(
   nowMs = Date.now(),
-  target?: { scope: Scope; date: string; signal?: AbortSignal; pruneExpired?: boolean },
+  target?: {
+    scope: Scope;
+    date: string;
+    signal?: AbortSignal;
+    pruneExpired?: boolean;
+    recoverDeferred?: boolean;
+  },
 ): Promise<{ examined: number; candidates: number }> {
   const query = db.select().from(dailySyncTable);
   const rows = target
@@ -441,7 +448,9 @@ export async function runWebPushAlerts(
     if (target?.signal?.aborted) throw new Error("Scheduled alert evaluation cancelled");
     // A quiet-time record is durable evidence, not a terminal suppression.
     // Once eligible, exactly one evaluator transitions it to delivering.
-    if (!quietHours(nowMs)) await deliverDeferredAlerts(row.scope as Scope, row.date, nowMs, target?.signal);
+    if (target?.recoverDeferred !== false && !quietHours(nowMs)) {
+      await deliverDeferredAlerts(row.scope as Scope, row.date, nowMs, target?.signal);
+    }
     const arm = fifteenArm(row.data, nowMs);
     if (arm) await db.insert(webPushAlertArmsTable).values({
       scope: row.scope, runKey: arm, alertKind: "fifteenMin", expiresAt: new Date(nowMs + RETENTION_MS),
@@ -619,18 +628,97 @@ registerServerJob("scheduled-evaluation", {
     await context.reportProgress(10, "Evaluating scheduled production alerts");
     const scope = context.job.scope as Scope;
     const requestedDate = typeof input.date === "string" ? input.date : undefined;
-    const dateRows: Array<{ date: string; data?: unknown }> = requestedDate
-      ? [{ date: requestedDate }]
-      : await db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
-        .from(dailySyncTable)
-        .where(eq(dailySyncTable.scope, scope))
-        .orderBy(asc(dailySyncTable.date));
-    let examined = requestedDate ? 0 : dateRows.length;
+    let dateRows: Array<{ date: string; data?: unknown }> = requestedDate ? [{ date: requestedDate }] : [];
+    let examined = 0;
     let candidates = 0;
     let datesToEvaluate = dateRows;
-    if (!requestedDate && dateRows.length > 0) {
+    if (!requestedDate) {
       const nowMs = Date.now();
-      const [recordRows, armRows] = await Promise.all([
+      const today = facilityDate(nowMs);
+      const [currentRows, historicalResult, recordRows, armRows] = await Promise.all([
+        db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
+          .from(dailySyncTable)
+          .where(and(
+            eq(dailySyncTable.scope, scope),
+            gte(dailySyncTable.date, today),
+          ))
+          .orderBy(asc(dailySyncTable.date)),
+        db.execute(sql`
+          WITH expanded AS (
+            SELECT
+              daily.date,
+              daily.data,
+              run.value AS run,
+              daily.data->'runValues'->(run.value->>'id') AS settings
+            FROM daily_sync AS daily
+            CROSS JOIN LATERAL jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(daily.data->'dayState'->'runs') = 'array'
+                THEN daily.data->'dayState'->'runs'
+                ELSE '[]'::jsonb
+              END
+            ) AS run(value)
+            WHERE daily.scope = ${scope}
+              AND daily.date < ${today}
+          ),
+          classified AS (
+            SELECT
+              date,
+              data,
+              run,
+              settings,
+              (
+                jsonb_typeof(run->'id') = 'string'
+                AND jsonb_typeof(run->'startedAt') = 'number'
+                AND (run->>'startedAt')::numeric > 0
+                AND CASE
+                  WHEN jsonb_typeof(run->'endedAt') = 'number'
+                  THEN (run->>'endedAt')::numeric
+                  ELSE 0
+                END = 0
+                AND CASE
+                  WHEN jsonb_typeof(run->'pausedAt') = 'number'
+                  THEN (run->>'pausedAt')::numeric
+                  ELSE 0
+                END = 0
+              ) AS is_active,
+              (
+                jsonb_typeof(run->'id') = 'string'
+                AND CASE
+                  WHEN jsonb_typeof(run->'endedAt') = 'number'
+                  THEN (run->>'endedAt')::numeric
+                  ELSE 0
+                END <> 0
+                AND CASE
+                  WHEN jsonb_typeof(settings->'freezerTime') = 'number'
+                  THEN (settings->>'freezerTime')::numeric
+                  ELSE 0
+                END > 0
+                AND CASE
+                  WHEN jsonb_typeof(run->'endedAt') = 'number'
+                    AND jsonb_typeof(settings->'freezerTime') = 'number'
+                  THEN (run->>'endedAt')::numeric
+                    + (settings->>'freezerTime')::numeric * 60000
+                  ELSE 0
+                END >= ${nowMs - RETENTION_MS}
+              ) AS freezer_due
+            FROM expanded
+          )
+          SELECT
+            date,
+            CASE WHEN bool_or(is_active) THEN data ELSE NULL::jsonb END AS data,
+            jsonb_agg(jsonb_build_object(
+              'run', jsonb_build_object(
+                'id', run->'id',
+                'startedAt', run->'startedAt',
+                'endedAt', run->'endedAt'
+              ),
+              'freezerTime', settings->'freezerTime'
+            )) FILTER (WHERE freezer_due) AS "freezerRuns"
+          FROM classified
+          GROUP BY date, data
+          HAVING bool_or(is_active) OR bool_or(freezer_due)
+        `),
         db.select({
           alertId: scheduledAlertRecordsTable.alertId,
           date: scheduledAlertRecordsTable.date,
@@ -648,26 +736,61 @@ registerServerJob("scheduled-evaluation", {
           gt(webPushAlertArmsTable.expiresAt, new Date(nowMs)),
         )),
       ]);
+      type HistoricalFreezerRow = {
+        date: string;
+        data: unknown | null;
+        freezerRuns: Array<{
+          run: { id: string; startedAt?: number; endedAt: number };
+          freezerTime: number;
+        }> | null;
+      };
+      const historicalRows = (historicalResult as unknown as {
+        rows: HistoricalFreezerRow[];
+      }).rows;
+      const rowsByDate = new Map(currentRows.map((row) => [row.date, row]));
+      for (const row of historicalRows) {
+        if (row.data !== null) {
+          rowsByDate.set(row.date, { date: row.date, data: row.data });
+          continue;
+        }
+        const freezerRuns = row.freezerRuns ?? [];
+        if (!freezerRuns.length) continue;
+        const runs = freezerRuns.map(({ run }) => run);
+        const runValues = Object.fromEntries(freezerRuns.map(({ run, freezerTime }) => [
+          run.id,
+          { freezerTime },
+        ]));
+        rowsByDate.set(row.date, {
+          date: row.date,
+          data: { dayState: { runs }, runValues },
+        });
+      }
+      dateRows = [...rowsByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+      examined = dateRows.length;
       const existingAlertIds = new Set(recordRows.map((row) => row.alertId));
       const activeArms = new Set(armRows.map((row) =>
         alertArmIdentity(row.alertKind as "fifteenMin" | "freezerEmpty", row.runKey),
       ));
       candidates = dateRows.reduce<number>((total, row) => total
         + scheduledAlertCandidateCount(row.data, row.date, nowMs, activeArms), 0);
-      const pendingDeferredDates = new Set(!quietHours(nowMs)
+      const pendingDeferredDates = !quietHours(nowMs)
         ? recordRows.filter((row) => row.status === "deferred"
           || (row.status === "delivering"
             && row.evaluatedAt instanceof Date
             && row.evaluatedAt.getTime() < nowMs - DEFERRED_DELIVERY_CLAIM_MS))
           .map((row) => row.date)
-        : []);
+        : [];
+      for (const date of new Set(pendingDeferredDates)) {
+        if (await context.isCancellationRequested()) throw new Error("Cancelled");
+        await context.commit(() => deliverDeferredAlerts(scope, date, Date.now(), context.signal));
+      }
       datesToEvaluate = dateRows.filter((row) => scheduledAlertDateNeedsEvaluation(
         row.data,
         row.date,
         nowMs,
         activeArms,
         existingAlertIds,
-        pendingDeferredDates.has(row.date),
+        false,
       ));
     }
     // Keep each date's alert effects in its own commit. Besides preserving the
@@ -680,6 +803,7 @@ registerServerJob("scheduled-evaluation", {
         date: row.date,
         signal: context.signal,
         pruneExpired: false,
+        recoverDeferred: requestedDate !== undefined,
       }));
       if (requestedDate) {
         examined += result.examined;
