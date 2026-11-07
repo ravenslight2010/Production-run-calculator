@@ -77,6 +77,18 @@ even though the main workspace's Git remote was reachable.
 code to address this symptom. Preserve the exact finalizer error and request
 platform-owned task-run/fetch diagnostics if it persists.
 
+A later task successfully merged after those fetch failures. This confirms that
+at least one task-completion path worked again, but it does not prove every task
+type or execution path is healthy, or identify which platform-side change fixed
+the earlier failure.
+
+**Why:** The owner reported the first successful task completion after repeated
+main-repl fetch failures and confirmed the recovery was working there.
+
+**How to apply:** Treat a successful merge as positive evidence, verify each
+task's own terminal state, and stop assuming a global completion outage unless
+new failures provide evidence.
+
 ## Background-task configuration snapshots
 
 Replit background tasks run from an isolated project snapshot that includes
