@@ -260,3 +260,90 @@ export async function measureBackgroundLoad(stage, profile) {
     measurements,
   };
 }
+
+export async function measureScreenOffWakeBrowserJourney(stage, runBrowserChecks) {
+  assert.equal(typeof runBrowserChecks, "function", "Browser check runner is required.");
+  const date = chicagoDate();
+  const databaseBefore = await readDatabaseSample(stage);
+  const runEvidenceBefore = await readActiveRunEvidence(stage, date);
+  const processSamples = [await readProcessSample(stage.appPid)];
+  const startedAt = Date.now();
+  let finished = false;
+  let samplingFailed = false;
+  const sampler = (async () => {
+    while (!finished) {
+      await delay(PROCESS_SAMPLE_INTERVAL_MS);
+      if (finished) break;
+      try {
+        processSamples.push(await readProcessSample(stage.appPid));
+      } catch {
+        samplingFailed = true;
+        break;
+      }
+    }
+  })();
+
+  let browserResult = null;
+  try {
+    browserResult = await runBrowserChecks();
+  } catch {
+    browserResult = { commandFailed: true, reportAvailable: false };
+  } finally {
+    finished = true;
+    await sampler;
+  }
+
+  let processAfter;
+  try {
+    processAfter = await readProcessSample(stage.appPid);
+    processSamples.push(processAfter);
+  } catch {
+    samplingFailed = true;
+  }
+  const databaseAfter = await readDatabaseSample(stage);
+  const runEvidenceAfter = await readActiveRunEvidence(stage, date);
+  const cpuTicks = processSamples.map((sample) => sample.cpuTicks);
+  const rssValues = processSamples.map((sample) => sample.rssKb);
+  const browserStatus = browserResult?.commandFailed === false
+    && browserResult?.expected === 4
+    && browserResult?.skipped === 0
+    && browserResult?.unexpected === 0
+    ? "PASS"
+    : "FAIL";
+
+  return {
+    status: browserStatus === "PASS" && !samplingFailed ? "PASS" : "FAIL",
+    scope: "same synthetic isolated app and database as the browser journey",
+    journey: "screen-off/visibility recovery, auto-track catch-up, and wake-recovered Stop/Resume actions",
+    durationMs: Date.now() - startedAt,
+    expectedBrowserCases: 4,
+    browserTests: {
+      status: browserStatus,
+      passed: browserResult?.expected ?? 0,
+      skipped: browserResult?.skipped ?? 0,
+      failed: browserResult?.unexpected ?? 0,
+      reportAvailable: browserResult?.reportAvailable !== false,
+      durationMs: browserResult?.durationMs ?? null,
+    },
+    database: {
+      transactionCommits: databaseAfter.commits - databaseBefore.commits,
+      tuplesReturned: databaseAfter.tuplesReturned - databaseBefore.tuplesReturned,
+      backendCountBefore: databaseBefore.backends,
+      backendCountAfter: databaseAfter.backends,
+    },
+    apiProcess: {
+      cpuTicks: cpuTicks.length > 1 ? Math.max(0, cpuTicks.at(-1) - cpuTicks[0]) : null,
+      rssMinKb: rssValues.length ? Math.min(...rssValues) : null,
+      rssMaxKb: rssValues.length ? Math.max(...rssValues) : null,
+      samples: processSamples.length,
+    },
+    runState: {
+      canonicalRevisionBefore: runEvidenceBefore.canonicalRevision,
+      canonicalRevisionAfter: runEvidenceAfter.canonicalRevision,
+      runCountBefore: runEvidenceBefore.runCount,
+      runCountAfter: runEvidenceAfter.runCount,
+      acceptedAutoTrackIntents:
+        runEvidenceAfter.acceptedAutoTrackIntents - runEvidenceBefore.acceptedAutoTrackIntents,
+    },
+  };
+}

@@ -43,7 +43,7 @@ const report = { schemaVersion: 1, target: "isolated-local-staging", runId,
   verificationScope: "Real local API/database; not browser offline, physical device, or published runtime proof." };
 if (mode === "measure") {
   report.backgroundProfile = backgroundProfile;
-  report.verificationScope = "Synthetic local API/database load comparison; not browser offline, physical device, or published runtime proof.";
+  report.verificationScope = "Synthetic local API/database load and browser lifecycle emulation; not physical-device OS suspension or published runtime proof.";
 }
 const reportPath = path.join(parent, "reports", `${runId}.json`);
 const saveReport = () => writeRecord(reportPath, report);
@@ -52,6 +52,7 @@ let activeCommand;
 let interrupted = false;
 let pgInitialized = false;
 let phase = "initialization";
+let enableE2eBrowserFixtures = false;
 const abort = () => {
   interrupted = true;
   if (activeCommand?.pid) process.kill(-activeCommand.pid, "SIGTERM");
@@ -173,6 +174,9 @@ async function startApp() {
       DATABASE_POOL_MAX: "8",
       ...(backgroundProfile === "quiet" ? { DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS: "1" } : {}),
       ...(mode === "measure" ? { ENABLE_BACKGROUND_CAPACITY_TELEMETRY: "1" } : {}),
+      ...(enableE2eBrowserFixtures
+        ? { E2E_TEST_DB: "1", E2E_APPROVED_DESTRUCTIVE_MODE: "1" }
+        : {}),
       STAGING_RUN_ID: runId, SESSION_SECRET: credentials.sessionSecret,
       STAFF_SIGNUP_CODE: credentials.staffCode,
       INITIAL_MANAGER_USERNAME: credentials.manager.username, INITIAL_MANAGER_ACCESS_CODE: credentials.managerCode },
@@ -221,6 +225,12 @@ const stage = {
     return response.status === 204 ? null : response.json();
   },
   async restart() { await preflight(); await stopApp(); await startApp(); },
+  async restartForBrowserChecks() {
+    await preflight();
+    enableE2eBrowserFixtures = true;
+    await stopApp();
+    await startApp();
+  },
 };
 let bin;
 async function createDatabase() {
@@ -319,9 +329,47 @@ try {
   saveReport();
   if (mode === "measure") {
     phase = "background-load-measurement";
-    const { measureBackgroundLoad } = await import("./staging/background-load-measurement.mjs");
+    const { measureBackgroundLoad, measureScreenOffWakeBrowserJourney } =
+      await import("./staging/background-load-measurement.mjs");
     report.backgroundLoad = await measureBackgroundLoad(stage, backgroundProfile);
     stage.record("synthetic-background-load-measurement", "stage-runner", "PASS");
+    await stage.restartForBrowserChecks();
+    stage.record("restart-isolated-api-with-browser-fixture-gates", "stage-runner", "PASS");
+    const browserReportPath = path.join(directory, "playwright-results", "report.json");
+    report.browserLoad = await measureScreenOffWakeBrowserJourney(stage, async () => {
+      let commandFailed = false;
+      try {
+        await command("pnpm", ["exec", "playwright", "test",
+          "--config", "playwright.isolated-staging-background.config.ts"], {
+        APP_ENV: "isolated-staging",
+        DATABASE_URL: record.databaseUrl,
+        E2E_TEST_DB: "1",
+        E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+        ISOLATED_STAGING_BROWSER_OUTPUT_DIR: path.join(directory, "playwright-results"),
+        NODE_ENV: "test",
+        PLAYWRIGHT_API_BASE_URL: record.appUrl,
+        PLAYWRIGHT_BASE_URL: record.appUrl,
+        STAFF_SIGNUP_CODE: credentials.staffCode,
+        }, path.join(root, "artifacts/run-calculator"), 300_000);
+      } catch {
+        commandFailed = true;
+      }
+      try {
+        const playwrightReport = JSON.parse(await readFile(browserReportPath, "utf8"));
+        return {
+          commandFailed,
+          expected: Number(playwrightReport.stats?.expected ?? 0),
+          skipped: Number(playwrightReport.stats?.skipped ?? 0),
+          unexpected: Number(playwrightReport.stats?.unexpected ?? 0),
+          durationMs: Number(playwrightReport.stats?.duration ?? 0),
+        };
+      } catch {
+        return { commandFailed, reportAvailable: false };
+      }
+    });
+    stage.record("screen-off-wake-browser-journey", "stage-runner", report.browserLoad.status);
+    assert.equal(report.browserLoad.status, "PASS",
+      "Isolated screen-off/wake browser checks failed; private runtime logs are retained.");
   }
   if (mode === "serve") {
     console.log(`Isolated staging ready at ${record.appUrl}`);

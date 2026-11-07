@@ -51,10 +51,18 @@ recovery reads per scenario. The `quiet` profile disables optional scheduled
 jobs, while keeping auto-track, outbox delivery, capacity telemetry, readiness
 and error logging active. The `full` profile leaves those scheduled jobs on.
 Reports include bounded database activity, API-process CPU/RSS samples and sync
-request latency. Compare runs only when their source fingerprints match, and
-run them sequentially to reduce host-load interference. This is a local
-synthetic measurement, not proof of physical-device wake behavior, published
-service capacity or production impact.
+request latency. Each run then executes four focused Playwright checks against
+that same app process and database: active-run auto-track catch-up, paused-run
+stability, and wake-recovered Stop/Resume actions. Browser-window database and
+API-process measurements are recorded in the same report. After the normal load
+windows, the runner restarts only its loopback API with the existing E2E fixture
+gates enabled so the deterministic server-clock route can be used; those gates
+are not enabled in the earlier load windows. The browser test simulates
+visibility and clock changes; it does not simulate Android OS suspension.
+Compare runs only when their source fingerprints match, and run them
+sequentially to reduce host-load interference. This is a local synthetic
+measurement, not proof of physical-device wake behavior, published service
+capacity or production impact.
 
 For automation, send SIGTERM **only to the printed runner PID**, not to its
 entire process tree. Some job-stop tools forcibly kill all descendants without
