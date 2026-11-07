@@ -63,6 +63,20 @@ automatic completion set from workflows that remain manually runnable. Verify
 the registered global set and confirm all release commands remain available to
 the release owner.
 
+## Main-repl fetch failures during task completion
+
+Treat a task-finalization error fetching the main repl as separate from the
+task's implementation and test results. A successful `git ls-remote` from the
+workspace only verifies that workspace's configured Git remote; it does not
+prove the task service can fetch its internal main-repl reference.
+
+**Why:** Repeated task closure attempts reported the same main-repl fetch failure
+even though the main workspace's Git remote was reachable.
+
+**How to apply:** Do not rerun completed tests, invent a base SHA, or change app
+code to address this symptom. Preserve the exact finalizer error and request
+platform-owned task-run/fetch diagnostics if it persists.
+
 ## Background-task configuration snapshots
 
 Replit background tasks run from an isolated project snapshot that includes
