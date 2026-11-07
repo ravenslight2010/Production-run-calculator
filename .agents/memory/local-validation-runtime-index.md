@@ -118,3 +118,17 @@ Verify that the repository's pinned package manager actually starts before inter
 **Why:** A workspace bootstrap loop once prevented checks from reaching project scripts; changing repository package policy to repair the environment would have introduced unrelated changes.
 
 **How to apply:** Keep approved toolchain and package policy unchanged during environment repairs. Record whether a failed check reached project code, and verify the pinned runner identity before retrying.
+
+## Replit validation-run duration limit
+
+Replit's named validation runner can stop a still-running command after 600
+status polls (about ten minutes). A resulting `STOPPED` status is not evidence
+that the tests failed; inspect the run log and use a bounded test shard or keep
+the longer suite in its existing workflow.
+
+**Why:** The full API test workflow exceeded the validation runner's polling
+budget, while the isolated API unit shard completed successfully.
+
+**How to apply:** Register short, focused checks for named validation runs.
+Keep long API integration and full browser suites as separate workflows or
+split them into bounded shards; do not retry an unchanged overlong validation.
