@@ -53,6 +53,35 @@ describe("sealed artifact version", () => {
     expect(info?.appBuildId).toBe(stamp.appBuildId);
   });
 
+  it("returns only verified source identity and an explicit runtime environment", async () => {
+    vi.stubEnv("REPLIT_DEPLOYMENT_ID", "fixture-deployment");
+    const { getFieldCheckBuildIdentity } = await import("./buildInfo");
+    expect(getFieldCheckBuildIdentity()).toEqual({
+      appBuildId: stamp.appBuildId,
+      revision: stamp.gitRevision,
+      environment: "deployed",
+    });
+
+    vi.resetModules();
+    vi.stubEnv("REPLIT_DEPLOYMENT_ID", "");
+    file.read.mockReturnValue(Buffer.from(JSON.stringify({ ...stamp, buildMode: "development" })));
+    expect((await import("./buildInfo")).getFieldCheckBuildIdentity()).toEqual({
+      appBuildId: stamp.appBuildId,
+      revision: stamp.gitRevision,
+      environment: "development",
+    });
+  });
+
+  it("keeps missing build metadata explicitly unknown", async () => {
+    file.read.mockReturnValue(Buffer.from("{}"));
+    const { getFieldCheckBuildIdentity } = await import("./buildInfo");
+    expect(getFieldCheckBuildIdentity()).toEqual({
+      appBuildId: "unknown",
+      revision: "unknown",
+      environment: "unknown",
+    });
+  });
+
   it("rejects missing, malformed or sensitive-extra-field records instead of inventing a version", async () => {
     for (const value of ["{}", "invalid", JSON.stringify({ ...stamp, password: "synthetic" })]) {
       vi.resetModules();

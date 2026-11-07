@@ -9,6 +9,11 @@ import {
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import {
+  UNKNOWN_FIELD_CHECK_BUILD_IDENTITY,
+  getFieldCheckBuildIdentity,
+  type FieldCheckBuildIdentity,
+} from "./buildInfo";
+import {
   FIELD_CHECK_MAX_CLOCK_SKEW_MS,
   isFieldCheckTimestampOutsideClockWindow,
 } from "@workspace/field-check-contract";
@@ -364,7 +369,8 @@ export function validateHardwareConfirmation(body: unknown): {
 
 export function hardwareConfirmationObservation(
   input: HardwareConfirmationInput,
-): FieldCheckObservationInput {
+  buildIdentity: FieldCheckBuildIdentity,
+): FieldCheckObservationInput & { buildIdentity: FieldCheckBuildIdentity } {
   return {
     observationId: `hardware:${randomUUID()}`,
     checkName: input.checkName,
@@ -374,10 +380,13 @@ export function hardwareConfirmationObservation(
     appBuild: "hardware-protocol",
     deviceCategory: input.deviceCategory,
     metrics: {},
+    buildIdentity,
   };
 }
 
-export type FieldCheckObservationInput = z.infer<typeof observationSchema>;
+export type FieldCheckObservationInput = z.infer<typeof observationSchema> & {
+  buildIdentity?: FieldCheckBuildIdentity;
+};
 
 export function validateFieldCheckBatch(body: unknown): {
   ok: true;
@@ -423,6 +432,13 @@ export type FieldCheckFailure = {
   reportedRequestCorrelationId?: string;
 };
 
+export type FieldCheckHardwareConfirmation = {
+  outcome: FieldCheckOutcome;
+  observedAt: string;
+  deviceCategory: string;
+  buildIdentity: FieldCheckBuildIdentity;
+};
+
 export type FieldCheckSummary = {
   name: FieldCheckName;
   label: string;
@@ -435,6 +451,7 @@ export type FieldCheckSummary = {
   lastSuccessfulMetrics: FieldCheckMetrics | null;
   lastObservedAt: string | null;
   lastReceiptDelayMs: number | null;
+  lastHardwareConfirmation: FieldCheckHardwareConfirmation | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;
@@ -446,6 +463,7 @@ export type FieldChecksReport = {
   version: string;
   scope: "current facility";
   generatedAt: string;
+  buildIdentity: FieldCheckBuildIdentity;
   checks: FieldCheckSummary[];
   overallStatus: FieldCheckStatus;
   actionableCount: number;
@@ -528,6 +546,23 @@ function failureDto(row: FieldCheckObservation): FieldCheckFailure {
   };
 }
 
+function buildIdentityDto(value: unknown): FieldCheckBuildIdentity {
+  const identity = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const appBuildId = typeof identity.appBuildId === "string" &&
+    /^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(identity.appBuildId)
+    ? identity.appBuildId
+    : UNKNOWN_FIELD_CHECK_BUILD_IDENTITY.appBuildId;
+  const revision = typeof identity.revision === "string" && /^[a-f0-9]{40}$/i.test(identity.revision)
+    ? identity.revision
+    : UNKNOWN_FIELD_CHECK_BUILD_IDENTITY.revision;
+  const environment = identity.environment === "deployed" || identity.environment === "development"
+    ? identity.environment
+    : UNKNOWN_FIELD_CHECK_BUILD_IDENTITY.environment;
+  return { appBuildId, revision, environment };
+}
+
 export async function recordFieldCheckBatch(
   observations: FieldCheckObservationInput[],
 ): Promise<{ accepted: number; duplicate: number }> {
@@ -556,6 +591,7 @@ export async function recordFieldCheckBatch(
               ? { [reportedCorrelationMetricKey]: input.reportedRequestCorrelationId }
               : {}),
           },
+          buildIdentity: buildIdentityDto(input.buildIdentity),
         })
         .onConflictDoNothing({
           target: [fieldCheckObservationsTable.scope, fieldCheckObservationsTable.observationId],
@@ -701,6 +737,14 @@ export async function buildFieldChecksReport(now = Date.now(), filters: FieldChe
       lastReceiptDelayMs: last && last.receivedAt.getTime() >= last.observedAt.getTime()
         ? Math.min(2 * FIELD_CHECK_MAX_CLOCK_SKEW_MS, last.receivedAt.getTime() - last.observedAt.getTime())
         : null,
+      lastHardwareConfirmation: check.observedBy === "hardware" && last
+        ? {
+            outcome: last.outcome as FieldCheckOutcome,
+            observedAt: last.observedAt.toISOString(),
+            deviceCategory: last.deviceCategory,
+            buildIdentity: buildIdentityDto(last.buildIdentity),
+          }
+        : null,
       recentFailures,
       failureCount,
       incompleteCount,
@@ -719,6 +763,7 @@ export async function buildFieldChecksReport(now = Date.now(), filters: FieldChe
     version: FIELD_CHECK_VERSION,
     scope: "current facility",
     generatedAt: new Date(now).toISOString(),
+    buildIdentity: buildIdentityDto(getFieldCheckBuildIdentity()),
     checks: summaries,
     overallStatus,
     actionableCount,

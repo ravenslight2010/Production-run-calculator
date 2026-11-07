@@ -12,5 +12,9 @@ export type HardwareFieldCheckConfirmationCheckName = typeof HardwareFieldCheckC
 export const HardwareFieldCheckConfirmationCheckName = {
   'touch-accuracy': 'touch-accuracy',
   'keyboard-clearance': 'keyboard-clearance',
+  'orientation-layout': 'orientation-layout',
+  'safe-area-clearance': 'safe-area-clearance',
+  'camera-file-selection': 'camera-file-selection',
+  'update-handoff': 'update-handoff',
   'process-kill-recovery': 'process-kill-recovery',
 } as const;

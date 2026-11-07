@@ -556,6 +556,14 @@ function FieldChecksPanel({
               Browser evidence cannot confirm these. Follow the physical-device protocol without entering production data, then record only the device category, protocol version, outcome, and time.
             </p>
             {canConfirmHardware && (
+              <p className="mt-2 break-words text-xs text-muted-foreground" data-testid="field-check-build-identity">
+                Server-reported build identity: revision {report?.buildIdentity?.revision ?? "unknown"} ·
+                environment {report?.buildIdentity?.environment ?? "unknown"} ·
+                app build {report?.buildIdentity?.appBuildId ?? "unknown"}.
+                This is captured by the API when saved; it does not prove which client bundle is installed or published.
+              </p>
+            )}
+            {canConfirmHardware && (
               <label className="mt-2 block text-xs text-muted-foreground">
                 Device category
                 <select
@@ -606,6 +614,13 @@ function FieldChecksPanel({
                     )}
                   </div>
                   <p className="mt-1 text-[11px] text-muted-foreground">{check.evidence}</p>
+                  {check.lastHardwareConfirmation && (
+                    <p className="mt-1 break-words text-[11px] text-muted-foreground">
+                      Last confirmation build: revision {check.lastHardwareConfirmation.buildIdentity.revision} ·
+                      environment {check.lastHardwareConfirmation.buildIdentity.environment} ·
+                      app build {check.lastHardwareConfirmation.buildIdentity.appBuildId}
+                    </p>
+                  )}
                   {check.lastObservedAt && (
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       Last recorded {timeAgo(check.lastObservedAt)}

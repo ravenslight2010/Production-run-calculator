@@ -2,6 +2,7 @@ import { Router } from "express";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability, requireManagerRole } from "../middlewares/requireCapability";
+import { getFieldCheckBuildIdentity } from "../lib/buildInfo";
 import {
   FIELD_CHECK_MAX_BATCH,
   buildFieldChecksReport,
@@ -76,7 +77,7 @@ export function createFieldChecksRouter() {
         return;
       }
       const result = await recordFieldCheckBatch([
-        hardwareConfirmationObservation(validation.data),
+        hardwareConfirmationObservation(validation.data, getFieldCheckBuildIdentity()),
       ]);
       res.status(201).json(result);
     },

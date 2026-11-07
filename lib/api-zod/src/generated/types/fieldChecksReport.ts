@@ -5,6 +5,7 @@
  * API specification. Canonical shared-record GET responses expose X-Master-Data-Epoch. Shared-record mutations retain their original read epoch and return 409 after a guarded change if it is missing or stale. A fresh GET does not rebase an older queued intent.
  * OpenAPI spec version: 0.1.0
  */
+import type { FieldCheckBuildIdentity } from './fieldCheckBuildIdentity';
 import type { FieldChecksReportOverallStatus } from './fieldChecksReportOverallStatus';
 import type { FieldChecksReportPopulation } from './fieldChecksReportPopulation';
 import type { FieldChecksReportScope } from './fieldChecksReportScope';
@@ -15,6 +16,7 @@ export interface FieldChecksReport {
   version: string;
   scope: FieldChecksReportScope;
   generatedAt: Date;
+  buildIdentity: FieldCheckBuildIdentity;
   checks: FieldCheckSummary[];
   overallStatus: FieldChecksReportOverallStatus;
   actionableCount: number;

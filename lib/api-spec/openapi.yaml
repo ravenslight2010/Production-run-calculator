@@ -5771,7 +5771,9 @@ paths:
       description: >-
         Records a manager-confirmed hardware observation separately from passive
         browser evidence. The request accepts only the bounded device category,
-        protocol version, outcome, timestamp, and hardware check name.
+        protocol version, outcome, timestamp, and hardware check name. The API
+        captures its validated build identity at receipt time; client-supplied
+        revision or environment values are not accepted.
       requestBody:
         required: true
         content:
@@ -16322,7 +16324,14 @@ components:
       properties:
         checkName:
           type: string
-          enum: [touch-accuracy, keyboard-clearance, process-kill-recovery]
+          enum:
+            - touch-accuracy
+            - keyboard-clearance
+            - orientation-layout
+            - safe-area-clearance
+            - camera-file-selection
+            - update-handoff
+            - process-kill-recovery
         checkVersion:
           type: string
           enum: ["2026-09"]
@@ -16334,7 +16343,7 @@ components:
           format: date-time
         deviceCategory:
           type: string
-          enum: [android-phone, android-tablet, ipad]
+          enum: [android-phone, android-tablet, ipad, iphone]
 
     FieldCheckFailure:
       type: object
@@ -16356,6 +16365,37 @@ components:
           format: uuid
           description: Client-reported opaque request correlation reference; never an authorization credential.
 
+    FieldCheckBuildIdentity:
+      type: object
+      additionalProperties: false
+      required: [appBuildId, revision, environment]
+      properties:
+        appBuildId:
+          type: string
+          description: Server/build-generated application build ID, or unknown when unavailable.
+        revision:
+          type: string
+          description: Verified source revision, or unknown when unavailable.
+        environment:
+          type: string
+          enum: [deployed, development, unknown]
+
+    FieldCheckHardwareConfirmation:
+      type: object
+      additionalProperties: false
+      required: [outcome, observedAt, deviceCategory, buildIdentity]
+      properties:
+        outcome:
+          type: string
+          enum: [success, failure, incomplete]
+        observedAt:
+          type: string
+          format: date-time
+        deviceCategory:
+          type: string
+        buildIdentity:
+          $ref: "#/components/schemas/FieldCheckBuildIdentity"
+
     FieldCheckSummary:
       type: object
       required:
@@ -16370,6 +16410,7 @@ components:
         - lastSuccessfulMetrics
         - lastObservedAt
         - lastReceiptDelayMs
+        - lastHardwareConfirmation
         - recentFailures
         - failureCount
         - incompleteCount
@@ -16408,6 +16449,10 @@ components:
           minimum: 0
           maximum: 172800000
           description: Bounded estimate from the browser observation timestamp to server receipt; null when unavailable or the browser timestamp is in the future.
+        lastHardwareConfirmation:
+          oneOf:
+            - $ref: "#/components/schemas/FieldCheckHardwareConfirmation"
+            - type: "null"
         recentFailures:
           type: array
           items: { $ref: "#/components/schemas/FieldCheckFailure" }
@@ -16420,7 +16465,7 @@ components:
 
     FieldChecksReport:
       type: object
-      required: [version, scope, generatedAt, checks, overallStatus, actionableCount, population]
+      required: [version, scope, generatedAt, buildIdentity, checks, overallStatus, actionableCount, population]
       properties:
         population:
           type: object
@@ -16435,6 +16480,8 @@ components:
         generatedAt:
           type: string
           format: date-time
+        buildIdentity:
+          $ref: "#/components/schemas/FieldCheckBuildIdentity"
         checks:
           type: array
           items: { $ref: "#/components/schemas/FieldCheckSummary" }

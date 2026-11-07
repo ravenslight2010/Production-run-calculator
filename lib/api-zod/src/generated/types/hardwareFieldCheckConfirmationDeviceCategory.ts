@@ -13,4 +13,5 @@ export const HardwareFieldCheckConfirmationDeviceCategory = {
   'android-phone': 'android-phone',
   'android-tablet': 'android-tablet',
   ipad: 'ipad',
+  iphone: 'iphone',
 } as const;

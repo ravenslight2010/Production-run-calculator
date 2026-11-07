@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Incident } from "../inventoryShared";
 
 const mocks = vi.hoisted(() => ({
   fetchIncidents: vi.fn(),
   fetchFieldChecks: vi.fn(),
+  confirmHardwareFieldCheck: vi.fn(),
   fetchIncidentAssignees: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("../inventoryShared", async (importOriginal) => {
     ...actual,
     fetchIncidents: mocks.fetchIncidents,
     fetchFieldChecks: mocks.fetchFieldChecks,
+    confirmHardwareFieldCheck: mocks.confirmHardwareFieldCheck,
     fetchIncidentAssignees: mocks.fetchIncidentAssignees,
   };
 });
@@ -85,6 +87,7 @@ afterEach(() => {
   cleanup();
   mocks.fetchIncidents.mockReset();
   mocks.fetchFieldChecks.mockReset();
+  mocks.confirmHardwareFieldCheck.mockReset();
   mocks.fetchIncidentAssignees.mockReset();
   window.location.hash = "";
 });
@@ -229,5 +232,60 @@ describe("field-check count clarity", () => {
     expect(totals.length).toBeGreaterThan(0);
     expect(screen.getAllByText("Review the recent non-successes below.").length)
       .toBeGreaterThan(0);
+  });
+
+  it("shows server build provenance before recording a physical confirmation", async () => {
+    mocks.fetchIncidents.mockResolvedValue([]);
+    mocks.fetchIncidentAssignees.mockResolvedValue([]);
+    mocks.confirmHardwareFieldCheck.mockResolvedValue({ accepted: 1, duplicate: 0 });
+    mocks.fetchFieldChecks.mockResolvedValue({
+      version: "test",
+      scope: "current facility",
+      generatedAt: new Date().toISOString(),
+      buildIdentity: {
+        appBuildId: "app-build:00000000-0000-0000-0000-000000000001",
+        revision: "a".repeat(40),
+        environment: "development",
+      },
+      checks: [{
+        name: "orientation-layout",
+        label: "Orientation layout",
+        status: "unsupported",
+        coverage: "never-observed",
+        observedBy: "hardware",
+        evidence: "Guided physical confirmation.",
+        expiresHours: null,
+        lastSuccessfulAt: null,
+        lastSuccessfulMetrics: null,
+        lastObservedAt: null,
+        lastReceiptDelayMs: null,
+        lastHardwareConfirmation: null,
+        recentFailures: [],
+        failureCount: 0,
+        incompleteCount: 0,
+        actionable: false,
+        issueStatus: null,
+      }],
+      overallStatus: "healthy",
+      actionableCount: 0,
+      population: { appBuild: null, deviceCategory: null, countBasis: "lifetime-issues", retentionDays: 30 },
+    });
+
+    renderIncidents();
+    expect((await screen.findByTestId("field-check-build-identity")).textContent)
+      .toContain(`revision ${"a".repeat(40)} · environment development`);
+    expect(screen.getByTestId("field-check-build-identity").textContent)
+      .toContain("does not prove which client bundle is installed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Pass" }));
+    await waitFor(() => {
+      expect(mocks.confirmHardwareFieldCheck).toHaveBeenCalledWith({
+        checkName: "orientation-layout",
+        checkVersion: "2026-09",
+        outcome: "success",
+        observedAt: expect.any(String),
+        deviceCategory: "android-phone",
+      });
+    });
   });
 });

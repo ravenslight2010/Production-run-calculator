@@ -26,3 +26,32 @@ function loadBuildInfo(): Readonly<BuildInfo> | null {
 
 const sealedBuildInfo = loadBuildInfo();
 export const getBuildInfo = (): Readonly<BuildInfo> | null => sealedBuildInfo;
+
+export type FieldCheckBuildIdentity = {
+  appBuildId: string;
+  revision: string;
+  environment: "deployed" | "development" | "unknown";
+};
+
+export const UNKNOWN_FIELD_CHECK_BUILD_IDENTITY: Readonly<FieldCheckBuildIdentity> = Object.freeze({
+  appBuildId: "unknown",
+  revision: "unknown",
+  environment: "unknown",
+});
+
+export function getFieldCheckBuildIdentity(): Readonly<FieldCheckBuildIdentity> {
+  const info = getBuildInfo();
+  if (!info) return UNKNOWN_FIELD_CHECK_BUILD_IDENTITY;
+  const deploymentMarker = process.env.REPLIT_DEPLOYMENT?.trim().toLowerCase();
+  const deployed = Boolean(info.platformDeploymentId) ||
+    deploymentMarker === "1" || deploymentMarker === "true" || deploymentMarker === "yes";
+  return Object.freeze({
+    appBuildId: info.appBuildId,
+    revision: info.gitBinding === "verified" && info.gitRevision
+      ? info.gitRevision
+      : "unknown",
+    environment: deployed ? "deployed"
+      : info.buildMode === "development" ? "development"
+        : "unknown",
+  });
+}

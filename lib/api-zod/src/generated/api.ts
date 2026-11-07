@@ -8591,6 +8591,11 @@ export const GetFieldChecksResponse = zod.object({
   "version": zod.string(),
   "scope": zod.enum(['current facility']),
   "generatedAt": zod.coerce.date(),
+  "buildIdentity": zod.object({
+  "appBuildId": zod.string().describe('Server/build-generated application build ID, or unknown when unavailable.'),
+  "revision": zod.string().describe('Verified source revision, or unknown when unavailable.'),
+  "environment": zod.enum(['deployed', 'development', 'unknown'])
+}),
   "checks": zod.array(zod.object({
   "name": zod.string(),
   "label": zod.string(),
@@ -8603,6 +8608,16 @@ export const GetFieldChecksResponse = zod.object({
   "lastSuccessfulMetrics": zod.record(zod.string(), zod.number().min(getFieldChecksResponseChecksItemLastSuccessfulMetricsMinOne).max(getFieldChecksResponseChecksItemLastSuccessfulMetricsMaxOne)).nullable(),
   "lastObservedAt": zod.coerce.date().nullable(),
   "lastReceiptDelayMs": zod.int().min(getFieldChecksResponseChecksItemLastReceiptDelayMsMin).max(getFieldChecksResponseChecksItemLastReceiptDelayMsMax).nullable().describe('Bounded estimate from the browser observation timestamp to server receipt; null when unavailable or the browser timestamp is in the future.'),
+  "lastHardwareConfirmation": zod.union([zod.object({
+  "outcome": zod.enum(['success', 'failure', 'incomplete']),
+  "observedAt": zod.coerce.date(),
+  "deviceCategory": zod.string(),
+  "buildIdentity": zod.object({
+  "appBuildId": zod.string().describe('Server/build-generated application build ID, or unknown when unavailable.'),
+  "revision": zod.string().describe('Verified source revision, or unknown when unavailable.'),
+  "environment": zod.enum(['deployed', 'development', 'unknown'])
+})
+}),zod.null()]),
   "recentFailures": zod.array(zod.object({
   "outcome": zod.enum(['success', 'failure', 'incomplete']),
   "observedAt": zod.coerce.date(),
@@ -8621,15 +8636,15 @@ export const GetFieldChecksResponse = zod.object({
 })
 
 /**
- * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name.
+ * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name. The API captures its validated build identity at receipt time; client-supplied revision or environment values are not accepted.
  * @summary Record a guided physical-device check
  */
 export const ConfirmHardwareFieldCheckBody = zod.object({
-  "checkName": zod.enum(['touch-accuracy', 'keyboard-clearance', 'process-kill-recovery']),
+  "checkName": zod.enum(['touch-accuracy', 'keyboard-clearance', 'orientation-layout', 'safe-area-clearance', 'camera-file-selection', 'update-handoff', 'process-kill-recovery']),
   "checkVersion": zod.enum(['2026-09']),
   "outcome": zod.enum(['success', 'failure', 'incomplete']),
   "observedAt": zod.coerce.date(),
-  "deviceCategory": zod.enum(['android-phone', 'android-tablet', 'ipad'])
+  "deviceCategory": zod.enum(['android-phone', 'android-tablet', 'ipad', 'iphone'])
 })
 
 export const ConfirmHardwareFieldCheckResponse = zod.object({

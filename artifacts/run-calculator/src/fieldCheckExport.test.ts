@@ -41,12 +41,12 @@ describe("allowlisted field-check export", () => {
   });
   it("defines every exported field and version, exact times, scope and advisory provenance", () => {
     const result = createFieldCheckExport(fixture(), at);
-    expect(result.filename).toBe("field-check-report-v1-2026-10-16T12-34-56-789Z.json");
+    expect(result.filename).toBe("field-check-report-v2-2026-10-16T12-34-56-789Z.json");
     const output = JSON.parse(result.json);
     expect(Object.keys(output)).toEqual(["schemaVersion", "capturedAt", "facilityScope", "population", "provenance",
       "diagnosticCodeLegend", "reportGeneratedAt", "overallStatus", "checks"]);
     expect(output).toMatchObject({
-      schemaVersion: 1, capturedAt: at.toISOString(), facilityScope: "current facility",
+      schemaVersion: 2, capturedAt: at.toISOString(), facilityScope: "current facility",
       reportGeneratedAt: at.toISOString(), overallStatus: "needs-review",
       provenance: { environment: "unknown", buildIdentity: "unknown", missingDetailLabel: "unavailable" },
       checks: [{
@@ -68,7 +68,7 @@ describe("allowlisted field-check export", () => {
     expect(output.provenance.notice).toContain("Not release readiness or physical-device verification");
     expect(Object.keys(output.checks[0])).toEqual(["name", "status", "coverage", "observedBy", "lastObservedAt",
       "lastReceiptDelayMs",
-      "lastSuccessfulAt", "lastSuccessfulDiagnostics", "failureCount", "incompleteCount", "actionable",
+      "lastHardwareConfirmation", "lastSuccessfulAt", "lastSuccessfulDiagnostics", "failureCount", "incompleteCount", "actionable",
       "issueStatus", "recentFailures"]);
     expect(Object.keys(output.checks[0].recentFailures[0])).toEqual(["outcome", "observedAt",
       "buildCategory", "deviceCategory", "diagnostics", "reportedRequestCorrelationId"]);
@@ -88,6 +88,58 @@ describe("allowlisted field-check export", () => {
     Object.assign(input.checks[0]!.recentFailures[0]!, poison, { appBuild: "PRIVATE", deviceCategory: "PRIVATE" });
     Object.assign(input.checks[0]!.recentFailures[0]!.metrics, { PRIVATE: 1234, runId: 42 });
     expect(createFieldCheckExport(input, at).json).not.toMatch(/PRIVATE|runId|userId|clientId|credentials|https:/);
+  });
+
+  it("exports validated server and persisted hardware identities while dropping sensitive extras", () => {
+    const input = fixture();
+    const identity = {
+      appBuildId: "app-build:00000000-0000-0000-0000-000000000001",
+      revision: "a".repeat(40),
+      environment: "deployed",
+      deploymentId: "PRIVATE-deployment",
+      token: "PRIVATE-token",
+    };
+    Object.assign(input, { buildIdentity: identity });
+    Object.assign(input.checks[0]!, {
+      observedBy: "hardware",
+      lastHardwareConfirmation: {
+        outcome: "success",
+        observedAt: at.toISOString(),
+        deviceCategory: "android-phone",
+        buildIdentity: identity,
+        deviceFingerprint: "PRIVATE-device",
+        runPayload: "PRIVATE-run",
+      },
+    });
+    const output = JSON.parse(createFieldCheckExport(input, at).json);
+    expect(output.provenance).toMatchObject({
+      environment: "deployed",
+      buildIdentity: "server-reported",
+      serverBuildIdentity: {
+        appBuildId: identity.appBuildId,
+        revision: identity.revision,
+        environment: "deployed",
+      },
+    });
+    expect(output.checks[0].lastHardwareConfirmation).toEqual({
+      outcome: "success",
+      observedAt: at.toISOString(),
+      deviceCategory: "android-phone",
+      buildIdentity: {
+        appBuildId: identity.appBuildId,
+        revision: identity.revision,
+        environment: "deployed",
+      },
+    });
+    expect(JSON.stringify(output)).not.toMatch(/PRIVATE|deviceFingerprint|runPayload|deploymentId|token/);
+
+    Object.assign(input, { buildIdentity: { appBuildId: "arbitrary", revision: "not-a-revision", environment: "production" } });
+    const unknown = JSON.parse(createFieldCheckExport(input, at).json);
+    expect(unknown.provenance.serverBuildIdentity).toEqual({
+      appBuildId: "unknown",
+      revision: "unknown",
+      environment: "unknown",
+    });
   });
 
   it("marks missing and invalid details explicitly without inventing diagnostic causes", () => {

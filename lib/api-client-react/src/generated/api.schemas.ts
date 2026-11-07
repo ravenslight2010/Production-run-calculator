@@ -9613,6 +9613,10 @@ export type HardwareFieldCheckConfirmationCheckName = typeof HardwareFieldCheckC
 export const HardwareFieldCheckConfirmationCheckName = {
   'touch-accuracy': 'touch-accuracy',
   'keyboard-clearance': 'keyboard-clearance',
+  'orientation-layout': 'orientation-layout',
+  'safe-area-clearance': 'safe-area-clearance',
+  'camera-file-selection': 'camera-file-selection',
+  'update-handoff': 'update-handoff',
   'process-kill-recovery': 'process-kill-recovery',
 } as const;
 
@@ -9639,6 +9643,7 @@ export const HardwareFieldCheckConfirmationDeviceCategory = {
   'android-phone': 'android-phone',
   'android-tablet': 'android-tablet',
   ipad: 'ipad',
+  iphone: 'iphone',
 } as const;
 
 export interface HardwareFieldCheckConfirmation {
@@ -9668,6 +9673,39 @@ export interface FieldCheckFailure {
   metrics: FieldCheckFailureMetrics;
   /** Client-reported opaque request correlation reference; never an authorization credential. */
   reportedRequestCorrelationId?: string;
+}
+
+export type FieldCheckBuildIdentityEnvironment = typeof FieldCheckBuildIdentityEnvironment[keyof typeof FieldCheckBuildIdentityEnvironment];
+
+
+export const FieldCheckBuildIdentityEnvironment = {
+  deployed: 'deployed',
+  development: 'development',
+  unknown: 'unknown',
+} as const;
+
+export interface FieldCheckBuildIdentity {
+  /** Server/build-generated application build ID, or unknown when unavailable. */
+  appBuildId: string;
+  /** Verified source revision, or unknown when unavailable. */
+  revision: string;
+  environment: FieldCheckBuildIdentityEnvironment;
+}
+
+export type FieldCheckHardwareConfirmationOutcome = typeof FieldCheckHardwareConfirmationOutcome[keyof typeof FieldCheckHardwareConfirmationOutcome];
+
+
+export const FieldCheckHardwareConfirmationOutcome = {
+  success: 'success',
+  failure: 'failure',
+  incomplete: 'incomplete',
+} as const;
+
+export interface FieldCheckHardwareConfirmation {
+  outcome: FieldCheckHardwareConfirmationOutcome;
+  observedAt: string;
+  deviceCategory: string;
+  buildIdentity: FieldCheckBuildIdentity;
 }
 
 /**
@@ -9744,6 +9782,7 @@ export interface FieldCheckSummary {
      * @nullable
      */
   lastReceiptDelayMs: number | null;
+  lastHardwareConfirmation: FieldCheckHardwareConfirmation | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;
@@ -9798,6 +9837,7 @@ export interface FieldChecksReport {
   version: string;
   scope: FieldChecksReportScope;
   generatedAt: string;
+  buildIdentity: FieldCheckBuildIdentity;
   checks: FieldCheckSummary[];
   overallStatus: FieldChecksReportOverallStatus;
   actionableCount: number;

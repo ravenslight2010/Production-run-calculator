@@ -28,6 +28,7 @@ export const fieldCheckObservationsTable = pgTable(
     appBuild: text("app_build").notNull(),
     deviceCategory: text("device_category").notNull(),
     metrics: jsonb("metrics").notNull().default({}),
+    buildIdentity: jsonb("build_identity").notNull().default({}).$type<Record<string, unknown>>(),
   },
   (table) => [
     uniqueIndex("field_check_observations_scope_observation_idx").on(

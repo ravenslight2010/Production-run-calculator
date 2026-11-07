@@ -35,6 +35,19 @@ function receiptDelay(value: unknown) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 172_800_000
     ? value : MISSING;
 }
+function buildIdentity(value: unknown) {
+  const identity = record(value);
+  const unknown = "unknown";
+  return {
+    appBuildId: typeof identity.appBuildId === "string" &&
+      /^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(identity.appBuildId)
+      ? identity.appBuildId : unknown,
+    revision: typeof identity.revision === "string" && /^[a-f0-9]{40}$/i.test(identity.revision)
+      ? identity.revision : unknown,
+    environment: category(identity.environment, ["deployed", "development", "unknown"]) === MISSING
+      ? unknown : identity.environment as string,
+  };
+}
 function diagnostics(name: string, value: unknown) {
   const metrics = record(value);
   const duration = metrics.durationMs;
@@ -72,6 +85,7 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
       report.scope !== "current facility" || !Number.isFinite(capturedAt.getTime())) {
     throw new Error("Field-check report unavailable or too large");
   }
+  const serverBuildIdentity = buildIdentity(report.buildIdentity);
   const checks = report.checks.map((inputCheck) => {
     const check = record(inputCheck);
     const name = category(check.name, CHECKS);
@@ -85,6 +99,16 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
       observedBy: category(check.observedBy, ["browser", "hardware"]),
       lastObservedAt: timestamp(check.lastObservedAt),
       lastReceiptDelayMs: receiptDelay(check.lastReceiptDelayMs),
+      lastHardwareConfirmation: (() => {
+        if (check.lastHardwareConfirmation === null || check.lastHardwareConfirmation === undefined) return null;
+        const confirmation = record(check.lastHardwareConfirmation);
+        return {
+          outcome: category(confirmation.outcome, ["success", "failure", "incomplete"]),
+          observedAt: timestamp(confirmation.observedAt),
+          deviceCategory: category(confirmation.deviceCategory, DEVICES),
+          buildIdentity: buildIdentity(confirmation.buildIdentity),
+        };
+      })(),
       lastSuccessfulAt: timestamp(check.lastSuccessfulAt),
       lastSuccessfulDiagnostics: diagnostics(name, check.lastSuccessfulMetrics),
       failureCount: count(check.failureCount),
@@ -111,7 +135,7 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
     };
   });
   const envelope = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     capturedAt: capturedAt.toISOString(),
     facilityScope: "current facility",
     population: {
@@ -128,12 +152,14 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
     },
     provenance: {
       kind: "advisory-field-evidence",
-      environment: "unknown",
-      buildIdentity: "unknown",
-      notice: "Not release readiness or physical-device verification. Hardware entries are reported confirmations only. Build categories do not verify revision identity or environment.",
+      environment: serverBuildIdentity.environment,
+      buildIdentity: serverBuildIdentity.appBuildId === MISSING || serverBuildIdentity.appBuildId === "unknown"
+        ? "unknown" : "server-reported",
+      serverBuildIdentity,
+      notice: "Not release readiness or physical-device verification. Hardware entries are reported confirmations only. Server build identity does not prove which client bundle was installed on the device or published behavior.",
       missingDetailLabel: MISSING,
       coverage: "Existing report snapshot only; at most five recent non-successes per check. Not a complete observation history.",
-      sanitization: "Fixed categories, canonical timestamps and bounded numeric diagnostics only. Request elapsed time is client-observed, not server duration. No operational payloads or personal identifiers; an optional opaque correlation reference may be included.",
+      sanitization: "Server build identity is accepted only from the API's validated build record; exported fields are allowlisted. Fixed categories, canonical timestamps and bounded numeric diagnostics only. Request elapsed time is client-observed, not server duration. No secret values, device fingerprints, operational payloads or personal identifiers; an optional opaque correlation reference may be included.",
     },
     diagnosticCodeLegend: {
       syncFailure: { 1: "Login or permission rejected", 2: "Stale/reset write rejected", 3: "Sync retries exhausted" },
@@ -156,7 +182,7 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
   }
   return {
     json,
-    filename: `field-check-report-v1-${capturedAt.toISOString().replace(/[:.]/g, "-")}.json`,
+    filename: `field-check-report-v2-${capturedAt.toISOString().replace(/[:.]/g, "-")}.json`,
   };
 }
 

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FieldCheckFailure } from './fieldCheckFailure';
+import type { FieldCheckHardwareConfirmation } from './fieldCheckHardwareConfirmation';
 import type { FieldCheckSummaryCoverage } from './fieldCheckSummaryCoverage';
 import type { FieldCheckSummaryIssueStatus } from './fieldCheckSummaryIssueStatus';
 import type { FieldCheckSummaryLastSuccessfulMetrics } from './fieldCheckSummaryLastSuccessfulMetrics';
@@ -36,6 +37,7 @@ export interface FieldCheckSummary {
      * @nullable
      */
   lastReceiptDelayMs: number | null;
+  lastHardwareConfirmation: FieldCheckHardwareConfirmation | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;

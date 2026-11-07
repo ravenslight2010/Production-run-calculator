@@ -21388,7 +21388,7 @@ export const getConfirmHardwareFieldCheckUrl = () => {
 }
 
 /**
- * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name.
+ * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name. The API captures its validated build identity at receipt time; client-supplied revision or environment values are not accepted.
  * @summary Record a guided physical-device check
  */
 export const confirmHardwareFieldCheck = async (hardwareFieldCheckConfirmation: HardwareFieldCheckConfirmation, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {

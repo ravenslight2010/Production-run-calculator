@@ -1591,6 +1591,11 @@ export type FieldCheckFailure = {
   metrics: Record<string, number>;
   reportedRequestCorrelationId?: string;
 };
+export type FieldCheckBuildIdentity = {
+  appBuildId: string;
+  revision: string;
+  environment: "deployed" | "development" | "unknown";
+};
 export type FieldCheckSummary = {
   name: string;
   label: string;
@@ -1603,6 +1608,12 @@ export type FieldCheckSummary = {
   lastSuccessfulMetrics: Record<string, number> | null;
   lastObservedAt: string | null;
   lastReceiptDelayMs: number | null;
+  lastHardwareConfirmation: {
+    outcome: "success" | "failure" | "incomplete";
+    observedAt: string;
+    deviceCategory: string;
+    buildIdentity: FieldCheckBuildIdentity;
+  } | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;
@@ -1613,6 +1624,7 @@ export type FieldChecksReport = {
   version: string;
   scope: "current facility";
   generatedAt: string;
+  buildIdentity: FieldCheckBuildIdentity;
   checks: FieldCheckSummary[];
   overallStatus: "healthy" | "collecting" | "needs-review" | "unsupported";
   actionableCount: number;

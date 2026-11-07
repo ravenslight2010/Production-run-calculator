@@ -259,10 +259,13 @@ describe("field-check contract", () => {
     expect(validateHardwareConfirmation({ ...confirmation, deviceCategory: "desktop-chrome" }).ok).toBe(false);
     expect(validateHardwareConfirmation({ ...confirmation, deviceCategory: "iphone" }).ok).toBe(true);
     if (valid.ok) {
-      expect(hardwareConfirmationObservation(valid.data)).toMatchObject({
+      expect(hardwareConfirmationObservation(valid.data, {
+        appBuildId: "unknown", revision: "unknown", environment: "unknown",
+      })).toMatchObject({
         ...confirmation,
         appBuild: "hardware-protocol",
         metrics: {},
+        buildIdentity: { appBuildId: "unknown", revision: "unknown", environment: "unknown" },
       });
     }
   });

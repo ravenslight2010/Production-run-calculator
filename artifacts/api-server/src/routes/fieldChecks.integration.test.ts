@@ -8,7 +8,7 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import pg from "pg";
 import { eq, sql } from "drizzle-orm";
 import type { FieldChecksReport } from "../lib/fieldChecks";
@@ -30,6 +30,7 @@ let seedRoles: () => Promise<void>;
 let clearSandboxCache: () => void;
 let createFieldChecksRouter: typeof import("./fieldChecks").createFieldChecksRouter;
 let requireAuth: typeof import("../middlewares/requireAuth").requireAuth;
+let buildInfoModule: typeof import("../lib/buildInfo");
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -70,6 +71,7 @@ beforeAll(async () => {
   ({ signLegacyTokenForTests } = await import("../lib/auth"));
   ({ enhancedErrorMessages } = await import("../middlewares/errorMessagesEnhanced"));
   ({ FIELD_CHECK_MAX_CLOCK_SKEW_MS, FIELD_CHECK_RETENTION_DAYS } = await import("../lib/fieldChecks"));
+  buildInfoModule = await import("../lib/buildInfo");
   const dbModule = await import("@workspace/db");
   // This suite's historical disposable schema can predate additive lifecycle
   // columns when drizzle's push cache is reused. Keep the fixture explicitly
@@ -127,6 +129,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  vi.restoreAllMocks();
   clearSandboxCache();
   await db.execute(sql`
     TRUNCATE
@@ -1038,6 +1041,12 @@ describe("filtered field evidence", () => {
 
 describe("manager-only hardware confirmations", () => {
   it("records an iPhone confirmation and reports the expanded catalog", async () => {
+    const buildIdentity = {
+      appBuildId: "app-build:00000000-0000-0000-0000-000000000001",
+      revision: "a".repeat(40),
+      environment: "development" as const,
+    };
+    vi.spyOn(buildInfoModule, "getFieldCheckBuildIdentity").mockReturnValue(buildIdentity);
     const response = await request(
       MANAGER,
       "POST",
@@ -1053,22 +1062,64 @@ describe("manager-only hardware confirmations", () => {
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ accepted: 1, duplicate: 0 });
 
+    const [stored] = await db.select().from(fieldCheckObservationsTable);
+    expect(stored?.buildIdentity).toEqual(buildIdentity);
+
     const reportResponse = await request(MANAGER, "GET", "/api/field-checks");
     expect(reportResponse.status).toBe(200);
     const report = await reportResponse.json() as {
       scope: string;
-      checks: Array<{ name: string; observedBy: string; status: string; recentFailures: unknown[] }>;
+      buildIdentity: unknown;
+      checks: Array<{
+        name: string; observedBy: string; status: string; recentFailures: unknown[];
+        lastHardwareConfirmation: unknown;
+      }>;
     };
     expect(report.scope).toBe("current facility");
+    expect(report.buildIdentity).toEqual(buildIdentity);
     expect(report.checks.find((check) => check.name === "safe-area-clearance")).toMatchObject({
       observedBy: "hardware",
       status: "healthy",
       recentFailures: [],
+      lastHardwareConfirmation: {
+        outcome: "success",
+        deviceCategory: "iphone",
+        buildIdentity,
+      },
     });
     expect(report.checks.find((check) => check.name === "offline-queue-replay")).toMatchObject({
       observedBy: "browser",
       status: "collecting",
     });
+  });
+
+  it("records unknown server identity and rejects browser-supplied identity", async () => {
+    const unknownIdentity = {
+      appBuildId: "unknown",
+      revision: "unknown",
+      environment: "unknown" as const,
+    };
+    vi.spyOn(buildInfoModule, "getFieldCheckBuildIdentity").mockReturnValue(unknownIdentity);
+    const confirmation = {
+      checkName: "orientation-layout",
+      checkVersion: "2026-09",
+      outcome: "success",
+      observedAt: new Date().toISOString(),
+      deviceCategory: "android-phone",
+    };
+    const forged = await request(MANAGER, "POST", "/api/field-checks/hardware-confirmations", {
+      ...confirmation,
+      buildIdentity: { appBuildId: "forged", revision: "f".repeat(40), environment: "production" },
+    });
+    expect(forged.status).toBe(400);
+
+    const saved = await request(MANAGER, "POST", "/api/field-checks/hardware-confirmations", confirmation);
+    expect(saved.status).toBe(201);
+    const [stored] = await db.select().from(fieldCheckObservationsTable);
+    expect(stored?.buildIdentity).toEqual(unknownIdentity);
+    const report = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    expect(report.checks.find((check) => check.name === "orientation-layout")
+      ?.lastHardwareConfirmation?.buildIdentity).toEqual(unknownIdentity);
   });
 
   it("rejects browser categories for guided confirmations", async () => {
