@@ -5,7 +5,7 @@
 **Validates:** Case-counter catch-up, manual Packaging correction followed by auto-tracking resume, first-tap responsiveness during recovery, and peer/reload convergence.
 **Relevant code:** `artifacts/run-calculator/src/hooks/useAutoTrack.ts`, `artifacts/run-calculator/src/hooks/useClock.ts`  
 **Unit test coverage:** `useAutoTrack.pauseResume.test.ts` (tests 7 & 8 verify the arithmetic; browser and physical-device outcomes are separate evidence).
-**Automated browser regression:** Run `bash scripts/src/run-isolated-browser-suite.sh artifacts/run-calculator/e2e/screen-off-wake.spec.ts`. The wrapper uses disposable local services and a test database; do not direct it at the published app.
+**Automated browser regression:** Run `bash scripts/src/run-isolated-browser-suite.sh --playwright-config=playwright.release-debug.config.ts e2e/screen-off-wake.spec.ts`. The wrapper uses disposable local services and a test database; do not direct it at the published app. The focused config is required when running this file alone; the default config enforces the full browser-suite case contract.
 
 > **Safety boundary:** Run state-changing scenarios only on an owner-approved isolated staging app/database with synthetic accounts and data. Do not start, edit, pause, resume, or stop a production run for this protocol. If the approved staging target is unavailable or its build identity does not match the candidate under test, record the device scenarios as **BLOCKED / NOT RUN**.
 

@@ -265,3 +265,16 @@ do not change production formulas or loosen numeric ranges to match a forecast.
 For screen-off tests, simulate the intended worker cadence explicitly and
 derive case catch-up from accepted claim deadlines and canonical state rather
 than assuming one case per resumed poll.
+
+## Focused isolated browser runs
+
+When running one Playwright spec through `run-isolated-browser-suite.sh`, use
+the focused `playwright.release-debug.config.ts` config. The default config
+includes the full-suite case-count contract and must not be used for a single
+file selection.
+
+**Why:** A wake-only selection was rejected against the full-suite case count
+and produced an unknown attempt-case error before it could serve as evidence.
+
+**How to apply:** Use the explicit release-debug config for an isolated spec;
+reserve the default config for the complete browser release lane.
