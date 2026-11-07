@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -394,26 +394,115 @@ esac
   return fixture;
 }
 
-function runReplitShell(fixture, command) {
+function replitShellOptions(fixture, extraEnv = {}) {
+  return {
+    cwd: fixture,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      REPL_HOME: fixture,
+      HOME: path.join(path.dirname(fixture), "home"),
+      REAL_NODE_BIN: process.execPath,
+      FAKE_COREPACK_BIN: path.join(fixture, "module-bin", "corepack"),
+      XDG_DATA_HOME: path.join(fixture, ".local", "share"),
+      PATH: `${path.join(fixture, "module-bin")}:${process.env.PATH}`,
+      REPLIT_SHELL_NODE_STORE_ROOT: path.join(fixture, "store"),
+      REPLIT_SHELL_NODE_CACHE_ROOT: path.join(
+        path.dirname(fixture),
+        "node-cache",
+      ),
+      NODE_TLS_REJECT_UNAUTHORIZED: undefined,
+      ...extraEnv,
+    },
+  };
+}
+
+function runReplitShell(fixture, command, extraEnv = {}) {
   return spawnSync(
     "bash",
     ["-c", `source "$REPL_HOME/.config/bashrc"\n${command}`],
-    {
-      cwd: fixture,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        REPL_HOME: fixture,
-        HOME: path.join(path.dirname(fixture), "home"),
-        REAL_NODE_BIN: process.execPath,
-        FAKE_COREPACK_BIN: path.join(fixture, "module-bin", "corepack"),
-        XDG_DATA_HOME: path.join(fixture, ".local", "share"),
-        PATH: `${path.join(fixture, "module-bin")}:${process.env.PATH}`,
-        REPLIT_SHELL_NODE_STORE_ROOT: path.join(fixture, "store"),
-        NODE_TLS_REJECT_UNAUTHORIZED: undefined,
-      },
-    },
+    replitShellOptions(fixture, extraEnv),
   );
+}
+
+function runReplitShellAsync(fixture, command, extraEnv = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "bash",
+      ["-c", `source "$REPL_HOME/.config/bashrc"\n${command}`],
+      replitShellOptions(fixture, extraEnv),
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+function installFakeNodeProvisioner(
+  fixture,
+  { nodeVersion = `v${pinnedNodeVersion}`, delay = "0" } = {},
+) {
+  const tracePath = path.join(path.dirname(fixture), "node-provision.log");
+  fs.writeFileSync(
+    path.join(fixture, "module-bin", "npm"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+[[ "\${1:-}" == "exec" && "\${2:-}" == "--yes" &&
+  "\${3:-}" == "--package=node@\${RELEASE_NODE_VERSION}" &&
+  "\${4:-}" == "--" && "\${5:-}" == "bash" && "\${6:-}" == "-c" ]] || {
+  printf 'unexpected npm invocation: %s\\n' "$*" >&2
+  exit 91
+}
+[[ "\${npm_config_registry:-}" == "https://registry.npmjs.org/" ]] || {
+  printf 'npm registry was not HTTPS\\n' >&2
+  exit 92
+}
+[[ "\${npm_config_userconfig:-}" == "/dev/null" &&
+  "\${npm_config_globalconfig:-}" == "/dev/null" ]] || {
+  printf 'npm config was not isolated\\n' >&2
+  exit 93
+}
+[[ "\${NODE_OPTIONS:-}" == *"release-node-https-only.cjs"* ]] || {
+  printf 'HTTPS guard was not enabled\\n' >&2
+  exit 94
+}
+printf 'install\\n' >>"${tracePath}"
+sleep "\${FAKE_NODE_PROVISION_DELAY:-0}"
+node_dir="\${npm_config_cache}/_npx/fixture/node_modules/node/bin"
+shim_dir="\${npm_config_cache}/_npx/fixture/node_modules/.bin"
+mkdir -p "$node_dir" "$shim_dir"
+cat >"$node_dir/node" <<'NODE'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "-e" ]]; then
+  exec "$REAL_NODE_BIN" "$@"
+fi
+case "\${1:-}" in
+  --version) printf '%s\\n' "$FAKE_NODE_VERSION" ;;
+  -p)
+    case "\${2:-}" in
+      process.execPath) printf '%s\\n' "$0" ;;
+      process.version) printf '%s\\n' "$FAKE_NODE_VERSION" ;;
+      process.version*) printf '%s|%s\\n' "$FAKE_NODE_VERSION" "$0" ;;
+      *) printf 'unexpected fake Node expression: %s\\n' "\${2:-}" >&2; exit 2 ;;
+    esac
+    ;;
+  *) printf 'unexpected fake Node arguments: %s\\n' "$*" >&2; exit 2 ;;
+esac
+NODE
+chmod 700 "$node_dir/node"
+ln -s ../node/bin/node "$shim_dir/node"
+`,
+    { mode: 0o755 },
+  );
+  return { tracePath, extraEnv: { FAKE_NODE_VERSION: nodeVersion, FAKE_NODE_PROVISION_DELAY: delay } };
 }
 
 test("Replit interactive Bash startup selects the exact pinned Node for shell and package children", (t) => {
@@ -745,19 +834,92 @@ test("unsafe workspace-local Corepack caches fail before manager startup", (t) =
   assert.doesNotMatch(httpRegistryResult.stderr, /unexpected corepack call/);
 });
 
-test("interactive shell exits with guidance instead of silently retaining the wrong Node", (t) => {
+test("interactive shell provisions the exact Node into a private cache and reuses it", (t) => {
   const fixture = makeShellFixture(t, { withRuntime: false });
-  const result = runReplitShell(fixture, 'printf "SHELL_STARTED_WITH_FALLBACK\\n"');
+  const { tracePath, extraEnv } = installFakeNodeProvisioner(fixture);
+  const first = runReplitShell(
+    fixture,
+    [
+      'printf "shell-node=%s\\n" "$(node --version)"',
+      'printf "shell-exec=%s\\n" "$(node -p process.execPath)"',
+      'printf "node-tls=%s\\n" "${NODE_TLS_REJECT_UNAUTHORIZED:-unset}"',
+    ].join("\n"),
+    extraEnv,
+  );
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, new RegExp(`shell-node=v${escapeRegExp(pinnedNodeVersion)}`));
+  assert.match(
+    first.stdout,
+    /shell-exec=.*node-cache\/npm-cache\/_npx\/fixture\/node_modules\/node\/bin\/node/,
+  );
+  assert.match(first.stdout, /node-tls=unset/);
+  assert.equal(fs.readFileSync(tracePath, "utf8"), "install\n");
+
+  const cacheRoot = path.join(path.dirname(fixture), "node-cache");
+  assert.equal(fs.statSync(cacheRoot).mode & 0o777, 0o700);
+  assert.equal(
+    path.resolve(cacheRoot).startsWith(`${path.resolve(fixture)}${path.sep}`),
+    false,
+  );
+  const lockProbe = spawnSync(
+    "flock",
+    ["--nonblock", "--exclusive", path.join(cacheRoot, "install.lock"), "bash", "-c", "true"],
+    { encoding: "utf8" },
+  );
+  assert.equal(lockProbe.status, 0, lockProbe.stderr);
+
+  const second = runReplitShell(fixture, 'printf "shell-node=%s\\n" "$(node --version)"', extraEnv);
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, new RegExp(`shell-node=v${escapeRegExp(pinnedNodeVersion)}`));
+  assert.equal(fs.readFileSync(tracePath, "utf8"), "install\n");
+});
+
+test("concurrent interactive shells serialize only the cold Node-cache setup", async (t) => {
+  const fixture = makeShellFixture(t, { withRuntime: false });
+  const { tracePath, extraEnv } = installFakeNodeProvisioner(fixture, {
+    delay: "0.25",
+  });
+  const results = await Promise.all([
+    runReplitShellAsync(fixture, "node --version", extraEnv),
+    runReplitShellAsync(fixture, "node --version", extraEnv),
+  ]);
+  for (const result of results) {
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`v${escapeRegExp(pinnedNodeVersion)}`));
+  }
+  assert.equal(fs.readFileSync(tracePath, "utf8"), "install\n");
+});
+
+test("interactive shell rejects a cached runtime with the wrong Node version", (t) => {
+  const fixture = makeShellFixture(t, { withRuntime: false });
+  const { extraEnv } = installFakeNodeProvisioner(fixture, {
+    nodeVersion: "v24.22.1",
+  });
+  const result = runReplitShell(
+    fixture,
+    'printf "SHELL_STARTED_WITH_WRONG_NODE\\n"',
+    extraEnv,
+  );
   assert.notEqual(result.status, 0);
-  assert.match(
-    result.stderr,
-    new RegExp(`Cannot start this interactive shell with the required Node v${escapeRegExp(pinnedNodeVersion)}`),
+  assert.match(result.stderr, /did not contain a verified Node v24\.22\.2 runtime/);
+  assert.doesNotMatch(result.stdout, /SHELL_STARTED_WITH_WRONG_NODE/);
+});
+
+test("interactive shell rejects a project-local Node cache before npm runs", (t) => {
+  const fixture = makeShellFixture(t, { withRuntime: false });
+  const { tracePath } = installFakeNodeProvisioner(fixture);
+  const result = runReplitShell(
+    fixture,
+    'printf "SHELL_STARTED_WITH_PROJECT_CACHE\\n"',
+    {
+      HOME: fixture,
+      REPLIT_SHELL_NODE_CACHE_ROOT: path.join(fixture, ".cache", "node"),
+    },
   );
-  assert.match(
-    result.stderr,
-    new RegExp(`Restore Node v${escapeRegExp(pinnedNodeVersion)} to the Replit environment`),
-  );
-  assert.doesNotMatch(result.stdout, /SHELL_STARTED_WITH_FALLBACK/);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /runtime cache must stay outside the project/);
+  assert.doesNotMatch(result.stdout, /SHELL_STARTED_WITH_PROJECT_CACHE/);
+  assert.equal(fs.existsSync(tracePath), false);
 });
 
 test("interactive shell follows a changed .nvmrc value instead of a hardcoded patch", (t) => {
