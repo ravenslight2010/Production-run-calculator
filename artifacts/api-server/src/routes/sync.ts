@@ -2,6 +2,10 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { isDeepStrictEqual } from "node:util";
 import { hasOperationalSnapshotMutation } from "../lib/operationalSnapshotAuthority";
 import { isExactOperationalCommandRetry } from "../lib/operationalCommandIdentity";
+import {
+  deleteFreezerAlertProjection,
+  replaceFreezerAlertProjection,
+} from "../lib/freezerAlertProjection";
 import { canRebaseManualApplicatorAdjustment } from "../lib/manualSectionAutoTrackRebase";
 import { createHash, randomUUID } from "node:crypto";
 import { computeSummaryStats, type SummaryStats, type SummaryStatsInput } from "@workspace/inventory-math";
@@ -45,6 +49,7 @@ import {
   sandboxMetaTable,
   productionRunsTable,
   proactiveAlertSettingsTable,
+  freezerAlertRunProjectionTable,
   auditLogsTable,
   syncConflictLogsTable,
   operationalIntentLedgerTable,
@@ -1186,6 +1191,7 @@ export async function runDailyRollover(
       finalizedRuns += activeRunIds.size;
       await tx.update(dailySyncTable).set({ data: finalizedData as any, updatedAt: new Date(nowMs) })
         .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, priorRow.date)));
+      await replaceFreezerAlertProjection(tx, scope, priorRow.date, finalizedData);
     }
 
     const nextEpoch = (reset?.epoch ?? 0) + 1;
@@ -1203,6 +1209,7 @@ export async function runDailyRollover(
     if (scheduled) {
       await tx.update(dailySyncTable).set({ data: activated as any, updatedAt: new Date(nowMs) })
         .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, toDate)));
+      await replaceFreezerAlertProjection(tx, scope, toDate, activated);
     } else {
       await tx.insert(dailySyncTable).values({
         scope,
@@ -1210,6 +1217,7 @@ export async function runDailyRollover(
         data: activated as any,
         updatedAt: new Date(nowMs),
       });
+      await replaceFreezerAlertProjection(tx, scope, toDate, activated);
     }
     const [nextReset] = await tx.update(dataResetTable)
       .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date(nowMs) })
@@ -1718,10 +1726,12 @@ async function upsertProtected(
             .update(dailySyncTable)
             .set({ data: m as any, canonicalRevision, updatedAt: new Date() })
             .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+          await replaceFreezerAlertProjection(tx, scope, date, m);
         } else if (!existing) {
           await tx
             .insert(dailySyncTable)
             .values({ date, scope, data: m as any, canonicalRevision, updatedAt: new Date() });
+          await replaceFreezerAlertProjection(tx, scope, date, m);
         }
         if (changed || !existing) {
           await appendSyncOutboxEvent(tx, {
@@ -2423,6 +2433,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     } else {
       await tx.insert(dailySyncTable).values({ scope, date, data: next, canonicalRevision: revision, updatedAt: new Date() });
     }
+    await replaceFreezerAlertProjection(tx, scope, date, next);
     await tx.insert(operationalIntentLedgerTable).values({
       scope, date, intentId: id, outcome: "accepted", snapshot: next,
       commandType: resumePackaging ? "packaging:resume" : `manual-section:${section}`, actorId: req.userId ?? "unknown",
@@ -3070,23 +3081,25 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
         : {};
       const wallClockBookkeeping = { ...(serverState.wallClockBookkeeping ?? {}) };
       delete wallClockBookkeeping[run.id];
-      await tx.update(dailySyncTable).set({
-        data: {
-          ...data,
-          ...(startOffsetMs > 0
-            ? { dayState: { ...data.dayState, runs: updatedRuns } }
-            : {}),
-          autoTrackServerState: {
-            ...serverState,
-            version: 1,
-            wallClockBookkeeping,
-          },
+      const nextData = {
+        ...data,
+        ...(startOffsetMs > 0
+          ? { dayState: { ...data.dayState, runs: updatedRuns } }
+          : {}),
+        autoTrackServerState: {
+          ...serverState,
+          version: 1,
+          wallClockBookkeeping,
         },
+      };
+      await tx.update(dailySyncTable).set({
+        data: nextData,
         canonicalRevision: (locked.canonicalRevision ?? 0) + 1,
       }).where(and(
         eq(dailySyncTable.scope, scope),
         eq(dailySyncTable.date, date),
       ));
+      await replaceFreezerAlertProjection(tx, scope, date, nextData);
       return true;
     });
     if (startOffsetMs > 0 && !rearmed) {
@@ -3279,6 +3292,7 @@ router.post(
         const currentDestinationRevision = destinationRow.canonicalRevision ?? 0;
         if (currentDestinationRevision !== Number(destinationRevision)) {
           if (createdDestination) {
+            await deleteFreezerAlertProjection(tx, scope, destinationDate);
             await tx.delete(dailySyncTable).where(and(
               eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
             ));
@@ -3300,6 +3314,7 @@ router.post(
         const rawDestinationRuns = Array.isArray(destinationDay.runs) ? destinationDay.runs : [];
         if (rawDestinationRuns.some((run) => !isSyncRecord(run) || typeof run.id !== "string")) {
           if (createdDestination) {
+            await deleteFreezerAlertProjection(tx, scope, destinationDate);
             await tx.delete(dailySyncTable).where(and(
               eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
             ));
@@ -3421,6 +3436,7 @@ router.post(
         const nextSourceRevision = currentSourceRevision + 1;
         const nextDestinationRevision = currentDestinationRevision + 1;
         if (sourceRemoved) {
+          await deleteFreezerAlertProjection(tx, scope, sourceDate);
           await tx.delete(dailySyncTable).where(and(
             eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate),
           ));
@@ -3430,6 +3446,7 @@ router.post(
             canonicalRevision: nextSourceRevision,
             updatedAt: new Date(nowMs),
           }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)));
+          await replaceFreezerAlertProjection(tx, scope, sourceDate, nextSource);
         }
         const canonicalDestination = completeSyncData(nextDestination) as Record<string, unknown>;
         await tx.update(dailySyncTable).set({
@@ -3437,6 +3454,7 @@ router.post(
           canonicalRevision: nextDestinationRevision,
           updatedAt: new Date(nowMs),
         }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)));
+        await replaceFreezerAlertProjection(tx, scope, destinationDate, canonicalDestination);
         await appendSyncOutboxEvent(tx, {
           kind: "day-state", scope, date: sourceDate, senderId,
           canonicalRevision: nextSourceRevision,
@@ -3630,6 +3648,7 @@ router.post(
             canonicalRevision: nextSourceRevision,
             updatedAt: new Date(nowMs),
           }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)));
+          await replaceFreezerAlertProjection(tx, scope, sourceDate, nextSource);
           await appendSyncOutboxEvent(tx, {
             kind: "day-state", scope, date: sourceDate, senderId,
             canonicalRevision: nextSourceRevision,
@@ -3641,6 +3660,7 @@ router.post(
             canonicalRevision: nextDestinationRevision,
             updatedAt: new Date(nowMs),
           }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)));
+          await replaceFreezerAlertProjection(tx, scope, destinationDate, nextDestination);
           await appendSyncOutboxEvent(tx, {
             kind: "day-state", scope, date: destinationDate, senderId,
             canonicalRevision: nextDestinationRevision,
@@ -3861,9 +3881,12 @@ router.delete("/sync/:date", requireCapability("manage-factory-settings"), async
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   // Use server date (not client-supplied ?today=) so the past-date guard cannot be bypassed
   if (date <= todayStr()) { res.status(400).json({ error: "Cannot delete today or past days" }); return; }
-  await db
-    .delete(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, currentScope())));
+  const scope = currentScope();
+  await db.transaction(async (tx) => {
+    await deleteFreezerAlertProjection(tx, scope, date);
+    await tx.delete(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+  });
   res.json({ ok: true });
 });
 
@@ -3887,6 +3910,7 @@ router.post(
         .onConflictDoNothing();
       await tx.select().from(dataResetTable).where(eq(dataResetTable.scope, scope)).for("update");
       await tx.delete(operationalIntentLedgerTable).where(eq(operationalIntentLedgerTable.scope, scope));
+      await tx.delete(freezerAlertRunProjectionTable).where(eq(freezerAlertRunProjectionTable.scope, scope));
       await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
       const [row] = await tx
         .update(dataResetTable)
@@ -3977,6 +4001,8 @@ router.post(
         .onConflictDoNothing();
       await tx.select().from(dataResetTable)
         .where(eq(dataResetTable.scope, scope)).for("update");
+      await tx.delete(freezerAlertRunProjectionTable)
+        .where(eq(freezerAlertRunProjectionTable.scope, scope));
       for (const t of scopedTables) {
         await tx.execute(sql`DELETE FROM ${t} WHERE scope = ${scope}`);
       }
@@ -4344,6 +4370,7 @@ export async function runAutoTrackServerTicks(opts: {
           updatedAt: new Date(serverTime),
         })
           .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope)));
+        if (locked) await replaceFreezerAlertProjection(tx, scope, row.date, data);
         if (acceptedHere > 0) {
           await appendSyncOutboxEvent(tx, {
             kind: "day-state",

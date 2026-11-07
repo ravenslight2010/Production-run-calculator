@@ -14,6 +14,7 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
   SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
 } from "../sourceLibraryReconciliationHeal";
+import { replaceFreezerAlertProjection } from "../freezerAlertProjection";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
 
 const SOURCE_LINK_FIELDS = [
@@ -258,9 +259,13 @@ export const sourceLibraryReconciliationRepair: RepairDefinition<RepairTransacti
         values.valuesUpdatedAtMs = stamp; runValues[id] = values; stamps[id] = stamp;
         changed = true; repointedRuns++;
       }
-      if (changed) await tx.update(dailySyncTable).set({
-        data: { ...data, runValues, runValuesUpdatedAt: stamps }, updatedAt: new Date(),
-      }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, "live")));
+      if (changed) {
+        const nextData = { ...data, runValues, runValuesUpdatedAt: stamps };
+        await tx.update(dailySyncTable).set({
+          data: nextData, updatedAt: new Date(),
+        }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, "live")));
+        await replaceFreezerAlertProjection(tx, "live", day.date, nextData);
+      }
     }
 
     const postProfiles = await tx.select().from(brandProfilesTable)

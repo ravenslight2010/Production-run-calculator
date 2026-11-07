@@ -26,6 +26,7 @@ import {
 import { applyAiRetentionCleanup, buildAiRetentionReport, type AiRetentionReport } from "../lib/aiRetention";
 import { sourceLibraryReconciliationStatus, type SourceLibraryReconciliationStatus } from "../lib/sourceLibraryReconciliationHeal";
 import { findRepairResult } from "../lib/repairResultsRepository";
+import { replaceFreezerAlertProjection } from "../lib/freezerAlertProjection";
 
 type JsonRecord = Record<string, unknown>;
 type RecipeKind = "dough" | "sauce";
@@ -662,9 +663,11 @@ export function createProfileDataHealthService(database: typeof db = db): Profil
             changed = true;
           }
           if (changed) {
+            const nextData = { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps };
             await tx.update(dailySyncTable)
-              .set({ data: { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps }, updatedAt: new Date() })
+              .set({ data: nextData, updatedAt: new Date() })
               .where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, scope)));
+            await replaceFreezerAlertProjection(tx, scope, day.date, nextData);
           }
         }
       }
@@ -829,10 +832,12 @@ export function createProfileDataHealthService(database: typeof db = db): Profil
             ...stamps,
             [runId]: Math.max(Number(stamps[runId]) || 0, Date.now()) + 1,
           };
+          const nextData = { ...data, runValues: restoredRuns, runValuesUpdatedAt: restoredStamps };
           await tx.update(dailySyncTable).set({
-            data: { ...data, runValues: restoredRuns, runValuesUpdatedAt: restoredStamps },
+            data: nextData,
             updatedAt: new Date(),
           }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date)));
+          await replaceFreezerAlertProjection(tx, scope, date, nextData);
           repairedRuns++;
           continue;
         }
@@ -882,10 +887,12 @@ export function createProfileDataHealthService(database: typeof db = db): Profil
             ...stamps,
             [runId]: Math.max(Number(stamps[runId]) || 0, Date.now()) + 1,
           };
+          const nextData = { ...data, runValues: restoredRuns, runValuesUpdatedAt: restoredStamps };
           await tx.update(dailySyncTable).set({
-            data: { ...data, runValues: restoredRuns, runValuesUpdatedAt: restoredStamps },
+            data: nextData,
             updatedAt: new Date(),
           }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date)));
+          await replaceFreezerAlertProjection(tx, scope, date, nextData);
           repairedRuns++;
         }
       }

@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, boolean, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // A subscription is deliberately scoped: the sandbox account must never receive
 // a live-factory alert even if a browser reuses the same endpoint.
@@ -86,5 +86,37 @@ export const scheduledJobLeasesTable = pgTable(
     owner: text("owner").notNull(),
     leaseUntil: timestamp("lease_until", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+// Compact run facts used to select historical alert work without scanning
+// daily_sync JSONB on every scheduled evaluation. Rows are replaced from the
+// canonical snapshot in the same application transaction as each write.
+export const freezerAlertRunProjectionTable = pgTable(
+  "freezer_alert_run_projection",
+  {
+    scope: text("scope").notNull().default("live"),
+    date: text("date").notNull(),
+    runId: text("run_id").notNull(),
+    startedAt: numeric("started_at", { precision: 30, scale: 6, mode: "number" }),
+    endedAt: numeric("ended_at", { precision: 30, scale: 6, mode: "number" }),
+    freezerTime: numeric("freezer_time", { precision: 30, scale: 6, mode: "number" }),
+    dueAt: numeric("due_at", { precision: 30, scale: 6, mode: "number" }),
+    isActive: boolean("is_active").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("freezer_alert_run_projection_scope_date_run_idx").on(t.scope, t.date, t.runId),
+    index("freezer_alert_run_projection_scope_date_active_idx").on(t.scope, t.date, t.isActive),
+    index("freezer_alert_run_projection_scope_due_date_idx").on(t.scope, t.dueAt, t.date),
+  ],
+);
+
+// Presence means this scope's legacy snapshots have been backfilled. Until
+// then, alert evaluation keeps its compatible historical JSONB path.
+export const freezerAlertProjectionStatusTable = pgTable(
+  "freezer_alert_projection_status",
+  {
+    scope: text("scope").primaryKey(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
   },
 );

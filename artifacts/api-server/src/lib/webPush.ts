@@ -6,11 +6,13 @@ import {
   createBackgroundOperationBackoff,
   runBackgroundOperation,
 } from "./backgroundOperations";
-import { and, asc, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
-  dailySyncTable, scheduledAlertRecordsTable,
+  dailySyncTable, freezerAlertRunProjectionTable,
+  scheduledAlertRecordsTable,
 } from "@workspace/db";
+import { hasCompleteFreezerAlertProjection } from "./freezerAlertProjection";
 import { computeServerCalc, selectCanonicalLiveRun } from "@workspace/live-calc";
 import { logger } from "./logger";
 import type { Scope } from "./requestScope";
@@ -586,6 +588,197 @@ export function scheduledEvaluationIdempotencyKey(scope: Scope, nowMs: number, b
   return `scheduled-evaluation:${scope}:${bucket}`;
 }
 
+type ScheduledAlertSnapshotRow = { date: string; data?: unknown };
+
+async function readLegacyHistoricalAlertRows(scope: Scope, today: string, nowMs: number) {
+  const result = await db.execute(sql`
+    WITH expanded AS (
+      SELECT
+        daily.date,
+        daily.data,
+        run.value AS run,
+        daily.data->'runValues'->(run.value->>'id') AS settings
+      FROM daily_sync AS daily
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(daily.data->'dayState'->'runs') = 'array'
+          THEN daily.data->'dayState'->'runs'
+          ELSE '[]'::jsonb
+        END
+      ) AS run(value)
+      WHERE daily.scope = ${scope}
+        AND daily.date < ${today}
+    ),
+    classified AS (
+      SELECT
+        date,
+        data,
+        run,
+        settings,
+        (
+          jsonb_typeof(run->'id') = 'string'
+          AND jsonb_typeof(run->'startedAt') = 'number'
+          AND (run->>'startedAt')::numeric > 0
+          AND CASE
+            WHEN jsonb_typeof(run->'endedAt') = 'number'
+            THEN (run->>'endedAt')::numeric
+            ELSE 0
+          END = 0
+          AND CASE
+            WHEN jsonb_typeof(run->'pausedAt') = 'number'
+            THEN (run->>'pausedAt')::numeric
+            ELSE 0
+          END = 0
+        ) AS is_active,
+        (
+          jsonb_typeof(run->'id') = 'string'
+          AND CASE
+            WHEN jsonb_typeof(run->'endedAt') = 'number'
+            THEN (run->>'endedAt')::numeric
+            ELSE 0
+          END <> 0
+          AND CASE
+            WHEN jsonb_typeof(settings->'freezerTime') = 'number'
+            THEN (settings->>'freezerTime')::numeric
+            ELSE 0
+          END > 0
+          AND CASE
+            WHEN jsonb_typeof(run->'endedAt') = 'number'
+              AND jsonb_typeof(settings->'freezerTime') = 'number'
+            THEN (run->>'endedAt')::numeric
+              + (settings->>'freezerTime')::numeric * 60000
+            ELSE 0
+          END >= ${nowMs - RETENTION_MS}
+        ) AS freezer_due
+      FROM expanded
+    )
+    SELECT
+      date,
+      CASE WHEN bool_or(is_active) THEN data ELSE NULL::jsonb END AS data,
+      jsonb_agg(jsonb_build_object(
+        'run', jsonb_build_object(
+          'id', run->'id',
+          'startedAt', run->'startedAt',
+          'endedAt', run->'endedAt'
+        ),
+        'freezerTime', settings->'freezerTime'
+      )) FILTER (WHERE freezer_due) AS "freezerRuns"
+    FROM classified
+    GROUP BY date, data
+    HAVING bool_or(is_active) OR bool_or(freezer_due)
+  `);
+  type HistoricalFreezerRow = {
+    date: string;
+    data: unknown | null;
+    freezerRuns: Array<{
+      run: { id: string; startedAt?: number; endedAt: number };
+      freezerTime: number;
+    }> | null;
+  };
+  const rows = (result as unknown as { rows: HistoricalFreezerRow[] }).rows;
+  return rows.map((row) => {
+    if (row.data !== null) return { date: row.date, data: row.data };
+    const freezerRuns = row.freezerRuns ?? [];
+    return {
+      date: row.date,
+      data: {
+        dayState: { runs: freezerRuns.map(({ run }) => run) },
+        runValues: Object.fromEntries(freezerRuns.map(({ run, freezerTime }) => [
+          run.id,
+          { freezerTime },
+        ])),
+      },
+    };
+  });
+}
+
+/**
+ * Read only the full current/future snapshots and indexed historical alert
+ * facts. Legacy scopes keep the previous JSONB query until their explicit
+ * projection backfill has completed.
+ */
+export async function readScheduledAlertSnapshotRows(
+  scope: Scope,
+  today: string,
+  nowMs: number,
+): Promise<ScheduledAlertSnapshotRow[]> {
+  const currentRows = await db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
+    .from(dailySyncTable)
+    .where(and(eq(dailySyncTable.scope, scope), gte(dailySyncTable.date, today)))
+    .orderBy(asc(dailySyncTable.date));
+
+  if (!(await hasCompleteFreezerAlertProjection(scope))) {
+    const historical = await readLegacyHistoricalAlertRows(scope, today, nowMs);
+    const rowsByDate = new Map(currentRows.map((row) => [row.date, row]));
+    for (const row of historical) rowsByDate.set(row.date, row);
+    return [...rowsByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+  }
+
+  const [activeDateRows, freezerRows] = await Promise.all([
+    db.select({ date: freezerAlertRunProjectionTable.date })
+      .from(freezerAlertRunProjectionTable)
+      .where(and(
+        eq(freezerAlertRunProjectionTable.scope, scope),
+        lt(freezerAlertRunProjectionTable.date, today),
+        eq(freezerAlertRunProjectionTable.isActive, true),
+      ))
+      .groupBy(freezerAlertRunProjectionTable.date),
+    db.select({
+      date: freezerAlertRunProjectionTable.date,
+      runId: freezerAlertRunProjectionTable.runId,
+      startedAt: freezerAlertRunProjectionTable.startedAt,
+      endedAt: freezerAlertRunProjectionTable.endedAt,
+      freezerTime: freezerAlertRunProjectionTable.freezerTime,
+    }).from(freezerAlertRunProjectionTable).where(and(
+      eq(freezerAlertRunProjectionTable.scope, scope),
+      lt(freezerAlertRunProjectionTable.date, today),
+      gte(freezerAlertRunProjectionTable.dueAt, nowMs - RETENTION_MS),
+    )).orderBy(
+      asc(freezerAlertRunProjectionTable.date),
+      asc(freezerAlertRunProjectionTable.dueAt),
+    ),
+  ]);
+
+  const activeSnapshots = activeDateRows.length
+    ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
+      .from(dailySyncTable)
+      .where(and(
+        eq(dailySyncTable.scope, scope),
+        inArray(dailySyncTable.date, activeDateRows.map((row) => row.date)),
+      ))
+    : [];
+  const rowsByDate = new Map(currentRows.map((row) => [row.date, row]));
+  for (const row of activeSnapshots) rowsByDate.set(row.date, row);
+
+  const freezerByDate = new Map<string, typeof freezerRows>();
+  for (const row of freezerRows) {
+    const grouped = freezerByDate.get(row.date) ?? [];
+    grouped.push(row);
+    freezerByDate.set(row.date, grouped);
+  }
+  for (const [date, runs] of freezerByDate) {
+    if (rowsByDate.has(date)) continue;
+    rowsByDate.set(date, {
+      date,
+      data: {
+        dayState: {
+          runs: runs.map((run) => ({
+            id: run.runId,
+            ...(run.startedAt === null ? {} : { startedAt: run.startedAt }),
+            endedAt: run.endedAt,
+          })),
+        },
+        runValues: Object.fromEntries(runs.map((run) => [
+          run.runId,
+          { freezerTime: run.freezerTime },
+        ])),
+      },
+    });
+  }
+
+  return [...rowsByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
 /**
  * Enqueues one durable workload per canonical scope/time bucket. A single job
  * evaluates that scope's dates individually, so local-day boundaries and
@@ -635,90 +828,8 @@ registerServerJob("scheduled-evaluation", {
     if (!requestedDate) {
       const nowMs = Date.now();
       const today = facilityDate(nowMs);
-      const [currentRows, historicalResult, recordRows, armRows] = await Promise.all([
-        db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
-          .from(dailySyncTable)
-          .where(and(
-            eq(dailySyncTable.scope, scope),
-            gte(dailySyncTable.date, today),
-          ))
-          .orderBy(asc(dailySyncTable.date)),
-        db.execute(sql`
-          WITH expanded AS (
-            SELECT
-              daily.date,
-              daily.data,
-              run.value AS run,
-              daily.data->'runValues'->(run.value->>'id') AS settings
-            FROM daily_sync AS daily
-            CROSS JOIN LATERAL jsonb_array_elements(
-              CASE
-                WHEN jsonb_typeof(daily.data->'dayState'->'runs') = 'array'
-                THEN daily.data->'dayState'->'runs'
-                ELSE '[]'::jsonb
-              END
-            ) AS run(value)
-            WHERE daily.scope = ${scope}
-              AND daily.date < ${today}
-          ),
-          classified AS (
-            SELECT
-              date,
-              data,
-              run,
-              settings,
-              (
-                jsonb_typeof(run->'id') = 'string'
-                AND jsonb_typeof(run->'startedAt') = 'number'
-                AND (run->>'startedAt')::numeric > 0
-                AND CASE
-                  WHEN jsonb_typeof(run->'endedAt') = 'number'
-                  THEN (run->>'endedAt')::numeric
-                  ELSE 0
-                END = 0
-                AND CASE
-                  WHEN jsonb_typeof(run->'pausedAt') = 'number'
-                  THEN (run->>'pausedAt')::numeric
-                  ELSE 0
-                END = 0
-              ) AS is_active,
-              (
-                jsonb_typeof(run->'id') = 'string'
-                AND CASE
-                  WHEN jsonb_typeof(run->'endedAt') = 'number'
-                  THEN (run->>'endedAt')::numeric
-                  ELSE 0
-                END <> 0
-                AND CASE
-                  WHEN jsonb_typeof(settings->'freezerTime') = 'number'
-                  THEN (settings->>'freezerTime')::numeric
-                  ELSE 0
-                END > 0
-                AND CASE
-                  WHEN jsonb_typeof(run->'endedAt') = 'number'
-                    AND jsonb_typeof(settings->'freezerTime') = 'number'
-                  THEN (run->>'endedAt')::numeric
-                    + (settings->>'freezerTime')::numeric * 60000
-                  ELSE 0
-                END >= ${nowMs - RETENTION_MS}
-              ) AS freezer_due
-            FROM expanded
-          )
-          SELECT
-            date,
-            CASE WHEN bool_or(is_active) THEN data ELSE NULL::jsonb END AS data,
-            jsonb_agg(jsonb_build_object(
-              'run', jsonb_build_object(
-                'id', run->'id',
-                'startedAt', run->'startedAt',
-                'endedAt', run->'endedAt'
-              ),
-              'freezerTime', settings->'freezerTime'
-            )) FILTER (WHERE freezer_due) AS "freezerRuns"
-          FROM classified
-          GROUP BY date, data
-          HAVING bool_or(is_active) OR bool_or(freezer_due)
-        `),
+      const [snapshotRows, recordRows, armRows] = await Promise.all([
+        readScheduledAlertSnapshotRows(scope, today, nowMs),
         db.select({
           alertId: scheduledAlertRecordsTable.alertId,
           date: scheduledAlertRecordsTable.date,
@@ -736,36 +847,7 @@ registerServerJob("scheduled-evaluation", {
           gt(webPushAlertArmsTable.expiresAt, new Date(nowMs)),
         )),
       ]);
-      type HistoricalFreezerRow = {
-        date: string;
-        data: unknown | null;
-        freezerRuns: Array<{
-          run: { id: string; startedAt?: number; endedAt: number };
-          freezerTime: number;
-        }> | null;
-      };
-      const historicalRows = (historicalResult as unknown as {
-        rows: HistoricalFreezerRow[];
-      }).rows;
-      const rowsByDate = new Map(currentRows.map((row) => [row.date, row]));
-      for (const row of historicalRows) {
-        if (row.data !== null) {
-          rowsByDate.set(row.date, { date: row.date, data: row.data });
-          continue;
-        }
-        const freezerRuns = row.freezerRuns ?? [];
-        if (!freezerRuns.length) continue;
-        const runs = freezerRuns.map(({ run }) => run);
-        const runValues = Object.fromEntries(freezerRuns.map(({ run, freezerTime }) => [
-          run.id,
-          { freezerTime },
-        ]));
-        rowsByDate.set(row.date, {
-          date: row.date,
-          data: { dayState: { runs }, runValues },
-        });
-      }
-      dateRows = [...rowsByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+      dateRows = snapshotRows;
       examined = dateRows.length;
       const existingAlertIds = new Set(recordRows.map((row) => row.alertId));
       const activeArms = new Set(armRows.map((row) =>

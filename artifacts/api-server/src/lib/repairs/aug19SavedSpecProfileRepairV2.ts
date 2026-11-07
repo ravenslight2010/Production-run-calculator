@@ -18,6 +18,7 @@ import {
   type ImportMergeAliasMap,
 } from "@workspace/spec-import";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
+import { replaceFreezerAlertProjection } from "../freezerAlertProjection";
 
 export const AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID = "aug19-saved-spec-profile-repair-v2";
 const AUG19_SAVED_SPEC_START = new Date("2026-08-19T00:00:00.000Z");
@@ -280,8 +281,10 @@ export const aug19SavedSpecProfileRepairV2: RepairDefinition<RepairTransaction> 
         repairedRuns++;
       }
       if (!changed) continue;
-      await tx.update(dailySyncTable).set({ data: { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps }, updatedAt: new Date() })
+      const nextData = { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps };
+      await tx.update(dailySyncTable).set({ data: nextData, updatedAt: new Date() })
         .where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+      await replaceFreezerAlertProjection(tx, day.scope, day.date, nextData);
     }
     return { sheetsScanned: sheets.length, parsedProfiles: sources.size, repairedProfiles, repairedRuns };
   },

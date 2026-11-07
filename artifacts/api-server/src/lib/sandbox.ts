@@ -19,9 +19,12 @@ import {
   photoAliasesTable,
   specImportAliasesTable,
   sandboxMetaTable,
+  freezerAlertProjectionStatusTable,
+  freezerAlertRunProjectionTable,
 } from "@workspace/db";
 import { hashPassword, newUserId } from "./auth";
 import { findUserByUsername, getUserById } from "./users";
+import { replaceFreezerAlertProjection } from "./freezerAlertProjection";
 
 // The seeded sandbox account. Signing in as this user routes every read/write to
 // the isolated "sandbox" data scope (see lib/requestScope), so anyone can poke
@@ -120,6 +123,9 @@ export async function seedSandboxUser(): Promise<void> {
 // it is independent of which session triggers it.
 export async function resetSandbox(): Promise<void> {
   await db.transaction(async (tx) => {
+    await tx.delete(freezerAlertRunProjectionTable).where(eq(freezerAlertRunProjectionTable.scope, "sandbox"));
+    await tx.delete(freezerAlertProjectionStatusTable)
+      .where(eq(freezerAlertProjectionStatusTable.scope, "sandbox"));
     // ── daily_sync (composite PK date+scope; no serial id) ──
     await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, "sandbox"));
     const daily = await tx.select().from(dailySyncTable).where(eq(dailySyncTable.scope, "live"));
@@ -127,6 +133,21 @@ export async function resetSandbox(): Promise<void> {
       await tx.insert(dailySyncTable).values(
         daily.map((r) => ({ date: r.date, scope: "sandbox", data: r.data, updatedAt: r.updatedAt })),
       );
+      for (const row of daily) {
+        await replaceFreezerAlertProjection(tx, "sandbox", row.date, row.data);
+      }
+    }
+    const [liveProjection] = await tx.select({ scope: freezerAlertProjectionStatusTable.scope })
+      .from(freezerAlertProjectionStatusTable)
+      .where(eq(freezerAlertProjectionStatusTable.scope, "live"))
+      .limit(1);
+    if (liveProjection) {
+      await tx.insert(freezerAlertProjectionStatusTable)
+        .values({ scope: "sandbox", completedAt: new Date() })
+        .onConflictDoUpdate({
+          target: freezerAlertProjectionStatusTable.scope,
+          set: { completedAt: new Date() },
+        });
     }
 
     // ── production_rules (PK id+scope; id is a client-generated text id) ──

@@ -5,6 +5,7 @@ import {
   savedSpecSheetsTable,
 } from "@workspace/db";
 import type { RepairDefinition, RepairResult, RepairTransaction } from "../repairRegistry";
+import { replaceFreezerAlertProjection } from "../freezerAlertProjection";
 
 export const AUG19_SAVED_SPEC_PROFILE_REPAIR_ID = "aug19-saved-spec-profile-repair-v1";
 const AUG19_SAVED_SPEC_START = new Date("2026-08-19T00:00:00.000Z");
@@ -167,13 +168,15 @@ async function executeAug19SavedSpecProfileRepair(
       changed = true;
     }
     if (!changed) continue;
+    const nextData = { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps };
     await tx
       .update(dailySyncTable)
       .set({
-        data: { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps },
+        data: nextData,
         updatedAt: new Date(),
       })
       .where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+    await replaceFreezerAlertProjection(tx, day.scope, day.date, nextData);
   }
 
   return {

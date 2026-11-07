@@ -13,6 +13,7 @@ import {
 } from "./autoTrackCoordination";
 import { emptySyncData } from "./syncContract";
 import { appendSyncOutboxEvent } from "./syncOutbox";
+import { replaceFreezerAlertProjection } from "./freezerAlertProjection";
 
 type AutoTrackClaimTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -148,6 +149,7 @@ export async function executeAutoTrackClaim(
               updatedAt: new Date(serverTime),
             });
           }
+          await replaceFreezerAlertProjection(tx, scope, date, snapshot);
           await tx.insert(operationalIntentLedgerTable).values({
             scope,
             date,
@@ -218,6 +220,7 @@ export async function executeAutoTrackClaim(
           await tx.insert(dailySyncTable)
             .values({ date, scope, data: canonicalData as any, canonicalRevision, updatedAt: new Date(serverTime) });
         }
+        await replaceFreezerAlertProjection(tx, scope, date, canonicalData);
         await tx.insert(operationalIntentLedgerTable).values({
           scope,
           date,

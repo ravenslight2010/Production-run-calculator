@@ -12,6 +12,7 @@ import { appendSyncOutboxEvent } from "./syncOutbox";
 import { emptySyncData } from "./syncContract";
 import { applyOperationalIntent, type OperationalIntent } from "./operationalIntents";
 import { isExactOperationalCommandRetry } from "./operationalCommandIdentity";
+import { replaceFreezerAlertProjection } from "./freezerAlertProjection";
 import type { consumeRunInTransaction } from "../routes/inventory";
 
 export type OperationalIntentCommand = {
@@ -104,6 +105,7 @@ export async function reconcileOperationalIntentInTransaction(
         updatedAt: new Date(serverTime),
       });
     }
+    await replaceFreezerAlertProjection(tx, scope, intent.date, snapshot);
     const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
       scope, date: intent.date, intentId: intent.id, outcome: "review-required",
       snapshot: snapshot as any,
@@ -225,6 +227,7 @@ export async function reconcileOperationalIntentInTransaction(
       updatedAt: new Date(),
     });
   }
+  await replaceFreezerAlertProjection(tx, scope, intent.date, applied.data);
   if (existing) {
     await tx.update(dailySyncTable)
       .set({ canonicalRevision, updatedAt: new Date() })

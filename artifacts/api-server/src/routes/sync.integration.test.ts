@@ -38,6 +38,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let freezerAlertRunProjectionTable: DbModule["freezerAlertRunProjectionTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
 let usersTable: DbModule["usersTable"];
@@ -125,6 +126,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
+  freezerAlertRunProjectionTable = dbMod.freezerAlertRunProjectionTable;
   dataHealsTable = dbMod.dataHealsTable;
   syncConflictLogsTable = dbMod.syncConflictLogsTable;
   usersTable = dbMod.usersTable;
@@ -5294,6 +5296,17 @@ describe("POST /sync/schedule-move — atomic run relocation", () => {
 
   it("moves one run once, retains source runs, and carries run-bound values and progress", async () => {
     await seedPair();
+    // A stale projection must be removed when the canonical run moves away.
+    await db.insert(freezerAlertRunProjectionTable).values({
+      scope: "live",
+      date: sourceDate,
+      runId: "move-run",
+      startedAt: null,
+      endedAt: null,
+      freezerTime: 1,
+      dueAt: 1_900_000_000_000,
+      isActive: false,
+    });
     const responses = await Promise.all([moveRequest(), moveRequest()]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
 
@@ -5330,6 +5343,7 @@ describe("POST /sync/schedule-move — atomic run relocation", () => {
       .where(eq(syncOutboxEventsTable.scope, "live"));
     expect(events.filter((event) => event.kind === "day-state").map((event) => event.date).sort())
       .toEqual([sourceDate, destinationDate]);
+    expect(await db.select().from(freezerAlertRunProjectionTable)).toEqual([]);
   });
 
   it("relocates staging keys with a run when the destination assigns a new run ID", async () => {

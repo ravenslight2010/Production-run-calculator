@@ -21,6 +21,7 @@ import {
   healCheesePicksInPayload,
 } from "../cheesePickHeal";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
+import { replaceFreezerAlertProjection } from "../freezerAlertProjection";
 
 export const CHEESE_IMPORT_POISON_CLEANUP_REPAIR_ID = "cheese-import-poison-cleanup-v1";
 export const CHEESE_RECIPE_NAME_DEDUPE_REPAIR_ID = "cheese-recipe-name-dedupe-v1";
@@ -104,6 +105,7 @@ export const cheeseImportPoisonCleanupRepair = definition(
       if (!result.changed) continue;
       await tx.update(dailySyncTable).set({ data: result.data, updatedAt: new Date() })
         .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, row.scope)));
+      await replaceFreezerAlertProjection(tx, row.scope, row.date, result.data);
       healedRows++;
       clearedPicks += result.clearedPicks;
     }
@@ -308,6 +310,7 @@ export const aldoCheeseToleranceOzRepair = definition(
       }
       if (!changed) continue;
       await tx.update(dailySyncTable).set({ data }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+      await replaceFreezerAlertProjection(tx, day.scope, day.date, data);
       healedDays++;
     }
     return { healedSheets, healedProfiles, healedDays };

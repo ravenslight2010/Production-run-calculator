@@ -12,6 +12,7 @@ import { buildMasterDataPlan, planPendingReferences, masterHash, canonicalMaster
 import type { Scope } from "./requestScope";
 import { directoryFactFingerprint, restoreDirectoryFactValue, isFreshFenceDirectory, scopedDirectoryEvidence } from "./masterDataDirectoryFacts";
 import { assertMasterDataOperationActor } from "./masterDataOperationAuthorization";
+import { replaceFreezerAlertProjection } from "./freezerAlertProjection";
 
 type Row = Record<string, any>;
 const configs: Record<MasterDataEntity, { table: any; key: string }> = {
@@ -372,6 +373,7 @@ async function applyReferenceFacts(tx: MasterDataTransaction, scope: Scope, days
     const [written] = await tx.update(dailySyncTable).set({ data, canonicalRevision: sql`${dailySyncTable.canonicalRevision} + 1`, updatedAt: new Date() })
       .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, day.date))).returning();
     if (!written) throw new MasterDataOperationConflict();
+    await replaceFreezerAlertProjection(tx, scope, day.date, data);
     await appendSyncOutboxEvent(tx, { kind: "day-state", scope, date: day.date, canonicalRevision: written.canonicalRevision, senderId: "" });
   }
 }

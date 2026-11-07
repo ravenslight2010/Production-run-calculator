@@ -21,6 +21,7 @@ import {
   normalizeDoughballVariants,
 } from "@workspace/named-recipes";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
+import { replaceFreezerAlertProjection } from "../freezerAlertProjection";
 
 export const CRB_DOUGH_FAMILY_CONSOLIDATION_REPAIR_ID = "crb-dough-family-consolidation-v1";
 const CRB_FAMILY_CONSOLIDATION_FROM_DATE = "2026-08-22";
@@ -74,6 +75,7 @@ export const crbDoughFamilyConsolidationRepair: RepairDefinition<RepairTransacti
         if (!changed) continue;
         data.runValuesUpdatedAt = stamps;
         await tx.update(dailySyncTable).set({ data, updatedAt: new Date() }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+        await replaceFreezerAlertProjection(tx, day.scope, day.date, data);
         repointedDays++;
       }
       await tx.insert(specImportAliasesTable).values({ scope: "live", kind: "recipeName", externalName: duplicate.name, canonicalName: canonical.name, context: "dough" });
@@ -173,7 +175,9 @@ export const namedRecipeNameCleanupRepair: RepairDefinition<RepairTransaction> =
           if (sTo && sTo !== sauce) { vals.frontlineRecipeName = sTo; changed = true; }
         }
         if (!changed) continue;
-        await tx.update(dailySyncTable).set({ data: { ...data }, updatedAt: new Date() }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope))); repointedDays++;
+        await tx.update(dailySyncTable).set({ data: { ...data }, updatedAt: new Date() }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+        await replaceFreezerAlertProjection(tx, day.scope, day.date, data);
+        repointedDays++;
       }
     }
     return { renamedRows, repointedProfiles, repointedDays };

@@ -46,6 +46,8 @@ let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let freezerAlertRunProjectionTable: DbModule["freezerAlertRunProjectionTable"];
+let freezerAlertProjectionStatusTable: DbModule["freezerAlertProjectionStatusTable"];
 let productionRulesTable: DbModule["productionRulesTable"];
 let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
@@ -64,6 +66,7 @@ let savedSpecSheetsTable: DbModule["savedSpecSheetsTable"];
 
 let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
+let backfillFreezerAlertProjection: typeof import("../lib/freezerAlertProjection")["backfillFreezerAlertProjection"];
 let SANDBOX_USERNAME: string;
 let clearUserValidityCache: () => void;
 let clearSessionBoundaryCache: () => void;
@@ -124,6 +127,8 @@ beforeAll(async () => {
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
   dailySyncTable = dbMod.dailySyncTable;
+  freezerAlertRunProjectionTable = dbMod.freezerAlertRunProjectionTable;
+  freezerAlertProjectionStatusTable = dbMod.freezerAlertProjectionStatusTable;
   productionRulesTable = dbMod.productionRulesTable;
   inventoryItemsTable = dbMod.inventoryItemsTable;
   inventoryLotsTable = dbMod.inventoryLotsTable;
@@ -141,6 +146,7 @@ beforeAll(async () => {
   savedSpecSheetsTable = dbMod.savedSpecSheetsTable;
   seedRoles = rolesMod.seedRoles;
   seedSandboxUser = sandboxMod.seedSandboxUser;
+  backfillFreezerAlertProjection = (await import("../lib/freezerAlertProjection")).backfillFreezerAlertProjection;
   SANDBOX_USERNAME = sandboxMod.SANDBOX_USERNAME;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   clearSessionBoundaryCache = sessionBoundaryMod.clearSessionBoundaryCache;
@@ -213,7 +219,7 @@ beforeEach(async () => {
   // Wipe only the scoped DATA tables; the users / roles / role-catalog rows are
   // seeded once in beforeAll and must survive so the identity caches stay valid.
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${productionRulesTable}, ${brandProfilesTable}, ${mergedAwayTable}, ${dailySyncTable}, ${cheeseRecipesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${importAliasesTable}, ${specImportAliasesTable}, ${facilityKnowledgeTable}, ${savedSpecSheetsTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${productionRulesTable}, ${brandProfilesTable}, ${mergedAwayTable}, ${freezerAlertProjectionStatusTable}, ${freezerAlertRunProjectionTable}, ${dailySyncTable}, ${cheeseRecipesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${importAliasesTable}, ${specImportAliasesTable}, ${facilityKnowledgeTable}, ${savedSpecSheetsTable} RESTART IDENTITY CASCADE`,
   );
   // Clear after the disposable fixture is reset. This makes the first request
   // of every case read the boundary for the freshly truncated database rather
@@ -673,6 +679,15 @@ describe("POST /sandbox/reset re-copies live → sandbox", () => {
   it("wipes the sandbox's divergent edits and mirrors live, leaving live untouched", async () => {
     // Live is the source of truth.
     await putDayState(LIVE_MANAGER, { dayState: { runs: [], resetAt: 0, shiftNotes: "live-day" } });
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2000-01-01",
+      data: {
+        dayState: { date: "2000-01-01", runs: [{ id: "historical-freezer", startedAt: 10, endedAt: Date.now() - 60_000 }] },
+        runValues: { "historical-freezer": { freezerTime: 30 } },
+      },
+    });
+    await backfillFreezerAlertProjection("live");
     await createItem(LIVE_MANAGER, "live-item");
     await createRule(LIVE_MANAGER, "live-rule");
 
@@ -685,6 +700,12 @@ describe("POST /sandbox/reset re-copies live → sandbox", () => {
     // Reset (only the sandbox session may trigger it).
     const resetRes = await req(sandboxUserId, "POST", "/api/sandbox/reset");
     expect(resetRes.status).toBe(200);
+    expect(await db.select().from(freezerAlertRunProjectionTable)
+      .where(eq(freezerAlertRunProjectionTable.scope, "sandbox"))).toMatchObject([
+      { date: "2000-01-01", runId: "historical-freezer" },
+    ]);
+    expect(await db.select().from(freezerAlertProjectionStatusTable)
+      .where(eq(freezerAlertProjectionStatusTable.scope, "sandbox"))).toHaveLength(1);
 
     // The sandbox now mirrors live: divergent edits gone, live's rows copied in.
     const sandboxAfter = await getDayState(sandboxUserId) as Record<string, unknown>;

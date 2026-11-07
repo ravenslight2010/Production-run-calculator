@@ -15,6 +15,7 @@ import { sanitizeSpecAliases, type SpecImportAlias as SpecAliasEntry } from "@wo
 import { findFanTarget, healFanPoisonedValues, type DoughPoolRow } from "../brandFanHeal";
 import { BRAND_DRIFT_RENAMES, brandDriftTargetFor, planBrandAliasRepoints } from "../brandDriftHeal";
 import type { RepairDefinition, RepairResult, RepairTransaction } from "../repairRegistry";
+import { replaceFreezerAlertProjection } from "../freezerAlertProjection";
 
 type Values = Record<string, unknown>;
 const definition = (id: string, execute: (tx: RepairTransaction) => Promise<RepairResult>): RepairDefinition<RepairTransaction> =>
@@ -94,7 +95,11 @@ export const lowesNaturalPepNameRepair = definition(LOWES_NATURAL_PEP_NAME_REPAI
     const data = day.data as Values | null; if (!data || typeof data !== "object") continue; let changed = false;
     const list = healNaturalPepList(data.pepTypes); if (list) { data.pepTypes = list; changed = true; }
     for (const values of Object.values(data.runValues ?? {})) if (values && typeof values === "object" && healNaturalPepInValues(values as Values)) { (values as Values).valuesUpdatedAtMs = Math.max(Number((values as Values).valuesUpdatedAtMs ?? 0) + 1, Date.now()); changed = true; }
-    if (changed) { await tx.update(dailySyncTable).set({ data }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope))); healedDays++; }
+    if (changed) {
+      await tx.update(dailySyncTable).set({ data }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+      await replaceFreezerAlertProjection(tx, day.scope, day.date, data);
+      healedDays++;
+    }
   }
   return { healedSheets, healedProfiles, healedDays };
 });
@@ -127,7 +132,11 @@ export const brandFanDoughDepoisonRepair = definition(BRAND_FAN_DOUGH_DEPOISON_R
   const days = await tx.select().from(dailySyncTable).where(gte(dailySyncTable.date, "2026-07-23")).for("update");
   for (const day of days) { const data = (day.data ?? {}) as Values; const runs = Array.isArray((data.dayState as Values)?.runs) ? (data.dayState as Values).runs as Values[] : []; const runValues = data.runValues as Record<string, Values>; let changed = false;
     for (const run of runs) { const target = findFanTarget(String(run.brand ?? ""), String(run.flavor ?? "")); const id = String(run.id ?? ""); const values = target && runValues?.[id] && healFanPoisonedValues(runValues[id], target, pool.get(day.scope) ?? []); if (values) { values.valuesUpdatedAtMs = Math.max(Number(values.valuesUpdatedAtMs ?? 0) + 1, Date.now()); runValues[id] = values; changed = true; healedRuns++; } }
-    if (changed) { await tx.update(dailySyncTable).set({ data: { ...data } }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope))); healedDays++; } }
+    if (changed) {
+      await tx.update(dailySyncTable).set({ data: { ...data } }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+      await replaceFreezerAlertProjection(tx, day.scope, day.date, data);
+      healedDays++;
+    } }
   return { healedProfiles, healedDays, healedRuns };
 });
 
@@ -184,6 +193,7 @@ export const brandDuplicatePurgeRepair = definition(BRAND_DUPLICATE_PURGE_REPAIR
     const deduped = [...seen.values()].sort((a, b) => a.localeCompare(b));
     if (brands.length !== deduped.length) {
       await tx.update(dailySyncTable).set({ data: { ...data, brands: deduped } }).where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, row.scope)));
+      await replaceFreezerAlertProjection(tx, row.scope, row.date, { ...data, brands: deduped });
       healedRows++;
     }
   }
@@ -286,7 +296,9 @@ export const syncRowNameRegistryRestoreRepair = definition(SYNC_ROW_NAME_REGISTR
   for (const flavors of Object.values(brandFlavors)) flavors.sort((a, b) => a.localeCompare(b));
   const names = (rows: Array<{ name: string }>) => [...new Set(rows.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const result = { brands: [...brands].sort((a, b) => a.localeCompare(b)), cheeseRecipeNames: names(cheese), mixRecipeNames: names(mixes), doughRecipeNames: names(dough), frontlineRecipeNames: names(sauces) };
-  await tx.update(dailySyncTable).set({ data: { ...data, ...result, brandFlavors }, updatedAt: new Date() }).where(and(eq(dailySyncTable.date, today), eq(dailySyncTable.scope, "live")));
+  const nextData = { ...data, ...result, brandFlavors };
+  await tx.update(dailySyncTable).set({ data: nextData, updatedAt: new Date() }).where(and(eq(dailySyncTable.date, today), eq(dailySyncTable.scope, "live")));
+  await replaceFreezerAlertProjection(tx, "live", today, nextData);
   return { brands: result.brands.length, cheeseRecipeNames: result.cheeseRecipeNames.length, mixRecipeNames: result.mixRecipeNames.length, doughRecipeNames: result.doughRecipeNames.length, frontlineRecipeNames: result.frontlineRecipeNames.length };
 });
 
@@ -317,7 +329,10 @@ export const freshDeviceRunContaminationRepair = definition(FRESH_DEVICE_RUN_CON
     const removed = new Set(found.duplicateRunIds), runValues = { ...(isRecord(data.runValues) ? data.runValues : {}) }, runValuesUpdatedAt = { ...(isRecord(data.runValuesUpdatedAt) ? data.runValuesUpdatedAt : {}) }, deletedItems = { ...(isRecord(data.deletedItems) ? data.deletedItems : {}) }, deletedStamps = { ...(isRecord(data.deletedStamps) ? data.deletedStamps : {}) }, stamps = { ...(isRecord(deletedStamps.runs) ? deletedStamps.runs : {}) };
     for (const id of removed) { delete runValues[id]; delete runValuesUpdatedAt[id]; stamps[id.toLowerCase()] = Math.max(finite(stamps[id.toLowerCase()]) ?? 0, now) + 1; }
     deletedItems.runs = [...new Set([...(Array.isArray(deletedItems.runs) ? deletedItems.runs.filter((id): id is string => typeof id === "string") : []), ...found.duplicateRunIds.map((id) => id.toLowerCase())])]; deletedStamps.runs = stamps;
-    await tx.update(dailySyncTable).set({ data: { ...data, dayState: { ...data.dayState, runs: data.dayState.runs.filter((run) => !isRecord(run) || typeof run.id !== "string" || !removed.has(run.id)) }, runValues, runValuesUpdatedAt, deletedItems, deletedStamps }, updatedAt: new Date() }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope))); healedDays++; removedRuns += found.duplicateRunIds.length;
+    const nextData = { ...data, dayState: { ...data.dayState, runs: data.dayState.runs.filter((run) => !isRecord(run) || typeof run.id !== "string" || !removed.has(run.id)) }, runValues, runValuesUpdatedAt, deletedItems, deletedStamps };
+    await tx.update(dailySyncTable).set({ data: nextData, updatedAt: new Date() }).where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+    await replaceFreezerAlertProjection(tx, day.scope, day.date, nextData);
+    healedDays++; removedRuns += found.duplicateRunIds.length;
   }
   return { scannedDays: days.length, healedDays, removedRuns, ambiguousCandidates };
 });

@@ -20,6 +20,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let freezerAlertRunProjectionTable: DbModule["freezerAlertRunProjectionTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
@@ -69,6 +70,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
+  freezerAlertRunProjectionTable = dbMod.freezerAlertRunProjectionTable;
   dataResetTable = dbMod.dataResetTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
@@ -263,6 +265,16 @@ describe("POST /sync/reset", () => {
   });
 
   it("clears every daily_sync row for the scope and bumps the epoch", async () => {
+    await db.insert(freezerAlertRunProjectionTable).values({
+      scope: "live",
+      date: "2030-03-10",
+      runId: "reset-projection",
+      startedAt: null,
+      endedAt: 1_900_000_000_000,
+      freezerTime: 30,
+      dueAt: 1_900_001_800_000,
+      isActive: false,
+    });
     await db.insert(qcWorkflowEventsTable).values([
       {
         scope: "live", operationId: "reset-retention-live", recordId: "live-qc-record",
@@ -343,6 +355,7 @@ describe("POST /sync/reset", () => {
 
     const rows = await db.select().from(dailySyncTable);
     expect(rows).toHaveLength(0);
+    expect(await db.select().from(freezerAlertRunProjectionTable)).toEqual([]);
 
     const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(OPERATOR) });
     expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1, rollover: false });
@@ -404,6 +417,16 @@ describe("POST /sync/purge-all — full factory purge", () => {
 
   it("wipes day-state AND master data, bumps epoch, keeps accounts", async () => {
     const dbMod = await seedMasterData();
+    await db.insert(freezerAlertRunProjectionTable).values({
+      scope: "live",
+      date: "2030-03-10",
+      runId: "purge-projection",
+      startedAt: null,
+      endedAt: 1_900_000_000_000,
+      freezerTime: 30,
+      dueAt: 1_900_001_800_000,
+      isActive: false,
+    });
     await db.insert(dataResetTable).values({ scope: "live", epoch: 4, resetAt: new Date() });
     await db.insert(dbMod.operationalIntentLedgerTable).values({
       scope: "live",
@@ -419,6 +442,7 @@ describe("POST /sync/purge-all — full factory purge", () => {
     expect((await res.json()) as { ok: boolean; epoch: number }).toEqual({ ok: true, epoch: 5 });
 
     expect(await db.select().from(dailySyncTable)).toHaveLength(0);
+    expect(await db.select().from(freezerAlertRunProjectionTable)).toEqual([]);
     expect(await db.select().from(dbMod.operationalIntentLedgerTable)).toHaveLength(0);
     expect(await db.select().from(dbMod.cheeseRecipesTable)).toHaveLength(0);
     expect(await db.select().from(dbMod.mixesTable)).toHaveLength(0);

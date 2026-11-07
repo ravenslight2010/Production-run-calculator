@@ -1,6 +1,7 @@
 import { and, eq, gte } from "drizzle-orm";
 import { dailySyncTable, doughRecipesTable } from "@workspace/db";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
+import { replaceFreezerAlertProjection } from "../freezerAlertProjection";
 
 export const DOUGH_MERGE_VANISH_RESTORE_REPAIR_ID = "dough-merge-vanish-restore-v1";
 const DOUGH_MERGE_VANISH_FROM_DATE = "2026-07-18";
@@ -120,6 +121,7 @@ export const doughMergeVanishRestoreRepair: RepairDefinition<RepairTransaction> 
             eq(dailySyncTable.scope, day.scope),
           ),
         );
+      await replaceFreezerAlertProjection(tx, day.scope, day.date, data);
       repointedDays++;
     }
 
