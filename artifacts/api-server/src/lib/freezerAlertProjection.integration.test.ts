@@ -229,6 +229,53 @@ describe("freezer alert run projection", () => {
       .toEqual(["2031-01-16"]);
   });
 
+  it("does not mark a scope complete when persisted projection parity fails", async () => {
+    const date = "2031-01-19";
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date,
+      data: snapshot("omit-projection", NOW - 60_000, 1),
+    });
+    await db.insert(freezerAlertProjectionStatusTable).values({
+      scope: "live",
+      completedAt: new Date(),
+    });
+    await db.execute(sql.raw(`
+      CREATE FUNCTION omit_freezer_projection_test_row()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        IF NEW.run_id = 'omit-projection' THEN
+          RETURN NULL;
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+    `));
+    await db.execute(sql.raw(`
+      CREATE TRIGGER omit_freezer_projection_test_row
+      BEFORE INSERT ON freezer_alert_run_projection
+      FOR EACH ROW
+      EXECUTE FUNCTION omit_freezer_projection_test_row()
+    `));
+
+    try {
+      await expect(backfillFreezerAlertProjection("live"))
+        .rejects.toThrow("Freezer alert projection parity check failed");
+      expect(await db.select().from(freezerAlertProjectionStatusTable)).toHaveLength(0);
+      expect(await db.select().from(freezerAlertRunProjectionTable)).toHaveLength(0);
+    } finally {
+      await db.execute(sql.raw(`
+        DROP TRIGGER IF EXISTS omit_freezer_projection_test_row
+        ON freezer_alert_run_projection
+      `));
+      await db.execute(sql.raw(`
+        DROP FUNCTION IF EXISTS omit_freezer_projection_test_row()
+      `));
+    }
+  });
+
   it("replaces changed run generations and removes stale milestones transactionally", async () => {
     const date = "2031-01-19";
     const original = snapshot("reused-run", NOW - 60_000, 1, NOW - 120_000);

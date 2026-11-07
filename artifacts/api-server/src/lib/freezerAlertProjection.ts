@@ -4,9 +4,10 @@ import {
   freezerAlertProjectionStatusTable,
   freezerAlertRunProjectionTable,
 } from "@workspace/db";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, notExists, sql } from "drizzle-orm";
 
 type ProjectionTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+const BACKFILL_PAGE_SIZE = 100;
 
 const MAX_FREEZER_PROJECTION_AUDIT_DATES = 100;
 const MAX_FREEZER_PROJECTION_AUDIT_FINDINGS = 100;
@@ -232,35 +233,134 @@ export async function hasCompleteFreezerAlertProjection(scope: string): Promise<
   return !!row;
 }
 
+function sortedProjectionRows(
+  rows: ReturnType<typeof projectionRows>,
+): ReturnType<typeof projectionRows> {
+  return [...rows].sort((left, right) => left.runId.localeCompare(right.runId));
+}
+
+async function verifyFreezerAlertProjectionParity(scope: string): Promise<void> {
+  let cursor: string | undefined;
+  while (true) {
+    const days = await db.select({
+      date: dailySyncTable.date,
+      data: dailySyncTable.data,
+    }).from(dailySyncTable)
+      .where(cursor === undefined
+        ? eq(dailySyncTable.scope, scope)
+        : and(eq(dailySyncTable.scope, scope), gt(dailySyncTable.date, cursor)))
+      .orderBy(asc(dailySyncTable.date))
+      .limit(BACKFILL_PAGE_SIZE);
+    if (!days.length) break;
+
+    const dates = days.map((day) => day.date);
+    const actualRows = await db.select({
+      scope: freezerAlertRunProjectionTable.scope,
+      date: freezerAlertRunProjectionTable.date,
+      runId: freezerAlertRunProjectionTable.runId,
+      startedAt: freezerAlertRunProjectionTable.startedAt,
+      endedAt: freezerAlertRunProjectionTable.endedAt,
+      freezerTime: freezerAlertRunProjectionTable.freezerTime,
+      dueAt: freezerAlertRunProjectionTable.dueAt,
+      isActive: freezerAlertRunProjectionTable.isActive,
+    }).from(freezerAlertRunProjectionTable)
+      .where(and(
+        eq(freezerAlertRunProjectionTable.scope, scope),
+        inArray(freezerAlertRunProjectionTable.date, dates),
+      ))
+      .orderBy(
+        asc(freezerAlertRunProjectionTable.date),
+        asc(freezerAlertRunProjectionTable.runId),
+      );
+    const actualByDate = new Map<string, typeof actualRows>();
+    for (const row of actualRows) {
+      const rows = actualByDate.get(row.date) ?? [];
+      rows.push(row);
+      actualByDate.set(row.date, rows);
+    }
+
+    for (const day of days) {
+      const expected = sortedProjectionRows(projectionRows(scope, day.date, day.data));
+      const actual = actualByDate.get(day.date) ?? [];
+      if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+        throw new Error(
+          `Freezer alert projection parity check failed for scope ${scope} on ${day.date}.`,
+        );
+      }
+    }
+
+    cursor = days[days.length - 1]!.date;
+  }
+
+  const [orphanedProjection] = await db.select({
+    date: freezerAlertRunProjectionTable.date,
+  }).from(freezerAlertRunProjectionTable)
+    .where(and(
+      eq(freezerAlertRunProjectionTable.scope, scope),
+      notExists(
+        db.select({ one: sql`1` }).from(dailySyncTable)
+          .where(and(
+            eq(dailySyncTable.scope, scope),
+            eq(dailySyncTable.date, freezerAlertRunProjectionTable.date),
+          )),
+      ),
+    ))
+    .limit(1);
+
+  if (orphanedProjection) {
+    throw new Error(
+      `Freezer alert projection parity check found an orphaned date for scope ${scope}.`,
+    );
+  }
+}
+
 /**
  * Backfill existing scoped snapshots in bounded per-day transactions.
+ * Completion is marked only after persisted rows match every canonical
+ * snapshot and no projection rows exist without a corresponding snapshot.
  * This is intentionally explicit; it is not called at application startup.
  */
 export async function backfillFreezerAlertProjection(scope: string): Promise<{
   examinedDays: number;
   projectedRuns: number;
 }> {
-  const days = await db.select({ date: dailySyncTable.date })
-    .from(dailySyncTable)
-    .where(eq(dailySyncTable.scope, scope))
-    .orderBy(asc(dailySyncTable.date));
+  // Keep scheduled reads on the safe JSONB path if a rerun fails partway.
+  await db.delete(freezerAlertProjectionStatusTable)
+    .where(eq(freezerAlertProjectionStatusTable.scope, scope));
+
   let examinedDays = 0;
   let projectedRuns = 0;
+  let cursor: string | undefined;
 
-  for (const { date } of days) {
-    const count = await db.transaction(async (tx) => {
-      const [row] = await tx.select({ data: dailySyncTable.data })
-        .from(dailySyncTable)
-        .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date)))
-        .for("update");
-      if (!row) return 0;
-      await replaceFreezerAlertProjection(tx, scope, date, row.data);
-      return projectionRows(scope, date, row.data).length;
-    });
-    examinedDays++;
-    projectedRuns += count;
+  while (true) {
+    const days = await db.select({ date: dailySyncTable.date })
+      .from(dailySyncTable)
+      .where(cursor === undefined
+        ? eq(dailySyncTable.scope, scope)
+        : and(eq(dailySyncTable.scope, scope), gt(dailySyncTable.date, cursor)))
+      .orderBy(asc(dailySyncTable.date))
+      .limit(BACKFILL_PAGE_SIZE);
+    if (!days.length) break;
+
+    for (const { date } of days) {
+      const count = await db.transaction(async (tx) => {
+        const [row] = await tx.select({ data: dailySyncTable.data })
+          .from(dailySyncTable)
+          .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date)))
+          .for("update");
+        if (!row) return null;
+        await replaceFreezerAlertProjection(tx, scope, date, row.data);
+        return projectionRows(scope, date, row.data).length;
+      });
+      if (count === null) continue;
+      examinedDays++;
+      projectedRuns += count;
+    }
+
+    cursor = days[days.length - 1]!.date;
   }
 
+  await verifyFreezerAlertProjectionParity(scope);
   await db.insert(freezerAlertProjectionStatusTable)
     .values({ scope, completedAt: new Date() })
     .onConflictDoUpdate({
