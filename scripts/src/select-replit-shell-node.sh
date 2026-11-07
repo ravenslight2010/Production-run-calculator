@@ -186,6 +186,8 @@ select_replit_shell_node() {
       fi
 
       guarded_node_options="${NODE_OPTIONS:+${NODE_OPTIONS} }--require=\"${repo_root}/scripts/src/release-node-https-only.cjs\""
+      # The inner shell expands RELEASE_NODE_VERSION after npm provides Node.
+      # shellcheck disable=SC2016
       if ! (
         cd "$cache_root" &&
           env \

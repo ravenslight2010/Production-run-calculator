@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   checkDeclaredRuntimeInputs,
+  checkFrozenWorkflowInstalls,
   checkNodeCompatibilityWorkflow,
   checkRepositoryNodeVersionContract,
   checkRoutineNodeVersion,
@@ -65,6 +66,7 @@ test("reads the required version without changing retained evidence", () => {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
 
 test("reads the canonical current evaluation manifest version", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
@@ -552,4 +554,23 @@ test("discovers all GitHub workflows except the deliberate compatibility matrix"
         path.basename(workflowPath) !== "node-compatibility-advisory.yml",
     ),
   );
+});
+
+test("requires frozen pnpm installs throughout GitHub workflows", () => {
+  assert.doesNotThrow(() => checkFrozenWorkflowInstalls());
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "workflow-lockfile-"));
+  const workflowPath = path.join(directory, "install.yml");
+  fs.writeFileSync(
+    workflowPath,
+    ["steps:", "  - run: pnpm install", ""].join("\n"),
+  );
+  try {
+    assert.throws(
+      () => checkFrozenWorkflowInstalls([workflowPath]),
+      /CI dependency installs must use the committed pnpm lockfile/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

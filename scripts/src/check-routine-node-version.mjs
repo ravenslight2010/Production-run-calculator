@@ -139,17 +139,25 @@ export function readNodeSelectorVersion(selectorPath = NODE_SELECTOR_PATH) {
   return selectorVersion;
 }
 
-export function discoverCiWorkflowPaths(workflowDirectory = CI_WORKFLOW_DIRECTORY) {
+export function discoverAllCiWorkflowPaths(
+  workflowDirectory = CI_WORKFLOW_DIRECTORY,
+) {
   return fs
     .readdirSync(workflowDirectory, { withFileTypes: true })
     .filter(
       (entry) =>
-        entry.isFile() &&
-        /\.(?:yml|yaml)$/i.test(entry.name) &&
-        entry.name !== path.basename(NODE_COMPATIBILITY_WORKFLOW_PATH),
+        entry.isFile() && /\.(?:yml|yaml)$/i.test(entry.name),
     )
     .map((entry) => path.join(workflowDirectory, entry.name))
     .sort();
+}
+
+export function discoverCiWorkflowPaths(workflowDirectory = CI_WORKFLOW_DIRECTORY) {
+  return discoverAllCiWorkflowPaths(workflowDirectory).filter(
+    (workflowPath) =>
+      path.basename(workflowPath) !==
+      path.basename(NODE_COMPATIBILITY_WORKFLOW_PATH),
+  );
 }
 
 export function readCiNodeVersions(
@@ -158,7 +166,7 @@ export function readCiNodeVersions(
 ) {
   const workflow = fs.readFileSync(ciWorkflowPath, "utf8");
   const setupNodeSteps = [
-    ...workflow.matchAll(/^\s*-\s+uses:\s*actions\/setup-node@/gm),
+    ...workflow.matchAll(/^\s*(?:-\s+)?uses:\s*actions\/setup-node@/gm),
   ].length;
   const versionFiles = [
     ...workflow.matchAll(
@@ -203,7 +211,11 @@ export function readAllCiNodeVersions(
 
   return ciWorkflowPaths.flatMap((ciWorkflowPath) => {
     const workflow = fs.readFileSync(ciWorkflowPath, "utf8");
-    if (!/^\s*-\s+uses:\s*actions\/setup-node@/m.test(workflow)) return [];
+    if (
+      !/^\s*(?:-\s+)?uses:\s*actions\/setup-node@/m.test(workflow)
+    ) {
+      return [];
+    }
     return readCiNodeVersions(ciWorkflowPath, selectorVersion);
   });
 }
@@ -333,6 +345,33 @@ export function checkDeclaredRuntimeInputs({
   return { nodeVersion, pythonVersion: pythonModule, nixChannel };
 }
 
+export function checkFrozenWorkflowInstalls(
+  ciWorkflowPaths = discoverAllCiWorkflowPaths(),
+) {
+  const unfrozenInstallLines = [];
+  for (const workflowPath of ciWorkflowPaths) {
+    const lines = fs.readFileSync(workflowPath, "utf8").split(/\r?\n/);
+    lines.forEach((line, index) => {
+      if (/^\s*#/.test(line)) return;
+      const install = /\bpnpm\s+install\b(.*)$/.exec(line);
+      if (install && !/\s--frozen-lockfile(?:\s|$)/.test(install[1])) {
+        unfrozenInstallLines.push(`${workflowPath}:${index + 1}`);
+      }
+    });
+  }
+
+  if (unfrozenInstallLines.length > 0) {
+    throw new Error(
+      [
+        "CI dependency installs must use the committed pnpm lockfile.",
+        `Unfrozen installs: ${unfrozenInstallLines.join(", ")}`,
+        "Use pnpm install --frozen-lockfile so workspace changes cannot silently resolve new packages.",
+      ].join("\n"),
+    );
+  }
+  return true;
+}
+
 export function checkRepositoryNodeVersionContract({
   currentVersion,
   selectorVersion,
@@ -397,6 +436,7 @@ export function main() {
     pyproject: fs.readFileSync(PYPROJECT_PATH, "utf8"),
     dockerfile: fs.readFileSync(DOCKERFILE_PATH, "utf8"),
   });
+  checkFrozenWorkflowInstalls();
   checkRoutineNodeVersion({
     actualVersion: process.versions.node,
     requiredVersion: currentVersion,

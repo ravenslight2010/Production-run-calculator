@@ -490,8 +490,11 @@ set -euo pipefail
   printf 'npm registry was not HTTPS\\n' >&2
   exit 92
 }
-[[ "\${npm_config_userconfig:-}" == "/dev/null" &&
-  "\${npm_config_globalconfig:-}" == "/dev/null" ]] || {
+[[ "\${npm_config_userconfig:-}" == "$(dirname "$REPL_HOME")/node-cache/npm-user.npmrc" &&
+   "\${npm_config_globalconfig:-}" == "$(dirname "$REPL_HOME")/node-cache/npm-global.npmrc" &&
+   "\${npm_config_userconfig:-}" != "\${npm_config_globalconfig:-}" &&
+   -f "\${npm_config_userconfig:-}" && -f "\${npm_config_globalconfig:-}" &&
+   ! -L "\${npm_config_userconfig:-}" && ! -L "\${npm_config_globalconfig:-}" ]] || {
   printf 'npm config was not isolated\\n' >&2
   exit 93
 }

@@ -44,3 +44,9 @@ The runtime pin check should compare the selector and CI pins with the canonical
 **Why:** Historical reports describe the runtime used at capture time. Treating those records as current pins makes safe runtime updates impossible without rewriting or misrepresenting prior evidence.
 
 **How to apply:** Update and regenerate only the canonical current manifest under the selected exact Node version. Keep dated reports byte-for-byte intact and continue validating each manifest's structure and provenance independently.
+
+The project owner selected Node `24.22.2` as the authoritative runtime. Replit's major-version Node module is only a bootstrap; all project entry points must select the exact `.nvmrc` version. Keep pnpm's exact version aligned between the root `packageManager` field and the lockfile, and keep dependency installation frozen.
+
+**Why:** The workspace has repeatedly encountered patch-level Node mismatches, including when the Replit-provided Node 24 patch differed from the project's chosen version.
+
+**How to apply:** Before changing Node, pnpm, Nix, Python, or container inputs, update the canonical declaration and verify the runtime parity contract. Do not bulk-upgrade packages to address a runtime mismatch; add external Python dependencies only with a corresponding lockfile and frozen installation path.
