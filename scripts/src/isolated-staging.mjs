@@ -16,8 +16,14 @@ import { seed, auditInventory } from "./staging/inventory-audit.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const mode = process.argv[2] ?? "check";
-assert(["check", "serve"].includes(mode) && process.argv.length <= 3,
-  "Usage: node scripts/src/isolated-staging.mjs [check|serve]; target overrides are forbidden.");
+assert(["check", "serve", "measure"].includes(mode) && process.argv.length <= 3,
+  "Usage: node scripts/src/isolated-staging.mjs [check|serve|measure]; target overrides are forbidden.");
+const requestedBackgroundProfile = process.env.ISOLATED_STAGING_BACKGROUND_PROFILE;
+assert(mode === "measure" || requestedBackgroundProfile === undefined,
+  "Background profiles are accepted only by the measure mode.");
+const backgroundProfile = mode === "measure" ? (requestedBackgroundProfile ?? "quiet") : "quiet";
+assert(["quiet", "full"].includes(backgroundProfile),
+  "ISOLATED_STAGING_BACKGROUND_PROFILE must be quiet or full.");
 assert(!process.env.REPLIT_DEPLOYMENT_ID && !/^(1|true|yes)$/i.test(process.env.REPLIT_DEPLOYMENT ?? ""),
   "Refusing to run inside a published deployment.");
 const env = stageEnvironment(process.env);
@@ -35,6 +41,10 @@ const report = { schemaVersion: 1, target: "isolated-local-staging", runId,
   startedAt: new Date().toISOString(), status: "NOT REACHED", results: [],
   publishedProduction: "NOT REACHED: independent published-target acceptance remains unverified.",
   verificationScope: "Real local API/database; not browser offline, physical device, or published runtime proof." };
+if (mode === "measure") {
+  report.backgroundProfile = backgroundProfile;
+  report.verificationScope = "Synthetic local API/database load comparison; not browser offline, physical device, or published runtime proof.";
+}
 const reportPath = path.join(parent, "reports", `${runId}.json`);
 const saveReport = () => writeRecord(reportPath, report);
 let app;
@@ -160,7 +170,9 @@ async function startApp() {
     path.join(directory, "api/index.mjs")], { cwd: directory, detached: true,
     env: { ...env, NODE_ENV: "production", APP_ENV: "isolated-staging",
       PORT: String(record.appPort), DATABASE_URL: record.databaseUrl, PGAPPNAME: `stage-${runId}`,
-      DATABASE_POOL_MAX: "8", DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS: "1",
+      DATABASE_POOL_MAX: "8",
+      ...(backgroundProfile === "quiet" ? { DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS: "1" } : {}),
+      ...(mode === "measure" ? { ENABLE_BACKGROUND_CAPACITY_TELEMETRY: "1" } : {}),
       STAGING_RUN_ID: runId, SESSION_SECRET: credentials.sessionSecret,
       STAFF_SIGNUP_CODE: credentials.staffCode,
       INITIAL_MANAGER_USERNAME: credentials.manager.username, INITIAL_MANAGER_ACCESS_CODE: credentials.managerCode },
@@ -192,6 +204,8 @@ async function startApp() {
 }
 const stage = {
   credentials: null, query, preflight,
+  get appPid() { return app?.pid; },
+  get appUrl() { return record.appUrl; },
   record(check, role, status) {
     report.results.push({ check, role, status });
     saveReport();
@@ -303,6 +317,12 @@ try {
   await reset();
   report.auditStatus = "PASS";
   saveReport();
+  if (mode === "measure") {
+    phase = "background-load-measurement";
+    const { measureBackgroundLoad } = await import("./staging/background-load-measurement.mjs");
+    report.backgroundLoad = await measureBackgroundLoad(stage, backgroundProfile);
+    stage.record("synthetic-background-load-measurement", "stage-runner", "PASS");
+  }
   if (mode === "serve") {
     console.log(`Isolated staging ready at ${record.appUrl}`);
     console.log(`Stage-only access file: ${path.relative(root, directory)}/access.json (private; do not paste into chat).`);

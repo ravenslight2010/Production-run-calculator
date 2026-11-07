@@ -22,6 +22,7 @@ import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention
 import { startIdentitySequenceHealthScheduler } from "./lib/identitySequenceHealth";
 import { db, pool } from "@workspace/db";
 import { startDatabaseCapacityCollection } from "./lib/databaseCapacity";
+import { shouldEnableBackgroundCapacityTelemetry } from "./lib/backgroundSchedulerSettings";
 import {
   installPoolTelemetry,
   reportCapacityTelemetry,
@@ -239,7 +240,8 @@ async function initializeStartup(startedAt: number): Promise<void> {
   // polling workers from the disposable fixture so they cannot starve the
   // request pool during the long serialized suite.
   startAutoTrackServerTicks();
-  if (process.env.DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS !== "1") {
+  const auxiliarySchedulersDisabled = process.env.DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS === "1";
+  if (shouldEnableBackgroundCapacityTelemetry(process.env)) {
     stopDatabaseCapacityCollection = startDatabaseCapacityCollection(pool, logger, getBuildInfo).stop;
     // Surface database-checkout and server-delay signals in the live logs.
     // installPoolTelemetry wraps pool.connect so every checkout records its
@@ -255,6 +257,8 @@ async function initializeStartup(startedAt: number): Promise<void> {
     }, 60_000);
     capacityTelemetryTimer.unref();
     stopCapacityTelemetryHeartbeat = () => clearInterval(capacityTelemetryTimer);
+  }
+  if (!auxiliarySchedulersDisabled) {
     stopDailyRolloverScheduler = startDailyRolloverScheduler(
       sandboxAllowed() ? ["live", "sandbox"] : ["live"],
     ).stop;
@@ -286,8 +290,8 @@ async function initializeStartup(startedAt: number): Promise<void> {
     stopIdentitySequenceHealthScheduler = startIdentitySequenceHealthScheduler().stop;
   } else {
     logger.info(
-      { event: "background_auxiliary_schedulers", outcome: "disabled", reason: "managed_browser_fixture" },
-      "Auxiliary background schedulers disabled for managed browser fixture",
+      { event: "background_auxiliary_schedulers", outcome: "disabled", reason: "environment" },
+      "Auxiliary background schedulers disabled by environment",
     );
   }
 
@@ -299,27 +303,29 @@ async function initializeStartup(startedAt: number): Promise<void> {
     });
   }
 
-  // Optional read-only health snapshots never hold readiness hostage.
-  const intervalMs = Math.max(60_000, Number(process.env.MASTER_DATA_HEALTH_SCAN_INTERVAL_MS ?? 6 * 60 * 60 * 1000));
-  const startupDelayMs = Math.max(1_000, Number(process.env.MASTER_DATA_HEALTH_STARTUP_DELAY_MS ?? 10_000));
-  const scanScopes = sandboxAllowed() ? ["live", "sandbox"] : ["live"];
-  const scan = () => Promise.all(scanScopes.map(async (scope) => {
-    try {
-      const report = await runMasterDataHealthScan(scope, { maxAgeMs: intervalMs });
-      logger.info({
-        event: "master_data_health_scan",
-        environment: report.environment,
-        outcome: "success",
-        safeCounts: { findings: report.findings.length, errors: report.summary.error, warnings: report.summary.warning },
-      }, "master-data health scan completed");
-    } catch {
-      logger.error({ scope, outcome: "degraded", errorCode: "master_data_health_scan_failed" }, "Optional background task failed");
-    }
-  }));
-  const startupTimer = setTimeout(() => { void scan(); }, startupDelayMs);
-  startupTimer.unref();
-  const timer = setInterval(() => { void scan(); }, intervalMs);
-  timer.unref();
+  if (!auxiliarySchedulersDisabled) {
+    // Optional read-only health snapshots never hold readiness hostage.
+    const intervalMs = Math.max(60_000, Number(process.env.MASTER_DATA_HEALTH_SCAN_INTERVAL_MS ?? 6 * 60 * 60 * 1000));
+    const startupDelayMs = Math.max(1_000, Number(process.env.MASTER_DATA_HEALTH_STARTUP_DELAY_MS ?? 10_000));
+    const scanScopes = sandboxAllowed() ? ["live", "sandbox"] : ["live"];
+    const scan = () => Promise.all(scanScopes.map(async (scope) => {
+      try {
+        const report = await runMasterDataHealthScan(scope, { maxAgeMs: intervalMs });
+        logger.info({
+          event: "master_data_health_scan",
+          environment: report.environment,
+          outcome: "success",
+          safeCounts: { findings: report.findings.length, errors: report.summary.error, warnings: report.summary.warning },
+        }, "master-data health scan completed");
+      } catch {
+        logger.error({ scope, outcome: "degraded", errorCode: "master_data_health_scan_failed" }, "Optional background task failed");
+      }
+    }));
+    const startupTimer = setTimeout(() => { void scan(); }, startupDelayMs);
+    startupTimer.unref();
+    const timer = setInterval(() => { void scan(); }, intervalMs);
+    timer.unref();
+  }
 }
 // Schema changes are exclusively owned by the matching one-shot migration
 // image (or Render's pre-deploy command). In particular, a long-lived runtime

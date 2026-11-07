@@ -38,6 +38,24 @@ further audits. Enter `r` to reset; Ctrl-C stops it and deletes its fixtures,
 credentials, app process and cluster. The same command recreates a fresh sandbox.
 No fixture survives the runner's normal exit. Do not force-kill the runner.
 
+For a bounded background-load comparison, run these sequentially:
+
+```sh
+ISOLATED_STAGING_BACKGROUND_PROFILE=quiet node scripts/src/isolated-staging.mjs measure
+ISOLATED_STAGING_BACKGROUND_PROFILE=full node scripts/src/isolated-staging.mjs measure
+```
+
+Each run creates a fresh disposable database and measures a 60-second no-run
+window and a synthetic active-run window, followed by eight `/sync/today`
+recovery reads per scenario. The `quiet` profile disables optional scheduled
+jobs, while keeping auto-track, outbox delivery, capacity telemetry, readiness
+and error logging active. The `full` profile leaves those scheduled jobs on.
+Reports include bounded database activity, API-process CPU/RSS samples and sync
+request latency. Compare runs only when their source fingerprints match, and
+run them sequentially to reduce host-load interference. This is a local
+synthetic measurement, not proof of physical-device wake behavior, published
+service capacity or production impact.
+
 For automation, send SIGTERM **only to the printed runner PID**, not to its
 entire process tree. Some job-stop tools forcibly kill all descendants without
 allowing cleanup. If this happens, use:
@@ -91,6 +109,8 @@ HEAD is context only when `gitBinding` is unavailable: the content fingerprint
 identifies uncommitted source precisely. Credentials are deleted during cleanup;
 successful runs also delete private logs. Failed-run logs are retained privately
 for diagnosis and must not be shared without review. Reports contain neither.
+Measurement-mode reports also contain synthetic activity and request summaries,
+never API payloads or application records.
 
 The audit checks five manager-only denials with unchanged inventory-table
 digests, invalid-session and invalid-input no-write paths, a manager adjustment
