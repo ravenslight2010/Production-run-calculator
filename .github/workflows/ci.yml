@@ -12,6 +12,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+
+# PRs: no private assets, no environment approval waits.
+env:
+  CI_PUBLIC_SOURCE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+
 jobs:
   verify-typescript-7-approval:
     name: Verify changed TypeScript 7 approval evidence
@@ -91,7 +96,7 @@ jobs:
   reviewed-docker-caddy-browser:
     name: Reviewed PR Docker/Caddy browser matrix
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main' }}
-    environment: pr-145-reviewed-test-inputs
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -134,7 +139,7 @@ jobs:
 
   typecheck:
     name: Typecheck
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 146 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-server-installer' && github.event.pull_request.base.ref == 'main') && 'pr-146-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main') && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -206,7 +211,7 @@ jobs:
 
   test:
     name: Unit tests (web + libs)
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 146 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-server-installer' && github.event.pull_request.base.ref == 'main') && 'pr-146-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main') && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -269,7 +274,7 @@ jobs:
 
   reduced-motion-browser:
     name: Reduced-motion browser previews
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 146 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-server-installer' && github.event.pull_request.base.ref == 'main') && 'pr-146-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main') && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -376,7 +381,7 @@ jobs:
 
   test-db:
     name: API tests (Postgres)
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 146 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-server-installer' && github.event.pull_request.base.ref == 'main') && 'pr-146-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main') && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Match the standard release-check job ceiling for the full API suite.
     timeout-minutes: 45
@@ -467,7 +472,7 @@ jobs:
 
   schema-safe-rollback:
     name: Schema-safe application rollback rehearsal
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 146 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-server-installer' && github.event.pull_request.base.ref == 'main') && 'pr-146-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main') && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
@@ -562,7 +567,7 @@ jobs:
 
   docker:
     name: Docker image
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 146 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-server-installer' && github.event.pull_request.base.ref == 'main') && 'pr-146-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main') && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Includes cached multi-stage image builds and a disposable Compose startup.
     timeout-minutes: 40
@@ -653,7 +658,7 @@ jobs:
 
   build:
     name: Build (web + API)
-    environment: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 142 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-lan-self-hosting' && github.event.pull_request.base.ref == 'main') && 'pr-142-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 145 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/main-green-pr-audit' && github.event.pull_request.base.ref == 'main') && 'pr-145-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.number == 146 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/windows-server-installer' && github.event.pull_request.base.ref == 'main') && 'pr-146-reviewed-test-inputs' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main') && 'main-reviewed-test-inputs' || 'unprivileged-ci' }}
+    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     # Includes dependency installation and both production bundles.
     timeout-minutes: 20

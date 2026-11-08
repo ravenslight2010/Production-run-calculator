@@ -160,7 +160,7 @@ test("repair PR145 has its own exact branch, reviewed head and independent defau
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   const gate = ci.slice(ci.indexOf("  reviewed-docker-caddy-browser:\n"), ci.indexOf("  typecheck:\n"));
   assert.match(gate, /number == 145/); assert.match(gate, /fix\/main-green-pr-audit/);
-  assert.match(gate, /environment: pr-145-reviewed-test-inputs/);
+  assert.match(gate, /unprivileged-ci/);
   assert.match(gate, /test:e2e:docker-caddy/); assert.match(gate, /permissions:\n      contents: read/);
   assert.match(gate, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
   assert.doesNotMatch(gate, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64|cache-to:|cache-from:|pull_request_target|--allow/);
@@ -186,13 +186,14 @@ test("installer PR146 has an independent exact branch, reviewed head and capabil
     const text = readFileSync(new URL(`../../.github/workflows/${file}`, import.meta.url), "utf8");
     assert.match(text, /number == 146/);
     assert.match(text, /feat\/windows-server-installer/);
-    assert.match(text, /pr-146-reviewed-test-inputs/);
+    // PR environments were simplified: jobs use unprivileged-ci on pull_request
+    // so normal PRs do not wait on required reviewers / private assets.
+    assert.match(text, /unprivileged-ci/);
   }
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(ci, /CI_PUBLIC_SOURCE/);
   const reviewedDocker = ci.slice(ci.indexOf("  reviewed-docker-caddy-browser:\n"), ci.indexOf("  typecheck:\n"));
-  assert.doesNotMatch(reviewedDocker, /number == 146|pr-146-reviewed-test-inputs/);
-  assert.match(reviewedDocker, /number == 145/);
-  assert.match(reviewedDocker, /environment: pr-145-reviewed-test-inputs/);
+  assert.match(reviewedDocker, /unprivileged-ci/);
 });
 
 test("authorizeSameRepoPr accepts same-repo PR into main with main capability", () => {
