@@ -1,6 +1,6 @@
 # Local Coding Assistant for Production Run Calculator
 
-**Status:** Phase 0 design, reconciled with the owner-supplied revision. **Production direction:** self-host is the target; Replit is transitional until an explicit cutover. This plan does not install an agent, change the live app, or authorize production cutover.
+**Status:** Phase 1 groundwork: a V2 read-only profile template and static invariant checker are prepared; OpenCode is not installed and host/runtime/outbound-traffic checks are not run. **Production direction:** self-host is the target; Replit is transitional until an explicit cutover. This work does not change the live app or authorize production cutover.
 
 ## Objective
 
@@ -54,7 +54,7 @@ The self-host cutover is a separate explicit owner decision. At minimum, close t
 ## Phased delivery
 
 1. **Phase 0 — design and host inventory:** maintain this plan and inventory the Windows host, storage, Docker/runtime, and network requirements. No runtime agent or production changes.
-2. **Phase 1 — local read-only pilot:** OpenCode + Ollama in the isolated agent directory; repository Q&A only. Audit egress, pin auxiliary inference locally, and prove no edits, shell, GitHub writes, or plant data access.
+2. **Phase 1 — local read-only pilot:** OpenCode + Ollama in the isolated agent directory; repository Q&A only. The branch now contains a current-V2 policy template and static invariant checker; the model ID and host deployment remain pending inventory. Audit egress, verify actual tool denials, and prove no edits, shell, GitHub writes, or plant data access before calling this phase passed.
 3. **Phase 2 — diagnostics and tests:** add a narrow read-only MCP/HTTP bridge for approved health/sync/incident summaries; then allowlisted tests in the disposable worktree. Test authorization, redaction, size bounds, injection resistance, and resource impact.
 4. **Phase 3 — reviewed GitHub workflow:** enable scoped branch/PR preparation through a restricted connector; owner reviews and merges. No autonomous deployment.
 5. **Phase 4 — self-host operation/cutover:** finish and rehearse the separate self-host qualification, updater, backup/restore, tablet smoke, and rollback work. Cutover only by explicit owner decision.
@@ -84,3 +84,4 @@ The self-host cutover is a separate explicit owner decision. At minimum, close t
 - Keep diagnostics least-privilege, read-only, allowlisted, bounded, privacy-filtered, and independently tested. Preserve owner approval for secrets, GitHub writes, security boundaries, migrations, production updates, and cutover.
 - Do not claim self-host qualification or assistant implementation before the actual host and required checks pass. This plan alone does not execute app tests or alter app behavior.
 - Any future web UI needs desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari coverage; emulation is not physical-device proof.
+

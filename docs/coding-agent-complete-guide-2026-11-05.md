@@ -31,62 +31,21 @@ Set-Location C:\runcalc\agent\Production-run-calculator
 
 Use an isolated worktree for each future edit task. Never mount plant volumes or copy the plant `.env` into the agent directory. The agent clone may be offline after it has been fetched; GitHub and remote CI actions require connectivity.
 
-## D. Local model and OpenCode setup (manual pilot)
+## D. Read-only OpenCode V2 profile (first pilot groundwork)
 
-Install Ollama and OpenCode from their official sources while online. Pull only the model selected after host qualification:
+Use OpenCode V2 **2.2.6 or newer** for the profile's current policy actions. Pin the exact installed version and upgrade deliberately; do not assume a newer version preserves policy behavior without rechecking it. Install Ollama locally and keep it listening on loopback only. Do not add provider/API credentials.
+
+The reviewed template is [`docs/coding-assistant/opencode-readonly.example.json`](coding-assistant/opencode-readonly.example.json). Its provider is a custom OpenAI-compatible adapter pointed at `http://127.0.0.1:11434/v1`; the primary and title-generation model both use that provider. V2 uses `permissions` rules with `action`/`resource`/`effect`, plus hard-deny policies. V1's object-shaped `permission` map and `bash` action are not the native V2 schema. V2 also treats legacy `small_model` as unsupported; use `agents.title.model` instead. See the [V2 migration guide](https://opencode.ai/v2/docs/migrate-v1), [permissions](https://opencode.ai/v2/docs/permissions), [policies](https://opencode.ai/v2/docs/policies), [providers](https://opencode.ai/v2/docs/providers), and [models](https://opencode.ai/v2/docs/models).
+
+The model identifier is intentionally a placeholder until Windows CPU/RAM/GPU/VRAM and normal plant workload are measured. After choosing and downloading an approved Ollama model, replace **every** `REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID` value with its exact local ID, then run:
 
 ```powershell
-ollama pull <approved-local-coding-model>
-ollama list
+node scripts/coding-assistant/check-readonly-profile.mjs
 ```
 
-Configure OpenCode for Ollama at loopback, not a LAN address. The following is a **template, not a ready-to-run configuration**: replace the model ID with the exact installed Ollama ID and validate against the installed OpenCode version. Keep `small_model` local as well; a local primary model does not guarantee every auxiliary task stays local.
+For the permission/policy restrictions to outrank project and user configuration, install the finalized profile as the OpenCode system configuration at `%ProgramData%\opencode\opencode.jsonc`, under a dedicated non-administrator coding-agent account. Review the impact if other people use OpenCode on this host: system configuration applies machine-wide. Do not treat a project-level copy as a security boundary: system configuration outranks project and user files, while a project-level copy can be overridden. The system-level profile applies machine-wide. Keep the agent checkout separate from `C:\runcalc\plant`, grant it no plant-volume, database, `.env`, private workbook, or GitHub-token access, and do not expose the agent or Ollama port to plant Wi-Fi.
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "ollama": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Ollama (local)",
-      "options": {
-        "baseURL": "http://127.0.0.1:11434/v1"
-      },
-      "models": {
-        "REPLACE_WITH_INSTALLED_MODEL_ID": {
-          "name": "Local coding model"
-        }
-      }
-    }
-  },
-  "model": "ollama/REPLACE_WITH_INSTALLED_MODEL_ID",
-  "small_model": "ollama/REPLACE_WITH_INSTALLED_MODEL_ID",
-  "permission": {
-    "*": "deny",
-    "read": {
-      "*": "allow",
-      "*.env*": "deny",
-      "*.env.example": "allow"
-    },
-    "glob": "allow",
-    "grep": "allow",
-    "question": "allow",
-    "skill": {
-      "*": "ask"
-    }
-  }
-}
-```
-
-The permission configuration follows the current OpenCode tool-keyed `allow` / `ask` / `deny` form. A catch-all deny leaves file reads/search and questions enabled while denying edit, bash, subagents, network tools, and GitHub writes; the read rule denies `.env*` except the safe example template. Verify this behavior with the exact installed OpenCode build before use. Do not use array-style `action/resource/effect` rules or a `shell` permission key; they do not match the current OpenCode documentation. See [providers](https://opencode.ai/docs/providers) and [permissions](https://opencode.ai/docs/permissions).
-
-Before relying on the setup:
-
-1. Confirm the model and auxiliary model are both local.
-2. Inspect OpenCode's current providers, plugins, sharing, title-generation, and update/network behavior.
-3. Capture/inspect outbound connections while asking a synthetic question. Block external inference or sharing; if content egress cannot be ruled out, stop and do not describe this as local-only.
-4. Confirm reads of `.env` and secrets fail, and edit, bash, MCP write tools, and GitHub writes are unavailable.
-5. Ask a grounded repository question and confirm the answer cites relevant file paths. Never test with real production secrets or incident payloads.
+This profile is a **read-only permission layer**, not a Windows sandbox or a network-egress guarantee. OpenCode, model metadata, updates, or other runtime components may make network requests even when the inference model is local. Before any app diagnostics or write-capable tools are added, verify actual tool denials on the pinned V2 build, audit outbound traffic, and apply and test OS/network controls that block nonlocal outbound traffic while preserving the loopback Ollama path. If any source, prompt, or incident content can leave the host, the no-cloud acceptance fails. The static check above validates config invariants only; it does not pass the runtime, isolation, or egress acceptance tests.
 
 ## E. Diagnostics and incident bridge (later phase)
 
@@ -125,3 +84,4 @@ Future self-host cutover requires its own rehearsals: backup/restore, GitHub upd
 - [ ] Synthetic prompt-injection and secret-redaction tests pass before diagnostics are enabled.
 - [ ] Stopping the agent/model leaves plant services healthy.
 - [ ] No production code, database, or deployment changes were made by this pilot.
+

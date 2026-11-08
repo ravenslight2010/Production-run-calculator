@@ -13,7 +13,9 @@
 | Safe secrets | Windows Credential Manager/DPAPI via a broker; evaluate SOPS/age for protected files only if useful. Do not place credentials in prompts or give unrestricted shell access to a token-bearing process. |
 | Skills and tests | Reuse reviewed repo `AGENTS.md` / `.agents/skills`; allowlist checks in a disposable worktree and test the bridge with synthetic data. |
 
-OpenCode supports local providers such as Ollama, reusable skills, permission rules, and local/remote MCP tools ([providers](https://opencode.ai/docs/providers), [skills](https://opencode.ai/docs/skills), [permissions](https://opencode.ai/docs/permissions), [MCP servers](https://opencode.ai/docs/mcp-servers)). Configuration is version-sensitive: in the current docs permissions are keyed by tool name (for example `bash`, `edit`, `read`) with `allow`/`ask`/`deny`; do not use an unverified `shell` key or array-shaped rules from the supplied guide.
+OpenCode V2 supports local providers such as Ollama, reusable skills, permission rules, and local/remote MCP tools ([V2 providers](https://opencode.ai/v2/docs/providers), [V2 skills](https://opencode.ai/v2/docs/skills), [V2 permissions](https://opencode.ai/v2/docs/permissions)). The current V2 format uses an ordered `permissions` array with `action`, `resource`, and `effect`; V2 actions include `shell`, `edit`, and `subagent`. The object-shaped `permission` map and actions such as `bash` are V1 syntax, not the native V2 form. In V2, legacy `small_model` has no native effect; use `agents.title.model` for the title-generation model ([V1 migration guide](https://opencode.ai/v2/docs/migrate-v1)).
+
+The starter profile at [`docs/coding-assistant/opencode-readonly.example.json`](coding-assistant/opencode-readonly.example.json) pins the primary and title models to a custom loopback Ollama endpoint, denies edit/shell/network/MCP/plugin/skill access, and keeps repository reading/search only. Its static invariant check is `node scripts/coding-assistant/check-readonly-profile.mjs`. This is not an OS sandbox or proof of zero egress: runtime permission behavior and outbound traffic still need testing on the qualified Windows host, with a system-level policy and host firewall boundary.
 
 ## What the app already provides
 
@@ -80,3 +82,4 @@ Build a small evaluation set (10–20 synthetic tasks) covering grounded file/pa
 6. Separately complete and rehearse self-host cutover requirements. Keep plant update/deploy human-controlled.
 
 **Decision:** OpenCode + local Ollama is the preferred pilot, not an irrevocable stack choice. If the read-only profile, local egress boundary, or host performance does not pass, reassess before integrating it into the installer.
+
