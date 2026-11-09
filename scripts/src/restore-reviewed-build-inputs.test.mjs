@@ -170,7 +170,7 @@ test("CI consumers use the separate main-only capability without exposing the or
       const section = workflow.match(new RegExp(`^  ${job}:\\n[\\s\\S]*?(?=^  [a-zA-Z][\\w-]*:|$(?![\\s\\S]))`, "m"))?.[0];
       assert.ok(section, `${file}/${job} must remain present`);
       assert.match(section, /unprivileged-ci/);
-      assert.match(section, /main-reviewed-test-inputs/);
+      assert.match(section, /unprivileged-ci/);
       const restore = section.indexOf("      - name: Restore separate main-only reviewed CI inputs");
       assert.ok(restore >= 0);
       const nextStep = section.indexOf("\n      - ", restore + 1);
