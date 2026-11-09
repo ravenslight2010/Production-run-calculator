@@ -7,10 +7,8 @@
  */
 
 export type ExportAuditLogsPdfParams = {
-startDate?: Date;
-endDate?: Date;
-/**
- * Maximum 5000 rows per export; defaults to 5000.
- */
-limit?: number;
+  startDate?: Date;
+  endDate?: Date;
+  /** Maximum 5000 rows per export; defaults to 5000. */
+  limit?: number;
 };

@@ -7,9 +7,9 @@
  */
 
 export type GetQcTargetsParams = {
-/**
- * @minLength 1
- * @maxLength 400
- */
-profileKey: string;
+  /**
+   * @minLength 1
+   * @maxLength 400
+   */
+  profileKey: string;
 };

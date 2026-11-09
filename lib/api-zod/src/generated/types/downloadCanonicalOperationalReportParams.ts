@@ -8,9 +8,7 @@
 import type { DownloadCanonicalOperationalReportFormat } from './downloadCanonicalOperationalReportFormat';
 
 export type DownloadCanonicalOperationalReportParams = {
-format: DownloadCanonicalOperationalReportFormat;
-/**
- * Completed export-package job whose pre-generated retained artifact should be served.
- */
-jobId?: string;
+  format: DownloadCanonicalOperationalReportFormat;
+  /** Completed export-package job whose pre-generated retained artifact should be served. */
+  jobId?: string;
 };

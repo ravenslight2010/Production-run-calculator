@@ -7,16 +7,16 @@
  */
 
 export type ListCompletedHistoryParams = {
-from?: Date;
-to?: Date;
-/**
- * @minimum 1
- * @maximum 200
- */
-limit?: number;
-/**
- * @maxLength 4096
- * @pattern ^[A-Za-z0-9_-]+$
- */
-cursor?: string;
+  from?: Date;
+  to?: Date;
+  /**
+   * @minimum 1
+   * @maximum 200
+   */
+  limit?: number;
+  /**
+   * @maxLength 4096
+   * @pattern ^[A-Za-z0-9_-]+$
+   */
+  cursor?: string;
 };

@@ -8,30 +8,20 @@
 import type { GetQcHistoryStation } from './getQcHistoryStation';
 
 export type GetQcHistoryParams = {
-/**
- * Inclusive ISO date or timestamp
- */
-from?: string;
-/**
- * Inclusive ISO date or timestamp
- */
-to?: string;
-/**
- * @maxLength 200
- */
-runId?: string;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: GetQcHistoryStation;
-/**
- * @minimum 1
- * @maximum 100
- */
-limit?: number;
-/**
- * @minimum 1
- */
-cursor?: number;
+  /** Inclusive ISO date or timestamp */
+  from?: string;
+  /** Inclusive ISO date or timestamp */
+  to?: string;
+  /** @maxLength 200 */
+  runId?: string;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: GetQcHistoryStation;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+  /** @minimum 1 */
+  cursor?: number;
 };

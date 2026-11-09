@@ -7,14 +7,14 @@
  */
 
 export type GetMasterDataOperationsParams = {
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
-/**
- * @minimum 1
- * @maximum 9007199254740991
- */
-before?: number;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
+  /**
+   * @minimum 1
+   * @maximum 9007199254740991
+   */
+  before?: number;
 };

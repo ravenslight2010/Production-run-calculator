@@ -8,14 +8,12 @@
 import type { ListQcRecipeReviewsStatus } from './listQcRecipeReviewsStatus';
 
 export type ListQcRecipeReviewsParams = {
-/**
- * @pattern ^[1-9][0-9]{0,8}$
- */
-cursor?: string;
-status?: ListQcRecipeReviewsStatus;
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
+  /** @pattern ^[1-9][0-9]{0,8}$ */
+  cursor?: string;
+  status?: ListQcRecipeReviewsStatus;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };

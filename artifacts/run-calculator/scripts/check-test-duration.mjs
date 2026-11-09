@@ -6,6 +6,15 @@ import { fileURLToPath } from "node:url";
 
 export const DEFAULT_CALCULATOR_TEST_BUDGET_MS = 150_000;
 export const MIN_CALCULATOR_TEST_WORKERS = 4;
+
+/** Public CI may run on smaller hosted runners; allow 2 workers when CI_PUBLIC_SOURCE=1. */
+export function minCalculatorTestWorkers(environment = process.env) {
+  if (environment.CI_PUBLIC_SOURCE === "1" || environment.CI_PUBLIC_SOURCE === "true") {
+    return 2;
+  }
+  return MIN_CALCULATOR_TEST_WORKERS;
+}
+
 export const CALCULATOR_TEST_WORKER_CEILING = 4;
 export const DEFAULT_CALCULATOR_TEST_WORKERS = CALCULATOR_TEST_WORKER_CEILING;
 
@@ -44,11 +53,11 @@ export function formatCalculatorTestCapacity(
 
 export function calculatorTestResourceError(
   availableWorkers,
-  minimumWorkers = MIN_CALCULATOR_TEST_WORKERS,
+  minimumWorkers = minCalculatorTestWorkers(),
 ) {
   if (
     Number.isInteger(availableWorkers) &&
-    availableWorkers >= minimumWorkers
+    availableWorkers >= (minimumWorkers ?? minCalculatorTestWorkers())
   ) {
     return null;
   }

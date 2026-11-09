@@ -9,9 +9,7 @@ import type { ClientTodayParameter } from './clientTodayParameter';
 import type { SyncSnapshotParameter } from './syncSnapshotParameter';
 
 export type GetSyncTodayParams = {
-today?: ClientTodayParameter;
-/**
- * @pattern ^[a-f0-9]{64}$
- */
-snapshot?: SyncSnapshotParameter;
+  today?: ClientTodayParameter;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshot?: SyncSnapshotParameter;
 };
