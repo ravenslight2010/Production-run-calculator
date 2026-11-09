@@ -427,6 +427,10 @@ test("reports a missing document without exposing filesystem payloads", async ()
 });
 
 test("reports an unreadable document without exposing filesystem payloads", async () => {
+  if (process.getuid?.() === 0) {
+    // Root can read mode 000 files; permission-denied path is not observable.
+    return;
+  }
   const fixturePayload = "UNREADABLE_FIXTURE_PAYLOAD_MUST_NOT_LEAK";
   const policyContent = "Never claim success by treating missing evidence as a pass.";
   const root = await createFixture({
