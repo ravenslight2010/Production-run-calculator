@@ -7781,7 +7781,10 @@ export default function Home() {
       nextDueAt: claim.nextDueAt,
       mutations: rebasedMutations,
     });
-    const response = await fetch(
+    // Bound both the request and response-body read. The hook retains the same
+    // event ID and sequence after a failed request, so an accepted but
+    // unacknowledged server claim can be safely replayed as a duplicate.
+    const { response, body } = await fetchAndConsumeWithTimeout(
       `/api/sync/auto-track/claim?today=${encodeURIComponent(date)}&epoch=${epoch}`,
       {
         method: "POST",
@@ -7802,6 +7805,22 @@ export default function Home() {
           },
         }),
       },
+      FOREGROUND_RECOVERY_TIMEOUT_MS,
+      async (claimResponse) => ({
+        response: claimResponse,
+        body: await claimResponse.json().catch(() => null) as {
+          error?: string;
+          stale?: boolean;
+          epoch?: number;
+          outcome?: AutoTrackEventResult["outcome"];
+          state?: AutoTrackEventResult["state"];
+          values?: AutoTrackEventResult["values"];
+          data?: SyncPayload;
+          snapshotId?: string;
+          canonicalRevision?: number;
+          serverTime?: number;
+        } | null,
+      }),
     );
     if (!contextIsCurrent()) throw Object.assign(
       new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
@@ -7809,18 +7828,6 @@ export default function Home() {
       reportUnauthorized();
       throw Object.assign(new Error("Automatic tracking needs authentication"), { retryable: false });
     }
-    const body = await response.json().catch(() => null) as {
-      error?: string;
-      stale?: boolean;
-      epoch?: number;
-      outcome?: AutoTrackEventResult["outcome"];
-      state?: AutoTrackEventResult["state"];
-      values?: AutoTrackEventResult["values"];
-      data?: SyncPayload;
-      snapshotId?: string;
-      canonicalRevision?: number;
-      serverTime?: number;
-    } | null;
     if (!contextIsCurrent()) throw Object.assign(
       new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
     if (!response.ok || !body?.outcome || !body.state || !body.values) {

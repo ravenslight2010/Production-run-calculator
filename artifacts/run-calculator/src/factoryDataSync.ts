@@ -160,7 +160,11 @@ export async function fetchFactoryData(): Promise<FactoryDataMap> {
   const epoch = scopeEpoch;
   const order = ++readOrder;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException("Operational directory request timed out", "TimeoutError"));
+  }, 15_000);
   try {
     const res = await fetchWithDiagnostics(canWrite ? "/api/factory-data" : "/api/factory-data/operational", {
       headers: { "x-client-id": inventoryClientId() }, cache: "no-store", signal: controller.signal,
@@ -171,7 +175,15 @@ export async function fetchFactoryData(): Promise<FactoryDataMap> {
     readReceipts.set(data, { epoch, order, writeEpoch: res.headers.get("x-master-data-epoch") ?? "unbound" });
     return data;
   } catch (error) {
-    if (epoch === scopeEpoch) setFactoryDirectoryStatus("unavailable", error instanceof Error ? error.message : "Directory unavailable. Retry online.");
+    // A slower, older request must not undo a newer successful hydration.
+    if (epoch === scopeEpoch && order >= appliedReadOrder) {
+      setFactoryDirectoryStatus(
+        "unavailable",
+        timedOut
+          ? "Operational lists did not finish loading within 15 seconds. Retry loading lists; pending edits remain on this device."
+          : error instanceof Error ? error.message : "Directory unavailable. Retry online.",
+      );
+    }
     throw error;
   } finally { clearTimeout(timer); }
 }

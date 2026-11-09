@@ -24,7 +24,7 @@ beforeEach(() => {
   localStorage.clear(); resetFactoryDataSyncForTests();
   setFactoryDataIdentity("live:manager", true); hydrateFromServer({});
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("memory directory and scoped durable commands", () => {
   it("notifies count subscribers after durable enqueue and each acknowledgment, retaining the unacknowledged remainder", async () => {
@@ -219,6 +219,39 @@ describe("memory directory and scoped durable commands", () => {
     const olderData = await older;
     expect(() => hydrateFromServer(olderData)).toThrow("superseded");
     expect(JSON.parse(directoryRaw(BRANDS_KEY)!)).toEqual(["New"]);
+  });
+  it("does not let an older failed read mark a newer directory unavailable", async () => {
+    let rejectOlder!: (error: Error) => void;
+    let count = 0;
+    vi.stubGlobal("fetch", vi.fn(() => ++count === 1
+      ? new Promise<Response>((_resolve, reject) => { rejectOlder = reject; })
+      : Promise.resolve(response({ data: {
+          [BRANDS_KEY]: { value: ["New"], updatedAt: new Date().toISOString() },
+        } }))));
+    const older = fetchFactoryData();
+    hydrateFromServer(await fetchFactoryData());
+    rejectOlder(new Error("The older request failed"));
+    await expect(older).rejects.toThrow("The older request failed");
+    expect(factoryDirectoryState()).toMatchObject({ status: "ready", error: null });
+    expect(JSON.parse(directoryRaw(BRANDS_KEY)!)).toEqual(["New"]);
+  });
+  it("shows a safe retry message when an operational-directory request times out", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((_url, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new Error("signal is aborted without reason"));
+        }, { once: true });
+      })));
+    const request = fetchFactoryData();
+    const rejection = expect(request).rejects.toThrow("signal is aborted without reason");
+    await vi.advanceTimersByTimeAsync(15_000);
+    await rejection;
+    expect(factoryDirectoryState()).toMatchObject({
+      status: "unavailable",
+      error: expect.stringContaining("Retry loading lists"),
+    });
+    expect(factoryDirectoryState().error).not.toContain("signal is aborted without reason");
   });
   it("preserves malformed pending records rather than silently replacing them", () => {
     const raw = '[{"key":"unknown-future-command","value":["Saved"]}]';

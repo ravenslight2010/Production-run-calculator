@@ -14,6 +14,19 @@ describe("Home sync manager boundary", () => {
     expect(home).not.toMatch(/fetch\(`\/api\/sync\/today[^`]*`,\s*\{\s*method:\s*"PUT"/);
   });
 
+  it("bounds automatic claim requests and response-body reads", () => {
+    const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
+    const claimStart = home.indexOf("function claimAutoTrackEvent(");
+    const claimEnd = home.indexOf("// Mirror today's substitution overlay", claimStart);
+    const claim = home.slice(claimStart, claimEnd);
+
+    expect(claimStart).toBeGreaterThanOrEqual(0);
+    expect(claimEnd).toBeGreaterThan(claimStart);
+    expect(claim).toContain("fetchAndConsumeWithTimeout");
+    expect(claim).toContain("FOREGROUND_RECOVERY_TIMEOUT_MS");
+    expect(claim).not.toMatch(/await fetch\(/);
+  });
+
   it("keeps every terminal local-write diagnostic classified for the manager alert", () => {
     const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
     const terminalWriteSections = [
