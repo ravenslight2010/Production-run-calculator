@@ -168,13 +168,6 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs --main --with-archives
 
-      - name: Restore main reviewed CI inputs for same-repo PRs
-        id: same-repo-pr-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' && !(github.event.pull_request.number == 142 || github.event.pull_request.number == 145 || github.event.pull_request.number == 146) }}
-        env:
-          CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
-          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs --same-repo-pr --with-archives
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       # pnpm version is read from the "packageManager" field in package.json
@@ -205,7 +198,7 @@ jobs:
           retention-days: 14
 
       - name: Clean reviewed PR or main CI inputs
-        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped' || steps.same-repo-pr-inputs.outcome != 'skipped')
+        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped')
         run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
 
@@ -239,13 +232,6 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs --main
 
-      - name: Restore main reviewed CI inputs for same-repo PRs
-        id: same-repo-pr-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' && !(github.event.pull_request.number == 142 || github.event.pull_request.number == 145 || github.event.pull_request.number == 146) }}
-        env:
-          CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
-          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs --same-repo-pr --with-archives
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       # pnpm version is read from the "packageManager" field in package.json
@@ -269,7 +255,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Clean reviewed PR or main CI inputs
-        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped' || steps.same-repo-pr-inputs.outcome != 'skipped')
+        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped')
         run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
   reduced-motion-browser:
@@ -302,13 +288,6 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs --main
 
-      - name: Restore main reviewed CI inputs for same-repo PRs
-        id: same-repo-pr-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' && !(github.event.pull_request.number == 142 || github.event.pull_request.number == 145 || github.event.pull_request.number == 146) }}
-        env:
-          CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
-          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs --same-repo-pr --with-archives
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -343,7 +322,7 @@ jobs:
           retention-days: 14
 
       - name: Clean reviewed PR or main CI inputs
-        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped' || steps.same-repo-pr-inputs.outcome != 'skipped')
+        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped')
         run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
 
@@ -428,13 +407,6 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs --main
 
-      - name: Restore main reviewed CI inputs for same-repo PRs
-        id: same-repo-pr-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' && !(github.event.pull_request.number == 142 || github.event.pull_request.number == 145 || github.event.pull_request.number == 146) }}
-        env:
-          CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
-          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs --same-repo-pr --with-archives
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       # pnpm version is read from the "packageManager" field in package.json
@@ -466,7 +438,7 @@ jobs:
           retention-days: 14
 
       - name: Clean reviewed PR or main CI inputs
-        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped' || steps.same-repo-pr-inputs.outcome != 'skipped')
+        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped')
         run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
 
@@ -499,13 +471,6 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs --main
 
-      - name: Restore main reviewed CI inputs for same-repo PRs
-        id: same-repo-pr-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' && !(github.event.pull_request.number == 142 || github.event.pull_request.number == 145 || github.event.pull_request.number == 146) }}
-        env:
-          CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
-          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs --same-repo-pr --with-archives
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -538,7 +503,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Clean reviewed PR or main CI inputs
-        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped' || steps.same-repo-pr-inputs.outcome != 'skipped')
+        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped')
         run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
   security-audit:
@@ -595,13 +560,6 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs --main
 
-      - name: Restore main reviewed CI inputs for same-repo PRs
-        id: same-repo-pr-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' && !(github.event.pull_request.number == 142 || github.event.pull_request.number == 145 || github.event.pull_request.number == 146) }}
-        env:
-          CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
-          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs --same-repo-pr --with-archives
       - name: Test exact Docker security comparisons
         run: python3 -S scripts/src/check-container-security.test.py
       - name: Set up QEMU (multi-arch builds)
@@ -653,7 +611,7 @@ jobs:
           DOCKER_IMAGE_TAG: ${{ github.sha }}
         run: bash scripts/src/check-docker-runtime.sh
       - name: Clean reviewed PR or main CI inputs
-        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped' || steps.same-repo-pr-inputs.outcome != 'skipped')
+        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped')
         run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
   build:
@@ -691,13 +649,6 @@ jobs:
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/src/restore-restricted-ci-inputs.mjs --main
 
-      - name: Restore main reviewed CI inputs for same-repo PRs
-        id: same-repo-pr-inputs
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' && !(github.event.pull_request.number == 142 || github.event.pull_request.number == 145 || github.event.pull_request.number == 146) }}
-        env:
-          CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
-          CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/src/restore-restricted-ci-inputs.mjs --same-repo-pr --with-archives
       # pnpm version is read from the "packageManager" field in package.json
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -710,7 +661,7 @@ jobs:
         run: pnpm --filter @workspace/api-server run build
 
       - name: Clean reviewed PR or main CI inputs
-        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped' || steps.same-repo-pr-inputs.outcome != 'skipped')
+        if: always() && (steps.restricted-inputs.outcome != 'skipped' || steps.main-inputs.outcome != 'skipped')
         run: node scripts/src/restore-restricted-ci-inputs.mjs --cleanup
 
 

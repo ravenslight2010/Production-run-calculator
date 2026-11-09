@@ -99,8 +99,7 @@ test("workflows retain both protected main and narrowly restricted PR lanes with
     assert.match(text, /main-reviewed-test-inputs/);
   }
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
-  assert.match(ci, /--same-repo-pr/);
-  assert.match(ci, /steps\.same-repo-pr-inputs\.outcome != 'skipped'/);
+  assert.match(ci, /CI_PUBLIC_SOURCE/);
 
   const docker = ci.slice(ci.indexOf("  docker:\n"), ci.indexOf("  build:\n")); assert.doesNotMatch(docker, /cache-to:|cache-from:/); assert.match(docker, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
   const rollback = readFileSync(new URL("./rehearse-schema-safe-rollback.mts", import.meta.url), "utf8"); assert.match(rollback, /for \(const context of \[parentContext, currentContext\]\)/); assert.match(rollback, /--copy-report/);
