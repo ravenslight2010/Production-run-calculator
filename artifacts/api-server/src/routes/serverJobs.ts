@@ -21,6 +21,7 @@ import {
   requireManagerRole,
 } from "../middlewares/requireCapability";
 import { AI_ROUTE_BOUNDARIES, validateAiRequestBoundary } from "../lib/aiDataBoundary";
+import "../lib/freezerAlertProjectionJob";
 
 const router: IRouter = Router();
 const CreateJob = z.object({

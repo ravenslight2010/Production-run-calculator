@@ -90,7 +90,8 @@ select_replit_shell_node() {
       return 1
     fi
 
-    cache_path="${REPLIT_SHELL_NODE_CACHE_ROOT:-${HOME}/.cache/replit-pinned-node}"
+    # Keep this runtime acquisition isolated from older shared npm-cache state.
+    cache_path="${REPLIT_SHELL_NODE_CACHE_ROOT:-${HOME}/.cache/replit-pinned-node-v2}"
     if [[ -L "$cache_path" ]]; then
       printf 'Cannot provision interactive Node v%s: the runtime cache path must not be a symbolic link.\n' \
         "$required_version" >&2

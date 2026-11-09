@@ -65,6 +65,15 @@ test("deployment, post-merge, and artifact entry points use the pinned selector"
     path.join(root, "scripts/src/run-project-pnpm.sh"),
     "utf8",
   );
+  const nodeSelector = fs.readFileSync(
+    path.join(root, "scripts/src/select-replit-shell-node.sh"),
+    "utf8",
+  );
+  assert.match(
+    nodeSelector,
+    /REPLIT_SHELL_NODE_CACHE_ROOT:-\$\{HOME\}\/\.cache\/replit-pinned-node-v2/,
+    "pinned Node bootstrap must use its isolated cache namespace",
+  );
   const nodeSelection = projectPnpm.indexOf(
     'source "${SCRIPT_DIR}/select-replit-shell-node.sh"',
   );

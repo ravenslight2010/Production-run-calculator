@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mocks = vi.hoisted(() => ({
   fetchSyncHealth: vi.fn(),
+  submitAndWaitForServerJob: vi.fn(),
 }));
 
 vi.mock("../syncDiagnostics", () => ({
@@ -17,6 +18,10 @@ vi.mock("../profileDataHealth", () => ({
   applyAiRetentionCleanup: vi.fn(),
   fetchDataHealthWorkspace: vi.fn(),
   undoProfileDataHealthRepair: vi.fn(),
+}));
+
+vi.mock("../serverJobs", () => ({
+  submitAndWaitForServerJob: mocks.submitAndWaitForServerJob,
 }));
 
 vi.mock("@/masterData", () => ({
@@ -80,6 +85,7 @@ const report = (status: "healthy" | "warning" | "failing") => ({
 afterEach(() => {
   cleanup();
   mocks.fetchSyncHealth.mockReset();
+  mocks.submitAndWaitForServerJob.mockReset();
 });
 
 describe("DataHealthWorkspace sync health sentinel", () => {
@@ -110,5 +116,60 @@ describe("DataHealthWorkspace sync health sentinel", () => {
 
     expect((await screen.findByTestId("sync-health-status")).textContent).toContain("failing");
     expect(screen.getByText(/no repair was performed/i)).toBeTruthy();
+  });
+
+  it("requires confirmation and reports a verified scoped projection backfill", async () => {
+    mocks.fetchSyncHealth.mockResolvedValue(report("warning"));
+    mocks.submitAndWaitForServerJob.mockResolvedValue({
+      status: "completed",
+      examinedDays: 98,
+      projectedRuns: 12,
+    });
+    renderWorkspace();
+
+    await userEvent.click(screen.getByRole("button", { name: /run self-check/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /prepare one-time backfill/i }));
+    expect(mocks.submitAndWaitForServerJob).not.toHaveBeenCalled();
+    expect(screen.getByText(/does not change those snapshots or scheduled alert audit records/i)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: /confirm backfill/i }));
+
+    expect(await screen.findByText(/verified 98 day snapshots and 12 projected runs/i)).toBeTruthy();
+    expect(mocks.submitAndWaitForServerJob).toHaveBeenCalledWith({
+      type: "freezer-alert-projection-backfill",
+      input: { expectedScope: "live" },
+      pollIntervalMs: 2_000,
+    });
+  });
+
+  it("shows a safe recovery message if projection backfill fails", async () => {
+    mocks.fetchSyncHealth.mockResolvedValue(report("warning"));
+    mocks.submitAndWaitForServerJob.mockRejectedValue(new Error("database details must not be shown"));
+    renderWorkspace();
+
+    await userEvent.click(screen.getByRole("button", { name: /run self-check/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /prepare one-time backfill/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm backfill/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Daily snapshots and alert audit records were not changed");
+    expect(alert.textContent).not.toContain("database details");
+  });
+
+  it("rejects malformed projection backfill results", async () => {
+    mocks.fetchSyncHealth.mockResolvedValue(report("warning"));
+    mocks.submitAndWaitForServerJob.mockResolvedValue({
+      status: "completed",
+      examinedDays: "98",
+      projectedRuns: 12,
+    });
+    renderWorkspace();
+
+    await userEvent.click(screen.getByRole("button", { name: /run self-check/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /prepare one-time backfill/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm backfill/i }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByText(/verified 98 day snapshots/i)).toBeNull();
   });
 });

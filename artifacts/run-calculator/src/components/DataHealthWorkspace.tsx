@@ -14,8 +14,22 @@ import {
 import { MASTER_DATA_QUERY_KEY } from "@/masterData";
 import { todayStr } from "@/utils";
 import { fetchSyncHealth, type SyncHealthReport } from "../syncDiagnostics";
+import { submitAndWaitForServerJob } from "../serverJobs";
 
 type Props = { onNavigate?: (section: string) => void };
+type FreezerProjectionBackfillResult = {
+  status: "completed" | "already-complete";
+  examinedDays: number;
+  projectedRuns: number;
+};
+
+function isFreezerProjectionBackfillResult(value: unknown): value is FreezerProjectionBackfillResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return (result.status === "completed" || result.status === "already-complete")
+    && Number.isSafeInteger(result.examinedDays) && (result.examinedDays as number) >= 0
+    && Number.isSafeInteger(result.projectedRuns) && (result.projectedRuns as number) >= 0;
+}
 
 const selectClass = "rounded border border-border bg-background px-2 py-1.5 text-xs";
 
@@ -39,6 +53,8 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
   const [result, setResult] = useState<{ applied: number; skipped: number; failed: number; repairedRuns: number } | null>(null);
   const [latestBatch, setLatestBatch] = useState<DataHealthWorkspaceData["repairBatches"][number] | null>(null);
   const [undoingBatch, setUndoingBatch] = useState<string | null>(null);
+  const [projectionBackfillConfirming, setProjectionBackfillConfirming] = useState(false);
+  const [projectionBackfillResult, setProjectionBackfillResult] = useState<FreezerProjectionBackfillResult | null>(null);
   const syncHealthQuery = useQuery<SyncHealthReport>({
     queryKey: ["sync-health", todayStr()],
     queryFn: () => fetchSyncHealth(todayStr()),
@@ -102,6 +118,23 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
   const retentionMutation = useMutation({
     mutationFn: applyAiRetentionCleanup,
     onSuccess: () => query.refetch(),
+  });
+  const projectionBackfillMutation = useMutation({
+    mutationFn: async () => {
+      const next = await submitAndWaitForServerJob<unknown>({
+        type: "freezer-alert-projection-backfill",
+        input: { expectedScope: syncHealthQuery.data?.scope },
+        pollIntervalMs: 2_000,
+      });
+      if (!isFreezerProjectionBackfillResult(next)) {
+        throw new Error("Freezer alert projection backfill returned an invalid response.");
+      }
+      return next;
+    },
+    onSuccess: (next) => {
+      setProjectionBackfillConfirming(false);
+      setProjectionBackfillResult(next);
+    },
   });
   const workspace = query.data;
   const safeFindings = useMemo(
@@ -252,6 +285,78 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
                 </span>
               </div>
               <p className="text-muted-foreground">{syncHealthQuery.data.nextAction}</p>
+              <section
+                aria-label="Freezer alert projection backfill"
+                data-testid="freezer-alert-projection-backfill"
+                className="rounded border border-border bg-background/60 px-2 py-2"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">Freezer alert projection</span>
+                  <span className="text-muted-foreground">Scope: {syncHealthQuery.data.scope}</span>
+                </div>
+                <p className="mt-1 text-muted-foreground">
+                  Rebuilds the derived projection from saved daily snapshots. It does not change those snapshots or
+                  scheduled alert audit records, and marks the projection usable only after parity verification.
+                </p>
+                {!projectionBackfillConfirming ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 h-7 gap-1.5 px-2 text-[10px]"
+                    disabled={projectionBackfillMutation.isPending}
+                    onClick={() => {
+                      setProjectionBackfillResult(null);
+                      setProjectionBackfillConfirming(true);
+                    }}
+                  >
+                    Prepare one-time backfill
+                  </Button>
+                ) : (
+                  <div className="mt-2 flex flex-wrap items-center gap-2" role="group" aria-label="Confirm freezer alert projection backfill">
+                    <span className="text-muted-foreground">Confirm the derived-data rebuild for this scope.</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 px-2 text-[10px]"
+                      disabled={projectionBackfillMutation.isPending}
+                      onClick={() => projectionBackfillMutation.mutate()}
+                    >
+                      {projectionBackfillMutation.isPending ? "Backfill running…" : "Confirm backfill"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[10px]"
+                      disabled={projectionBackfillMutation.isPending}
+                      onClick={() => setProjectionBackfillConfirming(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+                {projectionBackfillMutation.isPending && (
+                  <p role="status" className="mt-2 text-muted-foreground">
+                    Backfill is running; the projection remains on the legacy read path until parity verification finishes.
+                  </p>
+                )}
+                {projectionBackfillMutation.isError && (
+                  <p role="alert" className="mt-2 text-destructive">
+                    Backfill did not complete. Daily snapshots and alert audit records were not changed; partial projection rows are not marked complete. Retry when database health allows.
+                  </p>
+                )}
+                {projectionBackfillResult?.status === "already-complete" && (
+                  <p role="status" className="mt-2 text-emerald-600 dark:text-emerald-400">
+                    Projection was already complete; no rebuild was needed.
+                  </p>
+                )}
+                {projectionBackfillResult?.status === "completed" && (
+                  <p role="status" className="mt-2 text-emerald-600 dark:text-emerald-400">
+                    Verified {projectionBackfillResult.examinedDays} day snapshots and {projectionBackfillResult.projectedRuns} projected runs.
+                  </p>
+                )}
+              </section>
               <div data-testid="legacy-sync-readiness" className="rounded border border-border bg-background/60 px-2 py-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium">Legacy tablet cutoff readiness</span>

@@ -12,10 +12,11 @@ const POLL_MS = 750;
 const JOB_TIMEOUT_MS = 8 * 60_000;
 
 export async function submitAndWaitForServerJob<T>(args: {
-  type: "workbook-parse" | "workbook-reconcile" | "export-package";
+  type: "workbook-parse" | "workbook-reconcile" | "export-package" | "freezer-alert-projection-backfill";
   input: unknown;
   snapshotId?: string;
   signal?: AbortSignal;
+  pollIntervalMs?: number;
 }): Promise<T> {
   const idempotencyKey = crypto.randomUUID();
   const created = await fetch("/api/server-jobs", {
@@ -31,7 +32,7 @@ export async function submitAndWaitForServerJob<T>(args: {
     if (args.signal?.aborted) throw args.signal.reason ?? new DOMException("Job cancelled", "AbortError");
     if (Date.now() > deadline) throw new Error("Server job did not finish in time");
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, POLL_MS);
+      const timer = setTimeout(resolve, args.pollIntervalMs ?? POLL_MS);
       args.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(args.signal?.reason); }, { once: true });
     });
     const response = await fetch(`/api/server-jobs/${encodeURIComponent(job.id)}`, { signal: args.signal });

@@ -320,10 +320,20 @@ async function verifyFreezerAlertProjectionParity(scope: string): Promise<void> 
  * snapshot and no projection rows exist without a corresponding snapshot.
  * This is intentionally explicit; it is not called at application startup.
  */
-export async function backfillFreezerAlertProjection(scope: string): Promise<{
+export async function backfillFreezerAlertProjection(
+  scope: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<{
   examinedDays: number;
   projectedRuns: number;
 }> {
+  const throwIfAborted = () => {
+    if (options.signal?.aborted) {
+      throw options.signal.reason ?? new Error("Freezer alert projection backfill was interrupted.");
+    }
+  };
+
+  throwIfAborted();
   // Keep scheduled reads on the safe JSONB path if a rerun fails partway.
   await db.delete(freezerAlertProjectionStatusTable)
     .where(eq(freezerAlertProjectionStatusTable.scope, scope));
@@ -333,6 +343,7 @@ export async function backfillFreezerAlertProjection(scope: string): Promise<{
   let cursor: string | undefined;
 
   while (true) {
+    throwIfAborted();
     const days = await db.select({ date: dailySyncTable.date })
       .from(dailySyncTable)
       .where(cursor === undefined
@@ -343,6 +354,7 @@ export async function backfillFreezerAlertProjection(scope: string): Promise<{
     if (!days.length) break;
 
     for (const { date } of days) {
+      throwIfAborted();
       const count = await db.transaction(async (tx) => {
         const [row] = await tx.select({ data: dailySyncTable.data })
           .from(dailySyncTable)
@@ -360,7 +372,9 @@ export async function backfillFreezerAlertProjection(scope: string): Promise<{
     cursor = days[days.length - 1]!.date;
   }
 
+  throwIfAborted();
   await verifyFreezerAlertProjectionParity(scope);
+  throwIfAborted();
   await db.insert(freezerAlertProjectionStatusTable)
     .values({ scope, completedAt: new Date() })
     .onConflictDoUpdate({
