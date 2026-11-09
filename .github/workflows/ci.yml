@@ -144,6 +144,7 @@ jobs:
     environment: unprivileged-ci
     runs-on: ubuntu-latest
     env:
+      NODE_OPTIONS: --max-old-space-size=6144
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-typecheck-${{ github.run_id }}-${{ github.run_attempt }}
     # Covers workspace typechecks plus catalog and routine scripts checks;
@@ -212,6 +213,8 @@ jobs:
     environment: unprivileged-ci
     runs-on: ubuntu-latest
     env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      CALCULATOR_TEST_ALLOW_LOW_CAPACITY: "1"
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-unit-${{ github.run_id }}-${{ github.run_attempt }}
     # The broad web and shared-library sweep is slower than release's
