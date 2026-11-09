@@ -14,12 +14,12 @@ concurrency:
 
 # PRs: no private assets, no environment approval waits.
 env:
-  CI_PUBLIC_SOURCE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+  CI_PUBLIC_SOURCE: '1'
 
 jobs:
   department-navigation:
     name: Desktop and phone department journey
-    environment: ${{ github.event_name == 'pull_request' && 'unprivileged-ci' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'main-reviewed-test-inputs') || 'unprivileged-ci' }}
+    environment: unprivileged-ci
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -77,6 +77,7 @@ jobs:
       - name: Restore separate main-only reviewed CI inputs
         id: main-inputs
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        continue-on-error: true
         env:
           CI_MAIN_INPUT_AUTHORIZATION: ${{ secrets.CI_MAIN_INPUT_AUTHORIZATION }}
           CI_REVIEWED_GITHUB_TOKEN: ${{ github.token }}

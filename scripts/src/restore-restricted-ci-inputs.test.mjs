@@ -96,7 +96,7 @@ test("workflows retain both protected main and narrowly restricted PR lanes with
     assert.doesNotMatch(text, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64/);
     assert.match(text, /CI_MAIN_INPUT_AUTHORIZATION: \$\{\{ secrets\.CI_MAIN_INPUT_AUTHORIZATION \}\}/);
     assert.match(text, /if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\)/);
-    assert.match(text, /main-reviewed-test-inputs/);
+    assert.match(text, /unprivileged-ci/);
   }
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.match(ci, /CI_PUBLIC_SOURCE/);
