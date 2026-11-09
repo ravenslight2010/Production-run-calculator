@@ -179,6 +179,8 @@ jobs:
         with:
           node-version: 24.21.0
       - run: pnpm install --frozen-lockfile
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Typecheck (workspace + libs)
         run: node scripts/src/test-results.mjs run --lane ci-typecheck -- pnpm run typecheck
       - name: Validate skill catalog

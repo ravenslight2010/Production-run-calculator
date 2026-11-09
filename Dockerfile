@@ -102,6 +102,9 @@ COPY . .
 # empty/local identifier from a production Docker build.
 ARG VITE_APP_VERSION
 ARG REPLIT_DEPLOYMENT_ID
+# Public CI/main builds omit private attached_assets; mirror GitHub Actions CI_PUBLIC_SOURCE.
+ARG CI_PUBLIC_SOURCE=1
+ENV CI_PUBLIC_SOURCE=${CI_PUBLIC_SOURCE}
 RUN build_version="${VITE_APP_VERSION:-${REPLIT_DEPLOYMENT_ID:-docker-$(date -u +%Y%m%d%H%M%S)}}" \
   && pnpm run prepare:publish \
   && PORT=3000 BASE_PATH=/ VITE_APP_VERSION="$build_version" \
