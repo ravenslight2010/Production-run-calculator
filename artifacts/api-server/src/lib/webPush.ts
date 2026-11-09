@@ -397,7 +397,10 @@ async function deliverDeferredAlerts(scope: Scope, date: string, nowMs: number, 
   }).from(scheduledAlertRecordsTable).where(and(
     eq(scheduledAlertRecordsTable.scope, scope),
     eq(scheduledAlertRecordsTable.date, date),
+    gt(scheduledAlertRecordsTable.expiresAt, new Date(nowMs)),
+    inArray(scheduledAlertRecordsTable.alertKind, WEB_PUSH_KINDS),
     or(
+      eq(scheduledAlertRecordsTable.status, "pending"),
       eq(scheduledAlertRecordsTable.status, "deferred"),
       and(
         eq(scheduledAlertRecordsTable.status, "delivering"),
@@ -415,7 +418,10 @@ async function deliverDeferredAlerts(scope: Scope, date: string, nowMs: number, 
     }).where(and(
       eq(scheduledAlertRecordsTable.id, record.id),
       eq(scheduledAlertRecordsTable.scope, scope),
+      gt(scheduledAlertRecordsTable.expiresAt, new Date(nowMs)),
+      inArray(scheduledAlertRecordsTable.alertKind, WEB_PUSH_KINDS),
       or(
+        eq(scheduledAlertRecordsTable.status, "pending"),
         eq(scheduledAlertRecordsTable.status, "deferred"),
         and(
           eq(scheduledAlertRecordsTable.status, "delivering"),
@@ -588,6 +594,120 @@ export function scheduledEvaluationIdempotencyKey(scope: Scope, nowMs: number, b
   return `scheduled-evaluation:${scope}:${bucket}`;
 }
 
+type ScheduledFreezerProjectionRow = {
+  date: string;
+  runId: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  freezerTime: number | null;
+  dueAt: number | null;
+};
+
+function freezerAlertId(row: ScheduledFreezerProjectionRow): string {
+  const generation = number(row.startedAt) || number(row.endedAt);
+  return `${row.date}:${runKey(row.runId, generation)}:freezer-empty`;
+}
+
+/**
+ * Fail open until the scope has an audited projection. Once complete, schedule
+ * only for live runs, an unarmed upcoming freezer threshold, a due armed
+ * freezer alert without its logical record, or a recoverable logical record.
+ * Subscription count is deliberately not part of eligibility: a real alert
+ * still needs its durable audit row when nobody has opted into push.
+ */
+async function hasScheduledAlertWork(scope: Scope, nowMs: number): Promise<boolean> {
+  try {
+    if (!await hasCompleteFreezerAlertProjection(scope)) return true;
+
+    const [activeRun] = await db.select({ runId: freezerAlertRunProjectionTable.runId })
+      .from(freezerAlertRunProjectionTable).where(and(
+        eq(freezerAlertRunProjectionTable.scope, scope),
+        eq(freezerAlertRunProjectionTable.isActive, true),
+      )).limit(1);
+    if (activeRun) return true;
+
+    if (!quietHours(nowMs)) {
+      const [recoverableRecord] = await db.select({ id: scheduledAlertRecordsTable.id })
+        .from(scheduledAlertRecordsTable).where(and(
+          eq(scheduledAlertRecordsTable.scope, scope),
+          gt(scheduledAlertRecordsTable.expiresAt, new Date(nowMs)),
+          inArray(scheduledAlertRecordsTable.alertKind, WEB_PUSH_KINDS),
+          or(
+            eq(scheduledAlertRecordsTable.status, "pending"),
+            eq(scheduledAlertRecordsTable.status, "deferred"),
+            and(
+              eq(scheduledAlertRecordsTable.status, "delivering"),
+              lt(scheduledAlertRecordsTable.evaluatedAt, new Date(nowMs - DEFERRED_DELIVERY_CLAIM_MS)),
+            ),
+          ),
+        )).limit(1);
+      if (recoverableRecord) return true;
+    }
+
+    const freezerRows: ScheduledFreezerProjectionRow[] = await db.select({
+      date: freezerAlertRunProjectionTable.date,
+      runId: freezerAlertRunProjectionTable.runId,
+      startedAt: freezerAlertRunProjectionTable.startedAt,
+      endedAt: freezerAlertRunProjectionTable.endedAt,
+      freezerTime: freezerAlertRunProjectionTable.freezerTime,
+      dueAt: freezerAlertRunProjectionTable.dueAt,
+    }).from(freezerAlertRunProjectionTable).where(and(
+      eq(freezerAlertRunProjectionTable.scope, scope),
+      gte(freezerAlertRunProjectionTable.dueAt, nowMs - RETENTION_MS),
+    )).limit(5_000);
+    if (freezerRows.length >= 5_000) return true;
+    const actionableFreezerRows = freezerRows.filter((row) =>
+      row.endedAt !== null && row.endedAt !== 0
+      && row.freezerTime !== null && row.freezerTime > 0
+      && row.dueAt !== null,
+    );
+    if (actionableFreezerRows.length === 0) return false;
+
+    const armKeys = [...new Set(actionableFreezerRows.map((row) =>
+      runKey(row.runId, number(row.startedAt) || number(row.endedAt)),
+    ))];
+    const armRows = await db.select({ runKey: webPushAlertArmsTable.runKey })
+      .from(webPushAlertArmsTable).where(and(
+        eq(webPushAlertArmsTable.scope, scope),
+        eq(webPushAlertArmsTable.alertKind, "freezerEmpty"),
+        inArray(webPushAlertArmsTable.runKey, armKeys),
+        gt(webPushAlertArmsTable.expiresAt, new Date(nowMs)),
+      )).limit(armKeys.length);
+    const armedKeys = new Set(armRows.map((row) => row.runKey));
+
+    if (actionableFreezerRows.some((row) => {
+      const key = runKey(row.runId, number(row.startedAt) || number(row.endedAt));
+      return row.dueAt! > nowMs && !armedKeys.has(key);
+    })) return true;
+
+    const dueAlertIds = [...new Set(actionableFreezerRows
+      .filter((row) => {
+        const key = runKey(row.runId, number(row.startedAt) || number(row.endedAt));
+        return row.dueAt! <= nowMs && armedKeys.has(key);
+      })
+      .map(freezerAlertId))];
+    for (let offset = 0; offset < dueAlertIds.length; offset += 500) {
+      const batch = dueAlertIds.slice(offset, offset + 500);
+      const existingRows = await db.select({ alertId: scheduledAlertRecordsTable.alertId })
+        .from(scheduledAlertRecordsTable).where(and(
+          eq(scheduledAlertRecordsTable.scope, scope),
+          inArray(scheduledAlertRecordsTable.alertId, batch),
+          gt(scheduledAlertRecordsTable.expiresAt, new Date(nowMs)),
+        )).limit(batch.length);
+      const existingIds = new Set(existingRows.map((row) => row.alertId));
+      if (batch.some((alertId) => !existingIds.has(alertId))) return true;
+    }
+    return false;
+  } catch (error) {
+    logger.warn({
+      event: "scheduled_alert_work_gate",
+      outcome: "fallback_to_evaluation",
+      failureReason: classifyBackgroundFailure(error, { assumeDatabase: true }),
+    }, "Scheduled alert work gate failed open");
+    return true;
+  }
+}
+
 type ScheduledAlertSnapshotRow = { date: string; data?: unknown };
 
 async function readLegacyHistoricalAlertRows(scope: Scope, today: string, nowMs: number) {
@@ -714,30 +834,28 @@ export async function readScheduledAlertSnapshotRows(
     return [...rowsByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
   }
 
-  const [activeDateRows, freezerRows] = await Promise.all([
-    db.select({ date: freezerAlertRunProjectionTable.date })
-      .from(freezerAlertRunProjectionTable)
-      .where(and(
-        eq(freezerAlertRunProjectionTable.scope, scope),
-        lt(freezerAlertRunProjectionTable.date, today),
-        eq(freezerAlertRunProjectionTable.isActive, true),
-      ))
-      .groupBy(freezerAlertRunProjectionTable.date),
-    db.select({
-      date: freezerAlertRunProjectionTable.date,
-      runId: freezerAlertRunProjectionTable.runId,
-      startedAt: freezerAlertRunProjectionTable.startedAt,
-      endedAt: freezerAlertRunProjectionTable.endedAt,
-      freezerTime: freezerAlertRunProjectionTable.freezerTime,
-    }).from(freezerAlertRunProjectionTable).where(and(
+  const activeDateRows = await db.select({ date: freezerAlertRunProjectionTable.date })
+    .from(freezerAlertRunProjectionTable)
+    .where(and(
       eq(freezerAlertRunProjectionTable.scope, scope),
       lt(freezerAlertRunProjectionTable.date, today),
-      gte(freezerAlertRunProjectionTable.dueAt, nowMs - RETENTION_MS),
-    )).orderBy(
-      asc(freezerAlertRunProjectionTable.date),
-      asc(freezerAlertRunProjectionTable.dueAt),
-    ),
-  ]);
+      eq(freezerAlertRunProjectionTable.isActive, true),
+    ))
+    .groupBy(freezerAlertRunProjectionTable.date);
+  const freezerRows = await db.select({
+    date: freezerAlertRunProjectionTable.date,
+    runId: freezerAlertRunProjectionTable.runId,
+    startedAt: freezerAlertRunProjectionTable.startedAt,
+    endedAt: freezerAlertRunProjectionTable.endedAt,
+    freezerTime: freezerAlertRunProjectionTable.freezerTime,
+  }).from(freezerAlertRunProjectionTable).where(and(
+    eq(freezerAlertRunProjectionTable.scope, scope),
+    lt(freezerAlertRunProjectionTable.date, today),
+    gte(freezerAlertRunProjectionTable.dueAt, nowMs - RETENTION_MS),
+  )).orderBy(
+    asc(freezerAlertRunProjectionTable.date),
+    asc(freezerAlertRunProjectionTable.dueAt),
+  );
 
   const activeSnapshots = activeDateRows.length
     ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data })
@@ -792,8 +910,13 @@ export async function enqueueScheduledWebPushAlerts(
     .from(dailySyncTable)
     .groupBy(dailySyncTable.scope);
   let enqueued = 0;
+  let skippedNoWork = 0;
   for (const row of rows) {
     const scope = row.scope as Scope;
+    if (!await hasScheduledAlertWork(scope, nowMs)) {
+      skippedNoWork++;
+      continue;
+    }
     const result = await enqueueServerJob({
       scope,
       actorId: SCHEDULED_EVALUATION_CANONICAL_ACTOR,
@@ -802,6 +925,13 @@ export async function enqueueScheduledWebPushAlerts(
       input: { scheduledFor: nowMs },
     });
     if (result.created) enqueued++;
+  }
+  if (skippedNoWork > 0) {
+    logger.info({
+      event: "web_push_alert_scheduler",
+      outcome: "idle_scopes_skipped",
+      safeCounts: { examined: rows.length, enqueued, skippedNoWork },
+    }, "Scheduled alert scopes had no current work");
   }
   return { examined: rows.length, enqueued };
 }
@@ -828,25 +958,26 @@ registerServerJob("scheduled-evaluation", {
     if (!requestedDate) {
       const nowMs = Date.now();
       const today = facilityDate(nowMs);
-      const [snapshotRows, recordRows, armRows] = await Promise.all([
-        readScheduledAlertSnapshotRows(scope, today, nowMs),
-        db.select({
-          alertId: scheduledAlertRecordsTable.alertId,
-          date: scheduledAlertRecordsTable.date,
-          status: scheduledAlertRecordsTable.status,
-          evaluatedAt: scheduledAlertRecordsTable.evaluatedAt,
-        }).from(scheduledAlertRecordsTable).where(and(
-          eq(scheduledAlertRecordsTable.scope, scope),
-          gt(scheduledAlertRecordsTable.expiresAt, new Date(nowMs)),
-        )),
-        db.select({
-          runKey: webPushAlertArmsTable.runKey,
-          alertKind: webPushAlertArmsTable.alertKind,
-        }).from(webPushAlertArmsTable).where(and(
-          eq(webPushAlertArmsTable.scope, scope),
-          gt(webPushAlertArmsTable.expiresAt, new Date(nowMs)),
-        )),
-      ]);
+      // Keep this burst of pool reads serial: they are independent, but doing
+      // them together increases peak checkouts while other background work runs.
+      const snapshotRows = await readScheduledAlertSnapshotRows(scope, today, nowMs);
+      const recordRows = await db.select({
+        alertId: scheduledAlertRecordsTable.alertId,
+        alertKind: scheduledAlertRecordsTable.alertKind,
+        date: scheduledAlertRecordsTable.date,
+        status: scheduledAlertRecordsTable.status,
+        evaluatedAt: scheduledAlertRecordsTable.evaluatedAt,
+      }).from(scheduledAlertRecordsTable).where(and(
+        eq(scheduledAlertRecordsTable.scope, scope),
+        gt(scheduledAlertRecordsTable.expiresAt, new Date(nowMs)),
+      ));
+      const armRows = await db.select({
+        runKey: webPushAlertArmsTable.runKey,
+        alertKind: webPushAlertArmsTable.alertKind,
+      }).from(webPushAlertArmsTable).where(and(
+        eq(webPushAlertArmsTable.scope, scope),
+        gt(webPushAlertArmsTable.expiresAt, new Date(nowMs)),
+      ));
       dateRows = snapshotRows;
       examined = dateRows.length;
       const existingAlertIds = new Set(recordRows.map((row) => row.alertId));
@@ -856,10 +987,12 @@ registerServerJob("scheduled-evaluation", {
       candidates = dateRows.reduce<number>((total, row) => total
         + scheduledAlertCandidateCount(row.data, row.date, nowMs, activeArms), 0);
       const pendingDeferredDates = !quietHours(nowMs)
-        ? recordRows.filter((row) => row.status === "deferred"
-          || (row.status === "delivering"
-            && row.evaluatedAt instanceof Date
-            && row.evaluatedAt.getTime() < nowMs - DEFERRED_DELIVERY_CLAIM_MS))
+        ? recordRows.filter((row) =>
+          (WEB_PUSH_KINDS as readonly string[]).includes(row.alertKind as string)
+          && (row.status === "pending" || row.status === "deferred"
+            || (row.status === "delivering"
+              && row.evaluatedAt instanceof Date
+              && row.evaluatedAt.getTime() < nowMs - DEFERRED_DELIVERY_CLAIM_MS)))
           .map((row) => row.date)
         : [];
       for (const date of new Set(pendingDeferredDates)) {

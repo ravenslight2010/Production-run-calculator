@@ -22,6 +22,8 @@ let webPushDeliveriesTable: DbModule["webPushDeliveriesTable"];
 let webPushSubscriptionsTable: DbModule["webPushSubscriptionsTable"];
 let webPushAlertArmsTable: DbModule["webPushAlertArmsTable"];
 let scheduledAlertRecordsTable: DbModule["scheduledAlertRecordsTable"];
+let freezerAlertProjectionStatusTable: DbModule["freezerAlertProjectionStatusTable"];
+let freezerAlertRunProjectionTable: DbModule["freezerAlertRunProjectionTable"];
 let backgroundOperationEventsTable: DbModule["backgroundOperationEventsTable"];
 
 let adminPool: pg.Pool;
@@ -105,6 +107,8 @@ beforeAll(async () => {
   webPushSubscriptionsTable = dbMod.webPushSubscriptionsTable;
   webPushAlertArmsTable = dbMod.webPushAlertArmsTable;
   scheduledAlertRecordsTable = dbMod.scheduledAlertRecordsTable;
+  freezerAlertProjectionStatusTable = dbMod.freezerAlertProjectionStatusTable;
+  freezerAlertRunProjectionTable = dbMod.freezerAlertRunProjectionTable;
   backgroundOperationEventsTable = dbMod.backgroundOperationEventsTable;
   runBackgroundOperation = backgroundMod.runBackgroundOperation;
   isTransientDatabaseConnectionError = backgroundMod.isTransientDatabaseConnectionError;
@@ -204,6 +208,8 @@ beforeEach(async () => {
       ${backgroundOperationEventsTable},
       ${scheduledAlertRecordsTable},
       ${webPushAlertArmsTable},
+      ${freezerAlertProjectionStatusTable},
+      ${freezerAlertRunProjectionTable},
       ${serverJobAttemptsTable},
       ${serverJobsTable},
       ${completedRunHistoryTable},
@@ -1011,7 +1017,7 @@ describe("background operation PostgreSQL reconnection", () => {
     ]);
   });
 
-  it("recovers historical deferred alerts without reading their daily snapshot", async () => {
+  it("recovers interrupted pending and historical deferred alerts without reading their daily snapshot", async () => {
     const now = Date.now();
     const date = new Date(now - 30 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
     await db.insert(scheduledAlertRecordsTable).values({
@@ -1036,6 +1042,17 @@ describe("background operation PostgreSQL reconnection", () => {
       evaluatedAt: new Date(now - 120_000),
       expiresAt: new Date(now + 60_000),
     });
+    await db.insert(scheduledAlertRecordsTable).values({
+      id: "interrupted-pending-alert-record",
+      scope: SCOPE,
+      alertId: "interrupted-pending-alert",
+      alertKind: "freezerEmpty",
+      date,
+      dueAt: new Date(now - 30_000),
+      status: "pending",
+      evaluatedAt: new Date(now - 30_000),
+      expiresAt: new Date(now + 60_000),
+    });
     await enqueueServerJob({
       scope: SCOPE,
       actorId: "deferred-alert-recovery-one",
@@ -1048,6 +1065,7 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(scheduledAlertRecordsTable)).toMatchObject([
       { id: "historical-deferred-alert-record", status: "no-subscriptions" },
       { id: "historical-stale-delivery-claim", status: "no-subscriptions" },
+      { id: "interrupted-pending-alert-record", status: "no-subscriptions" },
     ]);
     await enqueueServerJob({
       scope: SCOPE,
@@ -1060,8 +1078,58 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(scheduledAlertRecordsTable)).toMatchObject([
       { id: "historical-deferred-alert-record", status: "no-subscriptions" },
       { id: "historical-stale-delivery-claim", status: "no-subscriptions" },
+      { id: "interrupted-pending-alert-record", status: "no-subscriptions" },
     ]);
     expect(await db.select().from(dailySyncTable)).toEqual([]);
+  });
+
+  it("skips completed idle scopes but keeps active and unarmed freezer scopes scheduled", async () => {
+    const now = Date.now();
+    const futureDueAt = now + 10 * 60_000;
+    await db.insert(dailySyncTable).values([SCOPE, ALERT_SANDBOX_SCOPE].map((scope) => ({
+      date: ALERT_DATE,
+      scope,
+      data: { dayState: { date: ALERT_DATE, runs: [] }, runValues: {} },
+    })));
+    await db.insert(freezerAlertProjectionStatusTable).values([
+      { scope: SCOPE },
+      { scope: ALERT_SANDBOX_SCOPE },
+    ]);
+
+    await expect(enqueueScheduledWebPushAlerts(now)).resolves.toEqual({
+      examined: 2,
+      enqueued: 0,
+    });
+    expect(await db.select().from(serverJobsTable)).toHaveLength(0);
+
+    await db.insert(freezerAlertRunProjectionTable).values([
+      {
+        scope: SCOPE,
+        date: ALERT_DATE,
+        runId: "gate-active-run",
+        startedAt: now - 30_000,
+        endedAt: null,
+        freezerTime: null,
+        dueAt: null,
+        isActive: true,
+      },
+      {
+        scope: ALERT_SANDBOX_SCOPE,
+        date: ALERT_DATE,
+        runId: "gate-upcoming-freezer",
+        startedAt: now - 30_000,
+        endedAt: now,
+        freezerTime: 10,
+        dueAt: futureDueAt,
+        isActive: false,
+      },
+    ]);
+
+    await expect(enqueueScheduledWebPushAlerts(now + 60_000)).resolves.toEqual({
+      examined: 2,
+      enqueued: 2,
+    });
+    expect(await db.select().from(serverJobsTable)).toHaveLength(2);
   });
 
   it("keeps one queued scheduled job when enqueue confirmation is lost", async () => {

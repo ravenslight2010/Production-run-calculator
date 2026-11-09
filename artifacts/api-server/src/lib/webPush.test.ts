@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   clearScheduledEvaluationQueueMonitorForTests,
@@ -12,12 +13,40 @@ const mocks = vi.hoisted(() => ({
   dbSelect: vi.fn(),
   enqueueServerJob: vi.fn(),
   backoffOptions: [] as Array<{ jitter?: boolean }>,
+  tables: {
+    dailySync: { scope: { name: "scope" }, date: { name: "date" }, data: { name: "data" } },
+    freezerProjection: {
+      scope: { name: "scope" }, date: { name: "date" }, runId: { name: "run_id" },
+      startedAt: { name: "started_at" }, endedAt: { name: "ended_at" },
+      freezerTime: { name: "freezer_time" }, dueAt: { name: "due_at" }, isActive: { name: "is_active" },
+    },
+    projectionStatus: { scope: { name: "scope" } },
+    webPushArms: {
+      scope: { name: "scope" }, runKey: { name: "run_key" },
+      alertKind: { name: "alert_kind" }, expiresAt: { name: "expires_at" },
+    },
+    scheduledAlertRecords: {
+      id: { name: "id" }, scope: { name: "scope" }, date: { name: "date" },
+      alertId: { name: "alert_id" }, alertKind: { name: "alert_kind" },
+      status: { name: "status" }, evaluatedAt: { name: "evaluated_at" },
+      expiresAt: { name: "expires_at" }, dueAt: { name: "due_at" },
+    },
+    users: {},
+    deliveries: {},
+    subscriptions: {},
+  },
 }));
 
 vi.mock("@workspace/db", () => ({
   db: { select: mocks.dbSelect },
-  dailySyncTable: { scope: { name: "scope" }, date: { name: "date" } },
-  usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
+  dailySyncTable: mocks.tables.dailySync,
+  freezerAlertRunProjectionTable: mocks.tables.freezerProjection,
+  freezerAlertProjectionStatusTable: mocks.tables.projectionStatus,
+  webPushAlertArmsTable: mocks.tables.webPushArms,
+  scheduledAlertRecordsTable: mocks.tables.scheduledAlertRecords,
+  usersTable: mocks.tables.users,
+  webPushDeliveriesTable: mocks.tables.deliveries,
+  webPushSubscriptionsTable: mocks.tables.subscriptions,
 }));
 vi.mock("@workspace/live-calc", async (importOriginal) => ({
   ...await importOriginal<typeof import("@workspace/live-calc")>(),
@@ -54,6 +83,57 @@ const {
   validPushEndpoint,
   validSubscription,
 } = await import("./webPush");
+
+type SchedulerDbOptions = {
+  scopes?: string[];
+  projectionComplete?: boolean;
+  activeRunRows?: Array<Record<string, unknown>>;
+  freezerRows?: Array<Record<string, unknown>>;
+  armRows?: Array<Record<string, unknown>>;
+  existingAlertRows?: Array<Record<string, unknown>>;
+  recoverableRows?: Array<Record<string, unknown>>;
+};
+
+function configureSchedulerDb(options: SchedulerDbOptions = {}) {
+  const tables = mocks.tables;
+  const scopes = options.scopes ?? ["live"];
+  const getRows = (source: unknown, selectedFields: string[]) => {
+    if (source === tables.dailySync) return scopes.map((scope) => ({ scope }));
+    if (source === tables.projectionStatus) {
+      return options.projectionComplete ? [{ scope: scopes[0] ?? "live" }] : [];
+    }
+    if (source === tables.freezerProjection) {
+      return selectedFields.includes("dueAt") ? options.freezerRows ?? [] : options.activeRunRows ?? [];
+    }
+    if (source === tables.webPushArms) return options.armRows ?? [];
+    if (source === tables.scheduledAlertRecords) {
+      return selectedFields.includes("alertId")
+        ? options.existingAlertRows ?? []
+        : options.recoverableRows ?? [];
+    }
+    return [];
+  };
+
+  mocks.dbSelect.mockImplementation((selection: Record<string, unknown> = {}) => {
+    const selectedFields = Object.keys(selection);
+    let source: unknown;
+    type MockBuilder = {
+      from: (table: unknown) => MockBuilder;
+      where: (...args: unknown[]) => MockBuilder;
+      groupBy: (...args: unknown[]) => Promise<Array<Record<string, unknown>>>;
+      limit: (limit: number) => Promise<Array<Record<string, unknown>>>;
+    };
+    const builder = {} as MockBuilder;
+    builder.from = vi.fn((table: unknown) => {
+      source = table;
+      return builder;
+    });
+    builder.where = vi.fn(() => builder);
+    builder.groupBy = vi.fn(() => Promise.resolve(getRows(source, selectedFields)));
+    builder.limit = vi.fn(() => Promise.resolve(getRows(source, selectedFields)));
+    return builder;
+  });
+}
 
 describe("web-push endpoint validation", () => {
   const subscription = (endpoint: unknown) => ({
@@ -456,9 +536,8 @@ describe("server web-push alert candidates", () => {
   });
 
   it("coalesces repeated time-bucketed scheduled evaluations for each distinct scope", async () => {
-    const grouped = vi.fn().mockResolvedValue([{ scope: "live" }, { scope: "sandbox" }]);
-    const from = vi.fn().mockReturnValue({ groupBy: grouped });
-    mocks.dbSelect.mockReturnValue({ from });
+    configureSchedulerDb({ scopes: ["live", "sandbox"] });
+    mocks.enqueueServerJob.mockReset();
     mocks.enqueueServerJob
       .mockResolvedValueOnce({ created: true })
       .mockResolvedValueOnce({ created: true })
@@ -470,7 +549,6 @@ describe("server web-push alert candidates", () => {
     await expect(enqueueScheduledWebPushAlerts(179_999, 60_000))
       .resolves.toEqual({ examined: 2, enqueued: 0 });
 
-    expect(grouped).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueServerJob).toHaveBeenCalledTimes(4);
     expect(mocks.enqueueServerJob.mock.calls.map(([job]) => ({
       scope: job.scope,
@@ -482,6 +560,74 @@ describe("server web-push alert candidates", () => {
       { scope: "live", idempotencyKey: scheduledEvaluationIdempotencyKey("live", 179_999, 60_000), scheduledFor: 179_999 },
       { scope: "sandbox", idempotencyKey: scheduledEvaluationIdempotencyKey("sandbox", 179_999, 60_000), scheduledFor: 179_999 },
     ]);
+  });
+
+  it("skips idle scopes only after their projection is complete", async () => {
+    configureSchedulerDb({ scopes: ["live", "sandbox"], projectionComplete: true });
+    mocks.enqueueServerJob.mockReset().mockResolvedValue({ created: true });
+
+    await expect(enqueueScheduledWebPushAlerts(120_001, 60_000))
+      .resolves.toEqual({ examined: 2, enqueued: 0 });
+    expect(mocks.enqueueServerJob).not.toHaveBeenCalled();
+  });
+
+  it("fails open for incomplete projections and schedules active runs", async () => {
+    configureSchedulerDb({ projectionComplete: false });
+    mocks.enqueueServerJob.mockReset().mockResolvedValue({ created: true });
+    await expect(enqueueScheduledWebPushAlerts(120_001, 60_000))
+      .resolves.toEqual({ examined: 1, enqueued: 1 });
+
+    configureSchedulerDb({ projectionComplete: true, activeRunRows: [{ runId: "active" }] });
+    mocks.enqueueServerJob.mockReset().mockResolvedValue({ created: true });
+    await expect(enqueueScheduledWebPushAlerts(120_001, 60_000))
+      .resolves.toEqual({ examined: 1, enqueued: 1 });
+  });
+
+  it("arms upcoming freezer work, evaluates due armed alerts, and skips recorded milestones", async () => {
+    const runId = "ended-run";
+    const startedAt = 1_000;
+    const endedAt = 2_000;
+    const date = "2026-11-08";
+    const runKey = createHash("sha256").update(`${runId}:${startedAt}`).digest("hex").slice(0, 24);
+    const alertId = `${date}:${runKey}:freezer-empty`;
+    const freezerRow = {
+      date, runId, startedAt, endedAt, freezerTime: 1, dueAt: endedAt + 60_000,
+    };
+
+    configureSchedulerDb({ projectionComplete: true, freezerRows: [freezerRow] });
+    mocks.enqueueServerJob.mockReset().mockResolvedValue({ created: true });
+    await expect(enqueueScheduledWebPushAlerts(10_000, 60_000))
+      .resolves.toMatchObject({ enqueued: 1 });
+
+    configureSchedulerDb({
+      projectionComplete: true,
+      freezerRows: [freezerRow],
+      armRows: [{ runKey }],
+    });
+    mocks.enqueueServerJob.mockReset().mockResolvedValue({ created: true });
+    await expect(enqueueScheduledWebPushAlerts(10_000, 60_000))
+      .resolves.toMatchObject({ enqueued: 0 });
+    expect(mocks.enqueueServerJob).not.toHaveBeenCalled();
+
+    configureSchedulerDb({
+      projectionComplete: true,
+      freezerRows: [freezerRow],
+      armRows: [{ runKey }],
+    });
+    mocks.enqueueServerJob.mockReset().mockResolvedValue({ created: true });
+    await expect(enqueueScheduledWebPushAlerts(63_000, 60_000))
+      .resolves.toMatchObject({ enqueued: 1 });
+
+    configureSchedulerDb({
+      projectionComplete: true,
+      freezerRows: [freezerRow],
+      armRows: [{ runKey }],
+      existingAlertRows: [{ alertId }],
+    });
+    mocks.enqueueServerJob.mockReset().mockResolvedValue({ created: true });
+    await expect(enqueueScheduledWebPushAlerts(63_000, 60_000))
+      .resolves.toMatchObject({ enqueued: 0 });
+    expect(mocks.enqueueServerJob).not.toHaveBeenCalled();
   });
 
   it("registers scheduled evaluation as an executable bounded server job", () => {
