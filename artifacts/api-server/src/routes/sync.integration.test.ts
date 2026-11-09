@@ -62,6 +62,7 @@ let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
+let startAutoTrackServerTicks: typeof import("./sync")["startAutoTrackServerTicks"];
 let reconcileOperationalIntentInTransaction:
   typeof import("../lib/operationalIntentService")["reconcileOperationalIntentInTransaction"];
 let clearServerTickDateBackoffsForTests:
@@ -152,6 +153,7 @@ beforeAll(async () => {
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
+  startAutoTrackServerTicks = syncMod.startAutoTrackServerTicks;
   reconcileOperationalIntentInTransaction =
     operationalIntentServiceMod.reconcileOperationalIntentInTransaction;
   clearServerTickDateBackoffsForTests = syncMod.clearServerTickDateBackoffsForTests;
@@ -2852,6 +2854,53 @@ describe("server auto-track tick recovery under database pressure", () => {
   const TICK_DATE = "2030-03-10";
   const TICK_RUN = "server-owned-applicator";
   const TICK_NOW = new Date("2030-03-10T12:00:00.000Z").getTime();
+
+  it("backs off repeated full-pass failures and restores the normal cadence after success", async () => {
+    const summary = {
+      examinedDates: 0,
+      dateTransactions: 0,
+      transactionReasons: { dueClaims: 0, wallClockBookkeeping: 0, uncertainSnapshot: 0 },
+      builtClaims: 0,
+      accepted: 0,
+      outcomes: {},
+    };
+    const runPass = vi.fn<() => Promise<typeof summary>>()
+      .mockRejectedValueOnce(new Error("temporary database checkout failure"))
+      .mockRejectedValueOnce(new Error("temporary database checkout failure"))
+      .mockResolvedValueOnce(summary)
+      .mockRejectedValueOnce(new Error("temporary database checkout failure"));
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-03-10T12:00:00.000Z"));
+    const timer = startAutoTrackServerTicks({
+      intervalMs: 5_000,
+      random: () => 1,
+      runPass,
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(runPass).toHaveBeenCalledTimes(1);
+
+      // First failure waits two intervals; the intervening timer beat does no
+      // database work.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(runPass).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(runPass).toHaveBeenCalledTimes(2);
+
+      // Consecutive failure waits four intervals, then success clears the
+      // failure streak and the healthy five-second cadence resumes.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(runPass).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(runPass).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(runPass).toHaveBeenCalledTimes(4);
+    } finally {
+      clearInterval(timer);
+      vi.useRealTimers();
+    }
+  });
 
   async function seedTickRun(scope: "live" | "sandbox" = "live") {
     await db.update(dailySyncTable).set({

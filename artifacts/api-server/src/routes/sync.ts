@@ -4467,15 +4467,38 @@ export async function runAutoTrackServerTicks(opts: {
   };
 }
 
-export function startAutoTrackServerTicks(): NodeJS.Timeout {
-  const intervalMs = Math.max(5_000, Number(process.env.AUTO_TRACK_SERVER_TICK_MS) || SERVER_TICK_DEFAULT_MS);
+export type AutoTrackServerTickSchedulerOptions = {
+  /** Test seam for exercising scheduler failure/recovery without database work. */
+  runPass?: () => Promise<ServerTickSummary>;
+  intervalMs?: number;
+  random?: () => number;
+};
+
+export function startAutoTrackServerTicks(
+  options: AutoTrackServerTickSchedulerOptions = {},
+): NodeJS.Timeout {
+  const configuredIntervalMs = options.intervalMs
+    ?? (Number(process.env.AUTO_TRACK_SERVER_TICK_MS) || SERVER_TICK_DEFAULT_MS);
+  const intervalMs = Math.max(5_000, configuredIntervalMs);
+  // Full-pass failures occur before per-date backoff can help (for example, if
+  // the initial 45-day row scan cannot check out a connection). Keep the healthy
+  // cadence unchanged, but slow repeated full-pass retries so every Autoscale
+  // process does not continue hitting an unhealthy database at the same rate.
+  const passFailureBackoff = createBackgroundOperationBackoff({
+    baseDelayMs: intervalMs * 2,
+    maxDelayMs: intervalMs * 4,
+    jitter: true,
+    random: options.random,
+  });
+  const runPass = options.runPass ?? runAutoTrackServerTicks;
   let running = false;
   let lastSummaryLogAt = 0;
   const timer = setInterval(() => {
-    if (running) return;
+    if (running || !passFailureBackoff.isReady()) return;
     running = true;
     const startedAt = Date.now();
-    void runAutoTrackServerTicks().then((summary) => {
+    void Promise.resolve().then(() => runPass()).then((summary) => {
+      passFailureBackoff.recordSuccess();
       const completedAt = Date.now();
       if (completedAt - lastSummaryLogAt < SERVER_TICK_SUMMARY_LOG_INTERVAL_MS) return;
       lastSummaryLogAt = completedAt;
@@ -4490,10 +4513,14 @@ export function startAutoTrackServerTicks(): NodeJS.Timeout {
         outcomes: summary.outcomes,
       }, "Server auto-track tick summary");
     }).catch((err) => {
+      const failedAt = Date.now();
+      passFailureBackoff.recordFailure(failedAt);
+      const nextRetryAt = passFailureBackoff.nextRetryAt(failedAt);
       logger.error({
         event: "server_auto_track_tick",
         failureStage: "tick-pass",
         failureReason: classifyBackgroundFailure(err, { assumeDatabase: true }),
+        retryDelayMs: nextRetryAt === undefined ? 0 : Math.max(0, nextRetryAt - failedAt),
       }, "Server auto-track tick pass failed");
     }).finally(() => { running = false; });
   }, intervalMs);
