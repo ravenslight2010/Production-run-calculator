@@ -33,7 +33,7 @@ const SKIP_FILES = new Set(["publish-source-record.json", "build-info.json",
 
 export function isSourceInput(relative, policy = SOURCE_POLICY) {
   assertPolicy(policy);
-  const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY;
+  const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY || isPublicCiSourceBuild();
   if (NON_PRODUCTION_SOURCE_FILES.has(relative)) return false;
   if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return !fresh;
   const parts = relative.split("/");
@@ -50,13 +50,21 @@ export function isSourceInput(relative, policy = SOURCE_POLICY) {
       ["package.json", "artifact.toml"].includes(parts[2])));
 }
 
+export function isPublicCiSourceBuild() {
+  return process.env.CI_PUBLIC_SOURCE === "1" || process.env.CI_PUBLIC_SOURCE === "true";
+}
+
 export function fingerprintSource(root, policy = SOURCE_POLICY) {
   assertPolicy(policy);
   const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY;
   const sourceRoot = path.resolve(root);
+  const publicCi = isPublicCiSourceBuild();
   const required = fresh
     ? [...REQUIRED.filter((entry) => entry !== "attached_assets/source-library/audits" &&
         !SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(entry)), ...FRESH_REQUIRED]
+    : publicCi
+    ? REQUIRED.filter((entry) => entry !== "attached_assets/source-library/audits" &&
+        !SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(entry))
     : REQUIRED;
   for (const entry of required) {
     let stat;

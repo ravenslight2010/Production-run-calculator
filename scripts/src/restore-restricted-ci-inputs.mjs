@@ -49,6 +49,23 @@ export function authorizeMain(context, event, capability, expectedCapabilityHash
   }
 }
 
+// Same-repository PRs into main may use the main reviewed-input capability so
+// routine PRs are not stuck on unprivileged CI missing attached_assets.
+// Fork PRs remain unauthorized.
+export function authorizeSameRepoPr(context, event, capability, expectedCapabilityHash = mainCapabilityHash) {
+  const pr = event?.pull_request;
+  if (context.GITHUB_ACTIONS !== "true" || context.GITHUB_REPOSITORY !== repository ||
+      context.GITHUB_EVENT_NAME !== "pull_request" ||
+      !context.GITHUB_REF?.startsWith("refs/pull/") ||
+      pr?.base?.ref !== "main" ||
+      pr?.head?.repo?.full_name !== repository ||
+      pr?.base?.repo?.full_name !== repository ||
+      event?.repository?.full_name !== repository ||
+      digest(capability ?? "") !== expectedCapabilityHash) {
+    throw new Error("Only same-repository pull requests into main may use the shared reviewed-input capability.");
+  }
+}
+
 function checksumEntry() {
   const report = manifest.find((entry) => entry.path.endsWith("/source-library-reconciliation-2026-08-26.json"));
   return { path: report.path.replace(/json$/, "sha256"), sha256: digest(Buffer.from(`${report.sha256}\n`)) };
@@ -129,13 +146,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else if (process.argv[2] === "--copy-report" && process.argv.length === 4) {
       // Rollback's disposable worktrees consume the same canonical pair as the outer build.
       restoreReviewedBuildInputsFromDirectory(process.argv[3], path.join(process.cwd(), reportDirectory));
-    } else if (process.argv.length === 2 || (process.argv.length === 3 && ["--with-archives", "--main"].includes(process.argv[2])) ||
-               (process.argv.length === 4 && process.argv[2] === "--main" && process.argv[3] === "--with-archives")) {
+    } else if (process.argv.length === 2 || (process.argv.length === 3 && ["--with-archives", "--main", "--same-repo-pr"].includes(process.argv[2])) ||
+               (process.argv.length === 4 && ["--main", "--same-repo-pr"].includes(process.argv[2]) && process.argv[3] === "--with-archives")) {
       const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
       if (process.argv[2] === "--main") {
         authorizeMain(process.env, event, mainCapability);
         const actualHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
         if (actualHead !== process.env.GITHUB_SHA) throw new Error("Main checkout differs from the authorized run revision.");
+      } else if (process.argv[2] === "--same-repo-pr") {
+        authorizeSameRepoPr(process.env, event, mainCapability);
       } else authorize(process.env, event, process.env.REVIEWED_PR_HEAD_SHA, capability);
       const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/false" };
       if (!token) throw new Error("Read-only repository transport unavailable.");
