@@ -3989,7 +3989,8 @@ describe("GET /sync/operational-intents/cursor", () => {
     const firstBody = await first.json() as any;
     expect(firstBody).toMatchObject({ hasMore: true });
     expect(firstBody.mutations).toHaveLength(100);
-    expect(firstBody.mutations.every((item: any) => item.snapshot.dayState.runs[0].id !== "sandbox-only")).toBe(true);
+    expect(firstBody.mutations.slice(0, -1).every((item: any) => item.snapshot === null)).toBe(true);
+    expect(firstBody.mutations.at(-1).snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
     expect(firstBody.mutations.every((item: any) => typeof item.cursor === "number")).toBe(true);
 
     const second = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=${firstBody.cursor}`, {
@@ -4014,8 +4015,9 @@ describe("GET /sync/operational-intents/cursor", () => {
 
     const response = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, { headers: authHeaders() });
     const body = await response.json() as any;
-    expect(body.mutations[0].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
-    expect(body.mutations[1].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
+    const snapshots = body.mutations.filter((item: any) => item.snapshot !== null);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].snapshot.dayState.runs[0].id).toBe("run-2030-03-10");
   });
 
   it("converges across multiple cursor pages without adopting retained history", async () => {
@@ -4079,7 +4081,8 @@ describe("GET /sync/operational-intents/cursor", () => {
     const page = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, { headers: authHeaders() });
     const body = await page.json() as any;
     expect(body.mutations[0].snapshot).toBeNull();
-    expect(body.mutations[1].snapshot).toEqual((await db.select().from(dailySyncTable)
+    expect(body.mutations.filter((item: any) => item.snapshot !== null)).toHaveLength(1);
+    expect(body.mutations.at(-1).snapshot).toEqual((await db.select().from(dailySyncTable)
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, "2030-03-10"))))[0].data);
   });
 });

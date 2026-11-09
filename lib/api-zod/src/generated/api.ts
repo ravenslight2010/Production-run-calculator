@@ -10489,7 +10489,7 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
 })).optional().describe('Per-row revision metadata used to reject stale same-row edits.')
 }),
   "runValues": zod.record(zod.string(), zod.unknown())
-}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.null()]).optional()
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.null()]).optional().describe('Current materialized snapshot, included only once per date per page. Null for non-adoptable receipts and duplicate snapshots in the same page.')
 }))
 })
 

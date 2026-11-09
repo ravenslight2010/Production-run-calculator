@@ -2962,6 +2962,7 @@ export interface OperationalIntentReceipt {
   deviceId?: string;
   serverReceivedAt?: string;
   createdAt: string;
+  /** Current materialized snapshot, included only once per date per page. Null for non-adoptable receipts and duplicate snapshots in the same page. */
   snapshot?: SyncPayload | null;
 }
 

@@ -15,7 +15,6 @@ function receipt(
     cursor,
     date: "2030-03-10",
     outcome: "accepted",
-    snapshot: { historical: cursor },
     commandType: "operational-intent",
     actorId: "operator-1",
     deviceId: "device-1",
@@ -49,10 +48,11 @@ describe("readOperationalIntentCursorPage", () => {
   });
 
   it("continues from the last receipt and signals a full page", async () => {
+    const canonical = { payload: "x".repeat(30_000) };
     const store = reader(Array.from(
       { length: OPERATIONAL_INTENT_CURSOR_PAGE_SIZE },
       (_, index) => receipt(index + 101),
-    ));
+    ), [{ date: "2030-03-10", data: canonical }]);
 
     const page = await readOperationalIntentCursorPage("live", 100, store);
 
@@ -61,6 +61,10 @@ describe("readOperationalIntentCursorPage", () => {
     expect(page.mutations).toHaveLength(OPERATIONAL_INTENT_CURSOR_PAGE_SIZE);
     expect(page.mutations[0]!.cursor).toBe(101);
     expect(page.mutations.at(-1)!.cursor).toBe(200);
+    expect(page.mutations.filter((mutation) => mutation.snapshot !== null)).toHaveLength(1);
+    expect(page.mutations.slice(0, -1).every((mutation) => mutation.snapshot === null)).toBe(true);
+    expect(page.mutations.at(-1)!.snapshot).toEqual(canonical);
+    expect(JSON.stringify(page).length).toBeLessThan(70_000);
   });
 
   it("uses the current scoped materialization for a compacted receipt", async () => {
@@ -69,7 +73,7 @@ describe("readOperationalIntentCursorPage", () => {
       runValues: { "canonical-current": { casesNeeded: 12 } },
     };
     const store = reader(
-      [receipt(7, { snapshot: null })],
+      [receipt(7)],
       [{ date: "2030-03-10", data: canonical }],
     );
 
@@ -81,6 +85,33 @@ describe("readOperationalIntentCursorPage", () => {
       materializedSnapshotId: syncSnapshotId(canonical),
     });
     expect(store.readMaterializedSnapshots).toHaveBeenCalledWith("live", ["2030-03-10"]);
+  });
+
+  it("includes one snapshot per date at that date's last adoptable receipt", async () => {
+    const firstDateSnapshot = { dayState: { date: "2030-03-10", runs: [{ id: "first-date" }] } };
+    const secondDateSnapshot = { dayState: { date: "2030-03-11", runs: [{ id: "second-date" }] } };
+    const store = reader([
+      receipt(1, { date: "2030-03-10", outcome: "accepted" }),
+      receipt(2, { date: "2030-03-10", outcome: "superseded" }),
+      receipt(3, { date: "2030-03-10", outcome: "review-required" }),
+      receipt(4, { date: "2030-03-11", outcome: "rebased" }),
+      receipt(5, { date: "2030-03-11", outcome: "rejected" }),
+    ], [
+      { date: "2030-03-10", data: firstDateSnapshot },
+      { date: "2030-03-11", data: secondDateSnapshot },
+    ]);
+
+    const page = await readOperationalIntentCursorPage("live", 0, store);
+
+    expect(page.cursor).toBe(5);
+    expect(page.mutations.map(({ cursor, snapshot }) => ({ cursor, snapshot }))).toEqual([
+      { cursor: 1, snapshot: null },
+      { cursor: 2, snapshot: firstDateSnapshot },
+      { cursor: 3, snapshot: null },
+      { cursor: 4, snapshot: secondDateSnapshot },
+      { cursor: 5, snapshot: null },
+    ]);
+    expect(page.mutations.filter((mutation) => mutation.snapshot !== null)).toHaveLength(2);
   });
 
   it("does not expose snapshots for non-adoptable outcomes", async () => {

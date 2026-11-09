@@ -2719,7 +2719,16 @@ router.get("/sync/operational-intents/cursor", async (req: Request, res: Respons
   }
   const scope = currentScope();
   try {
-    res.json(await readOperationalIntentCursorPage(scope, after));
+    const page = await readOperationalIntentCursorPage(scope, after);
+    req.log.info({
+      event: "operational_intent_cursor_page",
+      requestedAfter: after,
+      returnedCursor: page.cursor,
+      mutationCount: page.mutations.length,
+      hasMore: page.hasMore,
+      snapshotCount: page.mutations.reduce((count, mutation) => count + Number(mutation.snapshot !== null), 0),
+    }, "Operational intent cursor page served");
+    res.json(page);
   } catch (error) {
     req.log.error({ err: error, event: "operational_intent_cursor" }, "Mutation cursor read failed");
     res.status(500).json({ error: "Mutation cursor could not sync" });

@@ -13,7 +13,6 @@ export type OperationalIntentCursorReceipt = {
   cursor: number;
   date: string;
   outcome: string;
-  snapshot: unknown;
   commandType: string;
   actorId: string;
   deviceId: string;
@@ -45,7 +44,6 @@ const databaseReader: OperationalIntentCursorReader = {
     cursor: operationalIntentLedgerTable.sequence,
     date: operationalIntentLedgerTable.date,
     outcome: operationalIntentLedgerTable.outcome,
-    snapshot: operationalIntentLedgerTable.snapshot,
     commandType: operationalIntentLedgerTable.commandType,
     actorId: operationalIntentLedgerTable.actorId,
     deviceId: operationalIntentLedgerTable.deviceId,
@@ -73,16 +71,19 @@ const databaseReader: OperationalIntentCursorReader = {
 export type OperationalIntentCursorPage = {
   cursor: number;
   hasMore: boolean;
-  mutations: Array<Omit<OperationalIntentCursorReceipt, "snapshot"> & {
+  mutations: Array<OperationalIntentCursorReceipt & {
     snapshot: unknown | null;
     materializedSnapshotId: string | null;
   }>;
 };
 
+const ADOPTABLE_OUTCOMES = new Set(["accepted", "superseded", "rebased"]);
+
 /**
  * Read a bounded, scope-fenced receipt page and project adoptable outcomes to
- * the latest materialized snapshot for each date. Historical receipt snapshots
- * are never replayed as operations.
+ * the latest materialized snapshot for each date. Include that identical
+ * snapshot only once per date in the page; all receipt cursors still advance.
+ * Historical receipt snapshots are never replayed as operations.
  */
 export async function readOperationalIntentCursorPage(
   scope: Scope,
@@ -95,13 +96,17 @@ export async function readOperationalIntentCursorPage(
   const dates = [...new Set(rows.map((row) => row.date))];
   const materialized = await reader.readMaterializedSnapshots(scope, dates);
   const byDate = new Map(materialized.map((row) => [row.date, row.data]));
+  const lastAdoptableIndexByDate = new Map<string, number>();
+  rows.forEach((row, index) => {
+    if (ADOPTABLE_OUTCOMES.has(row.outcome)) lastAdoptableIndexByDate.set(row.date, index);
+  });
 
   return {
     cursor: rows.length ? rows[rows.length - 1]!.cursor : after,
     hasMore: rows.length === OPERATIONAL_INTENT_CURSOR_PAGE_SIZE,
-    mutations: rows.map(({ snapshot: _historical, ...row }) => {
-      const adoptable = ["accepted", "superseded", "rebased"].includes(row.outcome);
-      const snapshot = adoptable ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
+    mutations: rows.map((row, index) => {
+      const includeSnapshot = lastAdoptableIndexByDate.get(row.date) === index;
+      const snapshot = includeSnapshot ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
       return {
         ...row,
         snapshot,

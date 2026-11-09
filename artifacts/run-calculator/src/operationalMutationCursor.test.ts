@@ -57,6 +57,26 @@ describe("operational mutation cursor recovery", () => {
     expect(String(request.mock.calls.at(-1)?.[0])).toContain("after=205");
   });
 
+  it("advances every receipt while adopting one snapshot from a compact page", async () => {
+    const canonical = { dayState: { date: "2030-03-10", runs: [{ id: "current" }] } };
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      cursor: 100,
+      hasMore: false,
+      mutations: Array.from({ length: 100 }, (_, index) => ({
+        cursor: index + 1,
+        snapshot: index === 99 ? canonical : null,
+      })),
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", request);
+    const adopted: unknown[] = [];
+
+    await consumeOperationalMutationCursor(identity, (snapshot) => adopted.push(snapshot));
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(adopted).toEqual([canonical]);
+    expect(localStorage.getItem("run-calculator:operational-mutation-cursor:v1:live:operator-1")).toBe("100");
+  });
+
   it.each(["other-account", "same-account-return", "scope-switch", "cancel", "pending-command"] as const)(
     "does not adopt or acknowledge a late page after %s", async (boundary) => {
       let finish!: (response: Response) => void;

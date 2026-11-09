@@ -8853,6 +8853,7 @@ components:
         serverReceivedAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         snapshot:
+          description: Current materialized snapshot, included only once per date per page. Null for non-adoptable receipts and duplicate snapshots in the same page.
           oneOf:
             - $ref: "#/components/schemas/SyncPayload"
             - type: "null"
