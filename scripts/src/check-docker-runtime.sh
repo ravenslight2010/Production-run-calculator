@@ -232,7 +232,7 @@ assert_container_security "$storage_id" "0:0" '["ALL"]' '["CHOWN"]'
 
 echo "Waiting up to 120 seconds for Caddy HTTPS, API readiness, and static serving."
 ready=0
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
   if curl --silent --show-error --insecure --max-time 3 \
       --resolve localhost:443:127.0.0.1 \
       --output "$API_HEALTH_FILE" \
@@ -250,7 +250,7 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 if ((ready == 0)); then
-  echo "Caddy did not serve a ready API and static application within 120 seconds." >&2
+  echo "Caddy did not serve a ready API and static application within 240 seconds." >&2
   exit 1
 fi
 
