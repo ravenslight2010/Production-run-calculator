@@ -20,7 +20,7 @@ public sealed class CodingAssistantRecommendationEngineTests
         Assert.Equal("ollama", recommendation.Provider);
         Assert.Equal("qwen3-coder:30b", recommendation.CandidateModel);
         Assert.Equal(65_536, recommendation.ContextTokens);
-        Assert.Equal(19d, recommendation.ApproximateArtifactSizeGB);
+        Assert.Equal(19d, recommendation.ApproximateArtifactSizeGB.GetValueOrDefault());
         Assert.Equal(CodingAssistantModelQualificationStatus.Unmeasured, recommendation.Qualification);
         Assert.Equal(1, recommendation.MaxLoadedModels);
         Assert.Equal(1, recommendation.MaxParallelRequests);
