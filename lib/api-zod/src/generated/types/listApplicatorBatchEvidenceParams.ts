@@ -7,20 +7,18 @@
  */
 
 export type ListApplicatorBatchEvidenceParams = {
-from?: Date;
-to?: Date;
-/**
- * @maxLength 500
- */
-runId?: string;
-/**
- * @maxLength 4096
- * @pattern ^[A-Za-z0-9_-]+$
- */
-cursor?: string;
-/**
- * @minimum 1
- * @maximum 500
- */
-limit?: number;
+  from?: Date;
+  to?: Date;
+  /** @maxLength 500 */
+  runId?: string;
+  /**
+   * @maxLength 4096
+   * @pattern ^[A-Za-z0-9_-]+$
+   */
+  cursor?: string;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  limit?: number;
 };

@@ -8,9 +8,7 @@
 import type { ClientTodayParameter } from './clientTodayParameter';
 
 export type PutSyncTodayParams = {
-today?: ClientTodayParameter;
-/**
- * @minimum 0
- */
-epoch?: number;
+  today?: ClientTodayParameter;
+  /** @minimum 0 */
+  epoch?: number;
 };

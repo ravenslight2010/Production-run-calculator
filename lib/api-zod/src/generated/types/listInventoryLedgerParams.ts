@@ -7,5 +7,5 @@
  */
 
 export type ListInventoryLedgerParams = {
-itemId?: number;
+  itemId?: number;
 };

@@ -7,6 +7,6 @@
  */
 
 export type GetOperationalRunViewParams = {
-date: Date;
-runId: string;
+  date: Date;
+  runId: string;
 };

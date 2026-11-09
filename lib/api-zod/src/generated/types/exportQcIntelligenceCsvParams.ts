@@ -10,22 +10,18 @@ import type { ExportQcIntelligenceCsvStation } from './exportQcIntelligenceCsvSt
 import type { ExportQcIntelligenceCsvView } from './exportQcIntelligenceCsvView';
 
 export type ExportQcIntelligenceCsvParams = {
-view: ExportQcIntelligenceCsvView;
-from?: Date;
-to?: Date;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: ExportQcIntelligenceCsvStation;
-/**
- * @maxLength 200
- */
-runId?: string;
-checkType?: ExportQcIntelligenceCsvCheckType;
-/**
- * @minimum 1
- * @maximum 5000
- */
-limit?: number;
+  view: ExportQcIntelligenceCsvView;
+  from?: Date;
+  to?: Date;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: ExportQcIntelligenceCsvStation;
+  /** @maxLength 200 */
+  runId?: string;
+  checkType?: ExportQcIntelligenceCsvCheckType;
+  /**
+   * @minimum 1
+   * @maximum 5000
+   */
+  limit?: number;
 };

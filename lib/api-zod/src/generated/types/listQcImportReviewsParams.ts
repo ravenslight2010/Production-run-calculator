@@ -8,14 +8,12 @@
 import type { ListQcImportReviewsStatus } from './listQcImportReviewsStatus';
 
 export type ListQcImportReviewsParams = {
-/**
- * @maxLength 120
- */
-cursor?: string;
-status?: ListQcImportReviewsStatus;
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
+  /** @maxLength 120 */
+  cursor?: string;
+  status?: ListQcImportReviewsStatus;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };

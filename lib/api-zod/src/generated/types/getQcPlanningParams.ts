@@ -7,14 +7,12 @@
  */
 
 export type GetQcPlanningParams = {
-/**
- * Client-local production date used as the start of the range.
- */
-today: Date;
-/**
- * Inclusive number of client-calendar dates to inspect, capped at 90.
- * @minimum 1
- * @maximum 90
- */
-days?: number;
+  /** Client-local production date used as the start of the range. */
+  today: Date;
+  /**
+   * Inclusive number of client-calendar dates to inspect, capped at 90.
+   * @minimum 1
+   * @maximum 90
+   */
+  days?: number;
 };

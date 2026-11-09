@@ -10,29 +10,21 @@ import type { GetQcIntelligenceStation } from './getQcIntelligenceStation';
 import type { GetQcIntelligenceView } from './getQcIntelligenceView';
 
 export type GetQcIntelligenceParams = {
-view: GetQcIntelligenceView;
-/**
- * Inclusive UTC calendar date; defaults to 29 days before the current UTC date
- */
-from?: Date;
-/**
- * Inclusive UTC calendar date; defaults to the current UTC date
- */
-to?: Date;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: GetQcIntelligenceStation;
-/**
- * @maxLength 200
- */
-runId?: string;
-checkType?: GetQcIntelligenceCheckType;
-/**
- * Maximum recorded events to inspect; larger result sets are explicitly partial
- * @minimum 1
- * @maximum 5000
- */
-limit?: number;
+  view: GetQcIntelligenceView;
+  /** Inclusive UTC calendar date; defaults to 29 days before the current UTC date */
+  from?: Date;
+  /** Inclusive UTC calendar date; defaults to the current UTC date */
+  to?: Date;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: GetQcIntelligenceStation;
+  /** @maxLength 200 */
+  runId?: string;
+  checkType?: GetQcIntelligenceCheckType;
+  /**
+   * Maximum recorded events to inspect; larger result sets are explicitly partial
+   * @minimum 1
+   * @maximum 5000
+   */
+  limit?: number;
 };
