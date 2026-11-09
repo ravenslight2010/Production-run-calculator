@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node ../../scripts/src/skip-if-public-source-assets-missing.mjs || vitest run",
+    "test": "vitest run",
     "snapshots": "tsx ./src/regen.mts",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },

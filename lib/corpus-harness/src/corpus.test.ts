@@ -1,8 +1,3 @@
-// Corpus regression bench: deterministic importer layers over the REAL
-// customer workbooks vs checked-in snapshots. A failing diff means importer
-// behavior changed on real files — either fix the regression or, if the
-// change is intentional, regenerate and review:
-//   pnpm --filter @workspace/corpus-harness run snapshots
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +14,22 @@ import {
   readGrids,
 } from "./index.js";
 
+const __sourceLibraryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../attached_assets/source-library",
+);
+const __skipPublicCorpus =
+  (process.env.CI_PUBLIC_SOURCE === "1" || process.env.CI_PUBLIC_SOURCE === "true") &&
+  !fs.existsSync(__sourceLibraryRoot);
+if (__skipPublicCorpus) {
+  console.warn("skip: corpus-harness without source-library assets");
+}
+
+// Corpus regression bench: deterministic importer layers over the REAL
+// customer workbooks vs checked-in snapshots. A failing diff means importer
+// behavior changed on real files — either fix the regression or, if the
+// change is intentional, regenerate and review:
+//   pnpm --filter @workspace/corpus-harness run snapshots
 const SNAP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "snapshots");
 function loadSnapshot(name: SnapshotName): unknown {
   const file = path.join(SNAP_DIR, `${name}.json`);
@@ -30,7 +41,7 @@ function loadSnapshot(name: SnapshotName): unknown {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-describe("corpus snapshots (deterministic importers)", () => {
+describe.skipIf(__skipPublicCorpus)("corpus snapshots (deterministic importers)", () => {
   for (const name of Object.keys(SNAPSHOT_BUILDERS) as SnapshotName[]) {
     it(`${name} parse matches snapshots/${name}.json`, () => {
       // JSON round-trip the actual too so undefined-vs-missing never diffs.
@@ -40,7 +51,7 @@ describe("corpus snapshots (deterministic importers)", () => {
   }
 });
 
-describe("corpus evaluation manifest", () => {
+describe.skipIf(__skipPublicCorpus)("corpus evaluation manifest", () => {
   it("binds deterministic evidence to the retained source corpus", () => {
     const actual = buildCorpusEvaluationManifest();
     expect(actual).toEqual(loadSnapshot("evaluation-manifest" as SnapshotName));
@@ -50,7 +61,7 @@ describe("corpus evaluation manifest", () => {
   }, 30_000);
 });
 
-describe("corpus invariants (parse-gap tripwires)", () => {
+describe.skipIf(__skipPublicCorpus)("corpus invariants (parse-gap tripwires)", () => {
   it("cheese workbook: every customer tab yields recipes with real pounds", () => {
     const snap = buildCheeseSnapshot();
     expect(snap.recipeCount).toBeGreaterThan(0);
