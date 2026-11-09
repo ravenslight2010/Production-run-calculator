@@ -4150,6 +4150,12 @@ export type ServerTickSummary = {
   builtClaims: number;
   accepted: number;
   outcomes: Record<string, number>;
+  snapshotReadDurationMs?: number;
+  preflightDurationMs?: number;
+  dateTransactionDurationMs?: number;
+  maxDateTransactionDurationMs?: number;
+  peerBroadcastDurationMs?: number;
+  deferredDiagnosticWriteDurationMs?: number;
 };
 
 /** Executes automatic claims under the same locked, idempotent path as the
@@ -4164,6 +4170,7 @@ export async function runAutoTrackServerTicks(opts: {
 } = {}): Promise<ServerTickSummary> {
   const nowMs = opts.nowMs ?? Date.now();
   const maxClaims = Math.max(1, opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS);
+  const snapshotReadStartedAt = performance.now();
   const rows = await db.select().from(dailySyncTable).where(and(
     gte(dailySyncTable.date, serverTickStartDate(nowMs)),
     // Client-local dates may be one calendar day ahead of server UTC.
@@ -4171,9 +4178,15 @@ export async function runAutoTrackServerTicks(opts: {
     ...(opts.scope ? [eq(dailySyncTable.scope, opts.scope)] : []),
     ...(opts.date ? [eq(dailySyncTable.date, opts.date)] : []),
   ));
+  const snapshotReadDurationMs = Math.max(0, Math.round(performance.now() - snapshotReadStartedAt));
   let dateTransactions = 0;
   let builtClaims = 0;
   let accepted = 0;
+  let preflightDurationMs = 0;
+  let dateTransactionDurationMs = 0;
+  let maxDateTransactionDurationMs = 0;
+  let peerBroadcastDurationMs = 0;
+  let deferredDiagnosticWriteDurationMs = 0;
   const transactionReasons: Record<ServerTickTransactionReason, number> = {
     dueClaims: 0,
     wallClockBookkeeping: 0,
@@ -4207,7 +4220,9 @@ export async function runAutoTrackServerTicks(opts: {
     }
     // Keep one identity across preflight and the authoritative locked rebuild.
     const claimIdNamespace = `tick-${randomUUID()}`;
+    const preflightStartedAt = performance.now();
     const preflight = classifyServerAutoTrackDate(row.data, nowMs, claimIdNamespace);
+    preflightDurationMs += Math.max(0, Math.round(performance.now() - preflightStartedAt));
     if (preflight.kind === "skip") {
       await serverTickNoWorkSkipBarrierHook?.();
       outcomes.noWorkSkipped = (outcomes.noWorkSkipped ?? 0) + 1;
@@ -4216,11 +4231,21 @@ export async function runAutoTrackServerTicks(opts: {
     }
     transactionReasons[preflight.reason] += 1;
     let failureStage: "date-transaction" | "peer-broadcast" = "date-transaction";
+    let transactionStartedAt: number | undefined;
+    let transactionDurationRecorded = false;
+    const recordTransactionDuration = () => {
+      if (transactionStartedAt === undefined || transactionDurationRecorded) return;
+      const durationMs = Math.max(0, Math.round(performance.now() - transactionStartedAt));
+      dateTransactionDurationMs += durationMs;
+      maxDateTransactionDurationMs = Math.max(maxDateTransactionDurationMs, durationMs);
+      transactionDurationRecorded = true;
+    };
     try {
       // A transaction retry must keep the same event identity. If the database
       // committed but its reply was lost, the ledger then fences the rebuilt
       // claim instead of applying the operational effect a second time.
       dateTransactions++;
+      transactionStartedAt = performance.now();
       const result = await runBackgroundOperation(
         "server-auto-track-tick",
         () => runWithScope(scope, () => db.transaction(async (tx) => {
@@ -4391,15 +4416,22 @@ export async function runAutoTrackServerTicks(opts: {
         })),
         { recordSuccess: false },
       );
+      recordTransactionDuration();
       backoff.recordSuccess(nowMs);
       builtClaims += result.claims;
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
       if (result.accepted) {
         failureStage = "peer-broadcast";
-        await broadcast(result.data, "server:tick", scope, row.date, result);
+        const broadcastStartedAt = performance.now();
+        try {
+          await broadcast(result.data, "server:tick", scope, row.date, result);
+        } finally {
+          peerBroadcastDurationMs += Math.max(0, Math.round(performance.now() - broadcastStartedAt));
+        }
       }
     } catch (err) {
+      recordTransactionDuration();
       backoff.recordFailure(nowMs);
       logger.error({
         event: "server_auto_track_tick",
@@ -4435,7 +4467,15 @@ export async function runAutoTrackServerTicks(opts: {
   );
   // Persist only the bounded aggregate, after all per-date transactions have
   // completed; diagnostic writes must not join an automatic-tracking tx.
-  await persistAutoTrackDeferredDiagnostic(nowMs);
+  const deferredDiagnosticStartedAt = performance.now();
+  try {
+    await persistAutoTrackDeferredDiagnostic(nowMs);
+  } finally {
+    deferredDiagnosticWriteDurationMs += Math.max(
+      0,
+      Math.round(performance.now() - deferredDiagnosticStartedAt),
+    );
+  }
   // Only complete, unscoped background passes contribute to this process-local
   // warning. Scoped operations cannot establish or clear global health.
   if (opts.scope === undefined && opts.date === undefined
@@ -4464,6 +4504,12 @@ export async function runAutoTrackServerTicks(opts: {
     builtClaims,
     accepted,
     outcomes,
+    snapshotReadDurationMs,
+    preflightDurationMs,
+    dateTransactionDurationMs,
+    maxDateTransactionDurationMs,
+    peerBroadcastDurationMs,
+    deferredDiagnosticWriteDurationMs,
   };
 }
 
@@ -4511,6 +4557,12 @@ export function startAutoTrackServerTicks(
         builtClaims: summary.builtClaims,
         accepted: summary.accepted,
         outcomes: summary.outcomes,
+        snapshotReadDurationMs: summary.snapshotReadDurationMs ?? null,
+        preflightDurationMs: summary.preflightDurationMs ?? null,
+        dateTransactionDurationMs: summary.dateTransactionDurationMs ?? null,
+        maxDateTransactionDurationMs: summary.maxDateTransactionDurationMs ?? null,
+        peerBroadcastDurationMs: summary.peerBroadcastDurationMs ?? null,
+        deferredDiagnosticWriteDurationMs: summary.deferredDiagnosticWriteDurationMs ?? null,
       }, "Server auto-track tick summary");
     }).catch((err) => {
       const failedAt = Date.now();
@@ -4519,6 +4571,7 @@ export function startAutoTrackServerTicks(
       logger.error({
         event: "server_auto_track_tick",
         failureStage: "tick-pass",
+        durationMs: Math.max(0, failedAt - startedAt),
         failureReason: classifyBackgroundFailure(err, { assumeDatabase: true }),
         retryDelayMs: nextRetryAt === undefined ? 0 : Math.max(0, nextRetryAt - failedAt),
       }, "Server auto-track tick pass failed");

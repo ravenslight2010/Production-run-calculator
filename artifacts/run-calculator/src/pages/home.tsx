@@ -670,6 +670,7 @@ import {
   publishAutoTrackCoordination,
   publishAutoTrackSchedule,
   subscribeAutoTrackCoordination,
+  waitForAutoTrackSyncReady,
   DOUGH_TIMER_CONTROL_EVENT,
   adoptDoughTimerControls,
   type DoughTimerControl,
@@ -7742,20 +7743,22 @@ export default function Home() {
       .then(async (): Promise<AutoTrackEventResult> => {
     const sharedSyncSettled = () =>
       foregroundSyncAcknowledgement > 1 && !foregroundSyncBarrierRef.current;
-    while (navigator.onLine && contextIsCurrent()) {
-      if (
+    await waitForAutoTrackSyncReady({
+      isCurrent: () => navigator.onLine && contextIsCurrent(),
+      isReady: () =>
         !foregroundSyncBarrierRef.current
-        && (pushAcknowledgedRef.current || sharedSyncSettled())
-      ) break;
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        && (pushAcknowledgedRef.current || sharedSyncSettled()),
+      timeoutMs: FOREGROUND_RECOVERY_TIMEOUT_MS,
+    });
+    if (!contextIsCurrent()) {
+      throw Object.assign(new Error("Automatic tracking context changed before sync"), { retryable: false });
     }
     if (
-      !contextIsCurrent()
-      || !navigator.onLine
+      !navigator.onLine
       || foregroundSyncBarrierRef.current
       || (!pushAcknowledgedRef.current && !sharedSyncSettled())
     ) {
-      throw new Error("Automatic tracking is waiting for shared sync");
+      throw Object.assign(new Error("Automatic tracking is waiting for shared sync"), { retryable: true });
     }
     const currentBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
     const previousQueuedClaimWon =

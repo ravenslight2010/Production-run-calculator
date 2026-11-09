@@ -3,6 +3,7 @@ import {
   AUTO_TRACK_SCHEDULE_EVENT,
   autoTrackScheduleToCoordination,
   publishAutoTrackSchedule,
+  waitForAutoTrackSyncReady,
 } from "./autoTrackCoordinationClient";
 import type { AutoTrackSchedule } from "@workspace/live-calc";
 
@@ -52,6 +53,62 @@ describe("publishAutoTrackSchedule", () => {
 
     expect(listener).not.toHaveBeenCalled();
     window.removeEventListener(AUTO_TRACK_SCHEDULE_EVENT, listener);
+  });
+});
+
+describe("waitForAutoTrackSyncReady", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns false at the deadline without releasing the external recovery fence", async () => {
+    vi.useFakeTimers();
+    let recoveryFenceClosed = true;
+    const wait = waitForAutoTrackSyncReady({
+      isReady: () => !recoveryFenceClosed,
+      isCurrent: () => true,
+      timeoutMs: 100,
+      pollIntervalMs: 25,
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(wait).resolves.toBe(false);
+    expect(recoveryFenceClosed).toBe(true);
+  });
+
+  it("resolves when canonical sync becomes ready before the deadline", async () => {
+    vi.useFakeTimers();
+    let recoveryFenceClosed = true;
+    const wait = waitForAutoTrackSyncReady({
+      isReady: () => !recoveryFenceClosed,
+      isCurrent: () => true,
+      timeoutMs: 1_000,
+      pollIntervalMs: 25,
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+    recoveryFenceClosed = false;
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(wait).resolves.toBe(true);
+  });
+
+  it("stops waiting when the run or session context is no longer current", async () => {
+    vi.useFakeTimers();
+    let current = true;
+    const wait = waitForAutoTrackSyncReady({
+      isReady: () => false,
+      isCurrent: () => current,
+      timeoutMs: 1_000,
+      pollIntervalMs: 25,
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+    current = false;
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(wait).resolves.toBe(false);
   });
 });
 

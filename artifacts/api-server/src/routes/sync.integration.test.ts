@@ -2440,6 +2440,12 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
     });
 
     expect(result.dateTransactions).toBe(0);
+    expect(result.snapshotReadDurationMs).toEqual(expect.any(Number));
+    expect(result.preflightDurationMs).toEqual(expect.any(Number));
+    expect(result.dateTransactionDurationMs).toBe(0);
+    expect(result.maxDateTransactionDurationMs).toBe(0);
+    expect(result.peerBroadcastDurationMs).toBe(0);
+    expect(result.deferredDiagnosticWriteDurationMs).toEqual(expect.any(Number));
     expect(result.outcomes.noWorkSkipped).toBe(1);
     expect(result.transactionReasons).toEqual({
       dueClaims: 0,

@@ -6,6 +6,27 @@ export const AUTO_TRACK_SCHEDULE_EVENT = "run-calculator:auto-track-schedule";
 export const DOUGH_TIMER_CONTROL_EVENT = "run-calculator:dough-timer-control";
 export const DOUGH_TIMER_CONTROL_ADOPT_EVENT = "run-calculator:dough-timer-control-adopt";
 
+export async function waitForAutoTrackSyncReady(options: {
+  isReady: () => boolean;
+  isCurrent: () => boolean;
+  timeoutMs: number;
+  pollIntervalMs?: number;
+}): Promise<boolean> {
+  const timeoutMs = Math.max(0, Number.isFinite(options.timeoutMs) ? options.timeoutMs : 0);
+  const pollIntervalMs = Math.max(1, Number.isFinite(options.pollIntervalMs) ? options.pollIntervalMs! : 50);
+  const deadline = Date.now() + timeoutMs;
+
+  while (options.isCurrent()) {
+    if (options.isReady()) return true;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return false;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, Math.min(pollIntervalMs, remainingMs));
+    });
+  }
+  return false;
+}
+
 export type DoughTimerControl = {
   runId: string; generation: string; pausedAt: number; resumeAt: number; updatedAt: number;
 };

@@ -22,8 +22,10 @@ describe("Home sync manager boundary", () => {
 
     expect(claimStart).toBeGreaterThanOrEqual(0);
     expect(claimEnd).toBeGreaterThan(claimStart);
+    expect(claim).toContain("waitForAutoTrackSyncReady");
     expect(claim).toContain("fetchAndConsumeWithTimeout");
     expect(claim).toContain("FOREGROUND_RECOVERY_TIMEOUT_MS");
+    expect(claim).not.toMatch(/while\s*\(navigator\.onLine\s*&&\s*contextIsCurrent\(\)\)/);
     expect(claim).not.toMatch(/await fetch\(/);
   });
 
