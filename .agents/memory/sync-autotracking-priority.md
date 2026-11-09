@@ -75,6 +75,12 @@ For Packaging, an accepted Resume after a manual correction rebases the expected
 
 **How to apply:** Keep the projection baseline and scheduled cadence separate. Verify that an accepted manual correction survives Resume, the next due claim is not duplicated or over-counted, and the canonical count persists through wake and reload.
 
+The owner suspects a post-edit auto-track stall may involve a server-owned schedule racing a manual correction's generation/deadline reset. This remains a hypothesis, not a confirmed cause.
+
+**Why:** Recordings still showed “Syncing automatic count” after a force-close/PWA-update transition, and prior reports link stalls with manual edits, Resume, and peer wakes; those observations do not isolate timer ownership from transport or server load.
+
+**How to apply:** Reproduce both orders of a manual correction and a due/in-flight claim, including wake. Trace correction generation, sequence, due time, hold expiry, canonical revision, and response order; keep database latency as a separate factor.
+
 Synthetic auto-track ticks in browser tests must not move canonical anchors ahead of real server time before a manual operation.
 
 **Why:** A test that injected a tick at run-start plus 60 seconds while the server clock was only about 10 seconds past start correctly hit the server's future-anchor guard; it was a fixture time-travel error, not evidence for weakening production validation.
