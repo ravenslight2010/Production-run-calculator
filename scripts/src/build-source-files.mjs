@@ -105,7 +105,7 @@ export function fingerprintSource(root, policy = SOURCE_POLICY) {
     if (TOP_FILES.has(name) || (fresh && FRESH_TOP_FILES.has(name)) || /^tsconfig.*\.json$/.test(name)) walk(name);
   }
   const bases = ["lib", "scripts/src", "artifacts/api-server", "artifacts/run-calculator",
-    ...(fresh ? ["docker", "scripts/self-host"] : ["attached_assets/source-library/audits"])];
+    ...(fresh ? ["docker", "scripts/self-host"] : publicCi ? [] : ["attached_assets/source-library/audits"])];
   for (const base of bases) {
     const names = readdirSync(path.join(sourceRoot, base)).sort();
     for (const name of names) {
@@ -118,7 +118,7 @@ export function fingerprintSource(root, policy = SOURCE_POLICY) {
   }
   // These exact reviewed runtime assets are allowed through the otherwise
   // excluded docs/evidence tree. Never walk unrelated retained evidence.
-  if (!fresh) for (const asset of SOURCE_LIBRARY_POOL_APPROVAL_ASSETS) walk(asset);
+  if (!fresh && !publicCi) for (const asset of SOURCE_LIBRARY_POOL_APPROVAL_ASSETS) walk(asset);
   files.sort();
   const hash = createHash("sha256").update(`${policy}\0`);
   const gitFilesSha256 = new Map();

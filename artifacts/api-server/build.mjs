@@ -153,7 +153,9 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
   const publicCi = process.env.CI_PUBLIC_SOURCE === "1" || process.env.CI_PUBLIC_SOURCE === "true";
   const reportAbs = path.resolve(root, reportRelativePath);
   const reportShaAbs = path.resolve(root, reportShaRelativePath);
-  if (!(publicCi && !existsSync(reportAbs))) {
+  if (publicCi && !existsSync(reportAbs)) {
+    console.warn("CI_PUBLIC_SOURCE: skipping source-library reconciliation embed and pool approval (assets absent).");
+  } else {
   const reportBytes = await readFile(reportAbs);
   const reportSha256 = createHash("sha256").update(reportBytes).digest("hex");
   const reviewedSha256 = (await readFile(reportShaAbs, "utf8")).trim();
@@ -169,9 +171,6 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `${reportSha256}\n`,
     "utf8",
   );
-  } else {
-    console.warn("CI_PUBLIC_SOURCE: skipping source-library reconciliation embed (assets absent).");
-  }
 
   const { DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS, loadSourceLibraryPoolExceptionApproval } =
     await import(pathToFileURL(path.resolve(distDir, "source-library-approval.mjs")).href);
@@ -205,6 +204,8 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
   if (bundledApproval.sha256 !== sourceApproval.sha256) {
     throw new Error("Bundled source-library approval differs from the reviewed source.");
   }
+  }
+
   completeBuildStage(root, sourceRecord, "api");
 }
 
