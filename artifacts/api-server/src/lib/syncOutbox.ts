@@ -74,6 +74,8 @@ const NOTIFY_CHANNEL = "sync_outbox";
 const BATCH_SIZE = 100;
 const RETENTION_DAYS = 7;
 const DRAIN_INTERVAL_MS = 5_000;
+/** When the outbox is idle (no pending lag), poll less often to cut pool pressure. */
+const DRAIN_IDLE_INTERVAL_MS = 15_000;
 const RETENTION_INTERVAL_MS = 60 * 60_000;
 export const SYNC_OUTBOX_LAG_WARNING_MS = 30_000;
 const SYNC_OUTBOX_LAG_MAX_MS = 7 * 24 * 60 * 60_000;
@@ -323,6 +325,7 @@ export function startSyncOutboxListener(
   let errorHandler: ((error: Error) => void) | undefined;
   let retryTimer: NodeJS.Timeout | undefined;
   let drainTimer: NodeJS.Timeout | undefined;
+  let pollTimer: NodeJS.Timeout | undefined;
   let retentionTimer: NodeJS.Timeout | undefined;
   let draining = false;
   let drainRequested = false;
@@ -541,8 +544,19 @@ export function startSyncOutboxListener(
 
   if (process.env.NODE_ENV !== "test" || process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED === "1") {
     void connect();
-    const poll = setInterval(scheduleDrain, DRAIN_INTERVAL_MS);
-    poll.unref();
+    const armPoll = () => {
+      if (stopped) return;
+      const lag = getSyncOutboxLagDiagnostics();
+      const idle = lag.status === "ok" && !lag.lagging && lag.pendingEvents === 0;
+      const delay = idle ? DRAIN_IDLE_INTERVAL_MS : DRAIN_INTERVAL_MS;
+      pollTimer = setTimeout(() => {
+        pollTimer = undefined;
+        scheduleDrain();
+        armPoll();
+      }, delay);
+      pollTimer.unref();
+    };
+    armPoll();
     retentionTimer = setInterval(() => {
       void pool.query(
         `DELETE FROM sync_outbox_events
@@ -560,6 +574,7 @@ export function startSyncOutboxListener(
     syncOutboxLagByScope.clear();
     if (retryTimer) clearTimeout(retryTimer);
     if (drainTimer) clearTimeout(drainTimer);
+    if (pollTimer) clearTimeout(pollTimer);
     if (retentionTimer) clearInterval(retentionTimer);
     if (listener) {
       const client = listener;
