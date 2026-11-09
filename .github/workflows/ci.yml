@@ -255,7 +255,16 @@ jobs:
       - name: Run all shared-library unit tests (including spec-import)
         # This is the broad CI sweep. The release check intentionally runs a
         # smaller, explicit set of high-value library gates.
-        run: node scripts/src/test-results.mjs run --lane ci-library-sweep -- pnpm -r --filter "./lib/**" --if-present test
+        # Public CI without private source-library corpus: exclude corpus-harness.
+        run: |
+          if [[ "${CI_PUBLIC_SOURCE:-}" == "1" || "${CI_PUBLIC_SOURCE:-}" == "true" ]] &&              [[ ! -f attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json ]]; then
+            echo "CI_PUBLIC_SOURCE: excluding @workspace/corpus-harness (private corpus assets absent)"
+            node scripts/src/test-results.mjs run --lane ci-library-sweep -- \
+              pnpm -r --filter "./lib/**" --filter "!@workspace/corpus-harness" --if-present test
+          else
+            node scripts/src/test-results.mjs run --lane ci-library-sweep -- \
+              pnpm -r --filter "./lib/**" --if-present test
+          fi
       - name: Upload machine-readable test report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
