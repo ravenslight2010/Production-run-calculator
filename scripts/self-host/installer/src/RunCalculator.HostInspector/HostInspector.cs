@@ -12,6 +12,7 @@ public static class HostInspector
             OverallStatus = CompatibilityEvaluator.Overall(checks),
             Checks = checks,
             Ai = AiRecommendationEngine.Recommend(host),
+            CodingAssistant = CodingAssistantRecommendationEngine.Recommend(host),
         };
     }
 }

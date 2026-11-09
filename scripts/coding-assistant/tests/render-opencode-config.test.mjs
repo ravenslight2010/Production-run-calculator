@@ -11,6 +11,7 @@ function hostReport(codingAssistant = {
   status: "candidate",
   provider: "ollama",
   candidateModel: "qwen2.5-coder:7b",
+  contextTokens: 32_768,
   qualification: "unmeasured",
 }) {
   return {
@@ -30,12 +31,25 @@ test("renders only the coding-specific local model and preserves read-only bound
   assert.equal(result.agents.title.model, result.model);
   assert.deepEqual(Object.keys(result.providers["plant-local"].models), ["qwen2.5-coder:7b"]);
   assert.equal(result.providers["plant-local"].models["qwen2.5-coder:7b"].modelID, "qwen2.5-coder:7b");
+  assert.deepEqual(result.providers["plant-local"].models["qwen2.5-coder:7b"].limit, { context: 32_768, output: 8192 });
   assert.equal(result.providers["plant-local"].settings.baseURL, "http://127.0.0.1:11434/v1");
   assert.equal(result.permissions[0].effect, "deny");
   assert.equal(result.permissions.some((rule) => rule.action === "edit" && rule.effect === "allow"), false);
   assert.equal(result.permissions.some((rule) => rule.action === "shell" && rule.effect === "allow"), false);
   assert.equal("mcp" in result, false);
   assert.equal("plugins" in result, false);
+});
+
+test("uses the catalogue context cap for the higher-capacity model", () => {
+  const recommendation = {
+    status: "candidate",
+    provider: "ollama",
+    candidateModel: "qwen3-coder:30b",
+    contextTokens: 65_536,
+    qualification: "unmeasured",
+  };
+  const result = JSON.parse(renderOpenCodeConfig(hostReport(recommendation), template));
+  assert.deepEqual(result.providers["plant-local"].models["qwen3-coder:30b"].limit, { context: 65_536, output: 8192 });
 });
 
 test("does not confuse the product AI recommendation with a coding model", () => {
@@ -54,6 +68,16 @@ test("rejects cloud providers and malformed model identifiers", () => {
   for (const candidateModel of ["../secret", "bad model", "model/../other", "model//tag", "model:", ""]) {
     assert.throws(() => renderOpenCodeConfig(hostReport({ status: "candidate", provider: "ollama", candidateModel }), template), /invalid/);
   }
+});
+
+test("rejects a model/context pair outside the approved catalogue", () => {
+  const mismatch = {
+    status: "candidate",
+    provider: "ollama",
+    candidateModel: "qwen2.5-coder:7b",
+    contextTokens: 65_536,
+  };
+  assert.throws(() => renderOpenCodeConfig(hostReport(mismatch), template), /not in the approved local catalogue/);
 });
 
 test("refuses non-Windows or blocked/unknown host inspections", () => {

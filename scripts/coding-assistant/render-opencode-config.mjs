@@ -7,6 +7,10 @@ const TEMPLATE_PATH = fileURLToPath(
 const PLACEHOLDER = "REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID";
 const LOCAL_PROVIDER = "plant-local";
 const LOCAL_BASE_URL = "http://127.0.0.1:11434/v1";
+const MODEL_CONTEXT_LIMITS = Object.freeze({
+  "qwen2.5-coder:7b": 32_768,
+  "qwen3-coder:30b": 65_536,
+});
 
 function requireCondition(condition, message) {
   if (!condition) throw new Error(message);
@@ -37,10 +41,15 @@ function validateReport(report) {
       !modelId.includes("..") && !modelId.includes("//") && !modelId.endsWith(":") && !modelId.endsWith("/"),
     "coding model identifier is missing or invalid",
   );
-  return modelId;
+  const contextTokens = MODEL_CONTEXT_LIMITS[modelId];
+  requireCondition(
+    contextTokens !== undefined && recommendation.contextTokens === contextTokens,
+    "coding model or context cap is not in the approved local catalogue",
+  );
+  return { modelId, contextTokens };
 }
 
-function assertReadOnlyProfile(profile, expectedModelId) {
+function assertReadOnlyProfile(profile, expectedModelId, expectedContextTokens) {
   requireCondition(isRecord(profile), "profile template must be a JSON object");
   requireCondition(profile.$schema === "https://opencode.ai/config.json", "unexpected OpenCode schema");
   requireCondition(profile.update === "disable", "automatic OpenCode updates must stay disabled in the pilot");
@@ -57,6 +66,11 @@ function assertReadOnlyProfile(profile, expectedModelId) {
     isRecord(provider.models) && Object.keys(provider.models).length === 1 &&
       isRecord(provider.models[expectedModelId]) && provider.models[expectedModelId].modelID === expectedModelId,
     "profile model entry does not match the installer candidate",
+  );
+  requireCondition(
+    provider.models[expectedModelId].limit?.context === expectedContextTokens &&
+      provider.models[expectedModelId].limit?.output === 8192,
+    "model context/output limits do not match the approved catalogue",
   );
 
   requireCondition(Array.isArray(profile.permissions), "profile is missing explicit permissions");
@@ -102,7 +116,7 @@ function assertReadOnlyProfile(profile, expectedModelId) {
 }
 
 export function renderOpenCodeConfig(report, templateText) {
-  const modelId = validateReport(report);
+  const { modelId, contextTokens } = validateReport(report);
   let profile;
   try {
     profile = JSON.parse(templateText);
@@ -121,10 +135,14 @@ export function renderOpenCodeConfig(report, templateText) {
   profile.agents.title ??= {};
   profile.agents.title.model = profile.model;
   profile.providers[LOCAL_PROVIDER].models = {
-    [modelId]: { ...modelTemplate, modelID: modelId },
+    [modelId]: {
+      ...modelTemplate,
+      modelID: modelId,
+      limit: { ...modelTemplate.limit, context: contextTokens, output: 8192 },
+    },
   };
 
-  assertReadOnlyProfile(profile, modelId);
+  assertReadOnlyProfile(profile, modelId, contextTokens);
   const output = JSON.stringify(profile, null, 2);
   requireCondition(!output.includes(PLACEHOLDER), "unresolved model placeholder remains");
   return `${output}\n`;

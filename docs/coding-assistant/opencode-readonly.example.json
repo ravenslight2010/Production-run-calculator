@@ -18,6 +18,7 @@
         "REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID": {
           "name": "Local coding model",
           "modelID": "REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID",
+          "limit": { "context": 32768, "output": 8192 },
           "capabilities": {
             "tools": true,
             "input": ["text"],
