@@ -107,5 +107,5 @@ pnpm coding-assistant:test
 pnpm coding-assistant:check
 pnpm coding-assistant:bootstrap
 # After HostInspector on Windows:
-pnpm coding-assistant:bootstrap -- --host-report path/to/inspection.json --out .opencode/opencode.local.json
+pnpm coding-assistant:bootstrap -- --report path/to/inspection.json --out .opencode/opencode.local.json
 ```
