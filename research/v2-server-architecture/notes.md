@@ -35,7 +35,8 @@ _[@key] markers reference external sources in this investigation's `sources.json
 
 - Reserved VM is documented for always-on APIs/background workers; its deployment setup selects web-server or background-worker mode [@v2-replit-deployment-types].
 - Autoscale adds servers under load and can scale to zero; Replit docs do not guarantee the stream affinity or cross-instance behavior this app would need [@v2-replit-deployment-types].
-- Artifacts in one project share backend/data and publish together. The docs do not fully establish independent scaling or exact multi-artifact Reserved VM topology [@v2-replit-artifacts] [@v2-replit-multiple-artifacts].
+- Replit documentation confirms artifacts in a project share backend/data and publish together; artifacts do not get independent deployment modes. Separate projects have separate managed production databases, so independent projects do not satisfy the shared managed DB assumption. A Reserved VM can run multiple supervised processes, supporting a revised one-project/one-deployment API-plus-worker candidate. See [the final feasibility evidence](replit-feasibility.md).
+- Documentation confirms the platform boundary, not the V2 app's process health, restart, database sharing, publish compatibility, or actual connection budget. No isolated V2 Reserved VM deployment was available in this task; the synthetic pilot remains a hard gate.
 
 ### Durable timers and worker isolation
 
@@ -59,18 +60,19 @@ _[@key] markers reference external sources in this investigation's `sources.json
 ## Conflicts & Open Questions
 
 - Existing research's “one API instance” is a safe interim restriction, not a proven V2 topology. Current production telemetry still does not establish serving-instance count.
-- A separate worker can isolate the API event loop, but it adds a database pool. Its value depends on explicit combined connection budgets and a real Replit deployment test.
-- Replit docs support always-on Reserved VM web/worker modes and shared project data; they do not fully specify the independently scaled multi-artifact deployment shape needed for a two-service design.
+- A worker process can isolate the API event loop, but it adds a database pool and shares a Reserved VM's resources. Its value depends on explicit combined connection budgets and a real Replit deployment test.
+- Independent API/worker deployment modes in separate artifacts are not supported as originally proposed. Separate projects do not share a Replit-managed production database. The revised candidate is one Reserved VM deployment with supervised API and worker processes; its actual behavior remains untested.
 - Existing source documents are dated 2026-11-03 through 2026-11-07; the latest Nov 9 production capture changes the confidence from “likely pool pressure” to “checkout and event-loop stalls confirmed, trigger unknown.”
 
 ## Gaps
 
-- Filled: Replit's current docs identify Reserved VM as always-on and support a background-worker deployment mode; same-project artifacts share backend/database and publish together. Exact independent resource and scaling controls remain unverified.
+- Filled: Replit's current docs identify Reserved VM as always-on and support multiple supervised processes in one deployment; same-project artifacts share backend/database and publish together but cannot have independent deployment modes. Separate projects have separate managed production databases.
 - Filled: authoritative technical sources establish that event-loop blocking delays request handling, leases/locks need idempotency and durable state, SSE reconnect is not durable replay, and browser timers are throttled in hidden pages.
+- Filled: The architecture now records the revised single-project/single-Reserved-VM/two-process candidate, the exact project/deployment/database boundary, a schema-based transfer allowlist/exclusion plan, account revalidation, fresh-count procedure, and measurable acceptance checks.
+- Still required before V2 feature work: an isolated, synthetic-data Reserved VM deployment pilot proving process health/restart, shared V2 DB access, publish compatibility, and measured connection ceilings. Current task access does not include a separate V2 project or isolated publish target; do not publish the current Autoscale/V1 project.
 - Owner decision: migrate setup/master data only; historical production runs do not transfer into V2.
 - Owner decision: carry account identities and role assignments; require a fresh sign-in and do not transfer active sessions or reset tokens.
 - Owner decision: full inventory is in V2's first usable release; seed it from a fresh physical count rather than copied V1 balances.
-- Still to define: exact master-data allowlist, secure account revalidation, count workflow, and V1 history retention/access after cutover.
+- Owner/management decision still needed before cutover: V1 archive access and retention period. Until set, keep V1 history preserved and read-only after an approved cutover.
 - Limitation: the exact production cause is unknown; checkout and event-loop stalls are confirmed but not same-process correlated.
-- Limitation: the database provider's usable connection budget, Replit worker/API maximum counts, and deploy-overlap behavior are unknown.
-- Limitation: no table-level V1-to-V2 mapping or production cutover design has been approved.
+- Limitation: actual V2 database connection budget, Reserved VM process restart behavior, and publish overlap behavior remain unmeasured.
