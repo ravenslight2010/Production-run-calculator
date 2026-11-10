@@ -257,7 +257,6 @@ jobs:
         # smaller, explicit set of high-value library gates.
         # corpus-harness self-skips under CI_PUBLIC_SOURCE when assets are absent.
         run: node scripts/src/test-results.mjs run --lane ci-library-sweep -- pnpm -r --filter "./lib/**" --if-present test
-          fi
       - name: Upload machine-readable test report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
