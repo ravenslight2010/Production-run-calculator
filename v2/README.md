@@ -7,6 +7,11 @@ connect to V1 databases or credentials.
 See [HANDOFF.md](./HANDOFF.md) for the approved V2 scope, data-transfer
 decisions, current implementation status, and the next run-control milestone.
 
+Research record: [portable V1-to-V2 research bundle](research/README.md).
+Prepared 2026-11-10; current V1 checks are bound to revision
+`dc6e5205f55fa74005373c6d7f06fae8df0f3399`. It preserves evidence and
+recommendations, not authorization to implement or cut over.
+
 The first slice now contains a pure run-lifecycle model and a PostgreSQL
 transaction boundary for start, pause, resume, and complete. That boundary
 records idempotency receipts, revisions, audit events, and outbox events

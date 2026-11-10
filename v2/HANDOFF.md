@@ -4,6 +4,11 @@ This file carries the approved V2 decisions and current implementation status
 when the V2 source is moved into a separate Replit project. It supplements the
 code; it does not contain credentials or production data.
 
+Research record: [portable V1-to-V2 research bundle](research/README.md),
+prepared 2026-11-10 and checked against V1 revision
+`dc6e5205f55fa74005373c6d7f06fae8df0f3399`. It is evidence and planning
+context, not additional implementation or cutover approval.
+
 ## Product scope
 
 The first usable V2 release is a web/PWA production tool with:
