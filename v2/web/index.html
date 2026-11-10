@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f1f0e8" />
+    <meta name="description" content="Production run control" />
+    <title>Run control — Fieldline</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/v2/web/styles.css" />
+    <script src="/v2/web/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="wordmark" href="/" aria-label="Fieldline run control home">
+          <span class="mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>FIELDLINE</span>
+        </a>
+        <div class="topbar-center">
+          <span class="eyebrow">PRODUCTION FLOOR</span>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <span class="topbar-title">Run control</span>
+        </div>
+        <div class="connection" id="connection-indicator" data-testid="status-connection" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connection-label">Connecting</span>
+        </div>
+      </header>
+
+      <main class="page">
+        <section class="page-intro" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow intro-kicker">LIVE OPERATIONS <span class="intro-rule"></span> V2</p>
+            <h1 id="page-title">Run control<span class="title-period">.</span></h1>
+            <p class="intro-copy">One shared state. Always from the server.</p>
+          </div>
+          <div class="sync-stamp">
+            <span class="sync-icon" aria-hidden="true"></span>
+            <div><span class="eyebrow">LAST CHECK</span><strong id="last-check">Waiting for server</strong></div>
+          </div>
+        </section>
+
+        <div id="global-error" class="error-banner" role="alert" hidden>
+          <span class="error-symbol" aria-hidden="true">!</span>
+          <div class="error-copy"><strong id="error-title">Could not reach the server</strong><p id="error-message">Check the connection and try again.</p></div>
+          <button class="text-button" id="refresh-button" type="button" data-testid="button-refresh">Refresh state</button>
+        </div>
+
+        <section class="workspace" aria-label="Run operations">
+          <div class="primary-column">
+            <article class="run-panel" aria-labelledby="run-label">
+              <div class="panel-topline">
+                <span class="eyebrow">CURRENT RUN</span>
+                <span class="revision" id="revision-value" data-testid="text-revision">—</span>
+              </div>
+              <div id="run-content" aria-live="polite">
+                <div class="loading-state" aria-label="Loading run state">
+                  <div class="skeleton skeleton-status"></div>
+                  <div class="skeleton skeleton-title"></div>
+                  <div class="skeleton skeleton-line"></div>
+                  <div class="skeleton skeleton-block"></div>
+                </div>
+              </div>
+            </article>
+
+            <section class="create-panel" aria-labelledby="create-heading">
+              <div class="create-heading-row">
+                <div>
+                  <p class="eyebrow">NEW PRODUCTION RUN</p>
+                  <h2 id="create-heading">Prepare a run</h2>
+                </div>
+                <span class="create-index" aria-hidden="true">01</span>
+              </div>
+              <form id="create-form" class="create-form">
+                <label class="field field-label" for="setup-label">
+                  <span>Run label</span>
+                  <input id="setup-label" name="label" type="text" maxlength="120" placeholder="e.g. Citrus blend · morning" autocomplete="off" required data-testid="input-run-label" />
+                </label>
+                <label class="field field-cases" for="target-cases">
+                  <span>Target cases</span>
+                  <input id="target-cases" name="targetCases" type="number" inputmode="numeric" min="1" step="1" placeholder="0" required data-testid="input-target-cases" />
+                </label>
+                <button class="button button-create" id="create-button" type="submit" data-testid="button-create-run">
+                  <span>Prepare run</span><span class="button-arrow" aria-hidden="true">↗</span>
+                </button>
+              </form>
+              <p class="form-note" id="create-note">The server creates the run in planned status. No run starts until an operator starts it.</p>
+            </section>
+          </div>
+
+          <aside class="side-column">
+            <section class="history-panel" aria-labelledby="runs-heading">
+              <div class="section-heading">
+                <div><p class="eyebrow">SERVER REGISTER</p><h2 id="runs-heading">Runs</h2></div>
+                <span class="count-badge" id="run-count" data-testid="text-run-count">—</span>
+              </div>
+              <div id="runs-list" class="runs-list" aria-live="polite">
+                <div class="list-loading"><span></span><span></span><span></span></div>
+              </div>
+              <div class="list-footer">
+                <span class="server-mark" aria-hidden="true"></span>
+                <span>Current state comes from the server</span>
+              </div>
+            </section>
+
+            <section class="reliability-note" aria-label="State synchronization">
+              <span class="note-mark" aria-hidden="true">↻</span>
+              <div><strong>Reconnected?</strong><p>State refreshes when this screen returns to view, and periodically while open.</p></div>
+            </section>
+          </aside>
+        </section>
+        <footer class="page-footer"><span>FIELDLINE <i>—</i> FLOOR SYSTEMS</span><span>SERVER-AUTHORITATIVE CONTROL</span></footer>
+      </main>
+    </div>
+    <div id="live-announcer" class="visually-hidden" aria-live="assertive" aria-atomic="true"></div>
+  </body>
+</html>
