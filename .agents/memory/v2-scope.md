@@ -7,4 +7,4 @@ V2's first usable release should include run control, every production station, 
 
 **Why:** The owner chose to begin V2 planning after repeated V1 wake, sync, and auto-tracking failures, while keeping V1 available until V2 is ready.
 
-**How to apply:** Keep the live V1 deployment untouched during V2 development. Use these as confirmed product requirements, but get approval for the server architecture and staged implementation plan before coding. Treat identity/access and the initial inventory count as separate cutover decisions; never transfer sessions or reset tokens.
+**How to apply:** Keep the live V1 deployment untouched during V2 development. Use these as confirmed product requirements, but get approval for the staged implementation plan before coding. Carry existing account identities and role assignments, require fresh sign-in, and never transfer sessions or reset tokens. Establish an initial inventory count separately.

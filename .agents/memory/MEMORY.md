@@ -156,4 +156,4 @@
 - [Browser inventory preflight](browser-inventory-preflight.md) — reporter startup failures may not stop Playwright; compare exact case identities before expensive execution.
 - [Vitest source-file reads](vitest-source-file-reads.md) — filesystem contracts need an explicit package root; transformed source URLs may not be file URLs.
 - [Follow-up task scope](follow-up-task-scope.md) — keep investigation, implementation, tests and verification together; avoid recursive proposals unless the outcome is independent.
-- [V2 scope](v2-scope.md) — first release includes run control, all stations, importing, multi-device sync and auto-tracking; offline is read-only, web/PWA first; migrate setup/master data only.
+- [V2 scope](v2-scope.md) — first release includes run control, all stations, importing, multi-device sync and auto-tracking; offline read-only, web/PWA first; carry setup/master data and accounts/roles, not run history.
