@@ -2,6 +2,20 @@
 
 **Goal:** Run OpenCode against this repo with a local Ollama model and a fail-closed read-only profile. No plant production dependency, no cloud providers, no write tools.
 
+## Windows installer (recommended)
+
+Double-click:
+
+`scripts/self-host/coding-assistant/Install-CodingAssistant-DOUBLECLICK.cmd`
+
+Or PowerShell from the repo root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\self-host\coding-assistant\Install-CodingAssistant.ps1 -RepoRoot .
+```
+
+Details: `scripts/self-host/coding-assistant/README.md`.
+
 ## Prerequisites
 
 - Windows x64 host preferred (HostInspector is Windows-only).
