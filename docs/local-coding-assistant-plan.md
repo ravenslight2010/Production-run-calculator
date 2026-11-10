@@ -94,6 +94,8 @@ The self-host cutover is a separate explicit owner decision. At minimum, close t
 | Read-only OpenCode profile template + static checker | Done |
 | Config renderer (fail-closed catalogue) | Done |
 | `pnpm coding-assistant:check` / `:test` / `:bootstrap` | Done |
+| Fixture host report + bootstrap E2E test | Done |
+| Pilot runbook (`docs/coding-assistant/pilot-runbook.md`) | Done |
 | Ollama + OpenCode install on plant host | Operator step (not automated in-app) |
 | In-app chat UI | Not started (preview HTML only) |
 | Diagnostics bridge (sanitized logs) | Not started |
