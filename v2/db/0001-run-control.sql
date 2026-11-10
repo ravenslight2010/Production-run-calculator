@@ -6,7 +6,7 @@ CREATE TABLE v2.runs (
   facility_id uuid NOT NULL,
   id uuid NOT NULL,
   status text NOT NULL CHECK (status IN ('planned', 'running', 'paused', 'completed')),
-  revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  revision bigint NOT NULL DEFAULT 0 CHECK (revision BETWEEN 0 AND 9007199254740991),
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
   started_at timestamptz,
@@ -86,7 +86,7 @@ CREATE TABLE v2.command_receipts (
 CREATE TABLE v2.run_events (
   facility_id uuid NOT NULL,
   run_id uuid NOT NULL,
-  revision bigint NOT NULL CHECK (revision > 0),
+  revision bigint NOT NULL CHECK (revision BETWEEN 0 AND 9007199254740991),
   actor_id uuid,
   event_type text NOT NULL CHECK (length(event_type) BETWEEN 1 AND 100),
   occurred_at timestamptz NOT NULL,
@@ -100,7 +100,7 @@ CREATE TABLE v2.outbox_events (
   event_id uuid NOT NULL UNIQUE,
   facility_id uuid NOT NULL,
   run_id uuid NOT NULL,
-  revision bigint NOT NULL CHECK (revision > 0),
+  revision bigint NOT NULL CHECK (revision BETWEEN 0 AND 9007199254740991),
   event_type text NOT NULL CHECK (length(event_type) BETWEEN 1 AND 100),
   payload jsonb NOT NULL,
   created_at timestamptz NOT NULL,
@@ -178,6 +178,187 @@ CREATE TRIGGER outbox_events_immutable_content
   BEFORE UPDATE OR DELETE ON v2.outbox_events
   FOR EACH ROW EXECUTE FUNCTION v2.guard_outbox_event_mutation();
 
+CREATE FUNCTION v2.run_snapshot(p_facility_id uuid, p_run_id uuid)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+  SELECT jsonb_build_object(
+    'id', r.id,
+    'status', r.status,
+    'revision', r.revision,
+    'createdAt', to_char(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    'updatedAt', to_char(r.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    'startedAt', CASE WHEN r.started_at IS NULL THEN NULL
+      ELSE to_char(r.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
+    'pausedAt', CASE WHEN r.paused_at IS NULL THEN NULL
+      ELSE to_char(r.paused_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
+    'resumedAt', CASE WHEN r.resumed_at IS NULL THEN NULL
+      ELSE to_char(r.resumed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
+    'completedAt', CASE WHEN r.completed_at IS NULL THEN NULL
+      ELSE to_char(r.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
+    'setupSnapshot', r.setup_snapshot,
+    'pauseIntervals', COALESCE((
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'startedAt', to_char(p.paused_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+          'endedAt', CASE WHEN p.resumed_at IS NULL THEN NULL
+            ELSE to_char(p.resumed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END
+        )
+        ORDER BY p.pause_number
+      )
+      FROM v2.run_pause_intervals AS p
+      WHERE p.facility_id = p_facility_id AND p.run_id = p_run_id
+    ), '[]'::jsonb)
+  )
+  FROM v2.runs AS r
+  WHERE r.facility_id = p_facility_id AND r.id = p_run_id
+$$;
+
+CREATE FUNCTION v2.create_planned_run(
+  p_facility_id uuid,
+  p_actor_id uuid,
+  p_request_id text,
+  p_request_hash text,
+  p_setup_snapshot jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+DECLARE
+  v_existing_hash text;
+  v_existing_response jsonb;
+  v_run_id uuid;
+  v_now timestamptz;
+  v_setup jsonb;
+  v_response jsonb;
+BEGIN
+  IF p_facility_id IS NULL OR p_actor_id IS NULL
+     OR p_request_id IS NULL OR length(btrim(p_request_id)) = 0
+     OR length(p_request_id) > 200
+     OR p_request_hash IS NULL OR p_request_hash !~ '^[0-9a-f]{64}$'
+     OR p_setup_snapshot IS NULL OR jsonb_typeof(p_setup_snapshot) <> 'object'
+     OR (p_setup_snapshot - ARRAY['label', 'targetCases']) <> '{}'::jsonb
+     OR jsonb_typeof(p_setup_snapshot->'label') IS DISTINCT FROM 'string'
+     OR jsonb_typeof(p_setup_snapshot->'targetCases') IS DISTINCT FROM 'number' THEN
+    RAISE EXCEPTION 'Invalid run creation request'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF length(btrim(p_setup_snapshot->>'label')) NOT BETWEEN 1 AND 120
+     OR (p_setup_snapshot->>'targetCases') !~ '^[1-9][0-9]*$'
+     OR (p_setup_snapshot->>'targetCases')::numeric > 9007199254740991 THEN
+    RAISE EXCEPTION 'Invalid run setup snapshot'
+      USING ERRCODE = '22023';
+  END IF;
+
+  v_setup := jsonb_build_object(
+    'label', btrim(p_setup_snapshot->>'label'),
+    'targetCases', (p_setup_snapshot->>'targetCases')::bigint
+  );
+
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended(p_facility_id::text || ':' || p_actor_id::text || ':' || p_request_id, 0)
+  );
+
+  SELECT request_hash, response
+    INTO v_existing_hash, v_existing_response
+    FROM v2.command_receipts
+    WHERE facility_id = p_facility_id
+      AND actor_id = p_actor_id
+      AND command_id = p_request_id;
+
+  IF FOUND THEN
+    IF v_existing_hash <> p_request_hash THEN
+      RAISE EXCEPTION 'Run creation request ID was reused with different details'
+        USING ERRCODE = '22023';
+    END IF;
+    RETURN v_existing_response || jsonb_build_object('replayed', true);
+  END IF;
+
+  v_now := clock_timestamp();
+  v_run_id := gen_random_uuid();
+
+  INSERT INTO v2.runs (
+    facility_id, id, status, revision, created_at, updated_at, setup_snapshot
+  ) VALUES (
+    p_facility_id, v_run_id, 'planned', 0, v_now, v_now, v_setup
+  );
+
+  v_response := jsonb_build_object(
+    'outcome', 'created',
+    'replayed', false,
+    'run', v2.run_snapshot(p_facility_id, v_run_id)
+  );
+
+  INSERT INTO v2.run_events (
+    facility_id, run_id, revision, actor_id, event_type, occurred_at, payload
+  ) VALUES (
+    p_facility_id, v_run_id, 0, p_actor_id, 'run.created', v_now, v_response
+  );
+
+  INSERT INTO v2.outbox_events (
+    event_id, facility_id, run_id, revision, event_type, payload, created_at
+  ) VALUES (
+    gen_random_uuid(), p_facility_id, v_run_id, 0, 'run.created', v_response, v_now
+  );
+
+  INSERT INTO v2.command_receipts (
+    facility_id, actor_id, command_id, request_hash, response, created_at
+  ) VALUES (
+    p_facility_id, p_actor_id, p_request_id, p_request_hash, v_response, v_now
+  );
+
+  RETURN v_response;
+END
+$$;
+
+CREATE FUNCTION v2.get_run(p_facility_id uuid, p_run_id uuid)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+  SELECT v2.run_snapshot(p_facility_id, p_run_id)
+$$;
+
+CREATE FUNCTION v2.list_runs(p_facility_id uuid, p_limit integer)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+DECLARE
+  v_runs jsonb;
+BEGIN
+  IF p_facility_id IS NULL OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100 THEN
+    RAISE EXCEPTION 'Invalid run list request'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT COALESCE(
+    jsonb_agg(v2.run_snapshot(p_facility_id, selected.id) ORDER BY selected.created_at DESC, selected.id DESC),
+    '[]'::jsonb
+  )
+    INTO v_runs
+    FROM (
+      SELECT r.id, r.created_at
+      FROM v2.runs AS r
+      WHERE r.facility_id = p_facility_id
+      ORDER BY r.created_at DESC, r.id DESC
+      LIMIT p_limit
+    ) AS selected;
+
+  RETURN v_runs;
+END
+$$;
+
 CREATE FUNCTION v2.apply_run_lifecycle_command(
   p_facility_id uuid,
   p_run_id uuid,
@@ -248,31 +429,11 @@ BEGIN
     RETURN jsonb_build_object(
       'outcome', 'conflict',
       'expectedRevision', p_expected_revision,
-      'currentRun', jsonb_build_object(
-        'id', v_run.id,
-        'facilityId', v_run.facility_id,
-        'status', v_run.status,
-        'revision', v_run.revision,
-        'createdAt', v_run.created_at,
-        'updatedAt', v_run.updated_at,
-        'startedAt', v_run.started_at,
-        'pausedAt', v_run.paused_at,
-        'resumedAt', v_run.resumed_at,
-        'completedAt', v_run.completed_at,
-        'setupSnapshot', v_run.setup_snapshot,
-        'pauseIntervals', COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object('startedAt', paused_at, 'endedAt', resumed_at)
-            ORDER BY pause_number
-          )
-          FROM v2.run_pause_intervals
-          WHERE facility_id = p_facility_id AND run_id = p_run_id
-        ), '[]'::jsonb)
-      )
+      'currentRun', v2.run_snapshot(p_facility_id, p_run_id)
     );
   END IF;
 
-  IF v_run.revision = 9223372036854775807 THEN
+  IF v_run.revision = 9007199254740991 THEN
     RAISE EXCEPTION 'Run revision is exhausted'
       USING ERRCODE = '22003';
   END IF;
@@ -366,27 +527,7 @@ BEGIN
     'outcome', 'accepted',
     'replayed', false,
     'commandId', p_command_id,
-    'run', jsonb_build_object(
-      'id', v_run.id,
-      'facilityId', v_run.facility_id,
-      'status', v_run.status,
-      'revision', v_run.revision,
-      'createdAt', v_run.created_at,
-      'updatedAt', v_run.updated_at,
-      'startedAt', v_run.started_at,
-      'pausedAt', v_run.paused_at,
-      'resumedAt', v_run.resumed_at,
-      'completedAt', v_run.completed_at,
-      'setupSnapshot', v_run.setup_snapshot,
-      'pauseIntervals', COALESCE((
-        SELECT jsonb_agg(
-          jsonb_build_object('startedAt', paused_at, 'endedAt', resumed_at)
-          ORDER BY pause_number
-        )
-        FROM v2.run_pause_intervals
-        WHERE facility_id = p_facility_id AND run_id = p_run_id
-      ), '[]'::jsonb)
-    )
+    'run', v2.run_snapshot(p_facility_id, p_run_id)
   );
 
   INSERT INTO v2.run_events (
@@ -418,5 +559,12 @@ COMMENT ON FUNCTION v2.apply_run_lifecycle_command(uuid, uuid, uuid, text, text,
 REVOKE ALL ON SCHEMA v2 FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA v2 FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA v2 FROM PUBLIC;
+
+COMMENT ON FUNCTION v2.create_planned_run(uuid, uuid, text, text, jsonb)
+  IS 'Backend-only security-definer run creation boundary. The API supplies verified facility and actor identity, a server-computed request hash, and a validated setup snapshot.';
+COMMENT ON FUNCTION v2.get_run(uuid, uuid)
+  IS 'Facility-scoped backend-only run read. Grant EXECUTE only to the trusted API role.';
+COMMENT ON FUNCTION v2.list_runs(uuid, integer)
+  IS 'Bounded facility-scoped backend-only run list. Grant EXECUTE only to the trusted API role.';
 
 COMMIT;

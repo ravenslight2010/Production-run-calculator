@@ -1,0 +1,327 @@
+openapi: 3.1.0
+info:
+  title: V2 Run Control API
+  version: 0.1.0
+  description: >
+    Facility-scoped run control. The host must authenticate staff, enforce
+    permissions, and validate same-origin/CSRF protection before mutations.
+servers:
+  - url: /
+security:
+  - v2Session: []
+paths:
+  /api/v2/runs:
+    get:
+      operationId: listRuns
+      summary: List runs for the authenticated facility
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Facility-scoped run list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs]
+                properties:
+                  runs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createRun
+      summary: Create a planned run
+      description: >
+        requestId is an idempotency key. Repeating the same request returns the
+        original run; reusing the key for different details returns 409.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, setupSnapshot]
+              properties:
+                requestId:
+                  type: string
+                  format: uuid
+                setupSnapshot:
+                  $ref: "#/components/schemas/RunSetup"
+      responses:
+        "201":
+          description: New planned run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunCreated"
+        "200":
+          description: Previously created run confirmed by idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunCreated"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+  /api/v2/runs/{runId}:
+    get:
+      operationId: getRun
+      summary: Read one run from the authenticated facility
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Canonical run state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run]
+                properties:
+                  run:
+                    $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+  /api/v2/runs/{runId}/commands:
+    post:
+      operationId: applyRunCommand
+      summary: Apply a revision-guarded run lifecycle command
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandId, commandType, expectedRevision]
+              properties:
+                commandId:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                commandType:
+                  type: string
+                  enum: [start, pause, resume, complete]
+                expectedRevision:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+      responses:
+        "200":
+          description: Command accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunCommandAccepted"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: Stale revision or invalid transition; includes canonical state
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/RunConflict"
+                  - $ref: "#/components/schemas/InvalidTransition"
+        "500":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    v2Session:
+      type: apiKey
+      in: cookie
+      name: v2_session
+  parameters:
+    RunId:
+      in: path
+      name: runId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CsrfToken:
+      in: header
+      name: X-CSRF-Token
+      required: true
+      schema:
+        type: string
+  schemas:
+    RunSetup:
+      type: object
+      additionalProperties: false
+      required: [label, targetCases]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+        targetCases:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+    PauseInterval:
+      type: object
+      required: [startedAt, endedAt]
+      properties:
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: [string, "null"]
+          format: date-time
+    Run:
+      type: object
+      required:
+        - id
+        - status
+        - revision
+        - createdAt
+        - updatedAt
+        - startedAt
+        - pausedAt
+        - resumedAt
+        - completedAt
+        - setupSnapshot
+        - pauseIntervals
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [planned, running, paused, completed]
+        revision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        pausedAt:
+          type: [string, "null"]
+          format: date-time
+        resumedAt:
+          type: [string, "null"]
+          format: date-time
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+        setupSnapshot:
+          $ref: "#/components/schemas/RunSetup"
+        pauseIntervals:
+          type: array
+          items:
+            $ref: "#/components/schemas/PauseInterval"
+    RunCreated:
+      type: object
+      required: [outcome, replayed, run]
+      properties:
+        outcome:
+          const: created
+        replayed:
+          type: boolean
+        run:
+          $ref: "#/components/schemas/Run"
+    RunCommandAccepted:
+      type: object
+      required: [outcome, replayed, commandId, run]
+      properties:
+        outcome:
+          const: accepted
+        replayed:
+          type: boolean
+        commandId:
+          type: string
+        run:
+          $ref: "#/components/schemas/Run"
+    RunConflict:
+      type: object
+      required: [outcome, expectedRevision, currentRun]
+      properties:
+        outcome:
+          const: conflict
+        expectedRevision:
+          type: integer
+        currentRun:
+          $ref: "#/components/schemas/Run"
+    InvalidTransition:
+      type: object
+      required: [outcome, currentStatus]
+      properties:
+        outcome:
+          const: invalid_transition
+        currentStatus:
+          type: string
+          enum: [planned, running, paused, completed]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+  responses:
+    Error:
+      description: Safe error message
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

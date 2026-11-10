@@ -297,4 +297,53 @@ BEGIN
 END
 $$;
 
+DO $$
+DECLARE
+  v_count integer;
+BEGIN
+  BEGIN
+    PERFORM v2.create_planned_run(
+      '50000000-0000-4000-8000-000000000001',
+      '50000000-0000-4000-8000-000000000002',
+      'invalid-missing-label', repeat('a', 64),
+      '{"targetCases":1}'::jsonb
+    );
+    RAISE EXCEPTION 'Expected missing run label to be rejected';
+  EXCEPTION WHEN invalid_parameter_value THEN
+    NULL;
+  END;
+
+  BEGIN
+    PERFORM v2.create_planned_run(
+      '50000000-0000-4000-8000-000000000001',
+      '50000000-0000-4000-8000-000000000002',
+      'invalid-extra-field', repeat('b', 64),
+      '{"label":"Run","targetCases":1,"facilityId":"untrusted"}'::jsonb
+    );
+    RAISE EXCEPTION 'Expected unsupported run setup field to be rejected';
+  EXCEPTION WHEN invalid_parameter_value THEN
+    NULL;
+  END;
+
+  BEGIN
+    PERFORM v2.create_planned_run(
+      '50000000-0000-4000-8000-000000000001',
+      '50000000-0000-4000-8000-000000000002',
+      'invalid-fractional-target', repeat('c', 64),
+      '{"label":"Run","targetCases":1.5}'::jsonb
+    );
+    RAISE EXCEPTION 'Expected fractional target cases to be rejected';
+  EXCEPTION WHEN invalid_parameter_value THEN
+    NULL;
+  END;
+
+  SELECT count(*) INTO v_count
+    FROM v2.runs
+    WHERE facility_id = '50000000-0000-4000-8000-000000000001';
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'Invalid run creation left % runs behind', v_count;
+  END IF;
+END
+$$;
+
 ROLLBACK;

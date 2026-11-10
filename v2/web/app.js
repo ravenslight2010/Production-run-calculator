@@ -38,6 +38,11 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function getCsrfHeaders() {
+  const token = document.querySelector('meta[name="csrf-token"]')?.content?.trim();
+  return token ? { "X-CSRF-Token": token } : null;
+}
+
 function isTimestamp(value, nullable = false) {
   if (nullable && value === null) return true;
   if (typeof value !== "string") return false;
@@ -64,14 +69,16 @@ function validateRun(run) {
   return run;
 }
 
-async function readJson(response) {
+async function readJson(response, { allowCommandConflict = false } = {}) {
   let body;
   try {
     body = await response.json();
   } catch {
     throw new Error("The server response could not be read. Refresh and try again.");
   }
-  if (!response.ok) {
+  const knownCommandConflict = allowCommandConflict && response.status === 409
+    && ["conflict", "invalid_transition"].includes(body?.outcome);
+  if (!response.ok && !knownCommandConflict) {
     const message = isObject(body) && typeof body.error === "string"
       ? body.error
       : "The request was not accepted. Refresh the run state before trying again.";
@@ -315,6 +322,10 @@ async function fetchOneRun(runId) {
 
 async function beginCommand(run, commandType) {
   if (commandInFlight || getPending(run.id)) return;
+  if (!getCsrfHeaders()) {
+    showError("Your secure session is unavailable. Sign in again before changing run state.", "Sign-in required");
+    return;
+  }
   const payload = {
     commandId: crypto.randomUUID(),
     commandType,
@@ -336,6 +347,11 @@ async function retryCommand(runId) {
 }
 
 async function sendCommand(pending) {
+  const csrf = getCsrfHeaders();
+  if (!csrf) {
+    showError("Your secure session is unavailable. Sign in again, then retry the same saved action.", "Sign-in required");
+    return;
+  }
   commandInFlight = true;
   render();
   let definitive = false;
@@ -343,14 +359,14 @@ async function sendCommand(pending) {
     const response = await fetch(`${API}/${encodeURIComponent(pending.runId)}/commands`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...csrf },
       body: JSON.stringify({
         commandId: pending.commandId,
         commandType: pending.commandType,
         expectedRevision: pending.expectedRevision,
       }),
     });
-    const body = await readJson(response);
+    const body = await readJson(response, { allowCommandConflict: true });
     if (!["accepted", "conflict", "invalid_transition"].includes(body.outcome)) {
       throw new Error("The server returned an unknown command result. The same command can be retried safely.");
     }
@@ -398,6 +414,11 @@ function upsertRun(run) {
 async function createRun(event) {
   event.preventDefault();
   if (createInFlight) return;
+  const csrf = getCsrfHeaders();
+  if (!csrf) {
+    showError("Your secure session is unavailable. Sign in again before creating a run.", "Sign-in required");
+    return;
+  }
   const label = pendingCreate?.setupSnapshot.label ?? el.label.value.trim();
   const targetCases = pendingCreate?.setupSnapshot.targetCases ?? Number(el.target.value);
   if (!label || !Number.isSafeInteger(targetCases) || targetCases < 1) {
@@ -418,7 +439,7 @@ async function createRun(event) {
   try {
     const response = await fetch(API, {
       method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...csrf },
       body: JSON.stringify({ requestId: request.requestId, setupSnapshot: request.setupSnapshot }),
     });
     const body = await readJson(response);

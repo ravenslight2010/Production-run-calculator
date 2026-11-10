@@ -11,9 +11,11 @@ The first slice now contains a pure run-lifecycle model and a PostgreSQL
 transaction boundary for start, pause, resume, and complete. That boundary
 records idempotency receipts, revisions, audit events, and outbox events
 atomically, and has been tested against a disposable local PostgreSQL instance.
-It is not yet a usable app: authenticated HTTP routes, run creation and reads,
-station state, the auto-track worker, the web/PWA, and device-level verification
-are still missing.
+Run creation, bounded facility-scoped reads, a request-scoped HTTP handler, an
+OpenAPI contract, and a run-control screen draft are also present. It is not yet
+a usable app: the session and CSRF adapters, executable API host, browser-to-API
+integration, station state, the auto-track worker, PWA behavior, and
+two-session/browser verification are still missing.
 
 The database function is backend-only. A future API must derive facility and
 actor identity from verified authorization, compute the request hash itself,
@@ -27,11 +29,12 @@ here.
 Run the current focused checks from the repository root:
 
 ```sh
-node --test v2/core/*.test.mjs
+node --test v2/core/*.test.mjs v2/server/*.test.mjs
 bash v2/db/run-local-tests.sh
+node --check v2/web/app.js
 ```
 
 The SQL script creates a temporary PostgreSQL cluster under the system temp
-directory, binds it to loopback only, runs schema/lifecycle/receipt checks plus
-two concurrent-command checks, then stops and removes the cluster. It does not
-read or write either V1 database.
+directory, binds it to loopback only, runs schema/lifecycle/receipt checks,
+server-owned create/read checks, and concurrent retry/conflict checks, then
+stops and removes the cluster. It does not read or write either V1 database.
