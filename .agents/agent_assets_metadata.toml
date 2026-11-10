@@ -208,3 +208,31 @@ mtime_ms = 1792756524309
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/651cd566-db7a-418e-9f31-ee0f6c28bb2f/a4a8fc48-b606-494b-8cd6-fa439b94b077"
 storage_version_token = "1792756547046431"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "Pqjz_f6rn1RvDXgZkuPVE"
+uri = "file://research/v2-server-architecture/notes.md"
+type = "text"
+title = "Research Notes: V2 Server Architecture"
+description = "The focused research plan and running findings for the V2 server design recommendation."
+logical_id = "2a14d248-6d3d-43e5-97bc-817dcb0773cc"
+content_hash = "sha256:f74853804b214f9854945c1efd60f7f63286c689522610ea806abe8d1804663f"
+size = 2186
+mtime_ms = 1794277151899
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/2a14d248-6d3d-43e5-97bc-817dcb0773cc/88f3fe5d-011f-449c-ad90-ded386e1abe9"
+storage_version_token = "1794277158302875"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "S-E91X-9JpBuV3mr8iE9Z"
+uri = "file://research/v2-server-architecture.md"
+type = "text"
+title = "V2 Server Architecture Recommendation"
+description = "Synthesis of the existing sync/background research, current production evidence, and current Replit deployment guidance."
+logical_id = "b1af7f64-3b81-4c64-bfe1-08bab6323407"
+content_hash = "sha256:33492343bf2a6d70fd392e0d2e421419aff85158712c870b1707756b77efdd55"
+size = 19807
+mtime_ms = 1794277703226
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/b1af7f64-3b81-4c64-bfe1-08bab6323407/32516444-b532-4deb-b12b-8fc51ae374fd"
+storage_version_token = "1794277732619564"
+content_type = "text/markdown"

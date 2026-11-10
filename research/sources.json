@@ -238,5 +238,117 @@
     "accessed": "2026-09-19",
     "tier": 1,
     "evidencePath": "research/sources/sse-07-w3c-eventsource.md"
+  },
+  "v2-postgresql-select-locking": {
+    "title": "PostgreSQL 18: SELECT",
+    "url": "https://www.postgresql.org/docs/current/sql-select.html",
+    "publicationDate": "not shown; current PostgreSQL 18 docs",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/postgresql-select-locking.md"
+  },
+  "v2-postgresql-explicit-locks": {
+    "title": "PostgreSQL 18: Explicit Locking",
+    "url": "https://www.postgresql.org/docs/current/explicit-locking.html",
+    "publicationDate": "not shown; current PostgreSQL 18 docs",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/postgresql-explicit-locking.md"
+  },
+  "v2-aws-transactional-outbox": {
+    "title": "Transactional outbox pattern",
+    "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 2,
+    "evidencePath": "research/sources/aws-transactional-outbox.md"
+  },
+  "v2-node-event-loop": {
+    "title": "Don't Block the Event Loop (or the Worker Pool)",
+    "url": "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/nodejs-event-loop.md"
+  },
+  "v2-heroku-background-workers": {
+    "title": "Worker Dynos, Background Jobs and Queueing",
+    "url": "https://devcenter.heroku.com/articles/background-jobs-queueing",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 2,
+    "evidencePath": "research/sources/heroku-background-jobs-queueing.md"
+  },
+  "v2-whatwg-sse": {
+    "title": "HTML Standard: Server-sent events",
+    "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html",
+    "publicationDate": "living standard",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/whatwg-server-sent-events.md"
+  },
+  "v2-chrome-timer-throttling": {
+    "title": "Heavy throttling of chained JS timers beginning in Chrome 88",
+    "url": "https://developer.chrome.com/blog/timer-throttling-in-chrome-88",
+    "publicationDate": "2021-01",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/chrome-timer-throttling.md"
+  },
+  "v2-mdn-page-visibility": {
+    "title": "Page Visibility API",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 2,
+    "evidencePath": "research/sources/v2-mdn-page-visibility.md"
+  },
+  "v2-replit-deployment-types": {
+    "title": "Deployment types",
+    "url": "https://docs.replit.com/features/publishing/deployment-types",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/v2-replit-deployment-types.md"
+  },
+  "v2-replit-artifacts": {
+    "title": "What's an Artifact?",
+    "url": "https://docs.replit.com/features/projects-and-artifacts/artifacts",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/v2-replit-artifacts.md"
+  },
+  "v2-replit-reserved-vm": {
+    "title": "Reserved VM deployments",
+    "url": "https://docs.replit.com/references/publishing/reserved-vm-deployments",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/v2-replit-reserved-vm.md"
+  },
+  "v2-replit-autoscale": {
+    "title": "Autoscale deployments",
+    "url": "https://docs.replit.com/references/publishing/autoscale-deployments",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/v2-replit-autoscale.md"
+  },
+  "v2-replit-projects": {
+    "title": "What's a Project?",
+    "url": "https://docs.replit.com/features/projects-and-artifacts/projects",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/v2-replit-projects.md"
+  },
+  "v2-replit-multiple-artifacts": {
+    "title": "Multiple Artifacts vs. Separate Projects",
+    "url": "https://docs.replit.com/features/projects-and-artifacts/multiple-artifacts-vs-projects",
+    "publicationDate": "not shown",
+    "accessed": "2026-11-09",
+    "tier": 1,
+    "evidencePath": "research/sources/v2-replit-artifact-vs-project.md"
   }
 }
