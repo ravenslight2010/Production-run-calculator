@@ -69,7 +69,8 @@ _[@key] markers reference external sources in this investigation's `sources.json
 - Filled: authoritative technical sources establish that event-loop blocking delays request handling, leases/locks need idempotency and durable state, SSE reconnect is not durable replay, and browser timers are throttled in hidden pages.
 - Owner decision: migrate setup/master data only; historical production runs do not transfer into V2.
 - Owner decision: carry account identities and role assignments; require a fresh sign-in and do not transfer active sessions or reset tokens.
-- Still to define: exact master-data allowlist, secure account revalidation, fresh inventory baseline, and V1 history retention/access after cutover.
+- Owner decision: full inventory is in V2's first usable release; seed it from a fresh physical count rather than copied V1 balances.
+- Still to define: exact master-data allowlist, secure account revalidation, count workflow, and V1 history retention/access after cutover.
 - Limitation: the exact production cause is unknown; checkout and event-loop stalls are confirmed but not same-process correlated.
 - Limitation: the database provider's usable connection budget, Replit worker/API maximum counts, and deploy-overlap behavior are unknown.
 - Limitation: no table-level V1-to-V2 mapping or production cutover design has been approved.
