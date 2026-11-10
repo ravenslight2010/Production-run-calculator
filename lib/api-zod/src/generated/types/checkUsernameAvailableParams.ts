@@ -7,9 +7,9 @@
  */
 
 export type CheckUsernameAvailableParams = {
-/**
- * @minLength 1
- * @maxLength 64
- */
-username: string;
+  /**
+   * @minLength 1
+   * @maxLength 64
+   */
+  username: string;
 };

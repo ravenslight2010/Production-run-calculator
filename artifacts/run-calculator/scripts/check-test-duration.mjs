@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -6,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 export const DEFAULT_CALCULATOR_TEST_BUDGET_MS = 150_000;
 export const MIN_CALCULATOR_TEST_WORKERS = 4;
+
+
 export const CALCULATOR_TEST_WORKER_CEILING = 4;
 export const DEFAULT_CALCULATOR_TEST_WORKERS = CALCULATOR_TEST_WORKER_CEILING;
 
@@ -45,7 +48,14 @@ export function formatCalculatorTestCapacity(
 export function calculatorTestResourceError(
   availableWorkers,
   minimumWorkers = MIN_CALCULATOR_TEST_WORKERS,
+  environment = process.env,
 ) {
+  if (
+    environment.CALCULATOR_TEST_ALLOW_LOW_CAPACITY === "1" ||
+    environment.CALCULATOR_TEST_ALLOW_LOW_CAPACITY === "true"
+  ) {
+    return null;
+  }
   if (
     Number.isInteger(availableWorkers) &&
     availableWorkers >= minimumWorkers
@@ -115,18 +125,40 @@ async function runCalculatorTests() {
   let exitCode = 1;
   let spawnError;
   try {
+    const vitestArgs = [
+      "exec",
+      "vitest",
+      "run",
+      "--reporter=default",
+      "--reporter=json",
+      `--maxWorkers=${configuredWorkers}`,
+      `--outputFile=${reportPath}`,
+    ];
+    // Public CI without private source-library workbooks: skip real-workbook suites.
+    const publicCi =
+      process.env.CI_PUBLIC_SOURCE === "1" ||
+      process.env.CI_PUBLIC_SOURCE === "true";
+    const workbookRoot = resolve(
+      fileURLToPath(new URL("../../../../attached_assets/source-library", import.meta.url)),
+    );
+    if (publicCi && !existsSync(workbookRoot)) {
+      for (const pattern of [
+        "src/**/*Reimport*.test.ts",
+        "src/**/*RealWorkbook*.test.ts",
+        "src/specImportCheeseDuplication.test.ts",
+        "src/specImportBlendTypeAliasSkip.test.ts",
+        "src/brandRenameReimportRealWorkbooks.test.ts",
+      ]) {
+        vitestArgs.push(`--exclude=${pattern}`);
+      }
+      console.warn(
+        "CI_PUBLIC_SOURCE: excluding source-library workbook unit tests (assets absent).",
+      );
+    }
     exitCode = await new Promise((resolveExitCode) => {
       const child = spawn(
         "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--reporter=default",
-          "--reporter=json",
-          `--maxWorkers=${configuredWorkers}`,
-          `--outputFile=${reportPath}`,
-        ],
+        vitestArgs,
         { stdio: "inherit" },
       );
 

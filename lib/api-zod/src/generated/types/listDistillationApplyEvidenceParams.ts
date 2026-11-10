@@ -7,13 +7,11 @@
  */
 
 export type ListDistillationApplyEvidenceParams = {
-/**
- * @minimum 1
- * @maximum 20
- */
-limit?: number;
-/**
- * @maxLength 512
- */
-cursor?: string;
+  /**
+   * @minimum 1
+   * @maximum 20
+   */
+  limit?: number;
+  /** @maxLength 512 */
+  cursor?: string;
 };

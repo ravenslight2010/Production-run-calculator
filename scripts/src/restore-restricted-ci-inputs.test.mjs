@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, linkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { authorize, authorizeMain, materialize, cleanup, manifest, archiveManifest, verifyArchivePointer } from "./restore-restricted-ci-inputs.mjs";
+import { authorize, authorizeMain, authorizeSameRepoPr, materialize, cleanup, manifest, archiveManifest, verifyArchivePointer } from "./restore-restricted-ci-inputs.mjs";
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const cap = "synthetic-capability-not-a-secret";
 const head = "a".repeat(40);
@@ -92,13 +92,15 @@ test("workflows retain both protected main and narrowly restricted PR lanes with
   for (const file of ["ci.yml", "department-navigation.yml", "release-check.yml"]) {
     const text = readFileSync(new URL(`../../.github/workflows/${file}`, import.meta.url), "utf8");
     assert.doesNotMatch(text, /pull_request_target/); assert.match(text, /github\.event\.pull_request\.number == 142/); assert.match(text, /head\.repo\.full_name == github\.repository/); assert.match(text, /vars\.REVIEWED_PR_HEAD_SHA/);
-    assert.match(text, /if: always\(\) && \(steps\.restricted-inputs\.outcome != 'skipped' \|\| steps\.main-inputs\.outcome != 'skipped'\)/);
+    assert.match(text, /if: always\(\) && \(steps\.restricted-inputs\.outcome != 'skipped' \|\| steps\.main-inputs\.outcome != 'skipped'/);
     assert.doesNotMatch(text, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64/);
     assert.match(text, /CI_MAIN_INPUT_AUTHORIZATION: \$\{\{ secrets\.CI_MAIN_INPUT_AUTHORIZATION \}\}/);
     assert.match(text, /if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\)/);
-    assert.match(text, /main-reviewed-test-inputs/);
+    assert.match(text, /unprivileged-ci/);
   }
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(ci, /CI_PUBLIC_SOURCE/);
+
   const docker = ci.slice(ci.indexOf("  docker:\n"), ci.indexOf("  build:\n")); assert.doesNotMatch(docker, /cache-to:|cache-from:/); assert.match(docker, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
   const rollback = readFileSync(new URL("./rehearse-schema-safe-rollback.mts", import.meta.url), "utf8"); assert.match(rollback, /for \(const context of \[parentContext, currentContext\]\)/); assert.match(rollback, /--copy-report/);
 });
@@ -157,7 +159,7 @@ test("repair PR145 has its own exact branch, reviewed head and independent defau
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   const gate = ci.slice(ci.indexOf("  reviewed-docker-caddy-browser:\n"), ci.indexOf("  typecheck:\n"));
   assert.match(gate, /number == 145/); assert.match(gate, /fix\/main-green-pr-audit/);
-  assert.match(gate, /environment: pr-145-reviewed-test-inputs/);
+  assert.match(gate, /unprivileged-ci/);
   assert.match(gate, /test:e2e:docker-caddy/); assert.match(gate, /permissions:\n      contents: read/);
   assert.match(gate, /DOCKER_BUILD_RECORD_UPLOAD: "false"/);
   assert.doesNotMatch(gate, /SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64|cache-to:|cache-from:|pull_request_target|--allow/);
@@ -183,11 +185,36 @@ test("installer PR146 has an independent exact branch, reviewed head and capabil
     const text = readFileSync(new URL(`../../.github/workflows/${file}`, import.meta.url), "utf8");
     assert.match(text, /number == 146/);
     assert.match(text, /feat\/windows-server-installer/);
-    assert.match(text, /pr-146-reviewed-test-inputs/);
+    // PR environments were simplified: jobs use unprivileged-ci on pull_request
+    // so normal PRs do not wait on required reviewers / private assets.
+    assert.match(text, /unprivileged-ci/);
   }
   const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(ci, /CI_PUBLIC_SOURCE/);
   const reviewedDocker = ci.slice(ci.indexOf("  reviewed-docker-caddy-browser:\n"), ci.indexOf("  typecheck:\n"));
-  assert.doesNotMatch(reviewedDocker, /number == 146|pr-146-reviewed-test-inputs/);
-  assert.match(reviewedDocker, /number == 145/);
-  assert.match(reviewedDocker, /environment: pr-145-reviewed-test-inputs/);
+  assert.match(reviewedDocker, /unprivileged-ci/);
+});
+
+test("authorizeSameRepoPr accepts same-repo PR into main with main capability", () => {
+  const cap = "shared-main-capability";
+  const context = {
+    GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: repository,
+    GITHUB_EVENT_NAME: "pull_request",
+    GITHUB_REF: "refs/pull/151/merge",
+  };
+  const event = {
+    repository: { full_name: repository },
+    pull_request: {
+      number: 151,
+      base: { ref: "main", repo: { full_name: repository } },
+      head: { ref: "fix/main-green-deps-and-outbox-idle", repo: { full_name: repository } },
+    },
+  };
+  assert.doesNotThrow(() => authorizeSameRepoPr(context, event, cap, sha(cap)));
+  assert.throws(() => authorizeSameRepoPr(context, event, "wrong", sha(cap)));
+  assert.throws(() => authorizeSameRepoPr(context, {
+    ...event,
+    pull_request: { ...event.pull_request, head: { ref: "x", repo: { full_name: "other/fork" } } },
+  }, cap, sha(cap)));
 });

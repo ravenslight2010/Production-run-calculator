@@ -8,12 +8,8 @@
 import type { ImportGoldOpaqueReference } from './importGoldOpaqueReference';
 
 export type ListImportGoldApprovalsParams = {
-/**
- * @minimum 1
- */
-before?: number;
-/**
- * Exact opaque approval reference, filtered on the server within the authenticated scope.
- */
-recordRef?: ImportGoldOpaqueReference;
+  /** @minimum 1 */
+  before?: number;
+  /** Exact opaque approval reference, filtered on the server within the authenticated scope. */
+  recordRef?: ImportGoldOpaqueReference;
 };

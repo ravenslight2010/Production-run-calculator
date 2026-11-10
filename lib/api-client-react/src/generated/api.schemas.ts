@@ -10485,16 +10485,16 @@ export type ClientTodayParameter = string;
 export type SyncSnapshotParameter = string;
 
 export type GetMasterDataOperationsParams = {
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
-/**
- * @minimum 1
- * @maximum 9007199254740991
- */
-before?: number;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
+  /**
+   * @minimum 1
+   * @maximum 9007199254740991
+   */
+  before?: number;
 };
 
 export type GetQcImportReviewBadges200 = {
@@ -10505,16 +10505,14 @@ export type GetQcImportReviewBadges200 = {
 };
 
 export type ListQcImportReviewsParams = {
-/**
- * @maxLength 120
- */
-cursor?: string;
-status?: ListQcImportReviewsStatus;
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
+  /** @maxLength 120 */
+  cursor?: string;
+  status?: ListQcImportReviewsStatus;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };
 
 export type ListQcImportReviewsStatus = typeof ListQcImportReviewsStatus[keyof typeof ListQcImportReviewsStatus];
@@ -10539,28 +10537,24 @@ export type DecideQcImportReview409 = {
 };
 
 export type ListQcRecipeReviewStatusesParams = {
-/**
- * @maxLength 240
- */
-cursor?: string;
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
+  /** @maxLength 240 */
+  cursor?: string;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };
 
 export type ListQcRecipeReviewsParams = {
-/**
- * @pattern ^[1-9][0-9]{0,8}$
- */
-cursor?: string;
-status?: ListQcRecipeReviewsStatus;
-/**
- * @minimum 1
- * @maximum 50
- */
-limit?: number;
+  /** @pattern ^[1-9][0-9]{0,8}$ */
+  cursor?: string;
+  status?: ListQcRecipeReviewsStatus;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };
 
 export type ListQcRecipeReviewsStatus = typeof ListQcRecipeReviewsStatus[keyof typeof ListQcRecipeReviewsStatus];
@@ -10588,11 +10582,11 @@ export type GetBuildInfo503 = {
 };
 
 export type CheckUsernameAvailableParams = {
-/**
- * @minLength 1
- * @maxLength 64
- */
-username: string;
+  /**
+   * @minLength 1
+   * @maxLength 64
+   */
+  username: string;
 };
 
 export type ConsumeInventoryDayStart200 = {
@@ -10607,18 +10601,14 @@ export type ConsumeInventoryDayStart409 = {
 };
 
 export type ListInventoryLedgerParams = {
-itemId?: number;
+  itemId?: number;
 };
 
 export type ListQualityChecksParams = {
-/**
- * Only return checks for this product type
- */
-productType?: ListQualityChecksProductType;
-/**
- * Only return checks with this verdict
- */
-status?: ListQualityChecksStatus;
+  /** Only return checks for this product type */
+  productType?: ListQualityChecksProductType;
+  /** Only return checks with this verdict */
+  status?: ListQualityChecksStatus;
 };
 
 export type ListQualityChecksProductType = typeof ListQualityChecksProductType[keyof typeof ListQualityChecksProductType];
@@ -10640,59 +10630,47 @@ export const ListQualityChecksStatus = {
 } as const;
 
 export type GetQcTargetsParams = {
-/**
- * @minLength 1
- * @maxLength 400
- */
-profileKey: string;
+  /**
+   * @minLength 1
+   * @maxLength 400
+   */
+  profileKey: string;
 };
 
 export type GetQcPlanningParams = {
-/**
- * Client-local production date used as the start of the range.
- */
-today: string;
-/**
- * Inclusive number of client-calendar dates to inspect, capped at 90.
- * @minimum 1
- * @maximum 90
- */
-days?: number;
+  /** Client-local production date used as the start of the range. */
+  today: string;
+  /**
+   * Inclusive number of client-calendar dates to inspect, capped at 90.
+   * @minimum 1
+   * @maximum 90
+   */
+  days?: number;
 };
 
 export type GetQcAllergenActivityParams = {
-/**
- * Facility production date in YYYY-MM-DD form; defaults to the current facility date.
- */
-date?: string;
+  /** Facility production date in YYYY-MM-DD form; defaults to the current facility date. */
+  date?: string;
 };
 
 export type GetQcIntelligenceParams = {
-view: GetQcIntelligenceView;
-/**
- * Inclusive UTC calendar date; defaults to 29 days before the current UTC date
- */
-from?: string;
-/**
- * Inclusive UTC calendar date; defaults to the current UTC date
- */
-to?: string;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: GetQcIntelligenceStation;
-/**
- * @maxLength 200
- */
-runId?: string;
-checkType?: GetQcIntelligenceCheckType;
-/**
- * Maximum recorded events to inspect; larger result sets are explicitly partial
- * @minimum 1
- * @maximum 5000
- */
-limit?: number;
+  view: GetQcIntelligenceView;
+  /** Inclusive UTC calendar date; defaults to 29 days before the current UTC date */
+  from?: string;
+  /** Inclusive UTC calendar date; defaults to the current UTC date */
+  to?: string;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: GetQcIntelligenceStation;
+  /** @maxLength 200 */
+  runId?: string;
+  checkType?: GetQcIntelligenceCheckType;
+  /**
+   * Maximum recorded events to inspect; larger result sets are explicitly partial
+   * @minimum 1
+   * @maximum 5000
+   */
+  limit?: number;
 };
 
 export type GetQcIntelligenceView = typeof GetQcIntelligenceView[keyof typeof GetQcIntelligenceView];
@@ -10726,24 +10704,20 @@ export const GetQcIntelligenceCheckType = {
 } as const;
 
 export type ExportQcIntelligenceCsvParams = {
-view: ExportQcIntelligenceCsvView;
-from?: string;
-to?: string;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: ExportQcIntelligenceCsvStation;
-/**
- * @maxLength 200
- */
-runId?: string;
-checkType?: ExportQcIntelligenceCsvCheckType;
-/**
- * @minimum 1
- * @maximum 5000
- */
-limit?: number;
+  view: ExportQcIntelligenceCsvView;
+  from?: string;
+  to?: string;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: ExportQcIntelligenceCsvStation;
+  /** @maxLength 200 */
+  runId?: string;
+  checkType?: ExportQcIntelligenceCsvCheckType;
+  /**
+   * @minimum 1
+   * @maximum 5000
+   */
+  limit?: number;
 };
 
 export type ExportQcIntelligenceCsvView = typeof ExportQcIntelligenceCsvView[keyof typeof ExportQcIntelligenceCsvView];
@@ -10777,32 +10751,22 @@ export const ExportQcIntelligenceCsvCheckType = {
 } as const;
 
 export type GetQcHistoryParams = {
-/**
- * Inclusive ISO date or timestamp
- */
-from?: string;
-/**
- * Inclusive ISO date or timestamp
- */
-to?: string;
-/**
- * @maxLength 200
- */
-runId?: string;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: GetQcHistoryStation;
-/**
- * @minimum 1
- * @maximum 100
- */
-limit?: number;
-/**
- * @minimum 1
- */
-cursor?: number;
+  /** Inclusive ISO date or timestamp */
+  from?: string;
+  /** Inclusive ISO date or timestamp */
+  to?: string;
+  /** @maxLength 200 */
+  runId?: string;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: GetQcHistoryStation;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+  /** @minimum 1 */
+  cursor?: number;
 };
 
 export type GetQcHistoryStation = typeof GetQcHistoryStation[keyof typeof GetQcHistoryStation];
@@ -10818,17 +10782,13 @@ export const GetQcHistoryStation = {
 } as const;
 
 export type ExportQcHistoryCsvParams = {
-from?: string;
-to?: string;
-/**
- * @maxLength 200
- */
-runId?: string;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: ExportQcHistoryCsvStation;
+  from?: string;
+  to?: string;
+  /** @maxLength 200 */
+  runId?: string;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: ExportQcHistoryCsvStation;
 };
 
 export type ExportQcHistoryCsvStation = typeof ExportQcHistoryCsvStation[keyof typeof ExportQcHistoryCsvStation];
@@ -10844,8 +10804,8 @@ export const ExportQcHistoryCsvStation = {
 } as const;
 
 export type ListFinalizedOperationalReportsParams = {
-scope: ListFinalizedOperationalReportsScope;
-date: string;
+  scope: ListFinalizedOperationalReportsScope;
+  date: string;
 };
 
 export type ListFinalizedOperationalReportsScope = typeof ListFinalizedOperationalReportsScope[keyof typeof ListFinalizedOperationalReportsScope];
@@ -10857,14 +10817,14 @@ export const ListFinalizedOperationalReportsScope = {
 } as const;
 
 export type SearchFinalizedOperationalReportsParams = {
-startDate: string;
-endDate: string;
-scope?: SearchFinalizedOperationalReportsScope;
-/**
- * @minimum 1
- * @maximum 100
- */
-limit?: number;
+  startDate: string;
+  endDate: string;
+  scope?: SearchFinalizedOperationalReportsScope;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
 };
 
 export type SearchFinalizedOperationalReportsScope = typeof SearchFinalizedOperationalReportsScope[keyof typeof SearchFinalizedOperationalReportsScope];
@@ -10876,11 +10836,9 @@ export const SearchFinalizedOperationalReportsScope = {
 } as const;
 
 export type DownloadCanonicalOperationalReportParams = {
-format: DownloadCanonicalOperationalReportFormat;
-/**
- * Completed export-package job whose pre-generated retained artifact should be served.
- */
-jobId?: string;
+  format: DownloadCanonicalOperationalReportFormat;
+  /** Completed export-package job whose pre-generated retained artifact should be served. */
+  jobId?: string;
 };
 
 export type DownloadCanonicalOperationalReportFormat = typeof DownloadCanonicalOperationalReportFormat[keyof typeof DownloadCanonicalOperationalReportFormat];
@@ -10893,34 +10851,26 @@ export const DownloadCanonicalOperationalReportFormat = {
 } as const;
 
 export type GetOperationalRunViewParams = {
-date: string;
-runId: string;
+  date: string;
+  runId: string;
 };
 
 export type GetShiftHandoffDigestParams = {
-date: string;
+  date: string;
 };
 
 export type ListMergeAliasesParams = {
-/**
- * Which merge tab's pool to scope the alias list to. Defaults to "ingredient" for backward compatibility.
- */
-category?: MergeSuggestCategory;
-/**
- * When category is "flavor", scopes the alias list to a single brand's flavor pool. Ignored for every other category.
- */
-brand?: string;
+  /** Which merge tab's pool to scope the alias list to. Defaults to "ingredient" for backward compatibility. */
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", scopes the alias list to a single brand's flavor pool. Ignored for every other category. */
+  brand?: string;
 };
 
 export type ListDeniedMergesParams = {
-/**
- * Which merge tab's pool to scope the denied-pair list to. Defaults to "ingredient" for backward compatibility.
- */
-category?: MergeSuggestCategory;
-/**
- * When category is "flavor", scopes the denied-pair list to a single brand's flavor pool. Ignored for every other category.
- */
-brand?: string;
+  /** Which merge tab's pool to scope the denied-pair list to. Defaults to "ingredient" for backward compatibility. */
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", scopes the denied-pair list to a single brand's flavor pool. Ignored for every other category. */
+  brand?: string;
 };
 
 export type ObserveRunSuggestion200 = {
@@ -10959,34 +10909,26 @@ export type GetProfileDataHealthWorkspace200 = {
 };
 
 export type ListAuditLogsParams = {
-startDate?: string;
-endDate?: string;
-/**
- * Maximum 200 rows per page; defaults to 100.
- */
-limit?: number;
-/**
- * Opaque stable cursor, limited to 200 characters.
- */
-cursor?: string;
+  startDate?: string;
+  endDate?: string;
+  /** Maximum 200 rows per page; defaults to 100. */
+  limit?: number;
+  /** Opaque stable cursor, limited to 200 characters. */
+  cursor?: string;
 };
 
 export type ExportAuditLogsCsvParams = {
-startDate?: string;
-endDate?: string;
-/**
- * Maximum 5000 rows per export; defaults to 5000.
- */
-limit?: number;
+  startDate?: string;
+  endDate?: string;
+  /** Maximum 5000 rows per export; defaults to 5000. */
+  limit?: number;
 };
 
 export type ExportAuditLogsPdfParams = {
-startDate?: string;
-endDate?: string;
-/**
- * Maximum 5000 rows per export; defaults to 5000.
- */
-limit?: number;
+  startDate?: string;
+  endDate?: string;
+  /** Maximum 5000 rows per export; defaults to 5000. */
+  limit?: number;
 };
 
 export type GetProfileNameLinkCleanupAudit200 = {
@@ -10998,15 +10940,15 @@ export type SavePremixSheet200 = SavedPremixSheetList & {
 };
 
 export type ListImportHistoryParams = {
-/**
- * Exact scoped source identity, bounded to 300 characters
- * @minLength 1
- * @maxLength 300
- */
-sourceKey?: string;
-type?: ListImportHistoryType;
-status?: ListImportHistoryStatus;
-customer?: string;
+  /**
+   * Exact scoped source identity, bounded to 300 characters
+   * @minLength 1
+   * @maxLength 300
+   */
+  sourceKey?: string;
+  type?: ListImportHistoryType;
+  status?: ListImportHistoryStatus;
+  customer?: string;
 };
 
 export type ListImportHistoryType = typeof ListImportHistoryType[keyof typeof ListImportHistoryType];
@@ -11033,16 +10975,14 @@ export const ListImportHistoryStatus = {
 } as const;
 
 export type GetFieldChecksParams = {
-/**
- * Exact build identifier; use local for unknown builds. Omit for all builds.
- * @minLength 1
- * @maxLength 100
- */
-appBuild?: string;
-/**
- * Exact retained browser/device category. Omit for all categories.
- */
-deviceCategory?: GetFieldChecksDeviceCategory;
+  /**
+   * Exact build identifier; use local for unknown builds. Omit for all builds.
+   * @minLength 1
+   * @maxLength 100
+   */
+  appBuild?: string;
+  /** Exact retained browser/device category. Omit for all categories. */
+  deviceCategory?: GetFieldChecksDeviceCategory;
 };
 
 export type GetFieldChecksDeviceCategory = typeof GetFieldChecksDeviceCategory[keyof typeof GetFieldChecksDeviceCategory];
@@ -11073,12 +11013,10 @@ export type ListIncidentAssignees200Item = {
 };
 
 export type ListManagerActionQueueParams = {
-status?: ListManagerActionQueueStatus;
-category?: ListManagerActionQueueCategory;
-/**
- * Opaque cursor for loading the next page of resolved history.
- */
-cursor?: string;
+  status?: ListManagerActionQueueStatus;
+  category?: ListManagerActionQueueCategory;
+  /** Opaque cursor for loading the next page of resolved history. */
+  cursor?: string;
 };
 
 export type ListManagerActionQueueStatus = typeof ListManagerActionQueueStatus[keyof typeof ListManagerActionQueueStatus];
@@ -11122,37 +11060,35 @@ export type RotateSignupCode201 = {
 };
 
 export type ListCompletedHistoryParams = {
-from?: string;
-to?: string;
-/**
- * @minimum 1
- * @maximum 200
- */
-limit?: number;
-/**
- * @maxLength 4096
- * @pattern ^[A-Za-z0-9_-]+$
- */
-cursor?: string;
+  from?: string;
+  to?: string;
+  /**
+   * @minimum 1
+   * @maximum 200
+   */
+  limit?: number;
+  /**
+   * @maxLength 4096
+   * @pattern ^[A-Za-z0-9_-]+$
+   */
+  cursor?: string;
 };
 
 export type ListApplicatorBatchEvidenceParams = {
-from?: string;
-to?: string;
-/**
- * @maxLength 500
- */
-runId?: string;
-/**
- * @maxLength 4096
- * @pattern ^[A-Za-z0-9_-]+$
- */
-cursor?: string;
-/**
- * @minimum 1
- * @maximum 500
- */
-limit?: number;
+  from?: string;
+  to?: string;
+  /** @maxLength 500 */
+  runId?: string;
+  /**
+   * @maxLength 4096
+   * @pattern ^[A-Za-z0-9_-]+$
+   */
+  cursor?: string;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  limit?: number;
 };
 
 export type MoveSyncScheduledRuns200 = {
@@ -11167,8 +11103,8 @@ export type MoveSyncScheduledRuns200 = {
 };
 
 export type GetSyncScheduleSwapEligibilityParams = {
-sourceDate: string;
-destinationDate: string;
+  sourceDate: string;
+  destinationDate: string;
 };
 
 /**
@@ -11203,19 +11139,15 @@ export type SwapSyncScheduleDays200 = {
 };
 
 export type GetSyncTodayParams = {
-today?: ClientTodayParameter;
-/**
- * @pattern ^[a-f0-9]{64}$
- */
-snapshot?: SyncSnapshotParameter;
+  today?: ClientTodayParameter;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshot?: SyncSnapshotParameter;
 };
 
 export type PutSyncTodayParams = {
-today?: ClientTodayParameter;
-/**
- * @minimum 0
- */
-epoch?: number;
+  today?: ClientTodayParameter;
+  /** @minimum 0 */
+  epoch?: number;
 };
 
 export type PutSyncToday200 = {
@@ -11236,47 +11168,37 @@ export type PutSyncToday200 = {
 };
 
 export type StreamSyncEventsParams = {
-today?: ClientTodayParameter;
-clientId: string;
-/**
- * @pattern ^[a-f0-9]{64}$
- */
-snapshot?: string;
+  today?: ClientTodayParameter;
+  clientId: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshot?: string;
 };
 
 export type ClaimAutoTrackEventParams = {
-today?: ClientTodayParameter;
-/**
- * @minimum 0
- */
-epoch?: number;
+  today?: ClientTodayParameter;
+  /** @minimum 0 */
+  epoch?: number;
 };
 
 export type ConfirmStationActivityParams = {
-today?: ClientTodayParameter;
-/**
- * @minimum 0
- */
-epoch?: number;
+  today?: ClientTodayParameter;
+  /** @minimum 0 */
+  epoch?: number;
 };
 
 export type SubmitManualSectionEditParams = {
-today?: ClientTodayParameter;
+  today?: ClientTodayParameter;
 };
 
 export type SubmitOperationalIntentParams = {
-today?: ClientTodayParameter;
-/**
- * @minimum 0
- */
-epoch?: number;
+  today?: ClientTodayParameter;
+  /** @minimum 0 */
+  epoch?: number;
 };
 
 export type ListOperationalIntentReceiptsParams = {
-/**
- * @minimum 0
- */
-after?: number;
+  /** @minimum 0 */
+  after?: number;
 };
 
 export type ListOperationalIntentReceipts200 = {
@@ -11287,52 +11209,46 @@ export type ListOperationalIntentReceipts200 = {
 };
 
 export type ListImportGoldApprovalsParams = {
-/**
- * @minimum 1
- */
-before?: number;
-/**
- * Exact opaque approval reference, filtered on the server within the authenticated scope.
- */
-recordRef?: ImportGoldOpaqueReference;
+  /** @minimum 1 */
+  before?: number;
+  /** Exact opaque approval reference, filtered on the server within the authenticated scope. */
+  recordRef?: ImportGoldOpaqueReference;
 };
 
 export type ListImportGoldCasesParams = {
-/**
- * @minimum 1
- * @maximum 100
- */
-limit?: number;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
 };
 
 export type ListImportGoldCleanupCasesParams = {
-/**
- * Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
- * @maxLength 512
- */
-cursor?: string;
+  /**
+   * Opaque scope-bound keyset cursor from the preceding page; each page contains at most 100 cases.
+   * @maxLength 512
+   */
+  cursor?: string;
 };
 
 export type ListImportGoldRetentionParams = {
-/**
- * @minimum 1
- * @maximum 100
- */
-limit?: number;
-/**
- * @minimum 0
- * @maximum 10000
- */
-offset?: number;
-/**
- * Return only records with this current retention status; filtering is applied before pagination.
- */
-status?: ImportGoldRetentionStatus;
-/**
- * Pass the first page's revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.
- * @pattern ^[a-f0-9]{64}$
- */
-revision?: string;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+  /**
+   * @minimum 0
+   * @maximum 10000
+   */
+  offset?: number;
+  /** Return only records with this current retention status; filtering is applied before pagination. */
+  status?: ImportGoldRetentionStatus;
+  /**
+   * Pass the first page's revision on subsequent pages to detect concurrent changes. On 409 discard all pages and restart at offset zero.
+   * @pattern ^[a-f0-9]{64}$
+   */
+  revision?: string;
 };
 
 export type ListImportGoldRetention409 = {
@@ -11340,15 +11256,13 @@ export type ListImportGoldRetention409 = {
 };
 
 export type ListDistillationApplyEvidenceParams = {
-/**
- * @minimum 1
- * @maximum 20
- */
-limit?: number;
-/**
- * @maxLength 512
- */
-cursor?: string;
+  /**
+   * @minimum 1
+   * @maximum 20
+   */
+  limit?: number;
+  /** @maxLength 512 */
+  cursor?: string;
 };
 
 export type ListDistillationApplyEvidence200 = {

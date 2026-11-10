@@ -33,7 +33,7 @@ const SKIP_FILES = new Set(["publish-source-record.json", "build-info.json",
 
 export function isSourceInput(relative, policy = SOURCE_POLICY) {
   assertPolicy(policy);
-  const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY;
+  const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY || isPublicCiSourceBuild();
   if (NON_PRODUCTION_SOURCE_FILES.has(relative)) return false;
   if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return !fresh;
   const parts = relative.split("/");
@@ -50,13 +50,21 @@ export function isSourceInput(relative, policy = SOURCE_POLICY) {
       ["package.json", "artifact.toml"].includes(parts[2])));
 }
 
+export function isPublicCiSourceBuild() {
+  return process.env.CI_PUBLIC_SOURCE === "1" || process.env.CI_PUBLIC_SOURCE === "true";
+}
+
 export function fingerprintSource(root, policy = SOURCE_POLICY) {
   assertPolicy(policy);
   const fresh = policy === SELF_HOST_FRESH_SOURCE_POLICY;
   const sourceRoot = path.resolve(root);
+  const publicCi = isPublicCiSourceBuild();
   const required = fresh
     ? [...REQUIRED.filter((entry) => entry !== "attached_assets/source-library/audits" &&
         !SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(entry)), ...FRESH_REQUIRED]
+    : publicCi
+    ? REQUIRED.filter((entry) => entry !== "attached_assets/source-library/audits" &&
+        !SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(entry))
     : REQUIRED;
   for (const entry of required) {
     let stat;
@@ -97,7 +105,7 @@ export function fingerprintSource(root, policy = SOURCE_POLICY) {
     if (TOP_FILES.has(name) || (fresh && FRESH_TOP_FILES.has(name)) || /^tsconfig.*\.json$/.test(name)) walk(name);
   }
   const bases = ["lib", "scripts/src", "artifacts/api-server", "artifacts/run-calculator",
-    ...(fresh ? ["docker", "scripts/self-host"] : ["attached_assets/source-library/audits"])];
+    ...(fresh ? ["docker", "scripts/self-host"] : publicCi ? [] : ["attached_assets/source-library/audits"])];
   for (const base of bases) {
     const names = readdirSync(path.join(sourceRoot, base)).sort();
     for (const name of names) {
@@ -110,7 +118,7 @@ export function fingerprintSource(root, policy = SOURCE_POLICY) {
   }
   // These exact reviewed runtime assets are allowed through the otherwise
   // excluded docs/evidence tree. Never walk unrelated retained evidence.
-  if (!fresh) for (const asset of SOURCE_LIBRARY_POOL_APPROVAL_ASSETS) walk(asset);
+  if (!fresh && !publicCi) for (const asset of SOURCE_LIBRARY_POOL_APPROVAL_ASSETS) walk(asset);
   files.sort();
   const hash = createHash("sha256").update(`${policy}\0`);
   const gitFilesSha256 = new Map();

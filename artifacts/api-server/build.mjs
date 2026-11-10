@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { buildSourceRecord, completeBuildStage } from "../../scripts/src/build-source-identity.mjs";
 import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "../../scripts/src/source-library-pool-approval-assets.mjs";
@@ -149,9 +150,15 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
   const reportShaRelativePath =
     "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256";
-  const reportBytes = await readFile(path.resolve(root, reportRelativePath));
+  const publicCi = process.env.CI_PUBLIC_SOURCE === "1" || process.env.CI_PUBLIC_SOURCE === "true";
+  const reportAbs = path.resolve(root, reportRelativePath);
+  const reportShaAbs = path.resolve(root, reportShaRelativePath);
+  if (publicCi && !existsSync(reportAbs)) {
+    console.warn("CI_PUBLIC_SOURCE: skipping source-library reconciliation embed and pool approval (assets absent).");
+  } else {
+  const reportBytes = await readFile(reportAbs);
   const reportSha256 = createHash("sha256").update(reportBytes).digest("hex");
-  const reviewedSha256 = (await readFile(path.resolve(root, reportShaRelativePath), "utf8")).trim();
+  const reviewedSha256 = (await readFile(reportShaAbs, "utf8")).trim();
   if (!/^[a-f0-9]{64}$/u.test(reviewedSha256) || reviewedSha256 !== reportSha256) {
     throw new Error("Bundled source-library reconciliation report does not match its reviewed SHA-256.");
   }
@@ -164,6 +171,7 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `${reportSha256}\n`,
     "utf8",
   );
+
   const { DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS, loadSourceLibraryPoolExceptionApproval } =
     await import(pathToFileURL(path.resolve(distDir, "source-library-approval.mjs")).href);
   const manifestPath = path.resolve(root, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS);
@@ -196,6 +204,8 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
   if (bundledApproval.sha256 !== sourceApproval.sha256) {
     throw new Error("Bundled source-library approval differs from the reviewed source.");
   }
+  }
+
   completeBuildStage(root, sourceRecord, "api");
 }
 

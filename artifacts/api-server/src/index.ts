@@ -1,3 +1,4 @@
+import "./dependencyAuditAnchors";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedRoles } from "./lib/roles";

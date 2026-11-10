@@ -8,15 +8,11 @@
 import type { ExportQcHistoryCsvStation } from './exportQcHistoryCsvStation';
 
 export type ExportQcHistoryCsvParams = {
-from?: string;
-to?: string;
-/**
- * @maxLength 200
- */
-runId?: string;
-/**
- * @maxLength 200
- */
-ingredientId?: string;
-station?: ExportQcHistoryCsvStation;
+  from?: string;
+  to?: string;
+  /** @maxLength 200 */
+  runId?: string;
+  /** @maxLength 200 */
+  ingredientId?: string;
+  station?: ExportQcHistoryCsvStation;
 };

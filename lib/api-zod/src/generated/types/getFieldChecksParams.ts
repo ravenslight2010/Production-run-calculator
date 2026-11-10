@@ -8,14 +8,12 @@
 import type { GetFieldChecksDeviceCategory } from './getFieldChecksDeviceCategory';
 
 export type GetFieldChecksParams = {
-/**
- * Exact build identifier; use local for unknown builds. Omit for all builds.
- * @minLength 1
- * @maxLength 100
- */
-appBuild?: string;
-/**
- * Exact retained browser/device category. Omit for all categories.
- */
-deviceCategory?: GetFieldChecksDeviceCategory;
+  /**
+   * Exact build identifier; use local for unknown builds. Omit for all builds.
+   * @minLength 1
+   * @maxLength 100
+   */
+  appBuild?: string;
+  /** Exact retained browser/device category. Omit for all categories. */
+  deviceCategory?: GetFieldChecksDeviceCategory;
 };

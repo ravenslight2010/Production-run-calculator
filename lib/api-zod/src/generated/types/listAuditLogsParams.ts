@@ -7,14 +7,10 @@
  */
 
 export type ListAuditLogsParams = {
-startDate?: Date;
-endDate?: Date;
-/**
- * Maximum 200 rows per page; defaults to 100.
- */
-limit?: number;
-/**
- * Opaque stable cursor, limited to 200 characters.
- */
-cursor?: string;
+  startDate?: Date;
+  endDate?: Date;
+  /** Maximum 200 rows per page; defaults to 100. */
+  limit?: number;
+  /** Opaque stable cursor, limited to 200 characters. */
+  cursor?: string;
 };

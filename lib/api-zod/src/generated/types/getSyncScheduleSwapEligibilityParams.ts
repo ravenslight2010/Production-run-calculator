@@ -7,6 +7,6 @@
  */
 
 export type GetSyncScheduleSwapEligibilityParams = {
-sourceDate: Date;
-destinationDate: Date;
+  sourceDate: Date;
+  destinationDate: Date;
 };

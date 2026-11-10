@@ -75,6 +75,10 @@ is_excluded_shell_file() {
 }
 
 declare -a maintained_files=()
+shell_list_file=$(mktemp)
+git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard -- \
+  ':(glob)scripts/src/**/*.sh' \
+  ':(glob)scripts/*.sh' >"$shell_list_file"
 while IFS= read -r path; do
   # Git still lists an unstaged deletion in its index. The inventory should
   # describe files that exist in the current working tree.
@@ -84,21 +88,21 @@ while IFS= read -r path; do
   if ! is_excluded_shell_file "$path"; then
     maintained_files+=("$path")
   fi
-done < <(
-  git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard -- \
-    ':(glob)scripts/src/**/*.sh' \
-    ':(glob)scripts/*.sh'
-)
+done <"$shell_list_file"
+rm -f "$shell_list_file"
 
 sorted_expected=$(printf '%s\n' "${maintained_files[@]}" | sort -u)
 sorted_inventory=$(printf '%s\n' "${inventory[@]}" | sort -u)
 
-missing=$(comm -23 \
-  <(printf '%s\n' "$sorted_expected") \
-  <(printf '%s\n' "$sorted_inventory"))
-unexpected=$(comm -13 \
-  <(printf '%s\n' "$sorted_expected") \
-  <(printf '%s\n' "$sorted_inventory"))
+expected_file=$(mktemp)
+inventory_file=$(mktemp)
+printf '%s
+' "$sorted_expected" >"$expected_file"
+printf '%s
+' "$sorted_inventory" >"$inventory_file"
+missing=$(comm -23 "$expected_file" "$inventory_file")
+unexpected=$(comm -13 "$expected_file" "$inventory_file")
+rm -f "$expected_file" "$inventory_file"
 
 if [[ -n "$missing" || -n "$unexpected" ]]; then
   cat >&2 <<'EOF'
