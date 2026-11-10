@@ -86,3 +86,26 @@ The self-host cutover is a separate explicit owner decision. At minimum, close t
 - Do not claim self-host qualification or assistant implementation before the actual host and required checks pass. This plan alone does not execute app tests or alter app behavior.
 - Any future web UI needs desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari coverage; emulation is not physical-device proof.
 
+## Implementation status (updated)
+
+| Piece | Status |
+|-------|--------|
+| Host inspector coding-assistant recommendation | Done (Windows HostInspector + tests) |
+| Read-only OpenCode profile template + static checker | Done |
+| Config renderer (fail-closed catalogue) | Done |
+| `pnpm coding-assistant:check` / `:test` / `:bootstrap` | Done |
+| Ollama + OpenCode install on plant host | Operator step (not automated in-app) |
+| In-app chat UI | Not started (preview HTML only) |
+| Diagnostics bridge (sanitized logs) | Not started |
+| GitHub PR broker (human approval) | Not started |
+| Write/edit tools | Intentionally denied in read-only pilot |
+
+### Quick start (dev machine)
+
+```bash
+pnpm coding-assistant:test
+pnpm coding-assistant:check
+pnpm coding-assistant:bootstrap
+# After HostInspector on Windows:
+pnpm coding-assistant:bootstrap -- --host-report path/to/inspection.json --out .opencode/opencode.local.json
+```

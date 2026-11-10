@@ -44,7 +44,10 @@
     "release:verify:local": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run check:local-release-report",
     "release:check:typescript-7-promotion": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --typescript-7-promotion",
     "typecheck:libs": "node ./node_modules/typescript/bin/tsc --build",
-    "typecheck": "pnpm run check:shell-inventory && pnpm run check:typescript-api-v6 && pnpm run audit:recovery && pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run check:shell-inventory && pnpm run check:typescript-api-v6 && pnpm run audit:recovery && pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "coding-assistant:check": "node ./scripts/coding-assistant/check-readonly-profile.mjs",
+    "coding-assistant:test": "node --test ./scripts/coding-assistant/tests/*.test.mjs",
+    "coding-assistant:bootstrap": "node ./scripts/coding-assistant/bootstrap-local.mjs"
   },
   "private": true,
   "devDependencies": {
