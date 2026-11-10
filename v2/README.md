@@ -4,6 +4,9 @@ This directory is an isolated, code-only starting point for V2. It is not
 registered as a workspace, workflow, artifact, or deployment, and it must not
 connect to V1 databases or credentials.
 
+See [HANDOFF.md](./HANDOFF.md) for the approved V2 scope, data-transfer
+decisions, current implementation status, and the next run-control milestone.
+
 The first slice now contains a pure run-lifecycle model and a PostgreSQL
 transaction boundary for start, pause, resume, and complete. That boundary
 records idempotency receipts, revisions, audit events, and outbox events
