@@ -80,7 +80,7 @@ product and implementation decisions; they do not replace the named skill's chec
 | PWA updates, stale chunks, and offline recovery | `error-handling` | Follow the exact worker and stale-client contract in [PWA update prompts](../memory/pwa-update-prompts.md); do not invent a generic reload policy. |
 | QC and allergen workflow | [QC/allergen Phase 1 decision](../memory/qc-allergen-phase1-decisions.md) | This is an approved, record-first, non-blocking Phase 1 boundary; later blocking or label behavior needs separate approval. |
 | Shipping and production readiness | `review-before-shipping`, then `release-checklist`; use `production-go` for the final decision | These roles compose; a risk review or passing check is not itself a production GO. |
-| Task intake, execution, and closure | `task-execution-rules` | Repository guidance/checks govern task authoring and agent conduct, not platform scheduling, task state, or already-running task copies. |
+| Task intake, execution, and closure | `end-to-end-task-ownership` and `task-execution-rules` | Keep one task on its complete user outcome; use the execution rules for evidence, approvals, failure tracking, and platform boundaries. |
 
 When maintaining skills, preserve these boundaries and existing safety
 requirements. Do not rewrite descriptions based on unavailable model
