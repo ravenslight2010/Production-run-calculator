@@ -182,6 +182,58 @@ function Invoke-ProfileRender([string]$Repo, [string]$Report, [string]$OutFile) 
   }
 }
 
+
+function New-CodingAssistantShortcut(
+  [string]$LinkPath,
+  [string]$TargetPath,
+  [string]$Arguments,
+  [string]$WorkDir,
+  [string]$IconPath,
+  [string]$Description
+) {
+  $shell = New-Object -ComObject WScript.Shell
+  $sc = $shell.CreateShortcut($LinkPath)
+  $sc.TargetPath = $TargetPath
+  if ($Arguments) { $sc.Arguments = $Arguments }
+  if ($WorkDir) { $sc.WorkingDirectory = $WorkDir }
+  if ($IconPath -and (Test-Path -LiteralPath $IconPath)) { $sc.IconLocation = "$IconPath,0" }
+  $sc.Description = $Description
+  $sc.Save()
+  Write-Info "Shortcut: $LinkPath"
+}
+
+function Install-AppShortcuts([string]$Repo, [string]$AgentRoot, [string]$LaunchPs1) {
+  $icon = Join-Path $Repo "scripts\coding-assistant\chat-ui\icons\coding-assistant.ico"
+  if (-not (Test-Path -LiteralPath $icon)) {
+    Write-Warn2 "Icon not found at $icon — shortcuts will use default icon"
+    $icon = $null
+  }
+  $programs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Run Calculator"
+  Ensure-Directory $programs
+  $startLink = Join-Path $programs "Local Coding Assistant.lnk"
+  # Launch via powershell so window policy is consistent
+  $psExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  New-CodingAssistantShortcut -LinkPath $startLink -TargetPath $psExe `
+    -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$LaunchPs1`"" `
+    -WorkDir $Repo -IconPath $icon `
+    -Description "Local coding assistant (Ollama loopback, read-only pilot)"
+
+  $desktop = [Environment]::GetFolderPath("Desktop")
+  if ($desktop) {
+    $deskLink = Join-Path $desktop "Local Coding Assistant.lnk"
+    New-CodingAssistantShortcut -LinkPath $deskLink -TargetPath $psExe `
+      -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$LaunchPs1`"" `
+      -WorkDir $Repo -IconPath $icon `
+      -Description "Local coding assistant (Ollama loopback, read-only pilot)"
+  }
+  # Copy icon into agent dir for stable path
+  if ($icon) {
+    $iconDest = Join-Path $AgentRoot "coding-assistant.ico"
+    Copy-Item -LiteralPath $icon -Destination $iconDest -Force
+  }
+}
+
+
 # --- main ---
 Write-Host "Production Run Calculator — Coding Assistant installer (read-only pilot)" -ForegroundColor Green
 Write-Host "Plant data directory is never modified." -ForegroundColor DarkGray
@@ -230,18 +282,48 @@ $profilePath = Join-Path $AgentRoot "config\opencode.local.json"
 Invoke-ProfileRender -Repo $repo -Report $ReportPath -OutFile $profilePath
 
 $startPs1 = Join-Path $AgentRoot "Start-CodingAssistant.ps1"
+$chatServer = Join-Path $repo "scripts\coding-assistant\chat-ui\server.mjs"
 @"
-# Launch helper — does not start plant services
+# Launch Local Coding Assistant chat UI (loopback) — does not start plant services
 `$ErrorActionPreference = 'Stop'
-Write-Host 'Coding assistant profile: $profilePath'
-Write-Host 'Repo (open this folder in OpenCode): $repo'
-if (Get-Command opencode -ErrorAction SilentlyContinue) {
-  Write-Host 'Starting OpenCode...'
-  opencode
-} else {
-  Write-Host 'OpenCode not on PATH. Install from https://opencode.ai and load the profile above.'
+`$repo = '$repo'
+`$profilePath = '$profilePath'
+`$model = '$model'
+`$port = 7843
+`$url = "http://127.0.0.1:`$port/"
+`$server = Join-Path `$repo 'scripts\coding-assistant\chat-ui\server.mjs'
+
+Write-Host 'Local Coding Assistant (read-only pilot)' -ForegroundColor Green
+Write-Host "Profile: `$profilePath"
+Write-Host "Model:   `$model"
+Write-Host "Chat UI: `$url"
+Write-Host 'Plant data directories are not used.' -ForegroundColor DarkGray
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Error 'Node.js is required. Install Node 24+ and re-run the installer.'
+  exit 1
 }
+if (-not (Test-Path -LiteralPath `$server)) {
+  Write-Error "Chat UI server missing: `$server"
+  exit 1
+}
+
+# Start server minimized; open browser
+`$args = @(`$server, '--port', "`$port", '--model', `$model)
+`$proc = Start-Process -FilePath 'node' -ArgumentList `$args -WorkingDirectory `$repo -WindowStyle Minimized -PassThru
+Start-Sleep -Seconds 1
+Start-Process `$url
+
+Write-Host ""
+Write-Host 'Browser should open to the chat UI.' -ForegroundColor Cyan
+Write-Host 'Optional PWA: in Edge use Install app / Apps > Install this site as an app (localhost).'
+Write-Host 'OpenCode profile (tool-denial tests):' `$profilePath
+Write-Host 'Close this window when finished; stop the node process from Task Manager if needed.'
+Write-Host "Server PID: `$(`$proc.Id)"
 "@ | Set-Content -LiteralPath $startPs1 -Encoding UTF8
+
+Write-Step "App shortcuts + icon"
+Install-AppShortcuts -Repo $repo -AgentRoot $AgentRoot -LaunchPs1 $startPs1
 
 Write-Step "Done"
 Write-Host ""
@@ -249,12 +331,14 @@ Write-Host "Profile:  $profilePath" -ForegroundColor Green
 Write-Host "Model:    $model" -ForegroundColor Green
 Write-Host "Agent:    $AgentRoot" -ForegroundColor Green
 Write-Host "Repo:     $repo" -ForegroundColor Green
+Write-Host "Chat UI:  http://127.0.0.1:7843/ (Start Menu: Local Coding Assistant)" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next:" -ForegroundColor Cyan
-Write-Host "  1. Open the repo in OpenCode using the profile above"
-Write-Host "  2. Confirm edit/shell tools are denied"
-Write-Host "  3. Keep Ollama on localhost only"
-Write-Host "  4. Do not point the assistant at C:\runcalc\plant data volumes"
+Write-Host "  1. Double-click Desktop / Start Menu 'Local Coding Assistant' (chat UI + icon)"
+Write-Host "  2. Optional: Edge > Install app for a PWA icon pinned to taskbar"
+Write-Host "  3. Optional: OpenCode with the profile for edit/shell denial tests"
+Write-Host "  4. Keep Ollama on localhost only; do not use plant data volumes"
 Write-Host ""
 Write-Host "Helper:   $startPs1"
+Write-Host "Icon:     scripts\coding-assistant\chat-ui\icons\coding-assistant.ico"
 Write-Host "Runbook:  docs\coding-assistant\pilot-runbook.md"

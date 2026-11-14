@@ -78,6 +78,32 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, readFileSync(publicIndex, "utf8"), "text/html; charset=utf-8");
   }
 
+  // PWA / static assets (icons, manifest, service worker)
+  if (req.method === "GET") {
+    const staticMap = {
+      "/manifest.webmanifest": ["manifest.webmanifest", "application/manifest+json; charset=utf-8"],
+      "/sw.js": ["sw.js", "application/javascript; charset=utf-8"],
+      "/icons/icon-16.png": ["icons/icon-16.png", "image/png"],
+      "/icons/icon-32.png": ["icons/icon-32.png", "image/png"],
+      "/icons/icon-48.png": ["icons/icon-48.png", "image/png"],
+      "/icons/icon-180.png": ["icons/icon-180.png", "image/png"],
+      "/icons/icon-192.png": ["icons/icon-192.png", "image/png"],
+      "/icons/icon-512.png": ["icons/icon-512.png", "image/png"],
+      "/icons/coding-assistant.ico": ["icons/coding-assistant.ico", "image/x-icon"],
+    };
+    const hit = staticMap[url.pathname];
+    if (hit) {
+      const abs = path.join(__dirname, hit[0]);
+      if (!existsSync(abs)) return send(res, 404, { error: "missing asset" });
+      res.writeHead(200, {
+        "Content-Type": hit[1],
+        "Cache-Control": url.pathname === "/sw.js" ? "no-cache" : "public, max-age=86400",
+      });
+      res.end(readFileSync(abs));
+      return;
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/api/health") {
     let ollama = { ok: false };
     try {

@@ -116,3 +116,17 @@ pnpm coding-assistant:check
 pnpm coding-assistant:bootstrap -- --fixture --out .opencode/opencode.local.json
 pnpm coding-assistant:chat
 ```
+
+## Desktop / Start Menu icon
+
+The Windows installer creates:
+
+- Start Menu → **Run Calculator** → **Local Coding Assistant**
+- Desktop shortcut **Local Coding Assistant**
+- Icon: `scripts/coding-assistant/chat-ui/icons/coding-assistant.ico`
+
+The shortcut runs `Start-CodingAssistant.ps1` under the agent directory (starts loopback chat UI + opens the browser).
+
+### Optional PWA pin
+
+With the chat UI open in **Edge**, use **Install app** / *Apps → Install this site as an app* to pin a standalone window. Manifest: `/manifest.webmanifest` (localhost).
