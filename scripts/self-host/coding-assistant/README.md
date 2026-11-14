@@ -56,3 +56,13 @@ Fixture only (tooling test — not a host qualification):
 - Runbook: `docs\coding-assistant\pilot-runbook.md`  
 
 Open the **repo checkout** in OpenCode with that profile. Confirm edit/shell are denied and Ollama stays on localhost.
+
+## Chat UI (after Ollama)
+
+From the repo checkout (Node):
+
+```bash
+pnpm coding-assistant:chat
+```
+
+Open `http://127.0.0.1:7843/` — loopback-only, read-only file attach, no shell/edit tools.

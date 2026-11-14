@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Local coding assistant (pilot)</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d8bfd;
+      --warn: #e6a23c;
+      --ok: #3dd68c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+      display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;
+      background: var(--panel);
+    }
+    header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+    .badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+    .badge.ok { border-color: var(--ok); color: var(--ok); }
+    .badge.bad { border-color: var(--warn); color: var(--warn); }
+    main { flex: 1; display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
+    aside { border-right: 1px solid var(--border); padding: 0.75rem; overflow: auto; background: #121a24; }
+    aside h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 0.5rem; }
+    .file { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--text); padding: 0.35rem 0.4rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+    .file:hover { background: var(--panel); }
+    .file.active { background: var(--panel); outline: 1px solid var(--accent); }
+    .chat { display: flex; flex-direction: column; min-height: 0; }
+    #log { flex: 1; overflow: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .msg { max-width: 900px; padding: 0.75rem 1rem; border-radius: 10px; border: 1px solid var(--border); white-space: pre-wrap; line-height: 1.45; font-size: 0.95rem; }
+    .msg.user { background: #1c2a3d; align-self: flex-end; }
+    .msg.assistant { background: var(--panel); align-self: flex-start; }
+    .msg.system { background: transparent; color: var(--muted); border-style: dashed; font-size: 0.85rem; }
+    form { display: flex; gap: 0.5rem; padding: 0.75rem 1rem; border-top: 1px solid var(--border); background: var(--panel); }
+    textarea { flex: 1; resize: none; min-height: 52px; max-height: 160px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 0.6rem 0.75rem; font: inherit; }
+    button, select { border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 0.5rem 0.85rem; font: inherit; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .ctx { font-size: 0.75rem; color: var(--muted); padding: 0 1rem 0.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Local coding assistant</h1>
+    <span class="badge" id="mode">read-only pilot</span>
+    <span class="badge" id="ollama">ollama: …</span>
+    <span class="badge" id="modelBadge">model</span>
+    <select id="model" title="Ollama model"></select>
+  </header>
+  <main>
+    <aside>
+      <h2>Repo (read-only)</h2>
+      <div id="tree"></div>
+      <p style="color:var(--muted);font-size:0.75rem;margin-top:1rem">Click files to attach as context (max 6). No writes.</p>
+    </aside>
+    <section class="chat">
+      <div id="log"></div>
+      <div class="ctx" id="ctxLabel">Context: none</div>
+      <form id="form">
+        <textarea id="input" placeholder="Ask about this repo…" rows="2"></textarea>
+        <button type="submit" class="primary" id="send">Send</button>
+      </form>
+    </section>
+  </main>
+  <script>
+    const log = document.getElementById("log");
+    const tree = document.getElementById("tree");
+    const modelSel = document.getElementById("model");
+    const ctxLabel = document.getElementById("ctxLabel");
+    const messages = [];
+    const contextFiles = new Set();
+
+    function addMsg(role, text) {
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function refreshCtx() {
+      ctxLabel.textContent = contextFiles.size
+        ? "Context: " + [...contextFiles].join(", ")
+        : "Context: none";
+    }
+
+    async function loadTree(p = "") {
+      const r = await fetch("/api/tree?path=" + encodeURIComponent(p));
+      const data = await r.json();
+      tree.innerHTML = "";
+      if (p) {
+        const up = document.createElement("button");
+        up.className = "file";
+        up.textContent = "…";
+        up.onclick = () => loadTree(p.split("/").slice(0, -1).join("/"));
+        tree.appendChild(up);
+      }
+      for (const e of data.entries || []) {
+        const b = document.createElement("button");
+        b.className = "file";
+        b.textContent = (e.type === "dir" ? "📁 " : "📄 ") + e.name;
+        b.onclick = () => {
+          if (e.type === "dir") loadTree(e.path);
+          else {
+            if (contextFiles.has(e.path)) contextFiles.delete(e.path);
+            else {
+              if (contextFiles.size >= 6) contextFiles.clear();
+              contextFiles.add(e.path);
+            }
+            b.classList.toggle("active", contextFiles.has(e.path));
+            refreshCtx();
+          }
+        };
+        tree.appendChild(b);
+      }
+    }
+
+    async function health() {
+      const r = await fetch("/api/health");
+      const h = await r.json();
+      const o = document.getElementById("ollama");
+      const mb = document.getElementById("modelBadge");
+      if (h.ollama?.ok) {
+        o.textContent = "ollama: up";
+        o.className = "badge ok";
+        modelSel.innerHTML = "";
+        const models = h.ollama.models?.length ? h.ollama.models : [h.model];
+        for (const m of models) {
+          const opt = document.createElement("option");
+          opt.value = m;
+          opt.textContent = m;
+          if (m.includes("coder") || m === h.model) opt.selected = true;
+          modelSel.appendChild(opt);
+        }
+        mb.textContent = modelSel.value;
+      } else {
+        o.textContent = "ollama: down";
+        o.className = "badge bad";
+        addMsg("system", "Ollama not reachable at 127.0.0.1:11434. Start Ollama and pull a catalogue model (e.g. qwen2.5-coder:7b).");
+      }
+    }
+
+    document.getElementById("form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const input = document.getElementById("input");
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      messages.push({ role: "user", content: text });
+      addMsg("user", text);
+      const send = document.getElementById("send");
+      send.disabled = true;
+      try {
+        const r = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: modelSel.value,
+            messages,
+            contextFiles: [...contextFiles],
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || r.statusText);
+        messages.push({ role: "assistant", content: data.content });
+        addMsg("assistant", data.content || "(empty)");
+      } catch (e) {
+        addMsg("system", "Error: " + e.message);
+      } finally {
+        send.disabled = false;
+      }
+    });
+
+    modelSel.addEventListener("change", () => {
+      document.getElementById("modelBadge").textContent = modelSel.value;
+    });
+
+    addMsg("system", "Read-only pilot chat. Loopback only. Attach files from the left for context. For OpenCode tool-denial testing, use the rendered OpenCode profile.");
+    health();
+    loadTree("");
+  </script>
+</body>
+</html>

@@ -48,7 +48,9 @@
     "coding-assistant:check": "node ./scripts/coding-assistant/check-readonly-profile.mjs",
     "coding-assistant:test": "node --test ./scripts/coding-assistant/tests/*.test.mjs",
     "coding-assistant:bootstrap": "node ./scripts/coding-assistant/bootstrap-local.mjs",
-    "coding-assistant:install:help": "node -e \"console.log(\"Windows: scripts/self-host/coding-assistant/Install-CodingAssistant-DOUBLECLICK.cmd\\nSee scripts/self-host/coding-assistant/README.md\")\""
+    "coding-assistant:install:help": "node -e \"console.log(\"Windows: scripts/self-host/coding-assistant/Install-CodingAssistant-DOUBLECLICK.cmd\\nSee scripts/self-host/coding-assistant/README.md\")\"",
+    "coding-assistant:verify": "node ./scripts/coding-assistant/verify-pilot.mjs --fixture",
+    "coding-assistant:chat": "node ./scripts/coding-assistant/chat-ui/server.mjs"
   },
   "private": true,
   "devDependencies": {

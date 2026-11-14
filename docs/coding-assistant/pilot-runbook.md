@@ -1,12 +1,13 @@
-# Coding assistant pilot runbook (read-only)
+# Coding assistant pilot runbook
 
-**Goal:** Run OpenCode against this repo with a local Ollama model and a fail-closed read-only profile. No plant production dependency, no cloud providers, no write tools.
+Fail-closed pilot: **local Ollama + read-only tooling**. No cloud
+providers, no write tools against the plant.
 
 ## Windows installer (recommended)
 
 Double-click:
 
-`scripts/self-host/coding-assistant/Install-CodingAssistant-DOUBLECLICK.cmd`
+`scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd`
 
 Or PowerShell from the repo root:
 
@@ -16,18 +17,43 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\self-host\coding-a
 
 Details: `scripts/self-host/coding-assistant/README.md`.
 
+## Verify the pilot path (do this first)
+
+From the repo (Node 20+):
+
+```bash
+node --test ./scripts/coding-assistant/tests
+node ./scripts/coding-assistant/verify-pilot.mjs --fixture
+# After Ollama is installed and a catalogue model is pulled:
+node ./scripts/coding-assistant/verify-pilot.mjs --fixture --live
+```
+
+Or: `pnpm coding-assistant:verify`
+
+### Known gaps (honest)
+
+| Item | Status |
+|------|--------|
+| Unit tests + profile render | Automated in `verify-pilot` |
+| Read-only **template** invariants | Automated |
+| Ollama installed + catalogue model | Probe / `--live` |
+| OpenCode CLI install | Best-effort in Windows installer; package names vary — may need manual install from https://opencode.ai |
+| OpenCode **runtime** denies edit/shell | **Manual** — not automatable without OpenCode |
+| HostInspector real report | Preferred over `--fixture` for hardware qualification |
+| Chat UI | Local pilot at `pnpm coding-assistant:chat` (loopback) |
+
 ## Prerequisites
 
 - Windows x64 host preferred (HostInspector is Windows-only).
 - Separate directories:
-  - Plant: e.g. `C:\runcalc\plant` (Compose, env, volumes) — production
-  - Agent: e.g. `C:\runcalc\agent` (git checkout, OpenCode config) — disposable
+  - Plant: e.g. `C:\runcalc\plant` — production
+  - Agent: e.g. `C:\runcalc\agent` — disposable git checkout + configs
 
 ## 1. Host recommendation
 
-On the Windows host, run **RunCalculator.HostInspector** and save the JSON report.
+Run **RunCalculator.HostInspector** and save the JSON report.
 
-Or, for tooling tests only, use the bundled fixture (not a real host qualification):
+Tooling-only (not a host qualification):
 
 ```bash
 pnpm coding-assistant:bootstrap -- --fixture --out .opencode/opencode.local.json
@@ -40,44 +66,53 @@ pnpm coding-assistant:check
 pnpm coding-assistant:bootstrap -- --report path/to/inspection.json --out .opencode/opencode.local.json
 ```
 
-Confirm the printed model id (catalogue only), e.g. `qwen2.5-coder:7b` or `qwen3-coder:30b`.
+Confirm model id is catalogue-only (`qwen2.5-coder:7b` or `qwen3-coder:30b`).
 
 ## 3. Install local inference (Ollama)
 
-1. Install [Ollama](https://ollama.com) for Windows.
-2. Pull **only** the recommended model, e.g.:
+1. Install [Ollama](https://ollama.com) for Windows (or use the installer script).
+2. Pull **only** the recommended model, e.g. `ollama pull qwen2.5-coder:7b`
+3. Keep Ollama on loopback (`127.0.0.1:11434`).
 
-   ```bash
-   ollama pull qwen2.5-coder:7b
-   ```
+## 4A. Chat UI pilot (no OpenCode required)
 
-3. Keep Ollama on loopback (`127.0.0.1:11434`). Do not bind to the plant LAN.
+```bash
+pnpm coding-assistant:chat
+# open http://127.0.0.1:7843/
+```
 
-## 4. Install OpenCode
+- Loopback-only server
+- Optional read-only file attach from repo tree
+- Does **not** grant edit/shell tools (there are none in this UI)
 
-1. Install OpenCode for your OS: https://opencode.ai  
-2. Point it at the rendered config (`.opencode/opencode.local.json` or your `--out` path).  
-3. Open the **agent** checkout of this repository (not the plant data directory).
+## 4B. OpenCode pilot (tool-denial testing)
 
-## 5. Acceptance checks (must pass before diagnostics)
+1. Install OpenCode: https://opencode.ai  
+2. Point it at `.opencode/opencode.local.json` (or your `--out` path).  
+3. Open the **agent** checkout — not plant data volumes.
 
-- [ ] Session answers a simple repo question from local files only  
-- [ ] Edit / shell / web tools are denied by the profile  
-- [ ] No cloud provider is configured in the profile  
-- [ ] Ollama remains on localhost  
-- [ ] Plant app/API stays responsive under a short coding prompt (subjective first pass)
+## 5. Acceptance checks
 
-## 6. Explicitly out of scope until later
+- [ ] `verify-pilot --fixture` exits 0  
+- [ ] Chat UI answers a simple repo question with Ollama up  
+- [ ] OpenCode session (if used): edit/shell/web denied  
+- [ ] No cloud provider in rendered profile  
+- [ ] Ollama on localhost only  
+- [ ] Plant app stays usable during a short prompt (subjective)
+
+## 6. Out of scope until later
 
 - App diagnostics / incident bridge  
 - GitHub write or auto-PR  
-- In-app chat UI for floor users  
-- Merging this branch into Replit production without a deliberate cutover
+- Floor-user product AI  
+- Merging into Replit production without deliberate cutover  
 
 ## Commands
 
 ```bash
 pnpm coding-assistant:test
+pnpm coding-assistant:verify
 pnpm coding-assistant:check
 pnpm coding-assistant:bootstrap -- --fixture --out .opencode/opencode.local.json
+pnpm coding-assistant:chat
 ```
