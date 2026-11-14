@@ -126,7 +126,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/api/health") {
     let ollama = { ok: false };
     try {
-      const r = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(2000) });
+      const r = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(5000) });
       const j = await r.json();
       ollama = {
         ok: r.ok,
@@ -216,10 +216,30 @@ const server = http.createServer(async (req, res) => {
   send(res, 404, { error: "not found" });
 });
 
+async function warmup() {
+  try {
+    const tags = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    if (!tags.ok) console.warn("Ollama tags HTTP", tags.status);
+    else console.log("Ollama reachable");
+  } catch (e) {
+    console.warn("Ollama not reachable yet:", e.message || e);
+    console.warn("Start Ollama from the Start Menu, then refresh the browser.");
+  }
+}
+
+server.on("error", (err) => {
+  console.error("Server failed to bind:", err.message || err);
+  if (err && err.code === "EADDRINUSE") {
+    console.error(`Port ${PORT} is in use. Close the other CodeAgent/node process or use --port.`);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
   console.log(`Coding-assistant chat UI (read-only pilot)`);
   console.log(`  http://${HOST}:${PORT}/`);
   console.log(`  Ollama ${OLLAMA}  model=${MODEL}`);
   console.log(`  Repo   ${root}`);
   console.log(`  Bind is loopback-only. Ctrl+C to stop.`);
+  warmup();
 });
