@@ -130,6 +130,18 @@
       }
     }
 
+    function rememberedModel() {
+      try { return localStorage.getItem("ca_last_model") || ""; } catch { return ""; }
+    }
+    function rememberModel(m) {
+      try { if (m) localStorage.setItem("ca_last_model", m); } catch {}
+      fetch("/api/prefs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lastModel: m }),
+      }).catch(() => {});
+    }
+
     async function health() {
       const r = await fetch("/api/health");
       const h = await r.json();
@@ -140,18 +152,27 @@
         o.className = "badge ok";
         modelSel.innerHTML = "";
         const models = h.ollama.models?.length ? h.ollama.models : [h.model];
+        const prefer = rememberedModel() || h.lastModel || h.model || "";
+        let selected = "";
         for (const m of models) {
           const opt = document.createElement("option");
           opt.value = m;
           opt.textContent = m;
-          if (m.includes("coder") || m === h.model) opt.selected = true;
           modelSel.appendChild(opt);
+        }
+        // Prefer exact last-used, then server default, then first list entry
+        if (prefer && models.includes(prefer)) selected = prefer;
+        else if (h.model && models.includes(h.model)) selected = h.model;
+        else if (models.length) selected = models[0];
+        if (selected) {
+          modelSel.value = selected;
+          rememberModel(selected);
         }
         mb.textContent = modelSel.value;
       } else {
         o.textContent = "ollama: down";
         o.className = "badge bad";
-        addMsg("system", "Ollama not reachable at 127.0.0.1:11434. Start Ollama and pull a catalogue model (e.g. qwen2.5-coder:7b).");
+        addMsg("system", "Ollama not reachable at 127.0.0.1:11434. Start Ollama and pull a model.");
       }
     }
 
@@ -174,6 +195,7 @@
             messages,
             contextFiles: [...contextFiles],
           }),
+        rememberModel(modelSel.value);
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || r.statusText);
@@ -197,6 +219,7 @@
 
     modelSel.addEventListener("change", () => {
       document.getElementById("modelBadge").textContent = modelSel.value;
+      rememberModel(modelSel.value);
     });
 
     addMsg("system", "Read-only pilot chat. Loopback only. Attach files from the left for context. For OpenCode tool-denial testing, use the rendered OpenCode profile.");

@@ -11,7 +11,7 @@
  *   node scripts/coding-assistant/chat-ui/server.mjs --port 7843 --model qwen2.5-coder:7b
  */
 import http from "node:http";
-import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +36,21 @@ function findRepoRoot(start) {
   return path.resolve(start, "../../..");
 }
 const root = findRepoRoot(__dirname);
+const prefsPath = path.join(root, "ca-prefs.json");
+function readPrefs() {
+  try {
+    if (existsSync(prefsPath)) return JSON.parse(readFileSync(prefsPath, "utf8"));
+  } catch {}
+  return {};
+}
+function writePrefs(p) {
+  try {
+    writeFileSync(prefsPath, JSON.stringify(p, null, 2), "utf8");
+  } catch (e) {
+    console.warn("prefs write failed", e.message || e);
+  }
+}
+
 const args = process.argv.slice(2);
 const flag = (n, d) => {
   const i = args.indexOf(n);
@@ -139,7 +154,8 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       bind: `${HOST}:${PORT}`,
       repoRoot: root,
-      model: MODEL,
+      model: readPrefs().lastModel || MODEL,
+      lastModel: readPrefs().lastModel || MODEL,
       ollama,
       mode: "read-only-chat-pilot",
     });
@@ -174,7 +190,24 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { path: path.relative(root, abs).replace(/\\/g, "/") || ".", entries });
   }
 
-  if (req.method === "POST" && url.pathname === "/api/chat") {
+  
+  if (req.method === "GET" && url.pathname === "/api/prefs") {
+    return send(res, 200, readPrefs());
+  }
+  if (req.method === "POST" && url.pathname === "/api/prefs") {
+    let payload;
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch {
+      return send(res, 400, { error: "invalid JSON" });
+    }
+    const cur = readPrefs();
+    if (payload.lastModel) cur.lastModel = String(payload.lastModel);
+    writePrefs(cur);
+    return send(res, 200, cur);
+  }
+
+if (req.method === "POST" && url.pathname === "/api/chat") {
     let payload;
     try {
       payload = JSON.parse(await readBody(req));
@@ -182,7 +215,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 400, { error: "invalid JSON" });
     }
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
-    const model = payload.model || MODEL;
+    const model = payload.model || readPrefs().lastModel || MODEL;
+    if (payload.model) {
+      const cur = readPrefs();
+      cur.lastModel = String(payload.model);
+      writePrefs(cur);
+    }
     const contextFiles = Array.isArray(payload.contextFiles) ? payload.contextFiles : [];
     let contextBlob = "";
     for (const rel of contextFiles.slice(0, 6)) {
