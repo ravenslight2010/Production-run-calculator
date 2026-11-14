@@ -203,6 +203,7 @@ try {
 }
 `$wd = `$repo
 if (-not (Test-Path -LiteralPath (Join-Path `$wd 'package.json'))) { `$wd = `$app }
+`$env:RUNCALC_REPO = `$repo
 `$proc = Start-Process -FilePath 'node' -ArgumentList @(`$server, '--port', "`$port", '--model', `$model) -WorkingDirectory `$wd -WindowStyle Minimized -PassThru
 Start-Sleep -Seconds 1
 Start-Process `$url
