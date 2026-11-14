@@ -8,7 +8,11 @@ const PLACEHOLDER = "REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID";
 const LOCAL_PROVIDER = "plant-local";
 const LOCAL_BASE_URL = "http://127.0.0.1:11434/v1";
 const MODEL_CONTEXT_LIMITS = Object.freeze({
+  // Speed-first testing tier (allowed while pilots optimize latency)
+  "qwen2.5-coder:3b": 32_768,
+  // Default quality/speed balance
   "qwen2.5-coder:7b": 32_768,
+  // High-end only (balanced policy, strong hosts)
   "qwen3-coder:30b": 65_536,
 });
 

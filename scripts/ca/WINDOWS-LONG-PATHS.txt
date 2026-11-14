@@ -30,3 +30,13 @@ Fix D — sparse checkout without .agents
   cd /d C:\src\prc
   git sparse-checkout set scripts/ca scripts/coding-assistant docs/coding-assistant CA-Setup.cmd package.json
   git checkout feature/local-coding-assistant
+
+Model policy (testing vs later)
+-------------------------------
+Default for SETUP: speed
+  CA_MODEL_POLICY=speed or -ModelPolicy speed
+  Prefers qwen2.5-coder:3b on weak/CPU hosts; 7b when GPU+RAM allow.
+
+Later more balanced:
+  -ModelPolicy balanced
+  May use 7b more often; 30b only on strong hosts.
