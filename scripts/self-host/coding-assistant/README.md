@@ -1,82 +1,42 @@
-# Coding Assistant installer (Windows)
+# Coding assistant Windows installer
 
-Double-click or run the PowerShell installer to set up the **read-only** local coding-assistant pilot.
+## One-click
 
-## What it does
+1. Use a full git checkout of **Production-run-calculator** on branch `feature/local-coding-assistant` (or a release that includes these scripts).
+2. Double-click **either**:
+   - `Install-CodingAssistant.cmd` at the **repo root**, or  
+   - `scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd`
+3. Approve the Administrator prompt (needed for winget installs).
+4. Wait — first **model pull** can take a long time.
+5. When finished, the **chat UI** should open and shortcuts are on the Desktop / Start Menu.
 
-1. Creates `C:\runcalc\agent` (separate from plant)
-2. Reads a HostInspector report **or** the bundled fixture
-3. Installs **Ollama** via winget when missing
-4. Pulls only an approved catalogue model (`qwen2.5-coder:7b` or `qwen3-coder:30b`)
-5. Attempts to install **OpenCode**
-6. Renders the read-only OpenCode profile with Node
+### What it checks and installs if missing
 
-## What it does **not** do
+| Component | Action |
+|-----------|--------|
+| Agent dirs | `C:\runcalc\agent\config`, `logs` (never plant) |
+| **Node.js LTS** | winget `OpenJS.NodeJS.LTS` |
+| **Ollama** | winget `Ollama.Ollama` + start API on loopback |
+| **Model** | `ollama pull` catalogue model from report/fixture only |
+| **OpenCode CLI** | best-effort npm global (optional; chat UI works without it) |
+| **Profile** | read-only OpenCode JSON under agent `config` |
+| **Shortcuts + icon** | Desktop + Start Menu “Local Coding Assistant” |
+| **Verify** | `verify-pilot --fixture` |
+| **Launch** | starts chat UI on `http://127.0.0.1:7843/` |
 
-- Modify `C:\runcalc\plant` or production Compose data  
-- Enable edit/shell/cloud tools  
-- Qualify model quality or plant load impact  
-- Merge branches or deploy the app  
+### Optional PWA icon
 
-## Double-click
+With the chat UI open in Edge: **Install app** / Apps → Install this site as an app.
 
-1. Clone this repository (or use your existing checkout).  
-2. Double-click:
+### Logs
 
-   `scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd`
+`C:\runcalc\agent\logs\install-*.log`
 
-3. Approve the Administrator prompt if shown.
-
-## PowerShell (recommended)
-
-From the repo root:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\self-host\coding-assistant\Install-CodingAssistant.ps1 -RepoRoot .
-```
-
-With a real HostInspector report:
+### Advanced
 
 ```powershell
-.\scripts\self-host\coding-assistant\Install-CodingAssistant.ps1 `
-  -RepoRoot . `
-  -ReportPath C:\path\to\host-report.json
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\self-host\coding-assistant\Install-CodingAssistant.ps1 `
+  -RepoRoot . -ReportPath path\to\host-report.json -LaunchChat
 ```
 
-Fixture only (tooling test — not a host qualification):
-
-```powershell
-.\scripts\self-host\coding-assistant\Install-CodingAssistant.ps1 -RepoRoot . -UseFixture
-```
-
-## After install
-
-- Profile: `C:\runcalc\agent\config\opencode.local.json`  
-- Helper: `C:\runcalc\agent\Start-CodingAssistant.ps1`  
-- Runbook: `docs\coding-assistant\pilot-runbook.md`  
-
-Open the **repo checkout** in OpenCode with that profile. Confirm edit/shell are denied and Ollama stays on localhost.
-
-## Chat UI (after Ollama)
-
-From the repo checkout (Node):
-
-```bash
-pnpm coding-assistant:chat
-```
-
-Open `http://127.0.0.1:7843/` — loopback-only, read-only file attach, no shell/edit tools.
-
-## Desktop / Start Menu icon
-
-The Windows installer creates:
-
-- Start Menu → **Run Calculator** → **Local Coding Assistant**
-- Desktop shortcut **Local Coding Assistant**
-- Icon: `scripts/coding-assistant/chat-ui/icons/coding-assistant.ico`
-
-The shortcut runs `Start-CodingAssistant.ps1` under the agent directory (starts loopback chat UI + opens the browser).
-
-### Optional PWA pin
-
-With the chat UI open in **Edge**, use **Install app** / *Apps → Install this site as an app* to pin a standalone window. Manifest: `/manifest.webmanifest` (localhost).
+Switches: `-SkipNodeInstall`, `-SkipOllamaInstall`, `-SkipModelPull`, `-SkipOpenCodeInstall`, `-NoLaunch`, `-UseFixture`.

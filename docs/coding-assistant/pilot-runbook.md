@@ -5,9 +5,12 @@ providers, no write tools against the plant.
 
 ## Windows installer (recommended)
 
-Double-click:
+Double-click **one** of:
 
-`scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd`
+- `Install-CodingAssistant.cmd` (repo root), or
+- `scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd`
+
+Approves Admin → installs Node/Ollama/model if needed → profile → shortcuts → launches chat UI.
 
 Or PowerShell from the repo root:
 
