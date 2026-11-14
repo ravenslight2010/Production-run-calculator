@@ -36,6 +36,48 @@ function findRepoRoot(start) {
   return path.resolve(start, "../../..");
 }
 const root = findRepoRoot(__dirname);
+
+function skillsRoot() {
+  if (process.env.CA_SKILLS_DIR && existsSync(process.env.CA_SKILLS_DIR)) {
+    return process.env.CA_SKILLS_DIR;
+  }
+  const candidates = [
+    path.join(root, "agent-skills"),
+    path.join(path.dirname(root), "agent-skills"),
+    path.join(__dirname, "..", "..", "..", "agent-skills"),
+    path.join(__dirname, "skills"),
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return null;
+}
+
+function listSkills() {
+  const base = skillsRoot();
+  if (!base) return [];
+  const cat = path.join(base, "catalog.json");
+  if (existsSync(cat)) {
+    try {
+      const j = JSON.parse(readFileSync(cat, "utf8"));
+      return j.skills || [];
+    } catch {}
+  }
+  return readdirSync(base, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => ({ slug: d.name, name: d.name, path: `agent-skills/${d.name}/SKILL.md` }));
+}
+
+function loadSkill(slug) {
+  const base = skillsRoot();
+  if (!base || !slug || slug.includes("..") || slug.includes("/") || slug.includes("\\")) return null;
+  const p = path.join(base, slug, "SKILL.md");
+  if (!existsSync(p)) return null;
+  const st = statSync(p);
+  if (st.size > 250_000) return { slug, content: readFileSync(p, "utf8").slice(0, 200_000) + "\n\n[truncated]" };
+  return { slug, content: readFileSync(p, "utf8") };
+}
+
 const prefsPath = path.join(root, "ca-prefs.json");
 function readPrefs() {
   try {
@@ -138,7 +180,18 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "GET" && url.pathname === "/api/health") {
+  
+  if (req.method === "GET" && url.pathname === "/api/skills") {
+    return send(res, 200, { skills: listSkills(), root: skillsRoot() });
+  }
+  if (req.method === "GET" && url.pathname === "/api/skill") {
+    const slug = url.searchParams.get("slug") || "";
+    const sk = loadSkill(slug);
+    if (!sk) return send(res, 404, { error: "skill not found" });
+    return send(res, 200, sk);
+  }
+
+if (req.method === "GET" && url.pathname === "/api/health") {
     let ollama = { ok: false };
     try {
       const r = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(5000) });
@@ -222,6 +275,13 @@ if (req.method === "POST" && url.pathname === "/api/chat") {
       writePrefs(cur);
     }
     const contextFiles = Array.isArray(payload.contextFiles) ? payload.contextFiles : [];
+    const skillSlugs = Array.isArray(payload.skills) ? payload.skills : [];
+    let skillBlob = "";
+    for (const slug of skillSlugs.slice(0, 3)) {
+      const sk = loadSkill(String(slug));
+      if (sk) skillBlob += `\n\n--- SKILL ${sk.slug} ---\n${sk.content.slice(0, 120000)}`;
+    }
+
     let contextBlob = "";
     for (const rel of contextFiles.slice(0, 6)) {
       const abs = safeResolve(rel);
@@ -229,7 +289,10 @@ if (req.method === "POST" && url.pathname === "/api/chat") {
       if (statSync(abs).size > 120_000) continue;
       contextBlob += `\n\n--- FILE ${rel} ---\n${readFileSync(abs, "utf8").slice(0, 100_000)}`;
     }
-    const sys = contextBlob ? `${SYSTEM}\n\nRead-only context:${contextBlob}` : SYSTEM;
+    let sys = SYSTEM;
+    if (skillBlob) sys += `\n\nActive skills (follow when relevant):${skillBlob}`;
+    if (contextBlob) sys += `\n\nFile context:${contextBlob}`;
+
     try {
       const r = await fetch(`${OLLAMA}/v1/chat/completions`, {
         method: "POST",

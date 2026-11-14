@@ -64,7 +64,9 @@
   </header>
   <main>
     <aside>
-      <h2>Repo (read-only)</h2>
+      <h2>Skills</h2>
+      <div id="skills"></div>
+      <h2>Repo</h2>
       <div id="tree"></div>
       <p style="color:var(--muted);font-size:0.75rem;margin-top:1rem">Click files to attach as context (max 6). No writes.</p>
     </aside>
@@ -84,6 +86,7 @@
     const ctxLabel = document.getElementById("ctxLabel");
     const messages = [];
     const contextFiles = new Set();
+    const activeSkills = new Set();
 
     function addMsg(role, text) {
       const el = document.createElement("div");
@@ -142,6 +145,34 @@
       }).catch(() => {});
     }
 
+    
+    async function loadSkills() {
+      const el = document.getElementById("skills");
+      if (!el) return;
+      try {
+        const r = await fetch("/api/skills");
+        const data = await r.json();
+        el.innerHTML = "";
+        for (const s of (data.skills || []).slice(0, 80)) {
+          const b = document.createElement("button");
+          b.className = "file";
+          b.textContent = (activeSkills.has(s.slug) ? "✓ " : "") + (s.slug || s.name);
+          b.title = s.description || s.name || s.slug;
+          b.onclick = () => {
+            if (activeSkills.has(s.slug)) activeSkills.delete(s.slug);
+            else {
+              if (activeSkills.size >= 3) activeSkills.clear();
+              activeSkills.add(s.slug);
+            }
+            loadSkills();
+          };
+          el.appendChild(b);
+        }
+      } catch (e) {
+        el.textContent = "Skills unavailable";
+      }
+    }
+
     async function health() {
       const r = await fetch("/api/health");
       const h = await r.json();
@@ -181,6 +212,24 @@
       const input = document.getElementById("input");
       const text = input.value.trim();
       if (!text) return;
+      if (text === "/skills") {
+        input.value = "";
+        fetch("/api/skills").then(r => r.json()).then(d => {
+          addMsg("system", "Skills:\n" + (d.skills || []).map(s => "- " + s.slug).join("\n"));
+        });
+        return;
+      }
+      if (text.startsWith("/skill ")) {
+        const slug = text.slice(7).trim();
+        input.value = "";
+        if (slug) {
+          if (activeSkills.has(slug)) activeSkills.delete(slug);
+          else { if (activeSkills.size >= 3) activeSkills.clear(); activeSkills.add(slug); }
+          loadSkills();
+          addMsg("system", "Active skills: " + ([...activeSkills].join(", ") || "(none)"));
+        }
+        return;
+      }
       input.value = "";
       messages.push({ role: "user", content: text });
       addMsg("user", text);
@@ -194,6 +243,7 @@
             model: modelSel.value,
             messages,
             contextFiles: [...contextFiles],
+            skills: [...activeSkills],
           }),
         rememberModel(modelSel.value);
         });
@@ -225,6 +275,7 @@
     addMsg("system", "Read-only pilot chat. Loopback only. Attach files from the left for context. For OpenCode tool-denial testing, use the rendered OpenCode profile.");
     health();
     loadTree("");
+    loadSkills();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
