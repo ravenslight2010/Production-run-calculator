@@ -165,6 +165,27 @@
               activeSkills.add(s.slug);
             }
             loadSkills();
+
+    const runShellBtn = document.getElementById("runShell");
+    if (runShellBtn) {
+      runShellBtn.addEventListener("click", async () => {
+        const command = prompt("Command to run in repo root (blocked: plant paths, secrets, destructive disk ops):");
+        if (!command) return;
+        try {
+          const r = await fetch("/api/shell", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command }),
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || r.statusText);
+          addMsg("system", "exit " + data.code + "\n" + (data.stdout || "") + (data.stderr ? "\nSTDERR:\n" + data.stderr : ""));
+        } catch (e) {
+          addMsg("system", "Shell failed: " + e.message);
+        }
+      });
+    }
+
           };
           el.appendChild(b);
         }
@@ -226,6 +247,27 @@
           if (activeSkills.has(slug)) activeSkills.delete(slug);
           else { if (activeSkills.size >= 3) activeSkills.clear(); activeSkills.add(slug); }
           loadSkills();
+
+    const runShellBtn = document.getElementById("runShell");
+    if (runShellBtn) {
+      runShellBtn.addEventListener("click", async () => {
+        const command = prompt("Command to run in repo root (blocked: plant paths, secrets, destructive disk ops):");
+        if (!command) return;
+        try {
+          const r = await fetch("/api/shell", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command }),
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || r.statusText);
+          addMsg("system", "exit " + data.code + "\n" + (data.stdout || "") + (data.stderr ? "\nSTDERR:\n" + data.stderr : ""));
+        } catch (e) {
+          addMsg("system", "Shell failed: " + e.message);
+        }
+      });
+    }
+
           addMsg("system", "Active skills: " + ([...activeSkills].join(", ") || "(none)"));
         }
         return;
@@ -276,6 +318,27 @@
     health();
     loadTree("");
     loadSkills();
+
+    const runShellBtn = document.getElementById("runShell");
+    if (runShellBtn) {
+      runShellBtn.addEventListener("click", async () => {
+        const command = prompt("Command to run in repo root (blocked: plant paths, secrets, destructive disk ops):");
+        if (!command) return;
+        try {
+          const r = await fetch("/api/shell", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command }),
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || r.statusText);
+          addMsg("system", "exit " + data.code + "\n" + (data.stdout || "") + (data.stderr ? "\nSTDERR:\n" + data.stderr : ""));
+        } catch (e) {
+          addMsg("system", "Shell failed: " + e.message);
+        }
+      });
+    }
+
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }

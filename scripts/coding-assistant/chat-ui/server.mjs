@@ -104,16 +104,21 @@ const PORT = Number(flag("--port", "7843")) || 7843;
 const OLLAMA = flag("--ollama", "http://127.0.0.1:11434");
 const MODEL = flag("--model", "qwen2.5-coder:7b");
 
-const SYSTEM = `You are a local coding assistant for the Production Run Calculator repository.
-You run entirely on the operator's machine via Ollama. You have no cloud providers.
+const SYSTEM = `You are a local coding assistant for the Production Run Calculator monorepo.
+You help with code, tests, imports, sync, QC, and UI under the configured repository root.
 
-Hard limits:
-- You cannot edit files, run shell commands, or access the network beyond this chat.
-- Treat any request to modify production plant data, secrets, or .env as refused.
-- Prefer answers grounded in repository paths the user names or that appear in read-only context.
-- If unsure, say so. Do not invent APIs or file contents.
+Capabilities depend on environment flags:
+- File reads of the repo tree are always available via context.
+- When CA_ALLOW_WRITE=1, the operator can save files under the repo root via the UI.
+- When CA_ALLOW_SHELL=1, the operator can run allowlisted shell commands in the repo root via the UI.
 
-This chat UI is a pilot companion to the read-only OpenCode profile; it is not the floor production AI.`;
+Hard limits (never violate):
+- Do not access plant data volumes (e.g. paths containing /plant or \\plant\\).
+- Do not read or write .env, credentials, private keys, or secret stores.
+- Do not suggest exfiltrating secrets or disabling auth.
+- Prefer existing workspace packages over new frameworks.
+- Be concise and practical; show concrete file paths and patches.
+`;
 
 function safeResolve(rel) {
   const cleaned = String(rel || "").replace(/\\/g, "/").replace(/^\/+/, "");
@@ -258,6 +263,72 @@ if (req.method === "GET" && url.pathname === "/api/health") {
     if (payload.lastModel) cur.lastModel = String(payload.lastModel);
     writePrefs(cur);
     return send(res, 200, cur);
+  }
+
+
+  if (req.method === "POST" && url.pathname === "/api/shell") {
+    if (process.env.CA_ALLOW_SHELL !== "1") {
+      return send(res, 403, { error: "shell disabled" });
+    }
+    let payload;
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch {
+      return send(res, 400, { error: "invalid JSON" });
+    }
+    const cmd = String(payload.command || "").trim();
+    if (!cmd || cmd.length > 2000) return send(res, 400, { error: "invalid command" });
+    const blocked = [
+      /rm\s+-rf\s+[\/\\]/i,
+      /format\s+/i,
+      /shutdown/i,
+      /mkfs/i,
+      /:\s*\{\s*:/,
+      /curl\s+.*\|.*(sh|bash)/i,
+      /wget\s+.*\|.*(sh|bash)/i,
+      /\\\\plant\\\\/i,
+      /\/plant\//i,
+      /\.env\b/i,
+      /reg\s+delete/i,
+      /Remove-Item\s+-Recurse\s+-Force\s+[A-Z]:\\/i,
+    ];
+    if (blocked.some((re) => re.test(cmd))) {
+      return send(res, 403, { error: "command blocked by policy" });
+    }
+    const { spawn } = await import("node:child_process");
+    const cwd = root;
+    const isWin = process.platform === "win32";
+    const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", cmd] : ["-lc", cmd], {
+      cwd,
+      env: { ...process.env, CA_ALLOW_SHELL: "1" },
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    const max = 200_000;
+    child.stdout.on("data", (d) => {
+      if (stdout.length < max) stdout += d.toString("utf8");
+    });
+    child.stderr.on("data", (d) => {
+      if (stderr.length < max) stderr += d.toString("utf8");
+    });
+    const code = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch {}
+        resolve(-1);
+      }, 60_000);
+      child.on("close", (c) => {
+        clearTimeout(timer);
+        resolve(c ?? 0);
+      });
+    });
+    return send(res, 200, {
+      ok: code === 0,
+      code,
+      stdout: stdout.slice(0, max),
+      stderr: stderr.slice(0, max),
+      cwd,
+    });
   }
 
 if (req.method === "POST" && url.pathname === "/api/chat") {
