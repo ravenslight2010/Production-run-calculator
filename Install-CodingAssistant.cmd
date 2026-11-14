@@ -1,10 +1,9 @@
 @echo off
-:: Convenience launcher at repo root — forwards to the real installer.
-set "TARGET=%~dp0scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd"
-if not exist "%TARGET%" (
-  echo Missing %TARGET%
-  pause
-  exit /b 1
+:: Legacy name — forwards to short CA-Setup.cmd
+if exist "%~dp0CA-Setup.cmd" (
+  call "%~dp0CA-Setup.cmd"
+  exit /b %ERRORLEVEL%
 )
-call "%TARGET%"
-exit /b %ERRORLEVEL%
+echo Missing CA-Setup.cmd
+pause
+exit /b 1

@@ -3,22 +3,21 @@
 Fail-closed pilot: **local Ollama + read-only tooling**. No cloud
 providers, no write tools against the plant.
 
-## Windows installer (recommended)
+# Coding assistant pilot runbook
 
-Double-click **one** of:
+## One-click install (Windows)
 
-- `Install-CodingAssistant.cmd` (repo root), or
+Double-click **`CA-Setup.cmd`** in the **repo root** (short name for Windows path limits).
+
+Legacy long names still forward to the same setup:
+- `Install-CodingAssistant.cmd`
 - `scripts\self-host\coding-assistant\Install-CodingAssistant-DOUBLECLICK.cmd`
 
-Approves Admin → installs Node/Ollama/model if needed → profile → shortcuts → launches chat UI.
+Approves Admin → Node/Ollama/model if needed → copies app to `C:\runcalc\agent\app` → profile → **CodeAgent** shortcuts → launches chat UI.
 
-Or PowerShell from the repo root:
+Logs: `C:\runcalc\agent\logs\setup-*.log`
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\self-host\coding-assistant\Install-CodingAssistant.ps1 -RepoRoot .
-```
-
-Details: `scripts/self-host/coding-assistant/README.md`.
+If setup fails, open the latest log in that folder and re-run **`CA-Setup.cmd`** from a short path checkout when possible (e.g. `C:\src\prc\` instead of a deep user folder).
 
 ## Verify the pilot path (do this first)
 

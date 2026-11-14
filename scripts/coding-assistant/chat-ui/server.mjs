@@ -16,7 +16,26 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "../../..");
+function findRepoRoot(start) {
+  if (process.env.RUNCALC_REPO && existsSync(path.join(process.env.RUNCALC_REPO, "package.json"))) {
+    return path.resolve(process.env.RUNCALC_REPO);
+  }
+  let dir = start;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "pnpm-workspace.yaml"))) {
+      return dir;
+    }
+    if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "scripts"))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Fallback: legacy depth from scripts/coding-assistant/chat-ui
+  return path.resolve(start, "../../..");
+}
+const root = findRepoRoot(__dirname);
 const args = process.argv.slice(2);
 const flag = (n, d) => {
   const i = args.indexOf(n);
