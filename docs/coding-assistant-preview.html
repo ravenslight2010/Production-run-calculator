@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f9f8f7" />
+  <title>Local Code Assistant — Preview</title>
+  <style>
+    :root{color-scheme:light dark;--page:hsl(210 20% 98%);--surface:#fff;--surface-2:hsl(210 40% 96.1%);--raised:#fff;--text:hsl(222 47% 11%);--muted:hsl(215.4 16.3% 46.9%);--subtle:#64748b;--border:hsl(214 32% 91%);--primary:#ff9500;--primary-soft:hsl(38 100% 96%);--primary-foreground:#0f172a;--primary-contrast:#7a4700;--green:#46a171;--green-soft:#e8f1ec;--orange:#ff9500;--orange-soft:hsl(38 100% 96%);--red:#c84d46;--red-soft:#fce9e7;--shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.035);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:15px}
+    @media(prefers-color-scheme:dark){:root{--page:hsl(222 25% 10%);--surface:hsl(222 25% 12%);--surface-2:hsl(217 25% 18%);--raised:hsl(222 25% 12%);--text:hsl(210 40% 98%);--muted:hsl(215 20.2% 65.1%);--subtle:hsl(215 20.2% 65.1%);--border:hsl(217 25% 20%);--primary:#ff9500;--primary-soft:rgba(255,149,0,.14);--primary-foreground:#0f172a;--primary-contrast:#ffb347;--green:#72bc8f;--green-soft:rgba(114,188,143,.13);--orange:#ff9500;--orange-soft:rgba(255,149,0,.14);--red:#e97366;--red-soft:rgba(233,115,102,.13);--shadow:0 1px 2px rgba(0,0,0,.24),0 8px 24px rgba(0,0,0,.18)}}
+    *{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--text);min-width:320px}button,textarea{font:inherit}button{color:inherit}:where(button,textarea):focus-visible{outline:3px solid var(--primary);outline-offset:2px}.app{min-height:100vh;display:grid;grid-template-rows:64px 1fr}.topbar{height:64px;display:flex;align-items:center;gap:18px;padding:0 24px;border-bottom:1px solid var(--border);background:var(--surface)}.brand{display:flex;align-items:center;gap:10px;min-width:208px;font-weight:650;letter-spacing:-.02em}.brand-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--primary);color:var(--primary-foreground);font-size:13px;font-weight:750;letter-spacing:-.06em}.top-context{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:13px;min-width:0}.crumb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px}.slash{color:var(--subtle)}.top-spacer{flex:1}.demo-pill,.mode-pill,.connected-pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:12px;font-weight:550;white-space:nowrap}.demo-pill{background:var(--orange-soft);border-color:transparent;color:var(--text)}.dot{width:7px;height:7px;background:var(--orange);border-radius:50%}.mode-pill{background:var(--green-soft);border-color:transparent}.mode-pill .dot{background:var(--green)}.top-action{border:1px solid var(--border);background:var(--surface);border-radius:9px;min-height:36px;padding:0 12px;font-size:13px}.layout{display:grid;grid-template-columns:230px minmax(420px,1fr) 278px;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);padding:20px 14px;display:flex;flex-direction:column;gap:22px}.workspace-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--subtle);font-weight:650;padding:0 10px}.repo-card{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--raised)}.repo-icon{width:30px;height:30px;flex:0 0 30px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;color:var(--muted)}.repo-name{font-weight:600;font-size:12px;line-height:1.3;overflow-wrap:anywhere}.repo-meta{font-size:11px;color:var(--muted);margin-top:4px}.nav{display:grid;gap:4px}.nav button{width:100%;min-height:44px;text-align:left;border:0;background:transparent;border-radius:8px;padding:0 10px;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;cursor:pointer}.nav button:hover{background:var(--surface-2);color:var(--text)}.nav button[aria-current="page"]{background:var(--primary-soft);color:var(--text);font-weight:600}.nav-ico{width:17px;height:17px;display:grid;place-items:center;font-size:14px;color:inherit}.sidebar-bottom{margin-top:auto;display:grid;gap:10px}.safe-note{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface-2)}.safe-title{font-weight:600;font-size:12px;display:flex;gap:7px;align-items:center}.safe-note p{margin:7px 0 0;font-size:11px;line-height:1.45;color:var(--muted)}.user-row{display:flex;align-items:center;gap:9px;padding:8px 10px;color:var(--muted);font-size:12px}.avatar{width:26px;height:26px;border-radius:50%;background:#dbe8f4;color:#315574;display:grid;place-items:center;font-weight:650;font-size:11px}.main{padding:32px 34px 28px;min-width:0;max-width:1000px;width:100%;margin:0 auto;display:flex;flex-direction:column}.main-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:26px}.eyebrow{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}.branch{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;border:1px solid var(--border);border-radius:6px;padding:5px 7px;background:var(--surface)}.main-title{font-size:29px;line-height:1.15;letter-spacing:-.035em;margin:0 0 9px;font-weight:650}.intro{color:var(--muted);font-size:14px;line-height:1.55;margin:0;max-width:590px}.welcome{padding:22px 22px 20px;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}.welcome-top{display:flex;justify-content:space-between;gap:14px}.welcome-copy{max-width:600px}.preview-label{font-size:11px;color:var(--muted);border:1px solid var(--border);padding:5px 8px;border-radius:999px;height:max-content;white-space:nowrap}.prompt-label{font-size:12px;color:var(--muted);margin:22px 0 9px}.suggestions{display:flex;flex-wrap:wrap;gap:8px}.suggestion{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:8px 11px;min-height:44px;font-size:12px;cursor:pointer;transition:background .15s,border-color .15s}.suggestion:hover{border-color:var(--primary);background:var(--primary-soft)}.composer{margin-top:18px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.025)}textarea{width:100%;min-height:64px;max-height:150px;resize:vertical;background:transparent;color:var(--text);border:0;outline:0;line-height:1.5;font-size:13px;padding:3px 2px}textarea::placeholder{color:var(--subtle)}.composer-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}.composer-hint{font-size:11px;color:var(--subtle)}.send{border:0;border-radius:8px;background:var(--primary);color:var(--primary-foreground);min-height:44px;padding:0 14px;font-size:12px;font-weight:600;cursor:pointer}.send:hover{opacity:.86}.transcript{display:grid;gap:12px;margin-top:18px}.message{padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:11px;font-size:13px;line-height:1.55;color:var(--muted);display:none}.message.show{display:block}.message strong{color:var(--text)}.main-footer{margin-top:auto;padding-top:22px;text-align:center;color:var(--subtle);font-size:11px}.right-rail{border-left:1px solid var(--border);background:var(--surface);padding:24px 16px;display:flex;flex-direction:column;gap:16px}.rail-title{font-size:12px;font-weight:650;letter-spacing:.01em}.status-card{border:1px solid var(--border);border-radius:11px;background:var(--raised);padding:13px}.status-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.status-name{font-size:12px;font-weight:600}.status-tag{font-size:10px;color:var(--muted);background:var(--surface-2);padding:4px 7px;border-radius:999px;white-space:nowrap}.status-detail{font-size:11px;line-height:1.45;color:var(--muted);margin-top:7px}.rail-divider{height:1px;background:var(--border);margin:1px 0}.steps{display:grid;gap:13px;margin-top:2px}.step{display:grid;grid-template-columns:22px 1fr;gap:9px;align-items:start}.step-num{width:21px;height:21px;display:grid;place-items:center;border-radius:50%;background:var(--surface-2);font-size:10px;color:var(--muted)}.step.active .step-num{background:var(--primary-soft);color:var(--primary-contrast);font-weight:700}.step strong{display:block;font-size:11px;font-weight:600}.step span{display:block;color:var(--muted);font-size:10px;line-height:1.4;margin-top:3px}.rail-warning{margin-top:auto;border:1px solid rgba(255,149,0,.35);background:var(--orange-soft);border-radius:10px;padding:12px;font-size:11px;line-height:1.45}.rail-warning strong{display:block;margin-bottom:5px;font-size:11px}.mobile-menu{display:none}.mobile-menu .hamburger{display:grid;gap:4px;width:16px}.mobile-menu .hamburger i{height:1.5px;width:16px;background:currentColor;border-radius:2px;display:block}.view-panel{display:none}.view-panel.active{display:block}.history-empty,.skills-list{margin-top:18px;border:1px solid var(--border);background:var(--surface);border-radius:12px;padding:20px}.history-empty strong{display:block;margin-bottom:6px;font-size:14px}.history-empty p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}.skill-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--border);font-size:12px}.skill-row:last-child{border-bottom:0}
+    @media(max-width:1120px){.layout{grid-template-columns:212px minmax(360px,1fr)}.right-rail{display:none}.main{padding:28px 30px}}
+    @media(max-width:720px){.app{grid-template-rows:58px 1fr}.topbar{height:58px;padding:0 14px;gap:10px}.brand{min-width:0;font-size:13px}.brand-mark{width:27px;height:27px}.top-context{display:none}.top-spacer{flex:1}.top-action{display:none}.layout{display:block}.sidebar{display:none;position:absolute;z-index:5;top:58px;left:0;bottom:0;width:min(82vw,300px);box-shadow:var(--shadow);border-right:1px solid var(--border)}.sidebar.open{display:flex}.mobile-menu{display:grid;place-items:center;width:44px;height:44px;background:transparent;border:1px solid var(--border);border-radius:8px;cursor:pointer;flex:0 0 44px}.main{padding:23px 16px 18px;min-height:calc(100vh - 58px)}.main-head{margin-bottom:20px;align-items:flex-start;flex-direction:column}.main-title{font-size:25px}.welcome{padding:18px 16px}.welcome-top{display:block}.preview-label{display:inline-flex;margin-top:12px}.suggestions{gap:7px}.suggestion{white-space:normal;text-align:left;line-height:1.35}.composer{margin-top:15px}.composer-hint{max-width:190px;line-height:1.35}.main-footer{padding-top:22px}.branch{font-size:10px}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <button class="mobile-menu" id="menuToggle" aria-label="Open navigation" aria-expanded="false"><span class="hamburger" aria-hidden="true"><i></i><i></i><i></i></span></button>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">&lt;/&gt;</span><span>Local Code Assistant</span></div>
+      <div class="top-context"><span class="slash">/</span><span class="crumb">Production-run-calculator</span><span class="slash">·</span><span>Workspace preview</span></div>
+      <div class="top-spacer"></div>
+      <span class="demo-pill"><span class="dot" aria-hidden="true"></span>Preview only</span>
+      <button class="top-action" type="button" id="aboutButton">What is connected?</button>
+    </header>
+    <div class="layout">
+      <aside class="sidebar" id="sidebar" aria-label="Workspace navigation">
+        <div class="workspace-label">Workspace</div>
+        <div class="repo-card">
+          <div class="repo-icon" aria-hidden="true">⌘</div>
+          <div><div class="repo-name">Production-run-calculator</div><div class="repo-meta">Sample target · not connected</div></div>
+        </div>
+        <nav class="nav" aria-label="Main navigation">
+          <button type="button" class="nav-item" data-view="assistant" aria-current="page"><span class="nav-ico" aria-hidden="true">✳</span>Assistant</button>
+          <button type="button" class="nav-item" data-view="history"><span class="nav-ico" aria-hidden="true">◷</span>Run history</button>
+          <button type="button" class="nav-item" data-view="skills"><span class="nav-ico" aria-hidden="true">◇</span>Skills &amp; tests</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="safe-note"><div class="safe-title"><span aria-hidden="true">◉</span>Safe by default</div><p>This preview reads no files and sends nothing. Real access will be enabled in deliberate steps.</p></div>
+          <div class="user-row"><span class="avatar" aria-hidden="true">DB</span><span>Local workspace</span></div>
+        </div>
+      </aside>
+      <main class="main">
+        <section class="view-panel active" id="view-assistant" aria-labelledby="pageTitle">
+          <div class="main-head"><div class="eyebrow"><span>Assistant</span><span aria-hidden="true">·</span><span class="branch">feature/local-coding-assistant</span></div><span class="mode-pill"><span class="dot" aria-hidden="true"></span>Read-only concept</span></div>
+          <div class="welcome">
+            <div class="welcome-top"><div class="welcome-copy"><h1 class="main-title" id="pageTitle">A safer way to work on your app.</h1><p class="intro">A local coding assistant for exploring the repository, understanding test results, and proposing changes—with clear approval gates.</p></div><span class="preview-label">Illustrative interface</span></div>
+            <div class="prompt-label">Try a sample prompt</div>
+            <div class="suggestions" aria-label="Sample prompts">
+              <button class="suggestion" type="button" data-prompt="Explain how the sync feature is organized.">Explain the sync feature</button>
+              <button class="suggestion" type="button" data-prompt="Review the latest test output and summarize failures.">Summarize test failures</button>
+              <button class="suggestion" type="button" data-prompt="Inspect a change and tell me what tests should run.">Review a proposed change</button>
+            </div>
+            <form class="composer" id="promptForm">
+              <label for="prompt" class="prompt-label" style="display:none">Message the assistant</label>
+              <textarea id="prompt" placeholder="Ask about the codebase…" aria-label="Message the assistant"></textarea>
+              <div class="composer-foot"><span class="composer-hint">Mockup only — your prompt stays in this page.</span><button class="send" type="submit">Preview response <span aria-hidden="true">↗</span></button></div>
+            </form>
+          </div>
+          <div class="transcript" aria-live="polite"><div class="message" id="previewMessage"><strong>Preview boundary:</strong> This is a visual prototype, not connected to OpenCode, your files, logs, or GitHub. No request was run or sent.</div></div>
+          <div class="main-footer">Local-first concept · Your repository and credentials are not connected</div>
+        </section>
+        <section class="view-panel" id="view-history" aria-labelledby="historyTitle">
+          <div class="main-head"><div class="eyebrow">Workspace <span aria-hidden="true">·</span> History</div><span class="preview-label">Illustrative interface</span></div>
+          <h1 class="main-title" id="historyTitle">Run history</h1><p class="intro">Keep a clear record of what the assistant inspected, what tests ran, and which changes you approved.</p>
+          <div class="history-empty"><strong>No sessions in this preview</strong><p>When connected, completed sessions can be reviewed here. This prototype stores no prompts, logs, or activity.</p></div>
+          <div class="main-footer">Nothing has been saved in this mockup</div>
+        </section>
+        <section class="view-panel" id="view-skills" aria-labelledby="skillsTitle">
+          <div class="main-head"><div class="eyebrow">Workspace <span aria-hidden="true">·</span> Capabilities</div><span class="preview-label">Illustrative interface</span></div>
+          <h1 class="main-title" id="skillsTitle">Skills &amp; tests</h1><p class="intro">Review the tools and checks that would be available before a real coding session begins.</p>
+          <div class="skills-list">
+            <div class="skill-row"><span>Repository reading</span><span class="skill-state">Not connected</span></div>
+            <div class="skill-row"><span>Application test runner</span><span class="skill-state">Not connected</span></div>
+            <div class="skill-row"><span>Diagnostics &amp; feedback</span><span class="skill-state">Not connected</span></div>
+            <div class="skill-row"><span>GitHub pull requests</span><span class="skill-state">Not connected</span></div>
+          </div>
+          <div class="main-footer">No capabilities are active in this prototype</div>
+        </section>
+      </main>
+      <aside class="right-rail" aria-label="Connection and safety status">
+        <div class="rail-title">Connection status</div>
+        <div class="status-card"><div class="status-top"><span class="status-name">Local model</span><span class="status-tag">Not configured</span></div><div class="status-detail">The installer should assess this host and recommend a suitable model.</div></div>
+        <div class="status-card"><div class="status-top"><span class="status-name">Repository</span><span class="status-tag">Not connected</span></div><div class="status-detail">A separate working copy and read-only access come first.</div></div>
+        <div class="status-card"><div class="status-top"><span class="status-name">App diagnostics</span><span class="status-tag">Not connected</span></div><div class="status-detail">Logs and feedback are planned as scoped, privacy-aware inputs.</div></div>
+        <div class="status-card"><div class="status-top"><span class="status-name">GitHub</span><span class="status-tag">Not connected</span></div><div class="status-detail">Changes should be proposed on a feature branch; approval stays with you.</div></div>
+        <div class="rail-divider"></div>
+        <div class="rail-title">Test path</div>
+        <div class="steps">
+          <div class="step active"><div class="step-num">1</div><div><strong>Preview</strong><span>See the workflow with sample content.</span></div></div>
+          <div class="step"><div class="step-num">2</div><div><strong>Read-only trial</strong><span>Try it against an isolated repo copy.</span></div></div>
+          <div class="step"><div class="step-num">3</div><div><strong>Approved changes</strong><span>Review a diff and test results before any push.</span></div></div>
+        </div>
+        <div class="rail-warning"><strong>Prototype, not a running agent</strong>This screen has no model, repository, credentials, or backend connected.</div>
+      </aside>
+    </div>
+  </div>
+  <script>
+    const navItems=[...document.querySelectorAll('.nav-item')];
+    navItems.forEach(button=>button.addEventListener('click',()=>{
+      navItems.forEach(item=>item.removeAttribute('aria-current'));
+      button.setAttribute('aria-current','page');
+      document.querySelectorAll('.view-panel').forEach(panel=>panel.classList.remove('active'));
+      document.getElementById(`view-${button.dataset.view}`).classList.add('active');
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('menuToggle').setAttribute('aria-expanded','false');
+    }));
+    document.querySelectorAll('[data-prompt]').forEach(button=>button.addEventListener('click',()=>{
+      const input=document.getElementById('prompt');input.value=button.dataset.prompt;input.focus();
+    }));
+    document.getElementById('promptForm').addEventListener('submit',event=>{
+      event.preventDefault();
+      const message=document.getElementById('previewMessage');message.classList.add('show');
+      document.getElementById('prompt').value='';
+      message.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'nearest'});
+    });
+    document.getElementById('aboutButton').addEventListener('click',()=>{
+      document.getElementById('previewMessage').classList.add('show');
+      document.getElementById('previewMessage').scrollIntoView({block:'nearest'});
+    });
+    document.getElementById('menuToggle').addEventListener('click',event=>{
+      const sidebar=document.getElementById('sidebar');const opened=sidebar.classList.toggle('open');event.currentTarget.setAttribute('aria-expanded',String(opened));
+    });
+  </script>
+</body>
+</html>
