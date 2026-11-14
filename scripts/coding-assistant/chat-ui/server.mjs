@@ -11,7 +11,7 @@
  *   node scripts/coding-assistant/chat-ui/server.mjs --port 7843 --model qwen2.5-coder:7b
  */
 import http from "node:http";
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +36,25 @@ function findRepoRoot(start) {
   return path.resolve(start, "../../..");
 }
 const root = findRepoRoot(__dirname);
+
+function secretsPath() {
+  const dir = process.env.CA_SECRETS_DIR || path.join(path.dirname(root), "config");
+  return path.join(dir, "secrets.json");
+}
+function readSecretsFile() {
+  try {
+    const p = secretsPath();
+    if (existsSync(p)) return JSON.parse(readFileSync(p, "utf8"));
+  } catch {}
+  return {};
+}
+function writeSecretsFile(obj) {
+  const p = secretsPath();
+  const dir = path.dirname(p);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(p, JSON.stringify(obj, null, 2), { encoding: "utf8", mode: 0o600 });
+}
+
 
 function skillsRoot() {
   if (process.env.CA_SKILLS_DIR && existsSync(process.env.CA_SKILLS_DIR)) {
@@ -196,6 +215,48 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, sk);
   }
 
+
+  if (req.method === "GET" && url.pathname === "/api/secrets/status") {
+    const s = readSecretsFile();
+    const hasGh = Boolean(s.githubToken && String(s.githubToken).length > 8);
+    return send(res, 200, {
+      githubConfigured: hasGh,
+      githubHint: hasGh ? String(s.githubToken).slice(0, 4) + "…" + String(s.githubToken).slice(-4) : null,
+      path: secretsPath(),
+    });
+  }
+  if (req.method === "POST" && url.pathname === "/api/secrets/github") {
+    let payload;
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch {
+      return send(res, 400, { error: "invalid JSON" });
+    }
+    if (payload.clear) {
+      const s = readSecretsFile();
+      delete s.githubToken;
+      writeSecretsFile(s);
+      return send(res, 200, { ok: true, githubConfigured: false });
+    }
+    const token = String(payload.token || "").trim();
+    if (!token || token.length < 20 || token.length > 300) {
+      return send(res, 400, { error: "invalid token" });
+    }
+    if (/\s/.test(token)) return send(res, 400, { error: "token must not contain spaces" });
+    if (!/^(ghp_|github_pat_|gho_|ghu_|ghs_)/.test(token)) {
+      return send(res, 400, { error: "token does not look like a GitHub PAT" });
+    }
+    const s = readSecretsFile();
+    s.githubToken = token;
+    s.updatedAtUtc = new Date().toISOString();
+    writeSecretsFile(s);
+    return send(res, 200, {
+      ok: true,
+      githubConfigured: true,
+      githubHint: token.slice(0, 4) + "…" + token.slice(-4),
+    });
+  }
+
 if (req.method === "GET" && url.pathname === "/api/health") {
     let ollama = { ok: false };
     try {
@@ -298,9 +359,15 @@ if (req.method === "GET" && url.pathname === "/api/health") {
     const { spawn } = await import("node:child_process");
     const cwd = root;
     const isWin = process.platform === "win32";
+    const sec = readSecretsFile();
+    const shellEnv = { ...process.env, CA_ALLOW_SHELL: "1" };
+    if (sec.githubToken) {
+      shellEnv.GITHUB_TOKEN = sec.githubToken;
+      shellEnv.GH_TOKEN = sec.githubToken;
+    }
     const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", cmd] : ["-lc", cmd], {
       cwd,
-      env: { ...process.env, CA_ALLOW_SHELL: "1" },
+      env: shellEnv,
       windowsHide: true,
     });
     let stdout = "";
