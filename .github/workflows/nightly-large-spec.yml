@@ -75,6 +75,7 @@ jobs:
         run: python3 scripts/test_gemini_failure_alert.py
 
       - name: Run credentialed Gemini benchmark
+        if: ${{ secrets.AI_INTEGRATIONS_GEMINI_API_KEY != '' && secrets.AI_INTEGRATIONS_GEMINI_BASE_URL != '' }}
         id: gemini-benchmark
         run: |
           python3 scripts/gemini_skill_trigger_benchmark.py \
@@ -125,6 +126,9 @@ jobs:
       # development build identity rather than the committed publish record
       # pinned to its own source tree.
       BUILD_IDENTITY_MODE: development
+      # Public CI does not have the private attached_assets source-library audits.
+      # This skips those required inputs so the API server can build.
+      CI_PUBLIC_SOURCE: "1"
 
     steps:
       - name: Checkout
