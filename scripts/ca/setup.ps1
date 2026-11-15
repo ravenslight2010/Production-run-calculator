@@ -1,5 +1,6 @@
 #Requires -Version 5.1
 # Short-path coding-assistant setup. Prefer CA-Setup.cmd at repo root.
+# Updated to also install domain skills into the global OpenCode skills folder.
 [CmdletBinding()]
 param(
   [string]$RepoRoot = "",
@@ -11,7 +12,8 @@ param(
   [switch]$SkipNodeInstall,
   [switch]$UseFixture,
   [switch]$LaunchChat,
-  [switch]$NoLaunch
+  [switch]$NoLaunch,
+  [switch]$SkipSkillsInstall
 )
 
 Set-StrictMode -Version Latest
@@ -63,7 +65,6 @@ function Winget-Install($id, $label) {
   if (-not (HasCmd "winget")) { Fail "winget missing. Install $label manually, re-run." }
   Info "winget install $label ($id)"
   & winget install --id $id -e --accept-package-agreements --accept-source-agreements --disable-interactivity
-  # winget codes: 0 ok; already installed often non-zero — refresh and recheck
   Refresh-Path
 }
 
@@ -104,7 +105,6 @@ function Ensure-Ollama {
 }
 
 function Copy-AppPayload($repo, $agentRoot) {
-  # Short runtime tree: C:\runcalc\agent\app\...
   $app = Join-Path $agentRoot "app"
   Ensure-Dir $app
   Ensure-Dir (Join-Path $app "ui")
@@ -130,14 +130,25 @@ function Copy-AppPayload($repo, $agentRoot) {
     Ensure-Dir (Split-Path -Parent $dst)
     Copy-Item -LiteralPath $src -Destination $dst -Force
   }
-  # icons
   $iconDir = Join-Path $repo "scripts\coding-assistant\chat-ui\icons"
   if (Test-Path -LiteralPath $iconDir) {
     Copy-Item -Path (Join-Path $iconDir "*") -Destination (Join-Path $app "ui\icons") -Force
   }
-  # tests folder optional for verify - verify script references repo tests; run verify from repo if present
   Info "App payload at $app"
   return $app
+}
+
+function Install-DomainSkills($repo) {
+  if ($SkipSkillsInstall) { Info "Skipping domain skills"; return }
+  $src = Join-Path $repo "scripts\coding-assistant\domain-skills"
+  if (-not (Test-Path -LiteralPath $src)) {
+    Warn "domain-skills folder not found at $src — skipping"
+    return
+  }
+  $dest = Join-Path $env:USERPROFILE ".config\opencode\skills"
+  Ensure-Dir $dest
+  Copy-Item -Path (Join-Path $src "*") -Destination $dest -Recurse -Force
+  Info "Domain skills copied to $dest"
 }
 
 function Get-Model($jsonPath) {
@@ -155,8 +166,6 @@ function Get-Model($jsonPath) {
 }
 
 function Render-Profile($app, $report, $outFile) {
-  # boot.mjs expects repo-relative structure - run from REPO with out in agent
-  # Prefer repo bootstrap if available
   $repoBoot = Join-Path $script:Repo "scripts\coding-assistant\bootstrap-local.mjs"
   if (Test-Path -LiteralPath $repoBoot) {
     & node $repoBoot --report $report --out $outFile
@@ -232,7 +241,7 @@ Ensure-Dir (Join-Path $AgentRoot "logs")
 $log = Join-Path $AgentRoot ("logs\setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 try { Start-Transcript -Path $log -Force | Out-Null } catch {}
 
-Write-Host "Coding Assistant setup (short paths)" -ForegroundColor Green
+Write-Host "Coding Assistant setup (short paths + domain skills)" -ForegroundColor Green
 Write-Host "Agent: $AgentRoot  Log: $log" -ForegroundColor DarkGray
 
 try {
@@ -269,6 +278,9 @@ try {
   Step "Copy app to short path"
   $app = Copy-AppPayload $script:Repo $AgentRoot
 
+  Step "Domain skills"
+  Install-DomainSkills $script:Repo
+
   Step "Profile"
   $profile = Join-Path $AgentRoot "config\oc.json"
   Render-Profile $app $ReportPath $profile
@@ -283,7 +295,6 @@ try {
   $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$runPs1`""
   $prog = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
   Ensure-Dir $prog
-  # SHORT shortcut names only
   Add-Shortcut (Join-Path $prog "CodeAgent.lnk") $ps $arg $AgentRoot $icon
   $desk = [Environment]::GetFolderPath("Desktop")
   if ($desk) { Add-Shortcut (Join-Path $desk "CodeAgent.lnk") $ps $arg $AgentRoot $icon }
@@ -292,6 +303,7 @@ try {
   Write-Host "Profile $profile" -ForegroundColor Green
   Write-Host "Shortcuts: Desktop\CodeAgent.lnk  and  Start Menu\CodeAgent.lnk" -ForegroundColor Green
   Write-Host "Chat payload: $app\ui" -ForegroundColor Green
+  Write-Host "Domain skills installed to $env:USERPROFILE\.config\opencode\skills" -ForegroundColor Green
 
   if (-not $NoLaunch) {
     if ($LaunchChat -or -not $NoLaunch) {
