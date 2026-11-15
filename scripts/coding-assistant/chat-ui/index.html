@@ -125,6 +125,7 @@
   <header>
     <h1>Code Agent</h1>
     <span class="badge" id="mode">local</span>
+    <span class="badge" id="searchBadge" title="Toggle optional web search">search: off</span>
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
     <select id="model" title="Ollama model"></select>
@@ -298,6 +299,48 @@
       }
     }
 
+
+    let searchEnabled = false;
+    const searchBadge = document.getElementById("searchBadge");
+    searchBadge.onclick = () => {
+      searchEnabled = !searchEnabled;
+      searchBadge.textContent = searchEnabled ? "search: on" : "search: off";
+      searchBadge.className = searchEnabled ? "badge ok" : "badge";
+      addMsg("system", searchEnabled ? "Web search enabled (optional). Use /search <query> or ask the assistant." : "Web search disabled.");
+    };
+
+    async function doSearch(q) {
+      if (!searchEnabled) {
+        addMsg("system", "Search is off. Click the search badge to enable.");
+        return;
+      }
+      const step = showStep("Searching…");
+      try {
+        const r = await fetch("/api/search?q=" + encodeURIComponent(q) + "&force=1");
+        const data = await r.json();
+        step.remove();
+        if (!r.ok) throw new Error(data.error || r.statusText);
+        if (!data.results || !data.results.length) {
+          addMsg("system", "No results for: " + q);
+          return;
+        }
+        const card = document.createElement("div");
+        card.className = "step-ledger";
+        card.innerHTML = "<strong>Search: " + q + "</strong>";
+        for (const res of data.results.slice(0, 5)) {
+          const div = document.createElement("div");
+          div.style.margin = "0.4rem 0";
+          div.innerHTML = "<a href=\"" + res.url + "\" target=\"_blank\" style=\"color:var(--accent)\">" + (res.title || "result") + "</a><br><span style=\"color:var(--muted);font-size:0.8rem\">" + (res.snippet || "").slice(0, 220) + "</span>";
+          card.appendChild(div);
+        }
+        log.appendChild(card);
+        log.scrollTop = log.scrollHeight;
+      } catch (e) {
+        step.remove();
+        addMsg("system", "Search failed: " + e.message);
+      }
+    }
+
     async function health() {
       const r = await fetch("/api/health");
       const h = await r.json();
@@ -341,6 +384,13 @@
         fetch("/api/skills").then(r => r.json()).then(d => {
           addMsg("system", "Skills:\n" + (d.skills || []).map(s => "- " + s.slug).join("\n"));
         });
+        return;
+      }
+      if (text.startsWith("/search ")) {
+        const q = text.slice(8).trim();
+        input.value = "";
+        if (!q) return;
+        doSearch(q);
         return;
       }
       if (text.startsWith("/skill ")) {
