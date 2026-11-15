@@ -28,7 +28,11 @@ let root = findRepoRoot(__dirname);
 
 const AGENT_ROOT = process.env.CA_AGENT_ROOT || path.join(path.dirname(root), "agent");
 const SESSIONS_DIR = path.join(AGENT_ROOT, "sessions");
+const TASKS_DIR = path.join(AGENT_ROOT, "tasks");
+const TASKS_DONE = path.join(TASKS_DIR, "done");
 if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
+if (!existsSync(TASKS_DIR)) mkdirSync(TASKS_DIR, { recursive: true });
+if (!existsSync(TASKS_DONE)) mkdirSync(TASKS_DONE, { recursive: true });
 
 function secretsPath() {
   return path.join(AGENT_ROOT, "config", "secrets.json");
@@ -159,6 +163,32 @@ function loadSession(id) {
 function saveSession(sess) {
   sess.updated = Date.now();
   writeFileSync(sessionFile(sess.id), JSON.stringify(sess, null, 2));
+}
+
+
+function taskFile(id) { return path.join(TASKS_DIR, id + ".json"); }
+function listTasks() {
+  try {
+    return readdirSync(TASKS_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try {
+          const j = JSON.parse(readFileSync(path.join(TASKS_DIR, f), "utf8"));
+          return { id: j.id, type: j.type || "task", title: j.title || j.id, priority: j.priority || 5, status: j.status || "open", created: j.created || 0 };
+        } catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.priority - b.priority) || (b.created - a.created));
+  } catch { return []; }
+}
+function loadTask(id) {
+  const p = taskFile(id);
+  if (!existsSync(p)) return null;
+  return JSON.parse(readFileSync(p, "utf8"));
+}
+function saveTask(t) {
+  t.updated = Date.now();
+  writeFileSync(taskFile(t.id), JSON.stringify(t, null, 2));
 }
 
 const publicIndex = path.join(__dirname, "index.html");
@@ -296,7 +326,46 @@ const server = http.createServer(async (req, res) => {
     return send(res, 400, { error: "unknown tool" });
   }
 
-  if (req.method === "GET" && url.pathname === "/api/health") {
+  
+  if (req.method === "GET" && url.pathname === "/api/tasks") {
+    return send(res, 200, { tasks: listTasks() });
+  }
+  if (req.method === "POST" && url.pathname === "/api/tasks") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const id = body.id || randomUUID().slice(0, 8);
+    const task = {
+      id,
+      type: body.type || "task",
+      title: body.title || body.type || "Task",
+      priority: Number(body.priority) || 5,
+      status: "open",
+      payload: body.payload || {},
+      skill: body.skill || null,
+      created: Date.now(),
+    };
+    saveTask(task);
+    return send(res, 200, task);
+  }
+  if (req.method === "GET" && url.pathname === "/api/task") {
+    const t = loadTask(url.searchParams.get("id") || "");
+    if (!t) return send(res, 404, { error: "not found" });
+    return send(res, 200, t);
+  }
+  if (req.method === "POST" && url.pathname === "/api/task/done") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const t = loadTask(body.id);
+    if (!t) return send(res, 404, { error: "not found" });
+    t.status = "done";
+    t.result = body.result || null;
+    const donePath = path.join(TASKS_DONE, t.id + ".json");
+    writeFileSync(donePath, JSON.stringify(t, null, 2));
+    try { writeFileSync(taskFile(t.id), ""); } catch {}
+    const fs = await import("node:fs");
+    fs.unlinkSync(taskFile(t.id));
+    return send(res, 200, { ok: true });
+  }
+
+if (req.method === "GET" && url.pathname === "/api/health") {
     let ollama = { ok: false };
     try {
       const r = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(4000) });
