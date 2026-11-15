@@ -30,9 +30,14 @@ const AGENT_ROOT = process.env.CA_AGENT_ROOT || path.join(path.dirname(root), "a
 const SESSIONS_DIR = path.join(AGENT_ROOT, "sessions");
 const TASKS_DIR = path.join(AGENT_ROOT, "tasks");
 const TASKS_DONE = path.join(TASKS_DIR, "done");
+const CONTEXT_DIR = path.join(AGENT_ROOT, "context");
+const MEMORY_FILE = path.join(AGENT_ROOT, "config", "MEMORY.md");
 if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
 if (!existsSync(TASKS_DIR)) mkdirSync(TASKS_DIR, { recursive: true });
 if (!existsSync(TASKS_DONE)) mkdirSync(TASKS_DONE, { recursive: true });
+if (!existsSync(CONTEXT_DIR)) mkdirSync(CONTEXT_DIR, { recursive: true });
+if (!existsSync(path.dirname(MEMORY_FILE))) mkdirSync(path.dirname(MEMORY_FILE), { recursive: true });
+if (!existsSync(MEMORY_FILE)) writeFileSync(MEMORY_FILE, "# Project Memory\n\n", "utf8");
 
 function secretsPath() {
   return path.join(AGENT_ROOT, "config", "secrets.json");
@@ -189,6 +194,33 @@ function loadTask(id) {
 function saveTask(t) {
   t.updated = Date.now();
   writeFileSync(taskFile(t.id), JSON.stringify(t, null, 2));
+}
+
+
+function readMemory() {
+  try { return readFileSync(MEMORY_FILE, "utf8"); } catch { return ""; }
+}
+function appendMemory(line) {
+  const cur = readMemory();
+  writeFileSync(MEMORY_FILE, cur.trimEnd() + "\n- " + line + "\n", "utf8");
+}
+function listContext() {
+  try {
+    return readdirSync(CONTEXT_DIR)
+      .filter((f) => f.endsWith(".md") || f.endsWith(".txt"))
+      .map((f) => ({ name: f, path: path.join(CONTEXT_DIR, f) }));
+  } catch { return []; }
+}
+function loadContextPack() {
+  const files = listContext();
+  let blob = "";
+  for (const f of files.slice(0, 20)) {
+    try {
+      const t = readFileSync(f.path, "utf8");
+      blob += "\n\n--- CONTEXT " + f.name + " ---\n" + t.slice(0, 40000);
+    } catch {}
+  }
+  return blob;
 }
 
 const publicIndex = path.join(__dirname, "index.html");
@@ -365,6 +397,39 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { ok: true });
   }
 
+
+  if (req.method === "GET" && url.pathname === "/api/memory") {
+    return send(res, 200, { content: readMemory() });
+  }
+  if (req.method === "POST" && url.pathname === "/api/memory") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    if (body.append) appendMemory(String(body.append));
+    if (body.replace) writeFileSync(MEMORY_FILE, String(body.replace), "utf8");
+    return send(res, 200, { ok: true, content: readMemory() });
+  }
+  if (req.method === "GET" && url.pathname === "/api/context") {
+    return send(res, 200, { files: listContext().map((f) => f.name) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/context/import") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const name = String(body.name || "imported.md").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const content = String(body.content || "");
+    if (!content) return send(res, 400, { error: "empty" });
+    writeFileSync(path.join(CONTEXT_DIR, name), content, "utf8");
+    return send(res, 200, { ok: true, name });
+  }
+  if (req.method === "GET" && url.pathname === "/api/session/export") {
+    const s = loadSession(url.searchParams.get("id") || "");
+    if (!s) return send(res, 404, { error: "not found" });
+    return send(res, 200, s);
+  }
+  if (req.method === "POST" && url.pathname === "/api/session/import") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    if (!body.id || !Array.isArray(body.messages)) return send(res, 400, { error: "bad session" });
+    saveSession(body);
+    return send(res, 200, { ok: true, id: body.id });
+  }
+
 if (req.method === "GET" && url.pathname === "/api/health") {
     let ollama = { ok: false };
     try {
@@ -417,6 +482,10 @@ if (req.method === "GET" && url.pathname === "/api/health") {
       }
     }
     let sys = SYSTEM + `\nCurrent repo: ${root}`;
+    const mem = readMemory();
+    if (mem.trim()) sys += `\n\nProject memory:\n${mem.slice(0, 8000)}`;
+    const pack = loadContextPack();
+    if (pack) sys += `\n\nResearch context pack:${pack}`;
     if (skillBlob) sys += `\n\nActive skills:${skillBlob}`;
     if (contextBlob) sys += `\n\nFile context:${contextBlob}`;
 
