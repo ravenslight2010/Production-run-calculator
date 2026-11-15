@@ -6,153 +6,76 @@
   <title>Code Agent</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#0b0f14" />
-  <link rel="icon" href="/icons/icon-32.png" type="image/png" />
-  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
   <style>
-    :root {
-      --bg: #0b0f14;
-      --panel: #141a22;
-      --panel-2: #1c2430;
-      --border: #2a3544;
-      --text: #e8edf5;
-      --muted: #8b9bb4;
-      --accent: #4c9aff;
-      --accent-dim: #2a5a9a;
-      --ok: #3dd68c;
-      --warn: #e6a23c;
-      --danger: #f56c6c;
-      --user: #1a2740;
-      --assistant: #161d28;
-    }
+    :root { --bg:#0b0f14; --panel:#141a22; --panel-2:#1c2430; --border:#2a3544; --text:#e8edf5; --muted:#8b9bb4; --accent:#4c9aff; --ok:#3dd68c; --warn:#e6a23c; --user:#1a2740; --assistant:#161d28; }
     * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-      background: var(--bg); color: var(--text);
-      display: flex; flex-direction: column;
-    }
-    header {
-      padding: 0.6rem 1rem; border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-      background: var(--panel); flex-shrink: 0;
-    }
-    header h1 { font-size: 1.05rem; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-    .badge {
-      font-size: 0.7rem; padding: 0.18rem 0.55rem; border-radius: 999px;
-      border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
-    }
-    .badge.ok { border-color: var(--ok); color: var(--ok); }
-    .badge.bad { border-color: var(--danger); color: var(--danger); }
-    main { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
-    aside {
-      border-right: 1px solid var(--border); background: #10161e;
-      display: flex; flex-direction: column; overflow: hidden;
-    }
-    aside section { padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border); overflow: auto; }
-    aside section:last-child { flex: 1; border-bottom: 0; }
-    aside h2 {
-      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--muted); margin: 0 0 0.45rem; font-weight: 600;
-    }
-    .file, .skill-btn {
-      display: block; width: 100%; text-align: left; background: transparent;
-      border: 0; color: var(--text); padding: 0.32rem 0.45rem; border-radius: 6px;
-      cursor: pointer; font-size: 0.82rem; line-height: 1.3;
-    }
-    .file:hover, .skill-btn:hover { background: var(--panel); }
-    .file.active, .skill-btn.active { background: var(--panel-2); outline: 1px solid var(--accent); }
-    .chat { display: flex; flex-direction: column; min-height: 0; position: relative; }
-    #log {
-      flex: 1; overflow: auto; padding: 1rem 1.1rem 0.5rem;
-      display: flex; flex-direction: column; gap: 0.65rem;
-    }
-    .msg {
-      max-width: 920px; padding: 0.7rem 0.95rem; border-radius: 12px;
-      line-height: 1.45; font-size: 0.94rem; white-space: pre-wrap; word-break: break-word;
-      position: relative;
-    }
-    .msg.user { background: var(--user); align-self: flex-end; border-bottom-right-radius: 4px; }
-    .msg.assistant { background: var(--assistant); align-self: flex-start; border-bottom-left-radius: 4px; }
-    .msg.system { background: transparent; color: var(--muted); border: 1px dashed var(--border); font-size: 0.82rem; }
-    .msg .copy {
-      position: absolute; top: 0.4rem; right: 0.4rem; opacity: 0;
-      background: var(--panel); border: 1px solid var(--border); color: var(--muted);
-      border-radius: 4px; padding: 0.15rem 0.4rem; font-size: 0.7rem; cursor: pointer;
-    }
-    .msg:hover .copy { opacity: 1; }
-    .step-ledger {
-      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-      padding: 0.55rem 0.75rem; font-size: 0.82rem; align-self: flex-start; max-width: 520px;
-    }
-    .step { display: flex; align-items: center; gap: 0.45rem; padding: 0.15rem 0; }
-    .step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-    .step.running .dot { background: var(--accent); animation: pulse 1.2s infinite; }
-    .step.done .dot { background: var(--ok); }
-    @keyframes pulse { 50% { opacity: 0.4; } }
-    .ctx-bar {
-      display: flex; align-items: center; gap: 0.75rem; padding: 0.35rem 1rem;
-      font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--border);
-      background: var(--panel);
-    }
-    .meter { flex: 1; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
-    .meter > span { display: block; height: 100%; background: var(--accent); width: 0%; transition: width 0.2s; }
-    form {
-      display: flex; gap: 0.5rem; padding: 0.7rem 1rem; border-top: 1px solid var(--border);
-      background: var(--panel); align-items: flex-end;
-    }
-    textarea {
-      flex: 1; resize: none; min-height: 48px; max-height: 180px;
-      border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
-      color: var(--text); padding: 0.55rem 0.75rem; font: inherit; line-height: 1.4;
-    }
-    textarea:focus { outline: 1px solid var(--accent); }
-    button, select {
-      border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
-      color: var(--text); padding: 0.48rem 0.9rem; font: inherit; cursor: pointer;
-    }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .jump {
-      position: absolute; bottom: 4.5rem; right: 1.2rem; background: var(--panel-2);
-      border: 1px solid var(--border); color: var(--text); border-radius: 999px;
-      padding: 0.3rem 0.7rem; font-size: 0.75rem; cursor: pointer; display: none;
-    }
-    .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0 1rem 0.3rem; }
-    .chip { font-size: 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.5rem; }
+    body { margin:0; font-family:"Segoe UI",system-ui,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
+    header { padding:0.55rem 1rem; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap; background:var(--panel); }
+    header h1 { font-size:1.05rem; margin:0; font-weight:600; }
+    .badge { font-size:0.7rem; padding:0.16rem 0.5rem; border-radius:999px; border:1px solid var(--border); color:var(--muted); background:var(--panel-2); cursor:pointer; }
+    .badge.ok { border-color:var(--ok); color:var(--ok); }
+    main { flex:1; display:grid; grid-template-columns:250px 1fr; min-height:0; }
+    aside { border-right:1px solid var(--border); background:#10161e; display:flex; flex-direction:column; overflow:hidden; }
+    aside section { padding:0.55rem 0.65rem; border-bottom:1px solid var(--border); overflow:auto; }
+    aside h2 { font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); margin:0 0 0.4rem; }
+    .file,.skill-btn,.sess { display:block; width:100%; text-align:left; background:transparent; border:0; color:var(--text); padding:0.28rem 0.4rem; border-radius:6px; cursor:pointer; font-size:0.8rem; }
+    .file:hover,.skill-btn:hover,.sess:hover { background:var(--panel); }
+    .file.active,.skill-btn.active { background:var(--panel-2); outline:1px solid var(--accent); }
+    .chat { display:flex; flex-direction:column; min-height:0; position:relative; }
+    #log { flex:1; overflow:auto; padding:0.9rem 1rem; display:flex; flex-direction:column; gap:0.55rem; }
+    .msg { max-width:900px; padding:0.65rem 0.9rem; border-radius:12px; line-height:1.45; font-size:0.93rem; white-space:pre-wrap; word-break:break-word; position:relative; }
+    .msg.user { background:var(--user); align-self:flex-end; border-bottom-right-radius:4px; }
+    .msg.assistant { background:var(--assistant); align-self:flex-start; border-bottom-left-radius:4px; }
+    .msg.system { background:transparent; color:var(--muted); border:1px dashed var(--border); font-size:0.8rem; }
+    .tool-card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:0.6rem 0.75rem; font-size:0.82rem; align-self:flex-start; max-width:640px; }
+    .tool-card pre { background:var(--bg); padding:0.4rem; border-radius:6px; overflow:auto; max-height:180px; font-size:0.75rem; }
+    .btn-row { display:flex; gap:0.4rem; margin-top:0.4rem; }
+    .ctx-bar { display:flex; align-items:center; gap:0.6rem; padding:0.3rem 1rem; font-size:0.72rem; color:var(--muted); border-top:1px solid var(--border); background:var(--panel); }
+    .meter { flex:1; height:5px; background:var(--panel-2); border-radius:3px; overflow:hidden; }
+    .meter > span { display:block; height:100%; background:var(--accent); width:0%; }
+    form { display:flex; gap:0.45rem; padding:0.6rem 1rem; border-top:1px solid var(--border); background:var(--panel); align-items:flex-end; }
+    textarea { flex:1; resize:none; min-height:46px; max-height:160px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); padding:0.5rem 0.7rem; font:inherit; }
+    button,select { border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); padding:0.42rem 0.8rem; font:inherit; cursor:pointer; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    button.ok { background:var(--ok); border-color:var(--ok); color:#042; }
+    button.warn { background:var(--warn); border-color:var(--warn); color:#420; }
   </style>
 </head>
 <body>
   <header>
     <h1>Code Agent</h1>
     <span class="badge" id="mode">local</span>
-    <span class="badge" id="searchBadge" title="Toggle optional web search">search: off</span>
+    <span class="badge" id="searchBadge">search: off</span>
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
-    <select id="model" title="Ollama model"></select>
+    <select id="model"></select>
+    <button id="newSess" title="New session">New</button>
+    <button id="diag" title="Export diagnostics">Diag</button>
   </header>
   <main>
     <aside>
       <section>
+        <h2>Sessions</h2>
+        <div id="sessions"></div>
+      </section>
+      <section>
         <h2>Skills</h2>
         <div id="skills"></div>
       </section>
-      <section>
+      <section style="flex:1">
         <h2>Repo</h2>
         <div id="tree"></div>
-        <p style="color:var(--muted);font-size:0.7rem;margin:0.6rem 0 0">Click files to attach (max 6)</p>
       </section>
     </aside>
     <section class="chat">
       <div id="log"></div>
-      <button class="jump" id="jump">Jump to latest</button>
-      <div class="chips" id="chips"></div>
       <div class="ctx-bar">
         <span id="ctxLabel">Context: none</span>
-        <div class="meter" title="Approx. context usage"><span id="meterFill"></span></div>
-        <span id="meterText">0%</span>
+        <div class="meter"><span id="meterFill"></span></div>
+        <span id="meterText">0</span>
       </div>
       <form id="form">
-        <textarea id="input" placeholder="Ask about this repo, imports, QC, sync…" rows="2"></textarea>
+        <textarea id="input" placeholder="Ask, /search …, or propose a change…" rows="2"></textarea>
         <button type="submit" class="primary" id="send">Send</button>
       </form>
     </section>
@@ -161,217 +84,206 @@
     const log = document.getElementById("log");
     const tree = document.getElementById("tree");
     const modelSel = document.getElementById("model");
-    const ctxLabel = document.getElementById("ctxLabel");
-    const chips = document.getElementById("chips");
-    const meterFill = document.getElementById("meterFill");
-    const meterText = document.getElementById("meterText");
-    const jump = document.getElementById("jump");
-    const messages = [];
+    const sessionsEl = document.getElementById("sessions");
+    let messages = [];
+    let sessionId = localStorage.getItem("ca_session") || null;
     const contextFiles = new Set();
     const activeSkills = new Set();
+    let searchEnabled = false;
+    let currentRepo = "";
 
     function addMsg(role, text) {
       const el = document.createElement("div");
       el.className = "msg " + role;
       el.textContent = text;
-      if (role !== "system") {
-        const c = document.createElement("button");
-        c.className = "copy";
-        c.textContent = "Copy";
-        c.onclick = () => navigator.clipboard.writeText(text);
-        el.appendChild(c);
-      }
-      log.appendChild(el);
-      if (isNearBottom()) log.scrollTop = log.scrollHeight;
-      else jump.style.display = "block";
-      return el;
-    }
-
-    function isNearBottom() {
-      return log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-    }
-    log.addEventListener("scroll", () => {
-      jump.style.display = isNearBottom() ? "none" : "block";
-    });
-    jump.onclick = () => { log.scrollTop = log.scrollHeight; jump.style.display = "none"; };
-
-    function refreshCtx() {
-      const files = [...contextFiles];
-      ctxLabel.textContent = files.length ? "Context: " + files.join(", ") : "Context: none";
-      chips.innerHTML = "";
-      files.forEach(f => {
-        const c = document.createElement("span");
-        c.className = "chip";
-        c.textContent = f.split("/").pop();
-        chips.appendChild(c);
-      });
-      activeSkills.forEach(s => {
-        const c = document.createElement("span");
-        c.className = "chip";
-        c.textContent = "skill:" + s;
-        chips.appendChild(c);
-      });
-      // Rough token estimate: ~4 chars per token
-      const est = (files.join(" ").length + [...activeSkills].join(" ").length) / 4;
-      const pct = Math.min(100, Math.round(est / 80)); // soft ceiling visual
-      meterFill.style.width = pct + "%";
-      meterText.textContent = pct + "%";
-    }
-
-    function showStep(label) {
-      const el = document.createElement("div");
-      el.className = "step-ledger";
-      el.innerHTML = `<div class="step running"><span class="dot"></span> ${label}</div>`;
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
     }
 
-    async function loadTree(p = "") {
+    function addToolCard(toolObj) {
+      const card = document.createElement("div");
+      card.className = "tool-card";
+      card.innerHTML = `<strong>${toolObj.tool}</strong> ${toolObj.path || toolObj.command || ""}`;
+      if (toolObj.old || toolObj.new) {
+        const pre = document.createElement("pre");
+        pre.textContent = (toolObj.old || "") + "\n---\n" + (toolObj.new || "");
+        card.appendChild(pre);
+      }
+      const row = document.createElement("div");
+      row.className = "btn-row";
+      const allow = document.createElement("button");
+      allow.className = "ok";
+      allow.textContent = "Allow";
+      const deny = document.createElement("button");
+      deny.className = "warn";
+      deny.textContent = "Deny";
+      allow.onclick = async () => {
+        const r = await fetch("/api/tool/apply", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(toolObj) });
+        const d = await r.json();
+        addMsg("system", r.ok ? "Applied: " + JSON.stringify(d) : "Failed: " + (d.error || ""));
+        card.remove();
+      };
+      deny.onclick = () => { addMsg("system", "Denied"); card.remove(); };
+      row.appendChild(allow); row.appendChild(deny);
+      card.appendChild(row);
+      log.appendChild(card);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function extractTools(text) {
+      const re = /```tool\s*([\s\S]*?)```/g;
+      const tools = [];
+      let m;
+      while ((m = re.exec(text))) {
+        try { tools.push(JSON.parse(m[1])); } catch {}
+      }
+      return tools;
+    }
+
+    async function loadSessions() {
+      const r = await fetch("/api/sessions");
+      const d = await r.json();
+      sessionsEl.innerHTML = "";
+      for (const s of d.sessions || []) {
+        const b = document.createElement("button");
+        b.className = "sess" + (s.id === sessionId ? " active" : "");
+        b.textContent = (s.title || s.id).slice(0, 28);
+        b.onclick = () => loadSession(s.id);
+        sessionsEl.appendChild(b);
+      }
+    }
+    async function loadSession(id) {
+      const r = await fetch("/api/session?id=" + id);
+      if (!r.ok) return;
+      const s = await r.json();
+      sessionId = s.id;
+      localStorage.setItem("ca_session", id);
+      messages = s.messages || [];
+      log.innerHTML = "";
+      for (const m of messages) addMsg(m.role, m.content);
+      loadSessions();
+    }
+    async function saveSession() {
+      if (!sessionId) sessionId = Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("ca_session", sessionId);
+      await fetch("/api/sessions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ id:sessionId, title: messages.find(m=>m.role==="user")?.content?.slice(0,40) || "Session", messages }) });
+      loadSessions();
+    }
+
+    function refreshCtx() {
+      document.getElementById("ctxLabel").textContent = contextFiles.size ? "Context: " + [...contextFiles].join(", ") : "Context: none";
+      const est = [...contextFiles].join(" ").length / 4 + messages.reduce((a,m)=>a+(m.content||"").length,0)/4;
+      const pct = Math.min(100, Math.round(est / 2000));
+      document.getElementById("meterFill").style.width = pct + "%";
+      document.getElementById("meterText").textContent = Math.round(est) + " tok";
+    }
+
+    async function loadTree(p="") {
       const r = await fetch("/api/tree?path=" + encodeURIComponent(p));
       const data = await r.json();
       tree.innerHTML = "";
       if (p) {
         const up = document.createElement("button");
-        up.className = "file";
-        up.textContent = "…";
-        up.onclick = () => loadTree(p.split("/").slice(0, -1).join("/"));
+        up.className = "file"; up.textContent = "…";
+        up.onclick = () => loadTree(p.split("/").slice(0,-1).join("/"));
         tree.appendChild(up);
       }
       for (const e of data.entries || []) {
         const b = document.createElement("button");
-        b.className = "file";
-        b.textContent = (e.type === "dir" ? "📁 " : "📄 ") + e.name;
-        if (contextFiles.has(e.path)) b.classList.add("active");
+        b.className = "file" + (contextFiles.has(e.path) ? " active" : "");
+        b.textContent = (e.type==="dir"?"📁 ":"📄 ") + e.name;
         b.onclick = () => {
           if (e.type === "dir") loadTree(e.path);
           else {
             if (contextFiles.has(e.path)) contextFiles.delete(e.path);
-            else {
-              if (contextFiles.size >= 6) contextFiles.clear();
-              contextFiles.add(e.path);
-            }
-            loadTree(p);
-            refreshCtx();
+            else { if (contextFiles.size >= 6) contextFiles.clear(); contextFiles.add(e.path); }
+            loadTree(p); refreshCtx();
           }
         };
         tree.appendChild(b);
       }
     }
 
-    function rememberedModel() {
-      try { return localStorage.getItem("ca_last_model") || ""; } catch { return ""; }
-    }
-    function rememberModel(m) {
-      try { if (m) localStorage.setItem("ca_last_model", m); } catch {}
-      fetch("/api/prefs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lastModel: m }),
-      }).catch(() => {});
-    }
-
     async function loadSkills() {
       const el = document.getElementById("skills");
-      if (!el) return;
-      try {
-        const r = await fetch("/api/skills");
-        const data = await r.json();
-        el.innerHTML = "";
-        for (const s of (data.skills || []).slice(0, 80)) {
-          const b = document.createElement("button");
-          b.className = "skill-btn" + (activeSkills.has(s.slug) ? " active" : "");
-          b.textContent = (activeSkills.has(s.slug) ? "✓ " : "") + (s.slug || s.name);
-          b.title = s.description || s.name || s.slug;
-          b.onclick = () => {
-            if (activeSkills.has(s.slug)) activeSkills.delete(s.slug);
-            else {
-              if (activeSkills.size >= 3) activeSkills.clear();
-              activeSkills.add(s.slug);
-            }
-            loadSkills();
-            refreshCtx();
-          };
-          el.appendChild(b);
-        }
-      } catch {
-        el.textContent = "Skills unavailable";
-      }
-    }
-
-
-    let searchEnabled = false;
-    const searchBadge = document.getElementById("searchBadge");
-    searchBadge.onclick = () => {
-      searchEnabled = !searchEnabled;
-      searchBadge.textContent = searchEnabled ? "search: on" : "search: off";
-      searchBadge.className = searchEnabled ? "badge ok" : "badge";
-      addMsg("system", searchEnabled ? "Web search enabled (optional). Use /search <query> or ask the assistant." : "Web search disabled.");
-    };
-
-    async function doSearch(q) {
-      if (!searchEnabled) {
-        addMsg("system", "Search is off. Click the search badge to enable.");
-        return;
-      }
-      const step = showStep("Searching…");
-      try {
-        const r = await fetch("/api/search?q=" + encodeURIComponent(q) + "&force=1");
-        const data = await r.json();
-        step.remove();
-        if (!r.ok) throw new Error(data.error || r.statusText);
-        if (!data.results || !data.results.length) {
-          addMsg("system", "No results for: " + q);
-          return;
-        }
-        const card = document.createElement("div");
-        card.className = "step-ledger";
-        card.innerHTML = "<strong>Search: " + q + "</strong>";
-        for (const res of data.results.slice(0, 5)) {
-          const div = document.createElement("div");
-          div.style.margin = "0.4rem 0";
-          div.innerHTML = "<a href=\"" + res.url + "\" target=\"_blank\" style=\"color:var(--accent)\">" + (res.title || "result") + "</a><br><span style=\"color:var(--muted);font-size:0.8rem\">" + (res.snippet || "").slice(0, 220) + "</span>";
-          card.appendChild(div);
-        }
-        log.appendChild(card);
-        log.scrollTop = log.scrollHeight;
-      } catch (e) {
-        step.remove();
-        addMsg("system", "Search failed: " + e.message);
+      const r = await fetch("/api/skills");
+      const data = await r.json();
+      el.innerHTML = "";
+      for (const s of (data.skills || []).slice(0, 60)) {
+        const b = document.createElement("button");
+        b.className = "skill-btn" + (activeSkills.has(s.slug) ? " active" : "");
+        b.textContent = (activeSkills.has(s.slug) ? "✓ " : "") + s.slug;
+        b.onclick = () => {
+          if (activeSkills.has(s.slug)) activeSkills.delete(s.slug);
+          else { if (activeSkills.size >= 3) activeSkills.clear(); activeSkills.add(s.slug); }
+          loadSkills(); refreshCtx();
+        };
+        el.appendChild(b);
       }
     }
 
     async function health() {
       const r = await fetch("/api/health");
       const h = await r.json();
+      currentRepo = h.repoRoot || "";
       const o = document.getElementById("ollama");
-      const mb = document.getElementById("modelBadge");
       if (h.ollama?.ok) {
-        o.textContent = "ollama: up";
-        o.className = "badge ok";
+        o.textContent = "ollama: up"; o.className = "badge ok";
         modelSel.innerHTML = "";
-        const models = h.ollama.models?.length ? h.ollama.models : [h.model];
-        const prefer = rememberedModel() || h.lastModel || h.model || "";
-        let selected = "";
+        const models = h.ollama.models || [];
         for (const m of models) {
           const opt = document.createElement("option");
-          opt.value = m;
-          opt.textContent = m;
+          opt.value = m; opt.textContent = m;
           modelSel.appendChild(opt);
         }
-        if (prefer && models.includes(prefer)) selected = prefer;
-        else if (h.model && models.includes(h.model)) selected = h.model;
-        else if (models.length) selected = models[0];
-        if (selected) {
-          modelSel.value = selected;
-          rememberModel(selected);
-        }
-        mb.textContent = modelSel.value;
+        if (h.model && models.includes(h.model)) modelSel.value = h.model;
+        document.getElementById("modelBadge").textContent = modelSel.value;
       } else {
-        o.textContent = "ollama: down";
-        o.className = "badge bad";
-        addMsg("system", "Ollama not reachable at 127.0.0.1:11434. Start Ollama and pull a model.");
+        o.textContent = "ollama: down"; o.className = "badge";
       }
+    }
+
+    document.getElementById("searchBadge").onclick = () => {
+      searchEnabled = !searchEnabled;
+      const b = document.getElementById("searchBadge");
+      b.textContent = searchEnabled ? "search: on" : "search: off";
+      b.className = searchEnabled ? "badge ok" : "badge";
+    };
+
+    document.getElementById("newSess").onclick = () => {
+      sessionId = null; messages = []; log.innerHTML = "";
+      addMsg("system", "New session. Local Ollama — no token limits.");
+      saveSession();
+    };
+
+    document.getElementById("diag").onclick = async () => {
+      const r = await fetch("/api/diagnostics");
+      const d = await r.json();
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "code-agent-diag-" + Date.now() + ".json";
+      a.click();
+    };
+
+    async function doSearch(q) {
+      if (!searchEnabled) { addMsg("system", "Search is off. Click the badge."); return; }
+      addMsg("system", "Searching: " + q);
+      try {
+        const r = await fetch("/api/search?q=" + encodeURIComponent(q) + "&force=1");
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "");
+        const card = document.createElement("div");
+        card.className = "tool-card";
+        card.innerHTML = "<strong>Search: " + q + "</strong>";
+        for (const res of (data.results || []).slice(0, 5)) {
+          const div = document.createElement("div");
+          div.innerHTML = `<a href="${res.url}" target="_blank" style="color:var(--accent)">${res.title || "result"}</a><br><span style="color:var(--muted)">${(res.snippet||"").slice(0,200)}</span>`;
+          card.appendChild(div);
+        }
+        log.appendChild(card);
+      } catch (e) { addMsg("system", "Search failed: " + e.message); }
     }
 
     document.getElementById("form").addEventListener("submit", async (ev) => {
@@ -379,38 +291,18 @@
       const input = document.getElementById("input");
       const text = input.value.trim();
       if (!text) return;
-      if (text === "/skills") {
-        input.value = "";
-        fetch("/api/skills").then(r => r.json()).then(d => {
-          addMsg("system", "Skills:\n" + (d.skills || []).map(s => "- " + s.slug).join("\n"));
-        });
-        return;
-      }
-      if (text.startsWith("/search ")) {
-        const q = text.slice(8).trim();
-        input.value = "";
-        if (!q) return;
-        doSearch(q);
-        return;
-      }
-      if (text.startsWith("/skill ")) {
-        const slug = text.slice(7).trim();
-        input.value = "";
-        if (slug) {
-          if (activeSkills.has(slug)) activeSkills.delete(slug);
-          else { if (activeSkills.size >= 3) activeSkills.clear(); activeSkills.add(slug); }
-          loadSkills();
-          refreshCtx();
-          addMsg("system", "Active skills: " + ([...activeSkills].join(", ") || "(none)"));
-        }
-        return;
-      }
       input.value = "";
-      messages.push({ role: "user", content: text });
-      addMsg("user", text);
+      if (text.startsWith("/search ")) { doSearch(text.slice(8).trim()); return; }
+      if (text === "/goldset") {
+        messages.push({ role: "user", content: "Draft a small gold set for the current import or QC context. Use the schema-and-goldsets skill style. Output a tool block if you want me to save it." });
+        addMsg("user", "Draft gold set");
+      } else {
+        messages.push({ role: "user", content: text });
+        addMsg("user", text);
+      }
       const send = document.getElementById("send");
       send.disabled = true;
-      const step = showStep("Thinking…");
+      const assistantEl = addMsg("assistant", "");
       try {
         const r = await fetch("/api/chat", {
           method: "POST",
@@ -420,37 +312,46 @@
             messages,
             contextFiles: [...contextFiles],
             skills: [...activeSkills],
+            stream: true,
           }),
         });
-        rememberModel(modelSel.value);
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || r.statusText);
-        step.querySelector(".step").className = "step done";
-        step.querySelector(".step").innerHTML = `<span class="dot"></span> Done`;
-        messages.push({ role: "assistant", content: data.content });
-        addMsg("assistant", data.content || "(empty)");
-      } catch (e) {
-        step.remove();
-        const msg = String(e && e.message ? e.message : e);
-        if (/failed to fetch|networkerror|load failed/i.test(msg)) {
-          addMsg("system", "Cannot reach the local chat server.\n1) Close this tab\n2) Double-click Desktop CodeAgent again\n3) Wait for the server to start, then retry\nIf the badge says ollama: down, open the Ollama app first.");
-        } else {
-          addMsg("system", "Error: " + msg);
+        if (!r.ok || !r.body) throw new Error("stream failed");
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let full = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = dec.decode(value, { stream: true });
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") continue;
+            try {
+              const j = JSON.parse(data);
+              const delta = j.choices?.[0]?.delta?.content || "";
+              if (delta) { full += delta; assistantEl.textContent = full; log.scrollTop = log.scrollHeight; }
+            } catch {}
+          }
         }
+        messages.push({ role: "assistant", content: full });
+        const tools = extractTools(full);
+        for (const t of tools) addToolCard(t);
+        await saveSession();
+        refreshCtx();
+      } catch (e) {
+        assistantEl.textContent = "Error: " + e.message;
       } finally {
         send.disabled = false;
       }
     });
 
-    modelSel.addEventListener("change", () => {
-      document.getElementById("modelBadge").textContent = modelSel.value;
-      rememberModel(modelSel.value);
-    });
-
-    addMsg("system", "Local coding assistant. Attach files from the left or activate skills. Loopback only.");
+    addMsg("system", "Local coding assistant — Ollama only, no token limits. Sessions, tools (Allow/Deny), search, gold-set helper.");
     health();
     loadTree("");
     loadSkills();
+    loadSessions();
+    if (sessionId) loadSession(sessionId);
   </script>
 </body>
 </html>
