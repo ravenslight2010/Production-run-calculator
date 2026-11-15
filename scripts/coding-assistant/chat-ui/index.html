@@ -3,78 +3,155 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Local coding assistant (pilot)</title>
+  <title>Code Agent</title>
   <link rel="manifest" href="/manifest.webmanifest" />
-  <meta name="theme-color" content="#1a2332" />
+  <meta name="theme-color" content="#0b0f14" />
   <link rel="icon" href="/icons/icon-32.png" type="image/png" />
   <link rel="apple-touch-icon" href="/icons/icon-180.png" />
   <style>
     :root {
-      --bg: #0f1419;
-      --panel: #1a2332;
-      --border: #2d3a4d;
-      --text: #e7ecf3;
+      --bg: #0b0f14;
+      --panel: #141a22;
+      --panel-2: #1c2430;
+      --border: #2a3544;
+      --text: #e8edf5;
       --muted: #8b9bb4;
-      --accent: #3d8bfd;
-      --warn: #e6a23c;
+      --accent: #4c9aff;
+      --accent-dim: #2a5a9a;
       --ok: #3dd68c;
+      --warn: #e6a23c;
+      --danger: #f56c6c;
+      --user: #1a2740;
+      --assistant: #161d28;
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
-      margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
+      margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
       background: var(--bg); color: var(--text);
-      height: 100vh; display: flex; flex-direction: column;
+      display: flex; flex-direction: column;
     }
     header {
-      padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
-      display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;
+      padding: 0.6rem 1rem; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      background: var(--panel); flex-shrink: 0;
+    }
+    header h1 { font-size: 1.05rem; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+    .badge {
+      font-size: 0.7rem; padding: 0.18rem 0.55rem; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
+    }
+    .badge.ok { border-color: var(--ok); color: var(--ok); }
+    .badge.bad { border-color: var(--danger); color: var(--danger); }
+    main { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
+    aside {
+      border-right: 1px solid var(--border); background: #10161e;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    aside section { padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border); overflow: auto; }
+    aside section:last-child { flex: 1; border-bottom: 0; }
+    aside h2 {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); margin: 0 0 0.45rem; font-weight: 600;
+    }
+    .file, .skill-btn {
+      display: block; width: 100%; text-align: left; background: transparent;
+      border: 0; color: var(--text); padding: 0.32rem 0.45rem; border-radius: 6px;
+      cursor: pointer; font-size: 0.82rem; line-height: 1.3;
+    }
+    .file:hover, .skill-btn:hover { background: var(--panel); }
+    .file.active, .skill-btn.active { background: var(--panel-2); outline: 1px solid var(--accent); }
+    .chat { display: flex; flex-direction: column; min-height: 0; position: relative; }
+    #log {
+      flex: 1; overflow: auto; padding: 1rem 1.1rem 0.5rem;
+      display: flex; flex-direction: column; gap: 0.65rem;
+    }
+    .msg {
+      max-width: 920px; padding: 0.7rem 0.95rem; border-radius: 12px;
+      line-height: 1.45; font-size: 0.94rem; white-space: pre-wrap; word-break: break-word;
+      position: relative;
+    }
+    .msg.user { background: var(--user); align-self: flex-end; border-bottom-right-radius: 4px; }
+    .msg.assistant { background: var(--assistant); align-self: flex-start; border-bottom-left-radius: 4px; }
+    .msg.system { background: transparent; color: var(--muted); border: 1px dashed var(--border); font-size: 0.82rem; }
+    .msg .copy {
+      position: absolute; top: 0.4rem; right: 0.4rem; opacity: 0;
+      background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 4px; padding: 0.15rem 0.4rem; font-size: 0.7rem; cursor: pointer;
+    }
+    .msg:hover .copy { opacity: 1; }
+    .step-ledger {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      padding: 0.55rem 0.75rem; font-size: 0.82rem; align-self: flex-start; max-width: 520px;
+    }
+    .step { display: flex; align-items: center; gap: 0.45rem; padding: 0.15rem 0; }
+    .step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .step.running .dot { background: var(--accent); animation: pulse 1.2s infinite; }
+    .step.done .dot { background: var(--ok); }
+    @keyframes pulse { 50% { opacity: 0.4; } }
+    .ctx-bar {
+      display: flex; align-items: center; gap: 0.75rem; padding: 0.35rem 1rem;
+      font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--border);
       background: var(--panel);
     }
-    header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
-    .badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
-    .badge.ok { border-color: var(--ok); color: var(--ok); }
-    .badge.bad { border-color: var(--warn); color: var(--warn); }
-    main { flex: 1; display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
-    aside { border-right: 1px solid var(--border); padding: 0.75rem; overflow: auto; background: #121a24; }
-    aside h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 0.5rem; }
-    .file { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--text); padding: 0.35rem 0.4rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
-    .file:hover { background: var(--panel); }
-    .file.active { background: var(--panel); outline: 1px solid var(--accent); }
-    .chat { display: flex; flex-direction: column; min-height: 0; }
-    #log { flex: 1; overflow: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
-    .msg { max-width: 900px; padding: 0.75rem 1rem; border-radius: 10px; border: 1px solid var(--border); white-space: pre-wrap; line-height: 1.45; font-size: 0.95rem; }
-    .msg.user { background: #1c2a3d; align-self: flex-end; }
-    .msg.assistant { background: var(--panel); align-self: flex-start; }
-    .msg.system { background: transparent; color: var(--muted); border-style: dashed; font-size: 0.85rem; }
-    form { display: flex; gap: 0.5rem; padding: 0.75rem 1rem; border-top: 1px solid var(--border); background: var(--panel); }
-    textarea { flex: 1; resize: none; min-height: 52px; max-height: 160px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 0.6rem 0.75rem; font: inherit; }
-    button, select { border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 0.5rem 0.85rem; font: inherit; cursor: pointer; }
+    .meter { flex: 1; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+    .meter > span { display: block; height: 100%; background: var(--accent); width: 0%; transition: width 0.2s; }
+    form {
+      display: flex; gap: 0.5rem; padding: 0.7rem 1rem; border-top: 1px solid var(--border);
+      background: var(--panel); align-items: flex-end;
+    }
+    textarea {
+      flex: 1; resize: none; min-height: 48px; max-height: 180px;
+      border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
+      color: var(--text); padding: 0.55rem 0.75rem; font: inherit; line-height: 1.4;
+    }
+    textarea:focus { outline: 1px solid var(--accent); }
+    button, select {
+      border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
+      color: var(--text); padding: 0.48rem 0.9rem; font: inherit; cursor: pointer;
+    }
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .ctx { font-size: 0.75rem; color: var(--muted); padding: 0 1rem 0.5rem; }
+    .jump {
+      position: absolute; bottom: 4.5rem; right: 1.2rem; background: var(--panel-2);
+      border: 1px solid var(--border); color: var(--text); border-radius: 999px;
+      padding: 0.3rem 0.7rem; font-size: 0.75rem; cursor: pointer; display: none;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0 1rem 0.3rem; }
+    .chip { font-size: 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.5rem; }
   </style>
 </head>
 <body>
   <header>
-    <h1>Local coding assistant</h1>
-    <span class="badge" id="mode">read-only pilot</span>
+    <h1>Code Agent</h1>
+    <span class="badge" id="mode">local</span>
     <span class="badge" id="ollama">ollama: …</span>
     <span class="badge" id="modelBadge">model</span>
     <select id="model" title="Ollama model"></select>
   </header>
   <main>
     <aside>
-      <h2>Skills</h2>
-      <div id="skills"></div>
-      <h2>Repo</h2>
-      <div id="tree"></div>
-      <p style="color:var(--muted);font-size:0.75rem;margin-top:1rem">Click files to attach as context (max 6). No writes.</p>
+      <section>
+        <h2>Skills</h2>
+        <div id="skills"></div>
+      </section>
+      <section>
+        <h2>Repo</h2>
+        <div id="tree"></div>
+        <p style="color:var(--muted);font-size:0.7rem;margin:0.6rem 0 0">Click files to attach (max 6)</p>
+      </section>
     </aside>
     <section class="chat">
       <div id="log"></div>
-      <div class="ctx" id="ctxLabel">Context: none</div>
+      <button class="jump" id="jump">Jump to latest</button>
+      <div class="chips" id="chips"></div>
+      <div class="ctx-bar">
+        <span id="ctxLabel">Context: none</span>
+        <div class="meter" title="Approx. context usage"><span id="meterFill"></span></div>
+        <span id="meterText">0%</span>
+      </div>
       <form id="form">
-        <textarea id="input" placeholder="Ask about this repo…" rows="2"></textarea>
+        <textarea id="input" placeholder="Ask about this repo, imports, QC, sync…" rows="2"></textarea>
         <button type="submit" class="primary" id="send">Send</button>
       </form>
     </section>
@@ -84,6 +161,10 @@
     const tree = document.getElementById("tree");
     const modelSel = document.getElementById("model");
     const ctxLabel = document.getElementById("ctxLabel");
+    const chips = document.getElementById("chips");
+    const meterFill = document.getElementById("meterFill");
+    const meterText = document.getElementById("meterText");
+    const jump = document.getElementById("jump");
     const messages = [];
     const contextFiles = new Set();
     const activeSkills = new Set();
@@ -92,14 +173,57 @@
       const el = document.createElement("div");
       el.className = "msg " + role;
       el.textContent = text;
+      if (role !== "system") {
+        const c = document.createElement("button");
+        c.className = "copy";
+        c.textContent = "Copy";
+        c.onclick = () => navigator.clipboard.writeText(text);
+        el.appendChild(c);
+      }
       log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
+      if (isNearBottom()) log.scrollTop = log.scrollHeight;
+      else jump.style.display = "block";
+      return el;
     }
 
+    function isNearBottom() {
+      return log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    }
+    log.addEventListener("scroll", () => {
+      jump.style.display = isNearBottom() ? "none" : "block";
+    });
+    jump.onclick = () => { log.scrollTop = log.scrollHeight; jump.style.display = "none"; };
+
     function refreshCtx() {
-      ctxLabel.textContent = contextFiles.size
-        ? "Context: " + [...contextFiles].join(", ")
-        : "Context: none";
+      const files = [...contextFiles];
+      ctxLabel.textContent = files.length ? "Context: " + files.join(", ") : "Context: none";
+      chips.innerHTML = "";
+      files.forEach(f => {
+        const c = document.createElement("span");
+        c.className = "chip";
+        c.textContent = f.split("/").pop();
+        chips.appendChild(c);
+      });
+      activeSkills.forEach(s => {
+        const c = document.createElement("span");
+        c.className = "chip";
+        c.textContent = "skill:" + s;
+        chips.appendChild(c);
+      });
+      // Rough token estimate: ~4 chars per token
+      const est = (files.join(" ").length + [...activeSkills].join(" ").length) / 4;
+      const pct = Math.min(100, Math.round(est / 80)); // soft ceiling visual
+      meterFill.style.width = pct + "%";
+      meterText.textContent = pct + "%";
+    }
+
+    function showStep(label) {
+      const el = document.createElement("div");
+      el.className = "step-ledger";
+      el.innerHTML = `<div class="step running"><span class="dot"></span> ${label}</div>`;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
     }
 
     async function loadTree(p = "") {
@@ -117,6 +241,7 @@
         const b = document.createElement("button");
         b.className = "file";
         b.textContent = (e.type === "dir" ? "📁 " : "📄 ") + e.name;
+        if (contextFiles.has(e.path)) b.classList.add("active");
         b.onclick = () => {
           if (e.type === "dir") loadTree(e.path);
           else {
@@ -125,7 +250,7 @@
               if (contextFiles.size >= 6) contextFiles.clear();
               contextFiles.add(e.path);
             }
-            b.classList.toggle("active", contextFiles.has(e.path));
+            loadTree(p);
             refreshCtx();
           }
         };
@@ -145,7 +270,6 @@
       }).catch(() => {});
     }
 
-    
     async function loadSkills() {
       const el = document.getElementById("skills");
       if (!el) return;
@@ -155,7 +279,7 @@
         el.innerHTML = "";
         for (const s of (data.skills || []).slice(0, 80)) {
           const b = document.createElement("button");
-          b.className = "file";
+          b.className = "skill-btn" + (activeSkills.has(s.slug) ? " active" : "");
           b.textContent = (activeSkills.has(s.slug) ? "✓ " : "") + (s.slug || s.name);
           b.title = s.description || s.name || s.slug;
           b.onclick = () => {
@@ -165,67 +289,11 @@
               activeSkills.add(s.slug);
             }
             loadSkills();
-
-    const setTokenBtn = document.getElementById("setToken");
-    if (setTokenBtn) {
-      setTokenBtn.addEventListener("click", async () => {
-        try {
-          const st = await (await fetch("/api/secrets/status")).json();
-          const msg = st.githubConfigured
-            ? ("Token on file (" + (st.githubHint || "set") + "). Enter a new token to replace, or type CLEAR to remove.")
-            : "Paste a GitHub PAT (repo scope). Stored only in agent config, never shown fully again.";
-          const token = prompt(msg);
-          if (token === null) return;
-          if (token.trim().toUpperCase() === "CLEAR") {
-            const r = await fetch("/api/secrets/github", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ clear: true }),
-            });
-            const d = await r.json();
-            if (!r.ok) throw new Error(d.error || r.statusText);
-            addMsg("system", "GitHub token cleared.");
-            return;
-          }
-          const r = await fetch("/api/secrets/github", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: token.trim() }),
-          });
-          const d = await r.json();
-          if (!r.ok) throw new Error(d.error || r.statusText);
-          addMsg("system", "GitHub token saved (" + (d.githubHint || "ok") + "). Shell gets GITHUB_TOKEN/GH_TOKEN. Full value is not returned to the browser.");
-        } catch (e) {
-          addMsg("system", "Token save failed: " + e.message);
-        }
-      });
-    }
-
-
-    const runShellBtn = document.getElementById("runShell");
-    if (runShellBtn) {
-      runShellBtn.addEventListener("click", async () => {
-        const command = prompt("Command to run in repo root (blocked: plant paths, secrets, destructive disk ops):");
-        if (!command) return;
-        try {
-          const r = await fetch("/api/shell", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ command }),
-          });
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.error || r.statusText);
-          addMsg("system", "exit " + data.code + "\n" + (data.stdout || "") + (data.stderr ? "\nSTDERR:\n" + data.stderr : ""));
-        } catch (e) {
-          addMsg("system", "Shell failed: " + e.message);
-        }
-      });
-    }
-
+            refreshCtx();
           };
           el.appendChild(b);
         }
-      } catch (e) {
+      } catch {
         el.textContent = "Skills unavailable";
       }
     }
@@ -248,7 +316,6 @@
           opt.textContent = m;
           modelSel.appendChild(opt);
         }
-        // Prefer exact last-used, then server default, then first list entry
         if (prefer && models.includes(prefer)) selected = prefer;
         else if (h.model && models.includes(h.model)) selected = h.model;
         else if (models.length) selected = models[0];
@@ -283,63 +350,7 @@
           if (activeSkills.has(slug)) activeSkills.delete(slug);
           else { if (activeSkills.size >= 3) activeSkills.clear(); activeSkills.add(slug); }
           loadSkills();
-
-    const setTokenBtn = document.getElementById("setToken");
-    if (setTokenBtn) {
-      setTokenBtn.addEventListener("click", async () => {
-        try {
-          const st = await (await fetch("/api/secrets/status")).json();
-          const msg = st.githubConfigured
-            ? ("Token on file (" + (st.githubHint || "set") + "). Enter a new token to replace, or type CLEAR to remove.")
-            : "Paste a GitHub PAT (repo scope). Stored only in agent config, never shown fully again.";
-          const token = prompt(msg);
-          if (token === null) return;
-          if (token.trim().toUpperCase() === "CLEAR") {
-            const r = await fetch("/api/secrets/github", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ clear: true }),
-            });
-            const d = await r.json();
-            if (!r.ok) throw new Error(d.error || r.statusText);
-            addMsg("system", "GitHub token cleared.");
-            return;
-          }
-          const r = await fetch("/api/secrets/github", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: token.trim() }),
-          });
-          const d = await r.json();
-          if (!r.ok) throw new Error(d.error || r.statusText);
-          addMsg("system", "GitHub token saved (" + (d.githubHint || "ok") + "). Shell gets GITHUB_TOKEN/GH_TOKEN. Full value is not returned to the browser.");
-        } catch (e) {
-          addMsg("system", "Token save failed: " + e.message);
-        }
-      });
-    }
-
-
-    const runShellBtn = document.getElementById("runShell");
-    if (runShellBtn) {
-      runShellBtn.addEventListener("click", async () => {
-        const command = prompt("Command to run in repo root (blocked: plant paths, secrets, destructive disk ops):");
-        if (!command) return;
-        try {
-          const r = await fetch("/api/shell", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ command }),
-          });
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.error || r.statusText);
-          addMsg("system", "exit " + data.code + "\n" + (data.stdout || "") + (data.stderr ? "\nSTDERR:\n" + data.stderr : ""));
-        } catch (e) {
-          addMsg("system", "Shell failed: " + e.message);
-        }
-      });
-    }
-
+          refreshCtx();
           addMsg("system", "Active skills: " + ([...activeSkills].join(", ") || "(none)"));
         }
         return;
@@ -349,6 +360,7 @@
       addMsg("user", text);
       const send = document.getElementById("send");
       send.disabled = true;
+      const step = showStep("Thinking…");
       try {
         const r = await fetch("/api/chat", {
           method: "POST",
@@ -359,20 +371,19 @@
             contextFiles: [...contextFiles],
             skills: [...activeSkills],
           }),
-        rememberModel(modelSel.value);
         });
+        rememberModel(modelSel.value);
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || r.statusText);
+        step.querySelector(".step").className = "step done";
+        step.querySelector(".step").innerHTML = `<span class="dot"></span> Done`;
         messages.push({ role: "assistant", content: data.content });
         addMsg("assistant", data.content || "(empty)");
       } catch (e) {
+        step.remove();
         const msg = String(e && e.message ? e.message : e);
         if (/failed to fetch|networkerror|load failed/i.test(msg)) {
-          addMsg("system", "Cannot reach the local chat server (failed to fetch).\n" +
-            "1) Close this tab\n" +
-            "2) Double-click Desktop CodeAgent again\n" +
-            "3) Wait for the window/server to start, then retry\n" +
-            "If the badge says ollama: down, open the Ollama app from Start Menu first.");
+          addMsg("system", "Cannot reach the local chat server.\n1) Close this tab\n2) Double-click Desktop CodeAgent again\n3) Wait for the server to start, then retry\nIf the badge says ollama: down, open the Ollama app first.");
         } else {
           addMsg("system", "Error: " + msg);
         }
@@ -386,70 +397,10 @@
       rememberModel(modelSel.value);
     });
 
-    addMsg("system", "Read-only pilot chat. Loopback only. Attach files from the left for context. For OpenCode tool-denial testing, use the rendered OpenCode profile.");
+    addMsg("system", "Local coding assistant. Attach files from the left or activate skills. Loopback only.");
     health();
     loadTree("");
     loadSkills();
-
-    const setTokenBtn = document.getElementById("setToken");
-    if (setTokenBtn) {
-      setTokenBtn.addEventListener("click", async () => {
-        try {
-          const st = await (await fetch("/api/secrets/status")).json();
-          const msg = st.githubConfigured
-            ? ("Token on file (" + (st.githubHint || "set") + "). Enter a new token to replace, or type CLEAR to remove.")
-            : "Paste a GitHub PAT (repo scope). Stored only in agent config, never shown fully again.";
-          const token = prompt(msg);
-          if (token === null) return;
-          if (token.trim().toUpperCase() === "CLEAR") {
-            const r = await fetch("/api/secrets/github", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ clear: true }),
-            });
-            const d = await r.json();
-            if (!r.ok) throw new Error(d.error || r.statusText);
-            addMsg("system", "GitHub token cleared.");
-            return;
-          }
-          const r = await fetch("/api/secrets/github", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: token.trim() }),
-          });
-          const d = await r.json();
-          if (!r.ok) throw new Error(d.error || r.statusText);
-          addMsg("system", "GitHub token saved (" + (d.githubHint || "ok") + "). Shell gets GITHUB_TOKEN/GH_TOKEN. Full value is not returned to the browser.");
-        } catch (e) {
-          addMsg("system", "Token save failed: " + e.message);
-        }
-      });
-    }
-
-
-    const runShellBtn = document.getElementById("runShell");
-    if (runShellBtn) {
-      runShellBtn.addEventListener("click", async () => {
-        const command = prompt("Command to run in repo root (blocked: plant paths, secrets, destructive disk ops):");
-        if (!command) return;
-        try {
-          const r = await fetch("/api/shell", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ command }),
-          });
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.error || r.statusText);
-          addMsg("system", "exit " + data.code + "\n" + (data.stdout || "") + (data.stderr ? "\nSTDERR:\n" + data.stderr : ""));
-        } catch (e) {
-          addMsg("system", "Shell failed: " + e.message);
-        }
-      });
-    }
-
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
-    }
   </script>
 </body>
 </html>
