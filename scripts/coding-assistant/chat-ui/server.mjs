@@ -1,45 +1,37 @@
 #!/usr/bin/env node
 /**
- * Localhost-only coding-assistant chat UI (pilot).
- *
- * - Binds 127.0.0.1 only
- * - Talks to Ollama OpenAI-compatible API on 127.0.0.1:11434
- * - Optional read-only repo file access under repo root (no writes)
- * - Does not implement OpenCode tools; system prompt states read-only limits
- *
- *   node scripts/coding-assistant/chat-ui/server.mjs
- *   node scripts/coding-assistant/chat-ui/server.mjs --port 7843 --model qwen2.5-coder:7b
+ * Local coding assistant chat UI (local Ollama only — no cloud token limits).
+ * Binds 127.0.0.1. Optional search. Sessions, tools with approval, gold-set helper.
  */
 import http from "node:http";
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, appendFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 function findRepoRoot(start) {
   if (process.env.RUNCALC_REPO && existsSync(path.join(process.env.RUNCALC_REPO, "package.json"))) {
     return path.resolve(process.env.RUNCALC_REPO);
   }
   let dir = start;
   for (let i = 0; i < 8; i++) {
-    if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "pnpm-workspace.yaml"))) {
-      return dir;
-    }
-    if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "scripts"))) {
-      return dir;
-    }
+    if (existsSync(path.join(dir, "package.json"))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  // Fallback: legacy depth from scripts/coding-assistant/chat-ui
   return path.resolve(start, "../../..");
 }
-const root = findRepoRoot(__dirname);
+let root = findRepoRoot(__dirname);
+
+const AGENT_ROOT = process.env.CA_AGENT_ROOT || path.join(path.dirname(root), "agent");
+const SESSIONS_DIR = path.join(AGENT_ROOT, "sessions");
+if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
 
 function secretsPath() {
-  const dir = process.env.CA_SECRETS_DIR || path.join(path.dirname(root), "config");
-  return path.join(dir, "secrets.json");
+  return path.join(AGENT_ROOT, "config", "secrets.json");
 }
 function readSecretsFile() {
   try {
@@ -55,100 +47,74 @@ function writeSecretsFile(obj) {
   writeFileSync(p, JSON.stringify(obj, null, 2), { encoding: "utf8", mode: 0o600 });
 }
 
-
 function skillsRoot() {
-  if (process.env.CA_SKILLS_DIR && existsSync(process.env.CA_SKILLS_DIR)) {
-    return process.env.CA_SKILLS_DIR;
-  }
   const candidates = [
+    process.env.CA_SKILLS_DIR,
+    path.join(process.env.USERPROFILE || process.env.HOME || "", ".config", "opencode", "skills"),
+    path.join(root, "scripts", "coding-assistant", "domain-skills"),
     path.join(root, "agent-skills"),
-    path.join(path.dirname(root), "agent-skills"),
-    path.join(__dirname, "..", "..", "..", "agent-skills"),
-    path.join(__dirname, "skills"),
-  ];
+  ].filter(Boolean);
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
   return null;
 }
-
 function listSkills() {
   const base = skillsRoot();
   if (!base) return [];
-  const cat = path.join(base, "catalog.json");
-  if (existsSync(cat)) {
-    try {
-      const j = JSON.parse(readFileSync(cat, "utf8"));
-      return j.skills || [];
-    } catch {}
-  }
-  return readdirSync(base, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => ({ slug: d.name, name: d.name, path: `agent-skills/${d.name}/SKILL.md` }));
+  try {
+    return readdirSync(base, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => ({ slug: d.name, name: d.name }));
+  } catch { return []; }
 }
-
 function loadSkill(slug) {
   const base = skillsRoot();
-  if (!base || !slug || slug.includes("..") || slug.includes("/") || slug.includes("\\")) return null;
+  if (!base || !slug || /[\\/]/.test(slug) || slug.includes("..")) return null;
   const p = path.join(base, slug, "SKILL.md");
   if (!existsSync(p)) return null;
-  const st = statSync(p);
-  if (st.size > 250_000) return { slug, content: readFileSync(p, "utf8").slice(0, 200_000) + "\n\n[truncated]" };
-  return { slug, content: readFileSync(p, "utf8") };
+  return { slug, content: readFileSync(p, "utf8").slice(0, 120000) };
 }
 
-const prefsPath = path.join(root, "ca-prefs.json");
+const prefsPath = path.join(AGENT_ROOT, "config", "prefs.json");
 function readPrefs() {
-  try {
-    if (existsSync(prefsPath)) return JSON.parse(readFileSync(prefsPath, "utf8"));
-  } catch {}
+  try { if (existsSync(prefsPath)) return JSON.parse(readFileSync(prefsPath, "utf8")); } catch {}
   return {};
 }
 function writePrefs(p) {
-  try {
-    writeFileSync(prefsPath, JSON.stringify(p, null, 2), "utf8");
-  } catch (e) {
-    console.warn("prefs write failed", e.message || e);
-  }
+  const dir = path.dirname(prefsPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(prefsPath, JSON.stringify(p, null, 2));
 }
 
 const args = process.argv.slice(2);
-const flag = (n, d) => {
-  const i = args.indexOf(n);
-  return i >= 0 ? args[i + 1] : d;
-};
-
+const flag = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const HOST = "127.0.0.1";
 const PORT = Number(flag("--port", "7843")) || 7843;
 const OLLAMA = flag("--ollama", "http://127.0.0.1:11434");
 const MODEL = flag("--model", "qwen2.5-coder:7b");
 
-const SYSTEM = `You are a local coding assistant for the Production Run Calculator monorepo.
-You help with code, tests, imports, sync, QC, and UI under the configured repository root.
+const SYSTEM = `You are a local coding assistant (Ollama only — no cloud token limits).
+Repo root: ${root}
+Help with code, imports, gold sets, QC, sync, and multi-version work (v1/v2/v3).
 
-Capabilities depend on environment flags:
-- File reads of the repo tree are always available via context.
-- When CA_ALLOW_WRITE=1, the operator can save files under the repo root via the UI.
-- When CA_ALLOW_SHELL=1, the operator can run allowlisted shell commands in the repo root via the UI.
-
-Hard limits (never violate):
-- Do not access plant data volumes (e.g. paths containing /plant or \\plant\\).
-- Do not read or write .env, credentials, private keys, or secret stores.
-- Do not suggest exfiltrating secrets or disabling auth.
-- Prefer existing workspace packages over new frameworks.
-- Be concise and practical; show concrete file paths and patches.
-
-Optional internet search:
-- When the operator has enabled search, you may ask them to run a search (or they can type /search <query>).
-- Prefer local knowledge and attached files first. Use search only for external docs, current best practices, or library details not in the repo.
-- If search is unavailable (offline or disabled), continue with local context only and say so.
-`;
+Tools (request via structured JSON in your reply when needed):
+- To propose a file edit, reply with a fenced block: \`\`\`tool
+{"tool":"edit","path":"relative/path","old":"exact text","new":"replacement"}
+\`\`\`
+- To run a shell command: \`\`\`tool
+{"tool":"shell","command":"safe command"}
+\`\`\`
+- For gold-set draft: \`\`\`tool
+{"tool":"goldset","sheet":"schedule|dough|...","examples":[...]}
+\`\`\`
+The UI will show an approval card. Prefer local files and skills first.
+Optional search is available when the user enables it (/search).
+Be concise. Show concrete paths.`;
 
 function safeResolve(rel) {
   const cleaned = String(rel || "").replace(/\\/g, "/").replace(/^\/+/, "");
-  if (cleaned.includes("..") || cleaned.startsWith(".git/") || cleaned.includes("/.git/")) {
-    return null;
-  }
+  if (cleaned.includes("..") || cleaned.includes(".git")) return null;
   const abs = path.resolve(root, cleaned);
   if (!abs.startsWith(root)) return null;
   return abs;
@@ -156,14 +122,9 @@ function safeResolve(rel) {
 
 function send(res, status, body, type = "application/json; charset=utf-8") {
   const data = typeof body === "string" ? body : JSON.stringify(body);
-  res.writeHead(status, {
-    "Content-Type": type,
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-  });
+  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
   res.end(data);
 }
-
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -171,6 +132,33 @@ function readBody(req) {
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
+}
+
+function sessionFile(id) { return path.join(SESSIONS_DIR, id + ".json"); }
+function listSessions() {
+  try {
+    return readdirSync(SESSIONS_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        const p = path.join(SESSIONS_DIR, f);
+        try {
+          const j = JSON.parse(readFileSync(p, "utf8"));
+          return { id: j.id, title: j.title || j.id, updated: j.updated || 0, messages: (j.messages || []).length };
+        } catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.updated - a.updated)
+      .slice(0, 40);
+  } catch { return []; }
+}
+function loadSession(id) {
+  const p = sessionFile(id);
+  if (!existsSync(p)) return null;
+  return JSON.parse(readFileSync(p, "utf8"));
+}
+function saveSession(sess) {
+  sess.updated = Date.now();
+  writeFileSync(sessionFile(sess.id), JSON.stringify(sess, null, 2));
 }
 
 const publicIndex = path.join(__dirname, "index.html");
@@ -183,126 +171,145 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, readFileSync(publicIndex, "utf8"), "text/html; charset=utf-8");
   }
 
-  // PWA / static assets (icons, manifest, service worker)
+  // static
   if (req.method === "GET") {
     const staticMap = {
       "/manifest.webmanifest": ["manifest.webmanifest", "application/manifest+json; charset=utf-8"],
       "/sw.js": ["sw.js", "application/javascript; charset=utf-8"],
-      "/icons/icon-16.png": ["icons/icon-16.png", "image/png"],
-      "/icons/icon-32.png": ["icons/icon-32.png", "image/png"],
-      "/icons/icon-48.png": ["icons/icon-48.png", "image/png"],
-      "/icons/icon-180.png": ["icons/icon-180.png", "image/png"],
-      "/icons/icon-192.png": ["icons/icon-192.png", "image/png"],
-      "/icons/icon-512.png": ["icons/icon-512.png", "image/png"],
-      "/icons/coding-assistant.ico": ["icons/coding-assistant.ico", "image/x-icon"],
     };
     const hit = staticMap[url.pathname];
     if (hit) {
       const abs = path.join(__dirname, hit[0]);
-      if (!existsSync(abs)) return send(res, 404, { error: "missing asset" });
-      res.writeHead(200, {
-        "Content-Type": hit[1],
-        "Cache-Control": url.pathname === "/sw.js" ? "no-cache" : "public, max-age=86400",
-      });
-      res.end(readFileSync(abs));
-      return;
+      if (existsSync(abs)) {
+        res.writeHead(200, { "Content-Type": hit[1] });
+        res.end(readFileSync(abs));
+        return;
+      }
+    }
+    if (url.pathname.startsWith("/icons/")) {
+      const abs = path.join(__dirname, url.pathname);
+      if (existsSync(abs)) {
+        res.writeHead(200, { "Content-Type": "image/png" });
+        res.end(readFileSync(abs));
+        return;
+      }
     }
   }
 
-  
   if (req.method === "GET" && url.pathname === "/api/skills") {
     return send(res, 200, { skills: listSkills(), root: skillsRoot() });
   }
   if (req.method === "GET" && url.pathname === "/api/skill") {
-    const slug = url.searchParams.get("slug") || "";
-    const sk = loadSkill(slug);
-    if (!sk) return send(res, 404, { error: "skill not found" });
+    const sk = loadSkill(url.searchParams.get("slug") || "");
+    if (!sk) return send(res, 404, { error: "not found" });
     return send(res, 200, sk);
   }
 
-
-  if (req.method === "GET" && url.pathname === "/api/secrets/status") {
-    const s = readSecretsFile();
-    const hasGh = Boolean(s.githubToken && String(s.githubToken).length > 8);
-    return send(res, 200, {
-      githubConfigured: hasGh,
-      githubHint: hasGh ? String(s.githubToken).slice(0, 4) + "…" + String(s.githubToken).slice(-4) : null,
-      path: secretsPath(),
-    });
+  if (req.method === "GET" && url.pathname === "/api/sessions") {
+    return send(res, 200, { sessions: listSessions() });
   }
-  if (req.method === "POST" && url.pathname === "/api/secrets/github") {
-    let payload;
+  if (req.method === "POST" && url.pathname === "/api/sessions") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const id = body.id || randomUUID().slice(0, 8);
+    const sess = loadSession(id) || { id, title: body.title || "New session", messages: [], repo: root };
+    if (body.messages) sess.messages = body.messages;
+    if (body.title) sess.title = body.title;
+    saveSession(sess);
+    return send(res, 200, sess);
+  }
+  if (req.method === "GET" && url.pathname === "/api/session") {
+    const s = loadSession(url.searchParams.get("id") || "");
+    if (!s) return send(res, 404, { error: "not found" });
+    return send(res, 200, s);
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/repo") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    const next = body.path;
+    if (next && existsSync(path.join(next, "package.json"))) {
+      root = path.resolve(next);
+      return send(res, 200, { ok: true, root });
+    }
+    return send(res, 400, { error: "invalid repo" });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/diagnostics") {
+    const diag = {
+      time: new Date().toISOString(),
+      repo: root,
+      model: readPrefs().lastModel || MODEL,
+      ollama: OLLAMA,
+      skills: listSkills().map((s) => s.slug),
+      sessions: listSessions().length,
+      searchAllowed: process.env.CA_ALLOW_SEARCH === "1",
+    };
+    return send(res, 200, diag);
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/search") {
+    const allow = process.env.CA_ALLOW_SEARCH === "1" || url.searchParams.get("force") === "1";
+    if (!allow) return send(res, 403, { error: "search disabled" });
+    const q = (url.searchParams.get("q") || "").trim();
+    if (!q) return send(res, 400, { error: "missing q" });
     try {
-      payload = JSON.parse(await readBody(req));
-    } catch {
-      return send(res, 400, { error: "invalid JSON" });
+      const ddg = new URL("https://api.duckduckgo.com/");
+      ddg.searchParams.set("q", q);
+      ddg.searchParams.set("format", "json");
+      ddg.searchParams.set("no_html", "1");
+      const r = await fetch(ddg, { signal: AbortSignal.timeout(10000) });
+      const j = await r.json();
+      const results = [];
+      if (j.AbstractText) results.push({ title: j.Heading || q, snippet: j.AbstractText, url: j.AbstractURL || "" });
+      for (const t of (j.RelatedTopics || []).slice(0, 5)) {
+        if (t.Text && t.FirstURL) results.push({ title: t.Text.slice(0, 80), snippet: t.Text, url: t.FirstURL });
+      }
+      return send(res, 200, { query: q, results, source: "duckduckgo" });
+    } catch (e) {
+      return send(res, 503, { error: "search unavailable", detail: String(e.message || e) });
     }
-    if (payload.clear) {
-      const s = readSecretsFile();
-      delete s.githubToken;
-      writeSecretsFile(s);
-      return send(res, 200, { ok: true, githubConfigured: false });
-    }
-    const token = String(payload.token || "").trim();
-    if (!token || token.length < 20 || token.length > 300) {
-      return send(res, 400, { error: "invalid token" });
-    }
-    if (/\s/.test(token)) return send(res, 400, { error: "token must not contain spaces" });
-    if (!/^(ghp_|github_pat_|gho_|ghu_|ghs_)/.test(token)) {
-      return send(res, 400, { error: "token does not look like a GitHub PAT" });
-    }
-    const s = readSecretsFile();
-    s.githubToken = token;
-    s.updatedAtUtc = new Date().toISOString();
-    writeSecretsFile(s);
-    return send(res, 200, {
-      ok: true,
-      githubConfigured: true,
-      githubHint: token.slice(0, 4) + "…" + token.slice(-4),
-    });
   }
 
-if (req.method === "GET" && url.pathname === "/api/health") {
+  if (req.method === "POST" && url.pathname === "/api/tool/apply") {
+    const body = JSON.parse(await readBody(req) || "{}");
+    if (body.tool === "edit") {
+      const abs = safeResolve(body.path);
+      if (!abs || !existsSync(abs)) return send(res, 404, { error: "file not found" });
+      let content = readFileSync(abs, "utf8");
+      if (body.old && content.includes(body.old)) {
+        content = content.replace(body.old, body.new || "");
+        writeFileSync(abs, content);
+        return send(res, 200, { ok: true, path: body.path });
+      }
+      return send(res, 400, { error: "old text not found" });
+    }
+    if (body.tool === "shell") {
+      if (process.env.CA_ALLOW_SHELL !== "1") return send(res, 403, { error: "shell disabled" });
+      const { spawn } = await import("node:child_process");
+      const isWin = process.platform === "win32";
+      const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", body.command] : ["-lc", body.command], { cwd: root, windowsHide: true });
+      let out = "";
+      child.stdout.on("data", (d) => { out += d.toString(); });
+      child.stderr.on("data", (d) => { out += d.toString(); });
+      const code = await new Promise((r) => child.on("close", r));
+      return send(res, 200, { ok: code === 0, code, output: out.slice(0, 8000) });
+    }
+    return send(res, 400, { error: "unknown tool" });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/health") {
     let ollama = { ok: false };
     try {
-      const r = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(5000) });
+      const r = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(4000) });
       const j = await r.json();
-      ollama = {
-        ok: r.ok,
-        models: (j.models || []).map((m) => m.name || m.model).filter(Boolean),
-      };
-    } catch (e) {
-      ollama = { ok: false, error: String(e.message || e) };
-    }
-    return send(res, 200, {
-      ok: true,
-      bind: `${HOST}:${PORT}`,
-      repoRoot: root,
-      model: readPrefs().lastModel || MODEL,
-      lastModel: readPrefs().lastModel || MODEL,
-      ollama,
-      mode: "read-only-chat-pilot",
-    });
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/file") {
-    const rel = url.searchParams.get("path") || "";
-    const abs = safeResolve(rel);
-    if (!abs || !existsSync(abs) || !statSync(abs).isFile()) {
-      return send(res, 404, { error: "file not found or blocked" });
-    }
-    const st = statSync(abs);
-    if (st.size > 400_000) return send(res, 413, { error: "file too large" });
-    const text = readFileSync(abs, "utf8");
-    return send(res, 200, { path: rel, content: text });
+      ollama = { ok: r.ok, models: (j.models || []).map((m) => m.name).filter(Boolean) };
+    } catch (e) { ollama = { ok: false, error: String(e.message || e) }; }
+    return send(res, 200, { ok: true, repoRoot: root, model: readPrefs().lastModel || MODEL, ollama, mode: "local-ollama" });
   }
 
   if (req.method === "GET" && url.pathname === "/api/tree") {
     const rel = url.searchParams.get("path") || "";
     const abs = safeResolve(rel) || root;
-    if (!existsSync(abs) || !statSync(abs).isDirectory()) {
-      return send(res, 404, { error: "not a directory" });
-    }
+    if (!existsSync(abs) || !statSync(abs).isDirectory()) return send(res, 404, { error: "not a dir" });
     const entries = readdirSync(abs, { withFileTypes: true })
       .filter((d) => d.name !== ".git" && d.name !== "node_modules")
       .slice(0, 200)
@@ -314,176 +321,69 @@ if (req.method === "GET" && url.pathname === "/api/health") {
     return send(res, 200, { path: path.relative(root, abs).replace(/\\/g, "/") || ".", entries });
   }
 
-  
-  if (req.method === "GET" && url.pathname === "/api/prefs") {
-    return send(res, 200, readPrefs());
-  }
-  if (req.method === "POST" && url.pathname === "/api/prefs") {
-    let payload;
-    try {
-      payload = JSON.parse(await readBody(req));
-    } catch {
-      return send(res, 400, { error: "invalid JSON" });
-    }
-    const cur = readPrefs();
-    if (payload.lastModel) cur.lastModel = String(payload.lastModel);
-    writePrefs(cur);
-    return send(res, 200, cur);
+  if (req.method === "GET" && url.pathname === "/api/file") {
+    const abs = safeResolve(url.searchParams.get("path") || "");
+    if (!abs || !existsSync(abs) || !statSync(abs).isFile()) return send(res, 404, { error: "not found" });
+    if (statSync(abs).size > 400000) return send(res, 413, { error: "too large" });
+    return send(res, 200, { path: url.searchParams.get("path"), content: readFileSync(abs, "utf8") });
   }
 
-
-  if (req.method === "POST" && url.pathname === "/api/shell") {
-    if (process.env.CA_ALLOW_SHELL !== "1") {
-      return send(res, 403, { error: "shell disabled" });
-    }
-    let payload;
-    try {
-      payload = JSON.parse(await readBody(req));
-    } catch {
-      return send(res, 400, { error: "invalid JSON" });
-    }
-    const cmd = String(payload.command || "").trim();
-    if (!cmd || cmd.length > 2000) return send(res, 400, { error: "invalid command" });
-    const blocked = [
-      /rm\s+-rf\s+[\/\\]/i,
-      /format\s+/i,
-      /shutdown/i,
-      /mkfs/i,
-      /:\s*\{\s*:/,
-      /curl\s+.*\|.*(sh|bash)/i,
-      /wget\s+.*\|.*(sh|bash)/i,
-      /\\\\plant\\\\/i,
-      /\/plant\//i,
-      /\.env\b/i,
-      /reg\s+delete/i,
-      /Remove-Item\s+-Recurse\s+-Force\s+[A-Z]:\\/i,
-    ];
-    if (blocked.some((re) => re.test(cmd))) {
-      return send(res, 403, { error: "command blocked by policy" });
-    }
-    const { spawn } = await import("node:child_process");
-    const cwd = root;
-    const isWin = process.platform === "win32";
-    const sec = readSecretsFile();
-    const shellEnv = { ...process.env, CA_ALLOW_SHELL: "1" };
-    if (sec.githubToken) {
-      shellEnv.GITHUB_TOKEN = sec.githubToken;
-      shellEnv.GH_TOKEN = sec.githubToken;
-    }
-    const child = spawn(isWin ? "cmd.exe" : "bash", isWin ? ["/d", "/s", "/c", cmd] : ["-lc", cmd], {
-      cwd,
-      env: shellEnv,
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    const max = 200_000;
-    child.stdout.on("data", (d) => {
-      if (stdout.length < max) stdout += d.toString("utf8");
-    });
-    child.stderr.on("data", (d) => {
-      if (stderr.length < max) stderr += d.toString("utf8");
-    });
-    const code = await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        try { child.kill(); } catch {}
-        resolve(-1);
-      }, 60_000);
-      child.on("close", (c) => {
-        clearTimeout(timer);
-        resolve(c ?? 0);
-      });
-    });
-    return send(res, 200, {
-      ok: code === 0,
-      code,
-      stdout: stdout.slice(0, max),
-      stderr: stderr.slice(0, max),
-      cwd,
-    });
-  }
-
-
-  if (req.method === "GET" && url.pathname === "/api/search") {
-    const allow = process.env.CA_ALLOW_SEARCH === "1" || url.searchParams.get("force") === "1";
-    if (!allow) {
-      return send(res, 403, { error: "search disabled", hint: "Set CA_ALLOW_SEARCH=1 or use UI toggle" });
-    }
-    const q = (url.searchParams.get("q") || "").trim();
-    if (!q || q.length > 300) return send(res, 400, { error: "missing or too long query" });
-    try {
-      const ddg = new URL("https://api.duckduckgo.com/");
-      ddg.searchParams.set("q", q);
-      ddg.searchParams.set("format", "json");
-      ddg.searchParams.set("no_redirect", "1");
-      ddg.searchParams.set("no_html", "1");
-      const r = await fetch(ddg, { signal: AbortSignal.timeout(12000) });
-      if (!r.ok) return send(res, 502, { error: "search upstream", status: r.status });
-      const j = await r.json();
-      const results = [];
-      if (j.AbstractText) {
-        results.push({ title: j.Heading || q, snippet: j.AbstractText, url: j.AbstractURL || "" });
-      }
-      for (const t of (j.RelatedTopics || []).slice(0, 6)) {
-        if (t.Text && t.FirstURL) {
-          results.push({ title: t.Text.split(" - ")[0] || t.Text.slice(0, 80), snippet: t.Text, url: t.FirstURL });
-        }
-      }
-      return send(res, 200, { query: q, results, source: "duckduckgo" });
-    } catch (e) {
-      return send(res, 503, { error: "search unavailable (offline or blocked)", detail: String(e.message || e) });
-    }
-  }
-
-if (req.method === "POST" && url.pathname === "/api/chat") {
-    let payload;
-    try {
-      payload = JSON.parse(await readBody(req));
-    } catch {
-      return send(res, 400, { error: "invalid JSON" });
-    }
+  if (req.method === "POST" && url.pathname === "/api/chat") {
+    const payload = JSON.parse(await readBody(req) || "{}");
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
     const model = payload.model || readPrefs().lastModel || MODEL;
-    if (payload.model) {
-      const cur = readPrefs();
-      cur.lastModel = String(payload.model);
-      writePrefs(cur);
-    }
+    const stream = payload.stream === true;
     const contextFiles = Array.isArray(payload.contextFiles) ? payload.contextFiles : [];
     const skillSlugs = Array.isArray(payload.skills) ? payload.skills : [];
     let skillBlob = "";
     for (const slug of skillSlugs.slice(0, 3)) {
       const sk = loadSkill(String(slug));
-      if (sk) skillBlob += `\n\n--- SKILL ${sk.slug} ---\n${sk.content.slice(0, 120000)}`;
+      if (sk) skillBlob += `\n\n--- SKILL ${sk.slug} ---\n${sk.content}`;
     }
-
     let contextBlob = "";
     for (const rel of contextFiles.slice(0, 6)) {
       const abs = safeResolve(rel);
-      if (!abs || !existsSync(abs) || !statSync(abs).isFile()) continue;
-      if (statSync(abs).size > 120_000) continue;
-      contextBlob += `\n\n--- FILE ${rel} ---\n${readFileSync(abs, "utf8").slice(0, 100_000)}`;
+      if (abs && existsSync(abs) && statSync(abs).isFile() && statSync(abs).size < 120000) {
+        contextBlob += `\n\n--- FILE ${rel} ---\n${readFileSync(abs, "utf8").slice(0, 80000)}`;
+      }
     }
-    let sys = SYSTEM;
-    if (skillBlob) sys += `\n\nActive skills (follow when relevant):${skillBlob}`;
+    let sys = SYSTEM + `\nCurrent repo: ${root}`;
+    if (skillBlob) sys += `\n\nActive skills:${skillBlob}`;
     if (contextBlob) sys += `\n\nFile context:${contextBlob}`;
+
+    const body = {
+      model,
+      messages: [{ role: "system", content: sys }, ...messages],
+      temperature: 0.2,
+      stream,
+    };
 
     try {
       const r = await fetch(`${OLLAMA}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "system", content: sys }, ...messages],
-          temperature: 0.2,
-        }),
-        signal: AbortSignal.timeout(300_000),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(300000),
       });
-      const text = await r.text();
-      if (!r.ok) return send(res, 502, { error: "ollama error", status: r.status, body: text.slice(0, 800) });
-      const data = JSON.parse(text);
+      if (!r.ok) {
+        const t = await r.text();
+        return send(res, 502, { error: "ollama", status: r.status, body: t.slice(0, 500) });
+      }
+      if (stream && r.body) {
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(dec.decode(value, { stream: true }));
+        }
+        res.end();
+        return;
+      }
+      const data = await r.json();
       const content = data.choices?.[0]?.message?.content ?? "";
-      return send(res, 200, { content, model, raw: data });
+      return send(res, 200, { content, model });
     } catch (e) {
       return send(res, 502, { error: String(e.message || e) });
     }
@@ -492,30 +392,8 @@ if (req.method === "POST" && url.pathname === "/api/chat") {
   send(res, 404, { error: "not found" });
 });
 
-async function warmup() {
-  try {
-    const tags = await fetch(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(5000) });
-    if (!tags.ok) console.warn("Ollama tags HTTP", tags.status);
-    else console.log("Ollama reachable");
-  } catch (e) {
-    console.warn("Ollama not reachable yet:", e.message || e);
-    console.warn("Start Ollama from the Start Menu, then refresh the browser.");
-  }
-}
-
-server.on("error", (err) => {
-  console.error("Server failed to bind:", err.message || err);
-  if (err && err.code === "EADDRINUSE") {
-    console.error(`Port ${PORT} is in use. Close the other CodeAgent/node process or use --port.`);
-  }
-  process.exit(1);
-});
-
 server.listen(PORT, HOST, () => {
-  console.log(`Coding-assistant chat UI (read-only pilot)`);
-  console.log(`  http://${HOST}:${PORT}/`);
-  console.log(`  Ollama ${OLLAMA}  model=${MODEL}`);
-  console.log(`  Repo   ${root}`);
-  console.log(`  Bind is loopback-only. Ctrl+C to stop.`);
-  warmup();
+  console.log(`Code Agent (local Ollama) http://${HOST}:${PORT}/`);
+  console.log(`Repo: ${root}`);
+  console.log(`Sessions: ${SESSIONS_DIR}`);
 });
