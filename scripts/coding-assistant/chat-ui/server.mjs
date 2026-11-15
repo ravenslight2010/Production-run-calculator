@@ -137,6 +137,11 @@ Hard limits (never violate):
 - Do not suggest exfiltrating secrets or disabling auth.
 - Prefer existing workspace packages over new frameworks.
 - Be concise and practical; show concrete file paths and patches.
+
+Optional internet search:
+- When the operator has enabled search, you may ask them to run a search (or they can type /search <query>).
+- Prefer local knowledge and attached files first. Use search only for external docs, current best practices, or library details not in the repo.
+- If search is unavailable (offline or disabled), continue with local context only and say so.
 `;
 
 function safeResolve(rel) {
@@ -396,6 +401,38 @@ if (req.method === "GET" && url.pathname === "/api/health") {
       stderr: stderr.slice(0, max),
       cwd,
     });
+  }
+
+
+  if (req.method === "GET" && url.pathname === "/api/search") {
+    const allow = process.env.CA_ALLOW_SEARCH === "1" || url.searchParams.get("force") === "1";
+    if (!allow) {
+      return send(res, 403, { error: "search disabled", hint: "Set CA_ALLOW_SEARCH=1 or use UI toggle" });
+    }
+    const q = (url.searchParams.get("q") || "").trim();
+    if (!q || q.length > 300) return send(res, 400, { error: "missing or too long query" });
+    try {
+      const ddg = new URL("https://api.duckduckgo.com/");
+      ddg.searchParams.set("q", q);
+      ddg.searchParams.set("format", "json");
+      ddg.searchParams.set("no_redirect", "1");
+      ddg.searchParams.set("no_html", "1");
+      const r = await fetch(ddg, { signal: AbortSignal.timeout(12000) });
+      if (!r.ok) return send(res, 502, { error: "search upstream", status: r.status });
+      const j = await r.json();
+      const results = [];
+      if (j.AbstractText) {
+        results.push({ title: j.Heading || q, snippet: j.AbstractText, url: j.AbstractURL || "" });
+      }
+      for (const t of (j.RelatedTopics || []).slice(0, 6)) {
+        if (t.Text && t.FirstURL) {
+          results.push({ title: t.Text.split(" - ")[0] || t.Text.slice(0, 80), snippet: t.Text, url: t.FirstURL });
+        }
+      }
+      return send(res, 200, { query: q, results, source: "duckduckgo" });
+    } catch (e) {
+      return send(res, 503, { error: "search unavailable (offline or blocked)", detail: String(e.message || e) });
+    }
   }
 
 if (req.method === "POST" && url.pathname === "/api/chat") {
