@@ -55,6 +55,10 @@
   <main>
     <aside>
       <section>
+        <h2>Tasks</h2>
+        <div id="tasks"></div>
+      </section>
+      <section>
         <h2>Sessions</h2>
         <div id="sessions"></div>
       </section>
@@ -139,6 +143,56 @@
         try { tools.push(JSON.parse(m[1])); } catch {}
       }
       return tools;
+    }
+
+
+    async function loadTasks() {
+      const el = document.getElementById("tasks");
+      if (!el) return;
+      const r = await fetch("/api/tasks");
+      const d = await r.json();
+      el.innerHTML = "";
+      for (const t of d.tasks || []) {
+        const b = document.createElement("button");
+        b.className = "sess";
+        b.textContent = (t.priority <= 2 ? "! " : "") + (t.title || t.type).slice(0, 26);
+        b.title = t.type + " · p" + t.priority;
+        b.onclick = () => processTask(t.id);
+        el.appendChild(b);
+      }
+      if (!(d.tasks || []).length) el.innerHTML = "<span style='color:var(--muted);font-size:0.75rem'>No open tasks</span>";
+    }
+    async function processTask(id) {
+      const r = await fetch("/api/task?id=" + id);
+      if (!r.ok) return;
+      const t = await r.json();
+      sessionId = null;
+      messages = [];
+      log.innerHTML = "";
+      addMsg("system", "Task: " + t.title + " (" + t.type + ")");
+      if (t.skill) {
+        activeSkills.clear();
+        activeSkills.add(t.skill);
+        loadSkills();
+      }
+      const prompt = "Handle this " + t.type + ": " + t.title + "\nPayload: " + JSON.stringify(t.payload || {}, null, 2) + "\nUse the appropriate skill. Propose concrete fixes or a summary. You may use a tool block if a file change is needed.";
+      messages.push({ role: "user", content: prompt });
+      addMsg("user", "Process task: " + t.title);
+      // auto-submit style
+      document.getElementById("input").value = "";
+      document.getElementById("form").dispatchEvent(new Event("submit"));
+      // mark later via button or after reply
+      const mark = document.createElement("button");
+      mark.textContent = "Mark done";
+      mark.className = "ok";
+      mark.style.margin = "0.4rem 0";
+      mark.onclick = async () => {
+        await fetch("/api/task/done", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id, result: "processed" }) });
+        addMsg("system", "Task marked done");
+        loadTasks();
+        mark.remove();
+      };
+      log.appendChild(mark);
     }
 
     async function loadSessions() {
@@ -351,6 +405,9 @@
     loadTree("");
     loadSkills();
     loadSessions();
+    loadTasks();
+    setInterval(loadTasks, 15000);
+    loadTasks();
     if (sessionId) loadSession(sessionId);
   </script>
 </body>
