@@ -1,32 +1,41 @@
 #Requires -Version 5.1
-# Short-path coding-assistant setup. Prefer CA-Setup.cmd at repo root.
-# Updated to also install domain skills into the global OpenCode skills folder.
+# Code Agent Windows setup — robust, updatable, repairable.
+# Prefer double-clicking CA-Setup.cmd at repo root.
 [CmdletBinding()]
 param(
   [string]$RepoRoot = "",
-  [string]$ReportPath = "",
   [string]$AgentRoot = "C:\runcalc\agent",
-  [switch]$SkipOllamaInstall,
-  [switch]$SkipOpenCodeInstall,
-  [switch]$SkipModelPull,
-  [switch]$SkipNodeInstall,
-  [switch]$UseFixture,
+  [switch]$Repair,
   [switch]$LaunchChat,
   [switch]$NoLaunch,
-  [switch]$SkipSkillsInstall
+  [switch]$AddStartup,
+  [switch]$SkipSkillsInstall,
+  [switch]$SkipModelPull
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# Enable long paths in this process when possible
-try { New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+$LogDir = Join-Path $AgentRoot "logs"
+Ensure-Dir $LogDir
+$LogFile = Join-Path $LogDir ("setup-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".log")
 
-function Step($m) { Write-Host ""; Write-Host "==> $m" -ForegroundColor Cyan }
-function Info($m) { Write-Host "    $m" }
-function Warn($m) { Write-Host "    WARN: $m" -ForegroundColor Yellow }
-function Fail($m) { Write-Host "FAIL: $m" -ForegroundColor Red; throw $m }
+function Ensure-Dir($p) {
+  if (-not (Test-Path -LiteralPath $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
+}
+Ensure-Dir $LogDir
+
+function Log($m) {
+  $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $m
+  Add-Content -LiteralPath $LogFile -Value $line -ErrorAction SilentlyContinue
+  Write-Host $line
+}
+function Step($m) { Write-Host ""; Write-Host "==> $m" -ForegroundColor Cyan; Log "STEP: $m" }
+function Info($m) { Write-Host "    $m"; Log "  $m" }
+function Warn($m) { Write-Host "    WARN: $m" -ForegroundColor Yellow; Log "WARN: $m" }
+function Fail($m) { Write-Host "FAIL: $m" -ForegroundColor Red; Log "FAIL: $m"; throw $m }
+
 function HasCmd($n) { return [bool](Get-Command $n -ErrorAction SilentlyContinue) }
 
 function Refresh-Path {
@@ -46,8 +55,20 @@ function Refresh-Path {
   }
 }
 
-function Ensure-Dir($p) {
-  if (-not (Test-Path -LiteralPath $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
+function Enable-LongPaths {
+  try {
+    $key = "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem"
+    if (-not (Test-Path $key)) { return }
+    $cur = (Get-ItemProperty -Path $key -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled
+    if ($cur -ne 1) {
+      Set-ItemProperty -Path $key -Name LongPathsEnabled -Value 1 -Type DWord -Force
+      Info "Enabled Windows long paths (reboot may be required for full effect)"
+    } else {
+      Info "Long paths already enabled"
+    }
+  } catch {
+    Warn "Could not enable long paths: $_"
+  }
 }
 
 function Get-Repo {
@@ -61,266 +82,220 @@ function Get-Repo {
   Fail "Pass -RepoRoot to the Production-run-calculator checkout"
 }
 
-function Winget-Install($id, $label) {
-  if (-not (HasCmd "winget")) { Fail "winget missing. Install $label manually, re-run." }
-  Info "winget install $label ($id)"
-  & winget install --id $id -e --accept-package-agreements --accept-source-agreements --disable-interactivity
+function Winget-InstallOrUpdate($id, $label) {
+  if (-not (HasCmd "winget")) { Fail "winget missing. Install App Installer, then re-run." }
+  $attempt = 0
+  while ($attempt -lt 3) {
+    $attempt++
+    Info "winget install/upgrade $label (attempt $attempt)"
+    & winget upgrade --id $id -e --accept-package-agreements --accept-source-agreements --disable-interactivity 2>$null
+    $up = $LASTEXITCODE
+    if ($up -eq 0) { Info "$label upgraded or already current"; break }
+    & winget install --id $id -e --accept-package-agreements --accept-source-agreements --disable-interactivity
+    if ($LASTEXITCODE -eq 0) { Info "$label installed"; break }
+    if ($attempt -eq 3) { Warn "winget failed for $label after 3 tries" }
+    Start-Sleep -Seconds 5
+  }
   Refresh-Path
 }
 
 function Ensure-Node {
   Refresh-Path
-  if (HasCmd "node") { Info "Node $(node -v)"; return }
-  if ($SkipNodeInstall) { Fail "Node missing and SkipNodeInstall set" }
   Step "Node.js"
-  Winget-Install "OpenJS.NodeJS.LTS" "Node.js LTS"
+  Winget-InstallOrUpdate "OpenJS.NodeJS.LTS" "Node.js LTS"
   Refresh-Path
-  if (-not (HasCmd "node")) { Fail "Node still not on PATH. Open NEW Admin PowerShell and re-run CA-Setup.cmd" }
+  if (-not (HasCmd "node")) { Fail "Node still not on PATH. Open a NEW Admin PowerShell and re-run." }
   Info "Node $(node -v)"
 }
 
 function Ensure-Ollama {
   Refresh-Path
+  Step "Ollama"
   if (-not (HasCmd "ollama")) {
-    if ($SkipOllamaInstall) { Fail "Ollama missing and SkipOllamaInstall set" }
-    Winget-Install "Ollama.Ollama" "Ollama"
+    Winget-InstallOrUpdate "Ollama.Ollama" "Ollama"
     Refresh-Path
-    foreach ($c in @(
-      "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
-      "$env:ProgramFiles\Ollama\ollama.exe"
-    )) {
-      if (Test-Path -LiteralPath $c) { $env:Path = "$(Split-Path $c);$env:Path"; break }
-    }
+  } else {
+    Info "Ollama present — checking for update"
+    Winget-InstallOrUpdate "Ollama.Ollama" "Ollama"
+  }
+  foreach ($c in @(
+    "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
+    "$env:ProgramFiles\Ollama\ollama.exe"
+  )) {
+    if (Test-Path -LiteralPath $c) { $env:Path = "$(Split-Path $c);$env:Path"; break }
   }
   if (-not (HasCmd "ollama")) { Fail "Ollama not on PATH after install" }
   Info "Ollama OK"
   try {
-    Invoke-WebRequest -Uri "http://127.0.0.1:11434/api/tags" -UseBasicParsing -TimeoutSec 3 | Out-Null
+    Invoke-WebRequest -Uri "http://127.0.0.1:11434/api/tags" -UseBasicParsing -TimeoutSec 4 | Out-Null
     Info "Ollama API up"
   } catch {
     Info "Starting ollama serve..."
-    Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
-    Start-Sleep -Seconds 4
+    Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
+    Start-Sleep -Seconds 3
   }
 }
 
-function Copy-AppPayload($repo, $agentRoot) {
-  $app = Join-Path $agentRoot "app"
-  Ensure-Dir $app
-  Ensure-Dir (Join-Path $app "ui")
-  Ensure-Dir (Join-Path $app "ui\icons")
-  Ensure-Dir (Join-Path $app "bin")
-
-  $map = @{
-    "scripts\coding-assistant\bootstrap-local.mjs" = "bin\boot.mjs"
-    "scripts\coding-assistant\render-opencode-config.mjs" = "bin\render.mjs"
-    "scripts\coding-assistant\check-readonly-profile.mjs" = "bin\check.mjs"
-    "scripts\coding-assistant\verify-pilot.mjs" = "bin\verify.mjs"
-    "scripts\coding-assistant\chat-ui\server.mjs" = "ui\server.mjs"
-    "scripts\coding-assistant\chat-ui\index.html" = "ui\index.html"
-    "scripts\coding-assistant\chat-ui\manifest.webmanifest" = "ui\manifest.webmanifest"
-    "scripts\coding-assistant\chat-ui\sw.js" = "ui\sw.js"
-    "docs\coding-assistant\opencode-readonly.example.json" = "bin\profile.example.json"
-    "docs\coding-assistant\fixtures\host-report-candidate-7b.json" = "bin\fixture.json"
-  }
-  foreach ($k in $map.Keys) {
-    $src = Join-Path $repo $k
-    $dst = Join-Path $app $map[$k]
-    if (-not (Test-Path -LiteralPath $src)) { Fail "Missing $src" }
-    Ensure-Dir (Split-Path -Parent $dst)
-    Copy-Item -LiteralPath $src -Destination $dst -Force
-  }
-  $iconDir = Join-Path $repo "scripts\coding-assistant\chat-ui\icons"
-  if (Test-Path -LiteralPath $iconDir) {
-    Copy-Item -Path (Join-Path $iconDir "*") -Destination (Join-Path $app "ui\icons") -Force
-  }
-  Info "App payload at $app"
-  return $app
-}
-
-function Install-DomainSkills($repo) {
-  if ($SkipSkillsInstall) { Info "Skipping domain skills"; return }
-  $src = Join-Path $repo "scripts\coding-assistant\domain-skills"
-  if (-not (Test-Path -LiteralPath $src)) {
-    Warn "domain-skills folder not found at $src — skipping"
-    return
-  }
-  $dest = Join-Path $env:USERPROFILE ".config\opencode\skills"
-  Ensure-Dir $dest
-  Copy-Item -Path (Join-Path $src "*") -Destination $dest -Recurse -Force
-  Info "Domain skills copied to $dest"
-}
-
-function Get-Model($jsonPath) {
-  $report = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-  if ($report.schemaVersion -ne 1) { Fail "Bad schemaVersion" }
-  $rec = $null
-  if ($report.recommendations -and $report.recommendations.codingAssistant) {
-    $rec = $report.recommendations.codingAssistant
-  }
-  $model = [string]$rec.modelId
-  if (-not $model) { $model = [string]$rec.model }
-  $allowed = @("qwen2.5-coder:7b", "qwen3-coder:30b")
-  if ($allowed -notcontains $model) { Fail "Model not in catalogue: $model" }
-  return $model
-}
-
-function Render-Profile($app, $report, $outFile) {
-  $repoBoot = Join-Path $script:Repo "scripts\coding-assistant\bootstrap-local.mjs"
-  if (Test-Path -LiteralPath $repoBoot) {
-    & node $repoBoot --report $report --out $outFile
-  } else {
-    Fail "bootstrap missing"
-  }
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outFile)) {
-    Fail "Profile render failed"
-  }
-}
-
-function Write-RunPs1($path, $app, $profile, $model, $repo) {
-  $content = @"
-`$ErrorActionPreference = 'Stop'
-`$app = '$app'
-`$profile = '$profile'
-`$model = '$model'
-`$repo = '$repo'
-`$port = 7843
-`$url = "http://127.0.0.1:`$port/"
-`$server = Join-Path `$app 'ui\server.mjs'
-`$m = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-`$u = [Environment]::GetEnvironmentVariable('Path', 'User')
-`$env:Path = "`$m;`$u"
-`$extras = @(
-  (Join-Path `$env:ProgramFiles 'nodejs'),
-  (Join-Path `$env:LOCALAPPDATA 'Programs\Ollama'),
-  (Join-Path `$env:ProgramFiles 'Ollama')
-)
-foreach (`$p in `$extras) {
-  if (Test-Path -LiteralPath `$p) { `$env:Path = "`$p;`$env:Path" }
-}
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  Write-Error 'Node missing. Run CA-Setup.cmd again.'
-  exit 1
-}
-try {
-  Invoke-WebRequest -Uri 'http://127.0.0.1:11434/api/tags' -UseBasicParsing -TimeoutSec 2 | Out-Null
-} catch {
-  if (Get-Command ollama -ErrorAction SilentlyContinue) {
-    Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Hidden
-    Start-Sleep -Seconds 2
-  }
-}
-`$wd = `$repo
-if (-not (Test-Path -LiteralPath (Join-Path `$wd 'package.json'))) { `$wd = `$app }
-`$env:RUNCALC_REPO = `$repo
-`$proc = Start-Process -FilePath 'node' -ArgumentList @(`$server, '--port', "`$port", '--model', `$model) -WorkingDirectory `$wd -WindowStyle Minimized -PassThru
-Start-Sleep -Seconds 1
-Start-Process `$url
-Write-Host "Chat `$url  PID=`$(`$proc.Id)"
-"@
-  Set-Content -LiteralPath $path -Value $content -Encoding UTF8
-}
-
-function Add-Shortcut($link, $target, $args, $work, $icon) {
-  $sh = New-Object -ComObject WScript.Shell
-  $sc = $sh.CreateShortcut($link)
-  $sc.TargetPath = $target
-  $sc.Arguments = $args
-  $sc.WorkingDirectory = $work
-  if ($icon -and (Test-Path -LiteralPath $icon)) { $sc.IconLocation = "$icon,0" }
-  $sc.Description = "Local Coding Assistant"
-  $sc.Save()
-  Info "Shortcut $link"
-}
-
-# --- main ---
-$script:Repo = $null
-Ensure-Dir $AgentRoot
-Ensure-Dir (Join-Path $AgentRoot "config")
-Ensure-Dir (Join-Path $AgentRoot "logs")
-$log = Join-Path $AgentRoot ("logs\setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
-try { Start-Transcript -Path $log -Force | Out-Null } catch {}
-
-Write-Host "Coding Assistant setup (short paths + domain skills)" -ForegroundColor Green
-Write-Host "Agent: $AgentRoot  Log: $log" -ForegroundColor DarkGray
-
-try {
-  Step "Repo"
-  $script:Repo = Get-Repo
-  Info $script:Repo
-
-  $fixture = Join-Path $script:Repo "docs\coding-assistant\fixtures\host-report-candidate-7b.json"
-  if ($UseFixture -or -not $ReportPath) { $ReportPath = $fixture }
-  if (-not (Test-Path -LiteralPath $ReportPath)) { Fail "Report missing: $ReportPath" }
-
-  Step "Model id"
-  $model = Get-Model $ReportPath
-  Info $model
-
-  Ensure-Node
-  Step "Ollama"
-  Ensure-Ollama
-  if (-not $SkipModelPull) {
-    Info "Pull $model (long on first run)..."
+function Ensure-Model($model) {
+  if ($SkipModelPull) { Info "Skip model pull"; return }
+  Step "Model $model"
+  $attempt = 0
+  while ($attempt -lt 3) {
+    $attempt++
+    Info "ollama pull $model (attempt $attempt)"
     & ollama pull $model
-    if ($LASTEXITCODE -ne 0) { Fail "ollama pull failed code $LASTEXITCODE" }
+    if ($LASTEXITCODE -eq 0) { Info "Model ready"; return }
+    Start-Sleep -Seconds 8
   }
+  Warn "Model pull failed after retries — you can run Repick-Model.cmd later"
+}
 
-  if (-not $SkipOpenCodeInstall) {
-    Step "OpenCode (optional)"
-    Refresh-Path
-    if (-not (HasCmd "opencode") -and (HasCmd "npm")) {
-      try { & npm install -g opencode-ai 2>$null; Refresh-Path } catch { Warn $_.Exception.Message }
-    }
-    if (HasCmd "opencode") { Info "opencode OK" } else { Warn "opencode skipped — chat UI still works" }
-  }
-
-  Step "Copy app to short path"
-  $app = Copy-AppPayload $script:Repo $AgentRoot
-
+function Install-Skills($repo) {
+  if ($SkipSkillsInstall) { return }
   Step "Domain skills"
-  Install-DomainSkills $script:Repo
+  $src = Join-Path $repo "scripts\coding-assistant\domain-skills"
+  $dst = Join-Path $env:USERPROFILE ".config\opencode\skills"
+  if (-not (Test-Path $src)) { Warn "No domain-skills folder"; return }
+  Ensure-Dir $dst
+  Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force
+  Info "Skills copied to $dst"
+}
 
-  Step "Profile"
-  $profile = Join-Path $AgentRoot "config\oc.json"
-  Render-Profile $app $ReportPath $profile
-  Info $profile
+function Install-Context($repo) {
+  Step "Context pack folder"
+  $dst = Join-Path $AgentRoot "context"
+  Ensure-Dir $dst
+  $src = Join-Path $repo "docs\coding-assistant\context"
+  if (Test-Path $src) {
+    Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
+    Info "Context docs copied"
+  }
+  $mem = Join-Path $AgentRoot "config\MEMORY.md"
+  Ensure-Dir (Split-Path $mem)
+  if (-not (Test-Path $mem)) { Set-Content -LiteralPath $mem -Value "# Project Memory`n`n" -Encoding UTF8 }
+}
 
-  Step "Launcher + shortcuts"
-  $runPs1 = Join-Path $AgentRoot "run.ps1"
-  Write-RunPs1 $runPs1 $app $profile $model $script:Repo
-  $icon = Join-Path $app "ui\icons\coding-assistant.ico"
-  if (-not (Test-Path $icon)) { $icon = Join-Path $app "ui\icons\icon-32.png" }
-  $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-  $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$runPs1`""
-  $prog = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-  Ensure-Dir $prog
-  Add-Shortcut (Join-Path $prog "CodeAgent.lnk") $ps $arg $AgentRoot $icon
-  $desk = [Environment]::GetFolderPath("Desktop")
-  if ($desk) { Add-Shortcut (Join-Path $desk "CodeAgent.lnk") $ps $arg $AgentRoot $icon }
+function Create-Shortcuts($agent, $repo) {
+  Step "Shortcuts"
+  $Wsh = New-Object -ComObject WScript.Shell
+  $icon = Join-Path $agent "app\ui\icons\coding-assistant.ico"
+  $target = "powershell.exe"
+  $args = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $agent 'run.ps1')`""
 
-  Step "Done"
-  Write-Host "Profile $profile" -ForegroundColor Green
-  Write-Host "Shortcuts: Desktop\CodeAgent.lnk  and  Start Menu\CodeAgent.lnk" -ForegroundColor Green
-  Write-Host "Chat payload: $app\ui" -ForegroundColor Green
-  Write-Host "Domain skills installed to $env:USERPROFILE\.config\opencode\skills" -ForegroundColor Green
+  foreach ($loc in @(
+    [Environment]::GetFolderPath("Desktop"),
+    [Environment]::GetFolderPath("StartMenu") + "\Programs"
+  )) {
+    Ensure-Dir $loc
+    $lnk = Join-Path $loc "CodeAgent.lnk"
+    $s = $Wsh.CreateShortcut($lnk)
+    $s.TargetPath = $target
+    $s.Arguments = $args
+    $s.WorkingDirectory = $agent
+    if (Test-Path $icon) { $s.IconLocation = $icon }
+    $s.Description = "Local Code Agent"
+    $s.Save()
+    Info "Shortcut: $lnk"
+  }
 
-  if (-not $NoLaunch) {
-    if ($LaunchChat -or -not $NoLaunch) {
-      Step "Launch"
-      & powershell -NoProfile -ExecutionPolicy Bypass -File $runPs1
-    }
+  # Fix shortcut
+  $fix = Join-Path ([Environment]::GetFolderPath("Desktop")) "Fix CodeAgent.lnk"
+  $s2 = $Wsh.CreateShortcut($fix)
+  $s2.TargetPath = "powershell.exe"
+  $s2.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $repo 'scripts\ca\helpers\Fix-CodeAgent.cmd')`""
+  $s2.Description = "Restart Code Agent"
+  $s2.Save()
+}
+
+function Add-Startup {
+  if (-not $AddStartup) { return }
+  Step "Startup"
+  $startup = [Environment]::GetFolderPath("Startup")
+  $lnk = Join-Path $startup "CodeAgent.lnk"
+  $Wsh = New-Object -ComObject WScript.Shell
+  $s = $Wsh.CreateShortcut($lnk)
+  $s.TargetPath = "powershell.exe"
+  $s.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $AgentRoot 'run.ps1')`""
+  $s.Save()
+  Info "Added to Startup: $lnk"
+}
+
+function Write-RunScript($agent, $model, $repo) {
+  $run = Join-Path $agent "run.ps1"
+  @"
+`$ErrorActionPreference = 'Stop'
+`$app = '$agent\app'
+`$model = '$model'
+`$port = 7843
+`$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+foreach (`$p in @((Join-Path `$env:ProgramFiles 'nodejs'), (Join-Path `$env:LOCALAPPDATA 'Programs\Ollama'))) { if (Test-Path `$p) { `$env:Path = "`$p;`$env:Path" } }
+`$env:RUNCALC_REPO = '$repo'
+try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null } catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 2 }
+`$server = Join-Path `$app 'ui\server.mjs'
+Start-Process node -ArgumentList @(`$server, '--port', "`$port", '--model', `$model) -WorkingDirectory `$app -WindowStyle Minimized
+Start-Sleep 1
+Start-Process "http://127.0.0.1:`$port/"
+"@ | Set-Content -LiteralPath $run -Encoding UTF8
+  Info "Wrote $run"
+}
+
+function Copy-UI($repo, $agent) {
+  Step "UI + server"
+  $src = Join-Path $repo "scripts\coding-assistant\chat-ui"
+  $dst = Join-Path $agent "app\ui"
+  Ensure-Dir $dst
+  if (Test-Path $src) {
+    Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force
+    Info "UI copied to $dst"
+  } else {
+    Warn "chat-ui folder missing"
   }
 }
-catch {
-  Write-Host "SETUP FAILED: $($_.Exception.Message)" -ForegroundColor Red
-  Write-Host "Log: $log" -ForegroundColor Yellow
-  if (-not $env:CA_SETUP_NONINTERACTIVE) {
-    try { Read-Host "Press Enter to close" | Out-Null } catch {}
-  }
-  exit 1
+
+function Verify($agent) {
+  Step "Verification"
+  $ok = $true
+  Refresh-Path
+  if (-not (HasCmd "node")) { Warn "Node missing"; $ok = $false }
+  if (-not (HasCmd "ollama")) { Warn "Ollama missing"; $ok = $false }
+  try {
+    Invoke-WebRequest "http://127.0.0.1:11434/api/tags" -UseBasicParsing -TimeoutSec 4 | Out-Null
+    Info "Ollama API OK"
+  } catch { Warn "Ollama API not responding"; $ok = $false }
+  $server = Join-Path $agent "app\ui\server.mjs"
+  if (-not (Test-Path $server)) { Warn "server.mjs missing"; $ok = $false } else { Info "server.mjs present" }
+  if ($ok) { Info "Verification passed" } else { Warn "Verification had issues — see log" }
+  return $ok
 }
-finally {
-  try { Stop-Transcript | Out-Null } catch {}
+
+# ---------- main ----------
+Step "Code Agent Setup"
+Log "AgentRoot=$AgentRoot Repair=$Repair"
+Enable-LongPaths
+$repo = Get-Repo
+Info "Repo: $repo"
+
+Ensure-Node
+Ensure-Ollama
+
+$model = "qwen2.5-coder:7b"
+Ensure-Model $model
+
+Copy-UI $repo $AgentRoot
+Install-Skills $repo
+Install-Context $repo
+Write-RunScript $AgentRoot $model $repo
+Create-Shortcuts $AgentRoot $repo
+Add-Startup
+
+$verified = Verify $AgentRoot
+
+if ($LaunchChat -and -not $NoLaunch) {
+  Step "Launch"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $AgentRoot "run.ps1")
 }
+
+Step "Done"
+Info "Log: $LogFile"
+if (-not $verified) { exit 1 }
 exit 0
