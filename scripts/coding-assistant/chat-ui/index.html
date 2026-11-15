@@ -51,6 +51,9 @@
     <select id="model"></select>
     <button id="newSess" title="New session">New</button>
     <button id="diag" title="Export diagnostics">Diag</button>
+    <button id="memBtn" title="Project memory">Memory</button>
+    <button id="ctxBtn" title="Import context">Context</button>
+    <button id="expBtn" title="Export session">Export</button>
   </header>
   <main>
     <aside>
@@ -276,6 +279,36 @@
         el.appendChild(b);
       }
     }
+
+
+    document.getElementById("memBtn").onclick = async () => {
+      const r = await fetch("/api/memory");
+      const d = await r.json();
+      const note = prompt("Current memory:\n\n" + (d.content || "(empty)") + "\n\nAppend a note (or leave blank):");
+      if (note && note.trim()) {
+        await fetch("/api/memory", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ append: note.trim() }) });
+        addMsg("system", "Memory updated");
+      }
+    };
+    document.getElementById("ctxBtn").onclick = async () => {
+      const name = prompt("Context file name (e.g. research-summary.md):", "research.md");
+      if (!name) return;
+      const content = prompt("Paste markdown content to import into context pack:");
+      if (!content) return;
+      const r = await fetch("/api/context/import", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name, content }) });
+      const d = await r.json();
+      addMsg("system", r.ok ? "Imported " + d.name + " into context pack" : "Import failed");
+    };
+    document.getElementById("expBtn").onclick = async () => {
+      if (!sessionId) { addMsg("system", "No session to export"); return; }
+      const r = await fetch("/api/session/export?id=" + sessionId);
+      const s = await r.json();
+      const blob = new Blob([JSON.stringify(s, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "session-" + sessionId + ".json";
+      a.click();
+    };
 
     async function health() {
       const r = await fetch("/api/health");
