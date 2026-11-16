@@ -51,6 +51,21 @@ function makeAuth() {
       signOutCount += 1;
       signedIn = false;
     },
+    async bootstrapAvailable() {
+      return false;
+    },
+    async bootstrapManager() {
+      throw new V2AuthError(409, "First-manager setup has already been completed.");
+    },
+    async listStaff() {
+      return { staff: [], roles: [] };
+    },
+    async createStaffAccount() {
+      throw new V2AuthError(403, "Staff management is not authorized.");
+    },
+    async updateStaffAccount() {
+      throw new V2AuthError(403, "Staff management is not authorized.");
+    },
     sessionCookie(value, options) {
       return `v2_session=${value}; Path=/; HttpOnly; SameSite=Lax${options.secure ? "; Secure" : ""}`;
     },
@@ -195,6 +210,9 @@ test("sign-in rejects unsupported fields, non-JSON payloads, and wrong methods",
 
 test("sign-in and sign-out reject cross-origin browser requests", async () => {
   const auth = makeAuth();
+  auth.bootstrapManager = async () => {
+    throw new Error("cross-origin bootstrap must not reach the adapter");
+  };
   const handler = createAuthApi({ auth, getClientKey: () => "test-client" });
   await withServer(handler, async (baseUrl) => {
     const signIn = await fetch(`${baseUrl}/api/v2/auth/sign-in`, {
@@ -217,6 +235,21 @@ test("sign-in and sign-out reject cross-origin browser requests", async () => {
     });
     assert.equal(signOut.status, 403);
     assert.equal(auth.signOutCount, 0);
+
+    const bootstrap = await fetch(`${baseUrl}/api/v2/auth/bootstrap`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://attacker.example",
+        "sec-fetch-site": "cross-site",
+      },
+      body: JSON.stringify({
+        bootstrapCode: "test-only-initial-manager-code-123456",
+        username: "InitialManager",
+        password: "strong-test-password",
+      }),
+    });
+    assert.equal(bootstrap.status, 403);
   });
 });
 
@@ -246,5 +279,138 @@ test("missing session is cleared idempotently on sign-out", async () => {
     assert.equal(response.status, 204);
     assert.equal(auth.signOutCount, 0);
     assert.equal(response.headers.getSetCookie().length, 2);
+  });
+});
+
+test("first-manager setup status and response never expose the bootstrap code or password", async () => {
+  const observedLogs = [];
+  const auth = makeAuth();
+  let available = true;
+  auth.bootstrapAvailable = async () => available;
+  auth.bootstrapManager = async ({ username, password, bootstrapCode }) => {
+    assert.equal(username, "InitialManager");
+    assert.equal(password, "strong-test-password");
+    assert.equal(bootstrapCode, "test-only-initial-manager-code-123456");
+    available = false;
+    return {
+      token,
+      csrfToken,
+      expiresAt: "2026-11-17T00:00:00.000Z",
+      staff: { userId: "10000000-0000-4000-8000-000000000001", username, role: "manager", capabilities: ["manage-staff"] },
+    };
+  };
+  const handler = createAuthApi({
+    auth,
+    getClientKey: () => "test-client",
+    logger: (entry) => observedLogs.push(entry),
+  });
+
+  await withServer(handler, async (baseUrl) => {
+    const status = await fetch(`${baseUrl}/api/v2/auth/bootstrap-status`);
+    assert.equal(status.status, 200);
+    assert.deepEqual(await status.json(), { available: true });
+
+    const setup = await fetch(`${baseUrl}/api/v2/auth/bootstrap`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: baseUrl,
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({
+        bootstrapCode: "test-only-initial-manager-code-123456",
+        username: "InitialManager",
+        password: "strong-test-password",
+      }),
+    });
+    assert.equal(setup.status, 201);
+    const body = await setup.json();
+    assert.equal(body.staff.role, "manager");
+    assert.equal(JSON.stringify(body).includes("test-only-initial-manager-code-123456"), false);
+    assert.equal(JSON.stringify(body).includes("strong-test-password"), false);
+    assert.equal(JSON.stringify(body).includes(token), false);
+    assert.equal(setup.headers.getSetCookie().length, 2);
+
+    const closed = await fetch(`${baseUrl}/api/v2/auth/bootstrap-status`);
+    assert.deepEqual(await closed.json(), { available: false });
+    assert.deepEqual(observedLogs, []);
+  });
+});
+
+test("manager staff routes require authorization and CSRF and accept only known input fields", async () => {
+  const auth = makeAuth();
+  const manager = {
+    verified: true,
+    actorId: "10000000-0000-4000-8000-000000000011",
+    facilityId: "10000000-0000-4000-8000-000000000002",
+    username: "manager",
+    role: "manager",
+    capabilities: ["manage-staff"],
+    sessionExpiresAt: "2026-11-17T00:00:00.000Z",
+  };
+  let current = manager;
+  auth.authenticate = async () => current;
+  auth.verifyCsrf = async (request) => request.headers["x-csrf-token"] === csrfToken;
+  auth.listStaff = async () => ({
+    staff: [{ userId: manager.actorId, username: "manager", role: "manager", disabled: false, createdAt: "2026-11-16T00:00:00.000Z" }],
+    roles: [{ name: "manager", capabilities: ["manage-staff"] }, { name: "operator", capabilities: [] }],
+  });
+  auth.createStaffAccount = async (input) => {
+    assert.deepEqual(input, {
+      actorId: manager.actorId,
+      username: "NewOperator",
+      password: "strong-test-password",
+      roleName: "operator",
+      clientKey: "test-client",
+    });
+    return true;
+  };
+  const handler = createAuthApi({ auth, getClientKey: () => "test-client" });
+
+  await withServer(handler, async (baseUrl) => {
+    const managerList = await fetch(`${baseUrl}/api/v2/auth/staff`, {
+      headers: { cookie: `v2_session=${token}` },
+    });
+    assert.equal(managerList.status, 200);
+    assert.equal((await managerList.json()).roles.length, 2);
+
+    const missingCsrf = await fetch(`${baseUrl}/api/v2/auth/staff`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: `v2_session=${token}` },
+      body: JSON.stringify({ username: "NewOperator", password: "strong-test-password", roleName: "operator" }),
+    });
+    assert.equal(missingCsrf.status, 403);
+
+    const unsupported = await fetch(`${baseUrl}/api/v2/auth/staff`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `v2_session=${token}; v2_csrf=${csrfToken}`,
+        "x-csrf-token": csrfToken,
+      },
+      body: JSON.stringify({
+        username: "NewOperator",
+        password: "strong-test-password",
+        roleName: "operator",
+        passwordHash: "not-allowed",
+      }),
+    });
+    assert.equal(unsupported.status, 400);
+
+    const created = await fetch(`${baseUrl}/api/v2/auth/staff`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `v2_session=${token}; v2_csrf=${csrfToken}`,
+        "x-csrf-token": csrfToken,
+      },
+      body: JSON.stringify({ username: "NewOperator", password: "strong-test-password", roleName: "operator" }),
+    });
+    assert.equal(created.status, 201);
+    assert.equal((await created.json()).staff[0].username, "manager");
+
+    current = { ...manager, capabilities: [] };
+    const forbidden = await fetch(`${baseUrl}/api/v2/auth/staff`);
+    assert.equal(forbidden.status, 403);
   });
 });

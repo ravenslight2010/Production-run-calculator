@@ -87,9 +87,11 @@ been created.
   staff sessions, verifies both see the same run, applies a lifecycle command
   from one session, and confirms the other session receives the new revision
   and a conflict for a stale command.
-- There is no controlled manager/account provisioning, station workflow,
-  inventory/import implementation, auto-track worker, PWA recovery, or real
-  browser/device verification yet.
+- V2 now has one-time, secret-guarded first-manager setup plus manager-only
+  staff creation, disablement, role changes, and account-session revocation.
+  The setup path never imports V1 credentials or sessions.
+- Station workflow, inventory/import implementation, auto-track worker, PWA
+  recovery, and real browser/device verification are still incomplete.
 - There is no production data connection, V1 data migration, or separate V2
   Replit project.
 
@@ -97,11 +99,10 @@ been created.
 
 Continue the first usable run-control slice in this order:
 
-1. Add a controlled first-manager bootstrap and manager-only account/role
-   management. Do not add public registration or copy V1 hashes, accounts,
-   sessions, or data without the separate cutover process.
-2. Verify the sign-in and run-control interface in a real browser at phone and
-   desktop sizes, including background/foreground recovery and retained actions.
+1. Verify sign-in, run control, and manager setup/account changes in real
+   Chromium and WebKit browsers at desktop, phone, and tablet sizes.
+2. Continue implementing every production station, full inventory, import,
+   auto-tracking, and PWA recovery without reducing the V2 launch scope.
 3. Keep a separate-project VM, database, restart, publish, and capacity pilot as
    a pre-release gate.
 

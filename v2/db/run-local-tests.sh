@@ -44,6 +44,36 @@ PSQL=(
 "${PSQL[@]}" -f "$ROOT/v2/db/0001-run-control.sql" >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0001-run-control.test.sql"
 "${PSQL[@]}" -f "$ROOT/v2/db/0002-staff-auth.sql" >/dev/null
+
+BOOTSTRAP_HASH='argon2id$v=19$m=19456,t=2,p=1$c2FsdA==$aGFzaA=='
+BOOTSTRAP_SQL="SELECT v2.bootstrap_first_manager('V2FirstManagerRace', '$BOOTSTRAP_HASH');"
+"${PSQL[@]}" -c "$BOOTSTRAP_SQL" > "$TMP_DIR/bootstrap-race-1" &
+BOOTSTRAP_PID_1=$!
+"${PSQL[@]}" -c "$BOOTSTRAP_SQL" > "$TMP_DIR/bootstrap-race-2" &
+BOOTSTRAP_PID_2=$!
+wait "$BOOTSTRAP_PID_1"
+wait "$BOOTSTRAP_PID_2"
+BOOTSTRAP_RESULTS="$(cat "$TMP_DIR/bootstrap-race-1" "$TMP_DIR/bootstrap-race-2" | tr -d '[:space:]' | fold -w1 | sort | tr '\n' ' ')"
+BOOTSTRAP_COUNT="$("${PSQL[@]}" -c "
+  SELECT count(*)
+  FROM v2.staff_accounts AS u
+  JOIN v2.user_roles AS ur ON ur.user_id = u.id
+  WHERE lower(u.username) = 'v2firstmanagerrace' AND ur.role_name = 'manager'
+")"
+if [[ "$BOOTSTRAP_RESULTS" != "f t " || "$BOOTSTRAP_COUNT" != "1" ]]; then
+  echo "Concurrent first-manager bootstrap did not create exactly one manager: $BOOTSTRAP_RESULTS / $BOOTSTRAP_COUNT" >&2
+  exit 1
+fi
+"${PSQL[@]}" -c "DELETE FROM v2.staff_accounts WHERE lower(username) = 'v2firstmanagerrace';" >/dev/null
+if [[ "$("${PSQL[@]}" -c "SELECT v2.staff_bootstrap_open();")" != "f" ]]; then
+  echo "First-manager setup reopened after its account was removed despite its completion marker." >&2
+  exit 1
+fi
+"${PSQL[@]}" -c "DELETE FROM v2.staff_bootstrap_marker;" >/dev/null
+if [[ "$("${PSQL[@]}" -c "SELECT v2.staff_bootstrap_open();")" != "t" ]]; then
+  echo "The disposable database could not be returned to its clean bootstrap state." >&2
+  exit 1
+fi
 "${PSQL[@]}" -f "$ROOT/v2/db/0002-staff-auth.test.sql"
 
 "${PSQL[@]}" -c "
@@ -61,6 +91,12 @@ PSQL=(
   GRANT EXECUTE ON FUNCTION v2.open_staff_session(uuid, text, text, timestamptz) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.resolve_staff_session(text) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.revoke_staff_session(text) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.staff_bootstrap_open() TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.bootstrap_first_manager(text, text) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_staff_accounts(uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_staff_roles(uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.create_staff_account(uuid, text, text, text) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.update_staff_account(uuid, uuid, boolean, text) TO v2_api_test;
 " >/dev/null
 
 "${PSQL[@]}" -c "
@@ -102,6 +138,14 @@ API_AUTH_SESSION="$("${PSQL[@]}" -c "
 ")"
 if [[ "$API_AUTH_SESSION" != $'t\n72000000-0000-4000-8000-000000000001|operator|true\nt' ]]; then
   echo "Restricted API role could not open, resolve, and revoke a V2 session: $API_AUTH_SESSION" >&2
+  exit 1
+fi
+"${PSQL[@]}" -c "
+  DELETE FROM v2.staff_accounts
+  WHERE id = '72000000-0000-4000-8000-000000000001';
+" >/dev/null
+if [[ "$("${PSQL[@]}" -c "SELECT v2.staff_bootstrap_open();")" != "t" ]]; then
+  echo "The HTTP integration fixture did not return the V2 database to its clean bootstrap state." >&2
   exit 1
 fi
 
@@ -288,6 +332,7 @@ assert_no_direct_table_access() {
 assert_no_direct_table_access "v2.runs"
 assert_no_direct_table_access "v2.staff_accounts"
 assert_no_direct_table_access "v2.staff_sessions"
+assert_no_direct_table_access "v2.staff_bootstrap_marker"
 assert_no_direct_table_access "v2.user_roles"
 assert_no_direct_table_access "v2.roles"
 assert_no_direct_table_access "v2.facility_scope"
@@ -389,6 +434,7 @@ if [[ "$FINAL_STATE" != "running|1|1|1|running|1|1" ]]; then
 fi
 
 printf 'Run schema and lifecycle checks passed.\n'
+printf 'Concurrent first-manager bootstrap passed: exactly one manager was created.\n'
 printf 'Restricted API role check passed: %s\n' "$API_ROLE_RESULT"
 printf 'V2 auth function access passed: %s\n' "$API_AUTH_LOOKUP / session lookup / revoke"
 printf 'Restricted API role has no direct table access (runs and auth data).\n'

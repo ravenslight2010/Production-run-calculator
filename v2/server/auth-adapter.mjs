@@ -22,6 +22,12 @@ const FIND_STAFF_SQL = "SELECT * FROM v2.find_staff_for_sign_in($1::text)";
 const OPEN_SESSION_SQL = "SELECT v2.open_staff_session($1::uuid, $2::text, $3::text, $4::timestamptz) AS opened";
 const RESOLVE_SESSION_SQL = "SELECT * FROM v2.resolve_staff_session($1::text)";
 const REVOKE_SESSION_SQL = "SELECT v2.revoke_staff_session($1::text) AS revoked";
+const BOOTSTRAP_OPEN_SQL = "SELECT v2.staff_bootstrap_open() AS available";
+const BOOTSTRAP_MANAGER_SQL = "SELECT v2.bootstrap_first_manager($1::text, $2::text) AS created";
+const LIST_STAFF_SQL = "SELECT * FROM v2.list_staff_accounts($1::uuid)";
+const LIST_STAFF_ROLES_SQL = "SELECT * FROM v2.list_staff_roles($1::uuid)";
+const CREATE_STAFF_SQL = "SELECT v2.create_staff_account($1::uuid, $2::text, $3::text, $4::text) AS outcome";
+const UPDATE_STAFF_SQL = "SELECT v2.update_staff_account($1::uuid, $2::uuid, $3::boolean, $4::text) AS outcome";
 
 export class V2AuthError extends Error {
   constructor(status, message, retryAfterSeconds = undefined) {
@@ -82,9 +88,17 @@ export async function hashPassword(password) {
   if (typeof password !== "string" || password.length < 6 || password.length > 128) {
     throw new TypeError("Passwords must be between 6 and 128 characters.");
   }
-  const salt = randomBytes(16);
-  const derived = await derivePasswordHash(password, salt);
-  return `argon2id$v=19$m=${ARGON2_PARAMETERS.memory},t=${ARGON2_PARAMETERS.passes},p=${ARGON2_PARAMETERS.parallelism}$${salt.toString("base64")}$${derived.toString("base64")}`;
+  if (activePasswordChecks >= MAX_ACTIVE_PASSWORD_CHECKS) {
+    throw new V2AuthError(429, "Password processing is temporarily busy. Wait briefly and try again.", 1);
+  }
+  activePasswordChecks += 1;
+  try {
+    const salt = randomBytes(16);
+    const derived = await derivePasswordHash(password, salt);
+    return `argon2id$v=19$m=${ARGON2_PARAMETERS.memory},t=${ARGON2_PARAMETERS.passes},p=${ARGON2_PARAMETERS.parallelism}$${salt.toString("base64")}$${derived.toString("base64")}`;
+  } finally {
+    activePasswordChecks -= 1;
+  }
 }
 
 export async function verifyPassword(password, encodedHash) {
@@ -224,6 +238,11 @@ export function createAuthAdapter({
   clock = Date.now,
   sessionTtlMs = SESSION_TTL_MS,
   loginLimit = { maxAttempts: 20, windowMs: 60_000 },
+  bootstrapSecret = "",
+  bootstrapStatusLimit = { maxAttempts: 60, windowMs: 60_000 },
+  bootstrapLimit = { maxAttempts: 5, windowMs: 60_000 },
+  staffReadLimit = { maxAttempts: 120, windowMs: 60_000 },
+  staffLimit = { maxAttempts: 10, windowMs: 60_000 },
   logger = () => {},
 } = {}) {
   if (typeof query !== "function") throw new TypeError("A parameterized V2 database query is required.");
@@ -239,13 +258,266 @@ export function createAuthAdapter({
   ) {
     throw new TypeError("A positive login rate limit is required.");
   }
+  for (const [name, limit] of [
+    ["bootstrapStatusLimit", bootstrapStatusLimit],
+    ["bootstrapLimit", bootstrapLimit],
+    ["staffReadLimit", staffReadLimit],
+    ["staffLimit", staffLimit],
+  ]) {
+    if (
+      !Number.isSafeInteger(limit?.maxAttempts)
+      || limit.maxAttempts < 1
+      || !Number.isSafeInteger(limit.windowMs)
+      || limit.windowMs < 1000
+    ) {
+      throw new TypeError(`A positive ${name} is required.`);
+    }
+  }
 
   const limiter = createRateLimiter({ ...loginLimit, clock });
+  const bootstrapStatusLimiter = createRateLimiter({ ...bootstrapStatusLimit, clock });
+  const bootstrapLimiter = createRateLimiter({ ...bootstrapLimit, clock });
+  const staffReadLimiter = createRateLimiter({ ...staffReadLimit, clock });
+  const staffLimiter = createRateLimiter({ ...staffLimit, clock });
+  const bootstrapIsConfigured = typeof bootstrapSecret === "string"
+    && bootstrapSecret.length >= 32
+    && bootstrapSecret.length <= 256;
   let dummyHashPromise;
+
+  function consumeLimit(targetLimiter, keys, message) {
+    const results = keys.map((key) => targetLimiter.consume(key));
+    const blocked = results.find((result) => !result.allowed);
+    if (blocked) {
+      throw new V2AuthError(429, message, blocked.retryAfterSeconds);
+    }
+  }
+
+  function checkBootstrapSecret(value) {
+    if (!bootstrapIsConfigured) return false;
+    if (typeof value !== "string" || value.length < 32 || value.length > 256) return false;
+    const actual = Buffer.from(hashHex(value), "hex");
+    const expected = Buffer.from(hashHex(bootstrapSecret), "hex");
+    return timingSafeEqual(actual, expected);
+  }
 
   async function dummyHash() {
     dummyHashPromise ??= hashPassword(randomBytes(24).toString("hex"));
     return dummyHashPromise;
+  }
+
+  async function signIn({ username, password, clientKey }) {
+    const normalizedUsername = normalizeUsername(username);
+    validatePassword(password);
+    if (typeof clientKey !== "string" || clientKey.length < 1 || clientKey.length > 256) {
+      throw new V2AuthError(400, "Sign-in request is invalid.");
+    }
+
+    const ipLimit = limiter.consume(`ip:${hashHex(clientKey)}`);
+    const accountLimit = limiter.consume(`account:${hashHex(normalizedUsername)}`);
+    if (!ipLimit.allowed || !accountLimit.allowed) {
+      const retryAfterSeconds = Math.max(
+        ipLimit.retryAfterSeconds ?? 0,
+        accountLimit.retryAfterSeconds ?? 0,
+      );
+      logger({
+        event: "v2.auth.sign_in",
+        outcome: "rate_limited",
+        retryAfterSeconds,
+      });
+      throw new V2AuthError(429, "Too many sign-in attempts. Wait and try again.", retryAfterSeconds);
+    }
+
+    const lookup = await query(FIND_STAFF_SQL, [normalizedUsername]);
+    const account = lookup?.rows?.[0];
+    const passwordHash = typeof account?.password_hash === "string"
+      ? account.password_hash
+      : await dummyHash();
+    const passwordMatches = await verifyPassword(password, passwordHash);
+    if (!account || account.disabled !== false || !passwordMatches) {
+      logger({ event: "v2.auth.sign_in", outcome: "rejected" });
+      throw new V2AuthError(401, "Invalid username or password.");
+    }
+
+    const token = randomBytes(32).toString("base64url");
+    const csrfToken = randomBytes(32).toString("base64url");
+    const tokenHash = hashHex(token);
+    const csrfHash = hashHex(csrfToken);
+    const expiresAt = new Date(clock() + sessionTtlMs);
+    const opened = await query(OPEN_SESSION_SQL, [
+      account.staff_id,
+      tokenHash,
+      csrfHash,
+      expiresAt.toISOString(),
+    ]);
+    if (opened?.rows?.[0]?.opened !== true) {
+      logger({ event: "v2.auth.sign_in", outcome: "rejected" });
+      throw new V2AuthError(401, "Invalid username or password.");
+    }
+
+    const auth = await resolveToken(token);
+    if (!auth) {
+      await query(REVOKE_SESSION_SQL, [tokenHash]);
+      logger({ event: "v2.auth.sign_in", outcome: "unavailable" });
+      throw new V2AuthError(503, "Sign-in is temporarily unavailable. Try again.");
+    }
+
+    logger({ event: "v2.auth.sign_in", outcome: "accepted", actorId: auth.actorId });
+    return {
+      token,
+      csrfToken,
+      expiresAt: auth.sessionExpiresAt,
+      staff: publicStaff(auth),
+    };
+  }
+
+  function validateClientKey(clientKey, message) {
+    if (typeof clientKey !== "string" || clientKey.length < 1 || clientKey.length > 256) {
+      throw new V2AuthError(400, message);
+    }
+    return hashHex(clientKey);
+  }
+
+  function validateActorId(actorId) {
+    if (typeof actorId !== "string" || !UUID_PATTERN.test(actorId)) {
+      throw new V2AuthError(401, "Sign in to manage staff accounts.");
+    }
+  }
+
+  async function listStaff(actorId) {
+    validateActorId(actorId);
+    consumeLimit(
+      staffReadLimiter,
+      [`actor:${actorId}`],
+      "Staff account reads are temporarily limited. Wait and try again.",
+    );
+    const [staffResult, roleResult] = await Promise.all([
+      query(LIST_STAFF_SQL, [actorId]),
+      query(LIST_STAFF_ROLES_SQL, [actorId]),
+    ]);
+    return {
+      staff: (staffResult?.rows ?? []).map((row) => ({
+        userId: row.staff_id,
+        username: row.username,
+        role: row.role_name,
+        disabled: row.disabled,
+        createdAt: new Date(row.created_at).toISOString(),
+      })),
+      roles: (roleResult?.rows ?? []).map((row) => ({
+        name: row.role_name,
+        capabilities: row.capabilities,
+      })),
+    };
+  }
+
+  async function bootstrapAvailable({ clientKey } = {}) {
+    if (!bootstrapIsConfigured) return false;
+    const clientHash = validateClientKey(clientKey, "Setup status request is invalid.");
+    consumeLimit(
+      bootstrapStatusLimiter,
+      [`client:${clientHash}`],
+      "Setup status checks are temporarily limited. Wait and try again.",
+    );
+    const result = await query(BOOTSTRAP_OPEN_SQL, []);
+    return result?.rows?.[0]?.available === true;
+  }
+
+  async function bootstrapManager({ username, password, bootstrapCode, clientKey }) {
+    if (!bootstrapIsConfigured) {
+      throw new V2AuthError(404, "First-manager setup is unavailable.");
+    }
+    const clientHash = validateClientKey(clientKey, "First-manager setup request is invalid.");
+    consumeLimit(
+      bootstrapLimiter,
+      [`client:${clientHash}`],
+      "Too many setup attempts. Wait and try again.",
+    );
+    if (!checkBootstrapSecret(bootstrapCode)) {
+      logger({ event: "v2.auth.bootstrap", outcome: "rejected" });
+      throw new V2AuthError(401, "First-manager setup could not be completed.");
+    }
+    const normalizedUsername = normalizeUsername(username);
+    if (typeof password !== "string" || password.length < 6 || password.length > 128) {
+      throw new V2AuthError(400, "Passwords must be between 6 and 128 characters.");
+    }
+    if (!await bootstrapAvailable({ clientKey })) {
+      throw new V2AuthError(409, "First-manager setup has already been completed.");
+    }
+    const passwordHash = await hashPassword(password);
+    const result = await query(BOOTSTRAP_MANAGER_SQL, [normalizedUsername, passwordHash]);
+    if (result?.rows?.[0]?.created !== true) {
+      logger({ event: "v2.auth.bootstrap", outcome: "closed" });
+      throw new V2AuthError(409, "First-manager setup has already been completed.");
+    }
+    logger({ event: "v2.auth.bootstrap", outcome: "created" });
+    return signIn({ username: normalizedUsername, password, clientKey });
+  }
+
+  async function createStaffAccount({ actorId, username, password, roleName, clientKey }) {
+    validateActorId(actorId);
+    const clientHash = validateClientKey(clientKey, "Staff account request is invalid.");
+    consumeLimit(
+      staffLimiter,
+      [`client:${clientHash}`, `actor:${actorId}`],
+      "Too many staff account changes. Wait and try again.",
+    );
+    const normalizedUsername = normalizeUsername(username);
+    if (typeof password !== "string" || password.length < 6 || password.length > 128) {
+      throw new V2AuthError(400, "Passwords must be between 6 and 128 characters.");
+    }
+    if (typeof roleName !== "string" || roleName.length < 1 || roleName.length > 80) {
+      throw new V2AuthError(400, "Choose a valid staff role.");
+    }
+
+    const passwordHash = await hashPassword(password);
+    const result = await query(CREATE_STAFF_SQL, [actorId, normalizedUsername, passwordHash, roleName]);
+    const outcome = result?.rows?.[0]?.outcome;
+    if (outcome === "duplicate") throw new V2AuthError(409, "That username is already in use.");
+    if (outcome === "invalid_role") throw new V2AuthError(400, "Choose a valid staff role.");
+    if (outcome !== "created") throw new V2AuthError(503, "The staff account could not be created. Try again.");
+    logger({ event: "v2.auth.staff.create", outcome: "created", actorId });
+    return true;
+  }
+
+  async function updateStaffAccount({ actorId, staffId, disabled, roleName, clientKey }) {
+    validateActorId(actorId);
+    if (typeof staffId !== "string" || !UUID_PATTERN.test(staffId)) {
+      throw new V2AuthError(400, "Choose a valid staff account.");
+    }
+    if (disabled !== undefined && typeof disabled !== "boolean") {
+      throw new V2AuthError(400, "Choose whether the account is enabled or disabled.");
+    }
+    if (roleName !== undefined && (typeof roleName !== "string" || roleName.length < 1 || roleName.length > 80)) {
+      throw new V2AuthError(400, "Choose a valid staff role.");
+    }
+    if (disabled === undefined && roleName === undefined) {
+      throw new V2AuthError(400, "Choose an account status or role to change.");
+    }
+    const clientHash = validateClientKey(clientKey, "Staff account request is invalid.");
+    consumeLimit(
+      staffLimiter,
+      [`client:${clientHash}`, `actor:${actorId}`],
+      "Too many staff account changes. Wait and try again.",
+    );
+    const result = await query(UPDATE_STAFF_SQL, [
+      actorId,
+      staffId,
+      disabled ?? null,
+      roleName ?? null,
+    ]);
+    const outcome = result?.rows?.[0]?.outcome;
+    if (outcome === "not_found") throw new V2AuthError(404, "Staff account not found.");
+    if (outcome === "invalid_role") throw new V2AuthError(400, "Choose a valid staff role.");
+    if (outcome === "last_manager") {
+      throw new V2AuthError(409, "At least one enabled manager account must remain.");
+    }
+    if (outcome === "self_change") {
+      throw new V2AuthError(409, "You cannot change your own staff account.");
+    }
+    if (outcome !== "updated" && outcome !== "unchanged") {
+      throw new V2AuthError(503, "The staff account could not be updated. Try again.");
+    }
+    logger({ event: "v2.auth.staff.update", outcome, actorId, targetId: staffId });
+    return { outcome };
   }
 
   async function resolveToken(token) {
@@ -256,70 +528,17 @@ export function createAuthAdapter({
   }
 
   return Object.freeze({
-    async signIn({ username, password, clientKey }) {
-      const normalizedUsername = normalizeUsername(username);
-      validatePassword(password);
-      if (typeof clientKey !== "string" || clientKey.length < 1 || clientKey.length > 256) {
-        throw new V2AuthError(400, "Sign-in request is invalid.");
-      }
+    signIn,
 
-      const ipLimit = limiter.consume(`ip:${hashHex(clientKey)}`);
-      const accountLimit = limiter.consume(`account:${hashHex(normalizedUsername)}`);
-      if (!ipLimit.allowed || !accountLimit.allowed) {
-        const retryAfterSeconds = Math.max(
-          ipLimit.retryAfterSeconds ?? 0,
-          accountLimit.retryAfterSeconds ?? 0,
-        );
-        logger({
-          event: "v2.auth.sign_in",
-          outcome: "rate_limited",
-          retryAfterSeconds,
-        });
-        throw new V2AuthError(429, "Too many sign-in attempts. Wait and try again.", retryAfterSeconds);
-      }
+    bootstrapAvailable,
 
-      const lookup = await query(FIND_STAFF_SQL, [normalizedUsername]);
-      const account = lookup?.rows?.[0];
-      const passwordHash = typeof account?.password_hash === "string"
-        ? account.password_hash
-        : await dummyHash();
-      const passwordMatches = await verifyPassword(password, passwordHash);
-      if (!account || account.disabled !== false || !passwordMatches) {
-        logger({ event: "v2.auth.sign_in", outcome: "rejected" });
-        throw new V2AuthError(401, "Invalid username or password.");
-      }
+    bootstrapManager,
 
-      const token = randomBytes(32).toString("base64url");
-      const csrfToken = randomBytes(32).toString("base64url");
-      const tokenHash = hashHex(token);
-      const csrfHash = hashHex(csrfToken);
-      const expiresAt = new Date(clock() + sessionTtlMs);
-      const opened = await query(OPEN_SESSION_SQL, [
-        account.staff_id,
-        tokenHash,
-        csrfHash,
-        expiresAt.toISOString(),
-      ]);
-      if (opened?.rows?.[0]?.opened !== true) {
-        logger({ event: "v2.auth.sign_in", outcome: "rejected" });
-        throw new V2AuthError(401, "Invalid username or password.");
-      }
+    listStaff,
 
-      const auth = await resolveToken(token);
-      if (!auth) {
-        await query(REVOKE_SESSION_SQL, [tokenHash]);
-        logger({ event: "v2.auth.sign_in", outcome: "unavailable" });
-        throw new V2AuthError(503, "Sign-in is temporarily unavailable. Try again.");
-      }
+    createStaffAccount,
 
-      logger({ event: "v2.auth.sign_in", outcome: "accepted", actorId: auth.actorId });
-      return {
-        token,
-        csrfToken,
-        expiresAt: auth.sessionExpiresAt,
-        staff: publicStaff(auth),
-      };
-    },
+    updateStaffAccount,
 
     authenticate(request) {
       return resolveToken(parseCookie(request, SESSION_COOKIE));

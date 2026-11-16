@@ -116,6 +116,7 @@ export async function startV2Server({ env = process.env, logger = logStructured 
 
   const authAdapter = createAuthAdapter({
     query: (text, values) => pool.query(text, values),
+    bootstrapSecret: env.V2_INITIAL_MANAGER_BOOTSTRAP_CODE,
     logger,
   });
   const api = createV2Api({

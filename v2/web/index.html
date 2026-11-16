@@ -59,6 +59,26 @@
                 <span>Continue</span><span class="button-arrow" aria-hidden="true">→</span>
               </button>
             </form>
+            <button class="text-button setup-toggle" id="setup-toggle" type="button" hidden aria-expanded="false" aria-controls="bootstrap-form">Set up the first manager</button>
+            <form class="auth-form bootstrap-form" id="bootstrap-form" hidden>
+              <p class="form-note">This setup is available only on a fresh V2 database and requires the one-time code configured by the V2 administrator.</p>
+              <label class="field" for="bootstrap-code">
+                <span>One-time setup code</span>
+                <input id="bootstrap-code" name="bootstrapCode" type="password" minlength="32" maxlength="256" autocomplete="off" aria-describedby="auth-error-message" required />
+              </label>
+              <label class="field" for="bootstrap-username">
+                <span>Manager username</span>
+                <input id="bootstrap-username" name="username" type="text" minlength="3" maxlength="40" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="auth-error-message" required />
+              </label>
+              <label class="field" for="bootstrap-password">
+                <span>Manager password</span>
+                <input id="bootstrap-password" name="password" type="password" minlength="6" maxlength="128" autocomplete="new-password" aria-describedby="auth-error-message" required />
+              </label>
+              <button class="button button-primary auth-submit" id="bootstrap-submit" type="submit">
+                <span>Create first manager</span><span class="button-arrow" aria-hidden="true">→</span>
+              </button>
+              <button class="text-button setup-cancel" id="setup-cancel" type="button">Back to sign in</button>
+            </form>
             <button class="text-button auth-retry" id="auth-retry" type="button" hidden data-testid="button-check-session">Check session again</button>
             <p class="auth-footnote">Offline mode is read-only. No run state is shown until the server confirms your session.</p>
           </div>
@@ -74,6 +94,40 @@
           <div class="sync-stamp">
             <span class="sync-icon" aria-hidden="true"></span>
             <div><span class="eyebrow">LAST CHECK</span><strong id="last-check">Waiting for server</strong></div>
+          </div>
+        </section>
+
+        <section class="staff-panel" id="staff-panel" aria-labelledby="staff-heading" hidden>
+          <div class="staff-panel-header">
+            <div>
+              <p class="eyebrow">MANAGER ACCESS</p>
+              <h2 id="staff-heading">Staff accounts</h2>
+            </div>
+            <p class="staff-panel-note">Account and role changes revoke the staff member’s existing sessions.</p>
+          </div>
+          <p class="staff-status" id="staff-status" role="status" aria-live="polite">Loading staff accounts…</p>
+          <div class="staff-error" id="staff-error" role="alert" hidden></div>
+          <form class="staff-create-form" id="staff-create-form">
+            <label class="field" for="new-staff-username">
+              <span>Username</span>
+                <input id="new-staff-username" name="username" type="text" minlength="3" maxlength="40" autocomplete="off" aria-describedby="staff-error" required />
+            </label>
+            <label class="field" for="new-staff-password">
+              <span>Initial password</span>
+                <input id="new-staff-password" name="password" type="password" minlength="6" maxlength="128" autocomplete="new-password" aria-describedby="staff-error" required />
+            </label>
+            <label class="field" for="new-staff-role">
+              <span>Role</span>
+                <select id="new-staff-role" name="roleName" aria-describedby="staff-error" required></select>
+            </label>
+            <button class="button button-primary" id="create-staff-button" type="submit">Create account</button>
+          </form>
+          <div class="staff-table-wrap">
+            <table class="staff-table">
+              <caption class="visually-hidden">V2 staff accounts and role settings</caption>
+              <thead><tr><th scope="col">Username</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead>
+              <tbody id="staff-list"></tbody>
+            </table>
           </div>
         </section>
 

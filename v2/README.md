@@ -18,15 +18,22 @@ boundary for start, pause, resume, and complete. That boundary records
 idempotency receipts, revisions, audit events, and outbox events atomically.
 Run creation, bounded facility-scoped reads, V2-owned staff sign-in/session
 routes, a V2-only API host, restrictive browser response headers, an OpenAPI
-contract, and a browser sign-in/run-control flow are also present. The disposable
-PostgreSQL check exercises actual HTTP requests from two separate staff sessions
-and verifies shared revisions and stale-action conflicts. Browser-side writes
-remain disabled offline and until the latest run state is confirmed from V2.
+contract, and a browser sign-in/run-control flow are also present. Managers can
+create, disable, and change roles for V2 staff accounts. A guarded first-manager
+setup form is available only when `V2_INITIAL_MANAGER_BOOTSTRAP_CODE` is
+configured and neither a staff account nor the durable bootstrap marker exists.
+Set a unique 32–256 character secret
+through the V2 environment secret store before initial setup; remove it after
+bootstrap. Do not place it in source, chat, or browser storage. The disposable
+PostgreSQL checks exercise concurrent first-manager setup, manager-only account
+changes, session revocation, and actual HTTP requests from separate staff
+sessions. Browser-side run writes remain disabled offline and until the latest
+run state is confirmed from V2.
 
-It is not yet a usable app: there is no controlled manager/account provisioning,
-station-specific workflow, full inventory, product/setup import, auto-track
-worker, PWA recovery, or real browser/device verification. No separate V2
-Replit project or deployment exists.
+It is not yet a usable app: station-specific workflows, full inventory,
+product/setup import, auto-track worker, PWA recovery, and real browser/device
+verification remain incomplete. No separate V2 Replit project or deployment
+exists.
 
 Database functions are backend-only. The API must derive facility and actor
 identity from verified V2 authorization, compute request hashes itself, and
@@ -37,8 +44,8 @@ approved functions, not direct table writes. The V2 host requires
 startup, and refuses to start if it cannot connect to its configured database.
 No V1 sessions or data have been copied.
 Authentication uses the Node 24.22.2 built-in Argon2id implementation with a
-bounded number of concurrent password checks; only salted password hashes are
-stored in the V2 database.
+bounded number of concurrent password hash and verification operations; only
+salted password hashes are stored in the V2 database.
 Production deployment validation still requires a separate V2 Replit project
 and disposable database; that is not a prerequisite to writing isolated code
 here.

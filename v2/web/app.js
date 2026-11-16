@@ -20,7 +20,23 @@ const el = {
   authPassword: document.querySelector("#auth-password"),
   authSubmit: document.querySelector("#auth-submit"),
   authRetry: document.querySelector("#auth-retry"),
+  setupToggle: document.querySelector("#setup-toggle"),
+  bootstrapForm: document.querySelector("#bootstrap-form"),
+  bootstrapCode: document.querySelector("#bootstrap-code"),
+  bootstrapUsername: document.querySelector("#bootstrap-username"),
+  bootstrapPassword: document.querySelector("#bootstrap-password"),
+  bootstrapSubmit: document.querySelector("#bootstrap-submit"),
+  setupCancel: document.querySelector("#setup-cancel"),
   authenticatedApp: document.querySelector("#authenticated-app"),
+  staffPanel: document.querySelector("#staff-panel"),
+  staffStatus: document.querySelector("#staff-status"),
+  staffError: document.querySelector("#staff-error"),
+  staffCreateForm: document.querySelector("#staff-create-form"),
+  staffUsername: document.querySelector("#new-staff-username"),
+  staffPassword: document.querySelector("#new-staff-password"),
+  staffRole: document.querySelector("#new-staff-role"),
+  staffCreateButton: document.querySelector("#create-staff-button"),
+  staffList: document.querySelector("#staff-list"),
   accountControls: document.querySelector("#account-controls"),
   staffLabel: document.querySelector("#staff-label"),
   signOut: document.querySelector("#sign-out-button"),
@@ -53,6 +69,12 @@ let authInFlight = false;
 let signOutInFlight = false;
 let currentStaff = null;
 let authGeneration = 0;
+let bootstrapAvailable = false;
+let bootstrapStatusInFlight = false;
+let bootstrapInFlight = false;
+let staffInFlight = false;
+let staffGeneration = 0;
+let staffDirectory = null;
 let serverStateConfirmed = false;
 let lastKnownRun = null;
 let pendingCreate = loadPendingCreate();
@@ -226,12 +248,18 @@ function showAuthError(title, message) {
 function showSignIn(message = null, { title = "Sign-in needed", retry = false } = {}) {
   if (currentStaff) clearUserScopedState();
   currentStaff = null;
+  staffGeneration += 1;
+  staffDirectory = null;
   el.authPanel.hidden = false;
   el.authForm.hidden = false;
+  el.bootstrapForm.hidden = true;
+  el.setupToggle.hidden = !bootstrapAvailable;
+  el.setupToggle.setAttribute("aria-expanded", "false");
   el.authSubmit.disabled = authInFlight;
   el.authRetry.hidden = !retry;
   el.authStatus.textContent = message ? "Your session is not confirmed." : "Sign in to load the current server state.";
   el.accountControls.hidden = true;
+  el.staffPanel.hidden = true;
   el.authenticatedApp.hidden = true;
   if (message) showAuthError(title, message);
   else el.authError.hidden = true;
@@ -239,6 +267,7 @@ function showSignIn(message = null, { title = "Sign-in needed", retry = false } 
   if (!authInFlight) {
     window.requestAnimationFrame(() => el.authUsername.focus());
   }
+  void refreshBootstrapAvailability();
 }
 
 function showAuthenticated(staff) {
@@ -249,16 +278,284 @@ function showAuthenticated(staff) {
   currentStaff = staff;
   serverStateConfirmed = false;
   el.authPanel.hidden = true;
+  el.bootstrapForm.hidden = true;
+  el.setupToggle.hidden = true;
   el.authError.hidden = true;
   el.accountControls.hidden = false;
   el.authenticatedApp.hidden = false;
   el.staffLabel.textContent = `${staff.username} · ${staff.role}`;
   el.signOut.disabled = false;
   updateCreateFormForAuth();
+  const canManageStaff = staffManagementAllowed(staff);
+  el.staffPanel.hidden = !canManageStaff;
+  if (canManageStaff) void loadStaffDirectory();
   announce(`Signed in as ${staff.username}.`);
   setConnection(true);
   document.querySelector("#page-title")?.focus();
   void fetchRuns();
+}
+
+function staffManagementAllowed(staff = currentStaff) {
+  return isStaffRecord(staff) && staff.capabilities.includes("manage-staff");
+}
+
+async function refreshBootstrapAvailability() {
+  if (currentStaff || bootstrapInFlight || bootstrapStatusInFlight) return;
+  bootstrapStatusInFlight = true;
+  const requestGeneration = authGeneration;
+  let available = false;
+  let statusError = false;
+  try {
+    const response = await fetch(`${AUTH_API}/bootstrap-status`, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const body = await readJson(response);
+    if (typeof body.available !== "boolean") throw new Error("Setup status was incomplete.");
+    available = body.available;
+  } catch {
+    available = false;
+    statusError = true;
+  } finally {
+    bootstrapStatusInFlight = false;
+  }
+  if (currentStaff || requestGeneration !== authGeneration) return;
+  if (statusError) {
+    bootstrapAvailable = false;
+    el.setupToggle.hidden = true;
+    el.bootstrapForm.hidden = true;
+    el.authForm.hidden = false;
+    el.authStatus.textContent = "First-manager setup could not be checked.";
+    el.authRetry.hidden = false;
+    showAuthError("Setup status unavailable", "The app could not confirm whether first-manager setup is available. Check the connection, then try again.");
+    return;
+  }
+  bootstrapAvailable = available;
+  el.setupToggle.hidden = !bootstrapAvailable;
+  if (!bootstrapAvailable) {
+    el.bootstrapForm.hidden = true;
+    el.authForm.hidden = false;
+    el.setupToggle.setAttribute("aria-expanded", "false");
+  }
+}
+
+function toggleBootstrapForm(show) {
+  if (!bootstrapAvailable || bootstrapInFlight) return;
+  el.authForm.hidden = show;
+  el.bootstrapForm.hidden = !show;
+  el.setupToggle.hidden = show;
+  el.setupToggle.setAttribute("aria-expanded", String(show));
+  el.authError.hidden = true;
+  if (show) el.bootstrapCode.focus();
+  else el.authUsername.focus();
+}
+
+async function submitBootstrap(event) {
+  event.preventDefault();
+  if (bootstrapInFlight || !bootstrapAvailable) return;
+  bootstrapInFlight = true;
+  el.bootstrapSubmit.disabled = true;
+  el.authError.hidden = true;
+  try {
+    const response = await fetch(`${AUTH_API}/bootstrap`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        bootstrapCode: el.bootstrapCode.value,
+        username: el.bootstrapUsername.value,
+        password: el.bootstrapPassword.value,
+      }),
+    });
+    const body = await readJson(response);
+    if (!isStaffRecord(body.staff) || !isTimestamp(body.expiresAt)) {
+      throw new Error("The server returned an incomplete setup result. Try again.");
+    }
+    bootstrapAvailable = false;
+    el.bootstrapForm.reset();
+    showAuthenticated(body.staff);
+  } catch (error) {
+    el.bootstrapCode.value = "";
+    el.bootstrapPassword.value = "";
+    showAuthError(
+      error instanceof ApiError && error.status === 409 ? "Setup already completed" : "First-manager setup failed",
+      error instanceof Error ? error.message : "Check the setup code and try again.",
+    );
+    if (error instanceof ApiError && error.status === 409) void refreshBootstrapAvailability();
+  } finally {
+    bootstrapInFlight = false;
+    el.bootstrapSubmit.disabled = false;
+  }
+}
+
+function isStaffDirectory(body) {
+  return isObject(body)
+    && Array.isArray(body.staff)
+    && body.staff.length <= 200
+    && body.staff.every((staff) => isObject(staff)
+      && typeof staff.userId === "string"
+      && UUID.test(staff.userId)
+      && typeof staff.username === "string"
+      && staff.username.length >= 3
+      && staff.username.length <= 40
+      && typeof staff.role === "string"
+      && staff.role.length > 0
+      && typeof staff.disabled === "boolean"
+      && isTimestamp(staff.createdAt))
+    && Array.isArray(body.roles)
+    && body.roles.length <= 100
+    && body.roles.every((role) => isObject(role)
+      && typeof role.name === "string"
+      && role.name.length > 0
+      && role.name.length <= 80
+      && Array.isArray(role.capabilities)
+      && role.capabilities.length <= 100
+      && role.capabilities.every((capability) => typeof capability === "string" && capability.length <= 80));
+}
+
+function showStaffError(message) {
+  el.staffError.textContent = message;
+  el.staffError.hidden = false;
+}
+
+function clearStaffError() {
+  el.staffError.hidden = true;
+  el.staffError.textContent = "";
+}
+
+function renderStaffDirectory(directory) {
+  staffDirectory = directory;
+  el.staffRole.innerHTML = directory.roles
+    .map((role) => `<option value="${escapeHtml(role.name)}">${escapeHtml(role.name)}</option>`)
+    .join("");
+  if (directory.staff.length === 0) {
+    el.staffList.innerHTML = '<tr><td colspan="4">No staff accounts yet.</td></tr>';
+    return;
+  }
+  el.staffList.innerHTML = directory.staff.map((staff) => {
+    const self = staff.userId === currentStaff?.userId;
+    const roleOptions = directory.roles.map((role) => `<option value="${escapeHtml(role.name)}" ${role.name === staff.role ? "selected" : ""}>${escapeHtml(role.name)}</option>`).join("");
+    const actionMarkup = self
+      ? '<span class="staff-self-note">Your account</span>'
+      : `<div class="staff-actions">
+          <label class="visually-hidden" for="staff-role-${escapeHtml(staff.userId)}">Role for ${escapeHtml(staff.username)}</label>
+          <select id="staff-role-${escapeHtml(staff.userId)}" data-staff-role="${escapeHtml(staff.userId)}" ${staffInFlight ? "disabled" : ""}>${roleOptions}</select>
+          <button type="button" class="staff-action-button" data-staff-action="role" data-staff-id="${escapeHtml(staff.userId)}" ${staffInFlight ? "disabled" : ""}>Save role</button>
+          <button type="button" class="staff-action-button ${staff.disabled ? "" : "danger"}" data-staff-action="status" data-staff-id="${escapeHtml(staff.userId)}" ${staffInFlight ? "disabled" : ""}>${staff.disabled ? "Enable" : "Disable"}</button>
+        </div>`;
+    return `<tr>
+      <th scope="row">${escapeHtml(staff.username)}</th>
+      <td data-label="Status"><span class="staff-state ${staff.disabled ? "disabled" : "enabled"}">${staff.disabled ? "Disabled" : "Enabled"}</span></td>
+      <td data-label="Role">${escapeHtml(staff.role)}</td>
+      <td data-label="Actions">${actionMarkup}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadStaffDirectory() {
+  if (!staffManagementAllowed() || staffInFlight) return;
+  const generation = ++staffGeneration;
+  el.staffStatus.textContent = "Loading staff accounts…";
+  clearStaffError();
+  try {
+    const response = await fetch(`${AUTH_API}/staff`, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const body = await readJson(response);
+    if (!isStaffDirectory(body)) throw new Error("The server returned an unexpected staff list.");
+    if (generation !== staffGeneration || !staffManagementAllowed()) return;
+    renderStaffDirectory(body);
+    el.staffStatus.textContent = `${body.staff.length} staff account${body.staff.length === 1 ? "" : "s"}`;
+  } catch (error) {
+    if (generation !== staffGeneration) return;
+    if (error instanceof ApiError && error.status === 401) {
+      showSignIn("Your session has ended. Sign in again to manage staff accounts.");
+      return;
+    }
+    el.staffStatus.textContent = "Staff accounts could not be loaded.";
+    showStaffError(error instanceof Error ? error.message : "Refresh and try again.");
+  }
+}
+
+async function sendStaffMutation(url, method, body) {
+  if (!staffManagementAllowed() || staffInFlight) return;
+  if (navigator.onLine === false) {
+    showStaffError("Reconnect before changing staff accounts.");
+    return;
+  }
+  const csrf = getCsrfHeaders();
+  if (!csrf) {
+    showStaffError("Refresh your session before changing staff accounts.");
+    return;
+  }
+  staffInFlight = true;
+  el.staffCreateButton.disabled = true;
+  clearStaffError();
+  try {
+    const response = await fetch(url, {
+      method,
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...csrf,
+      },
+      body: JSON.stringify(body),
+    });
+    const result = await readJson(response);
+    if (!isStaffDirectory(result)) throw new Error("The server returned an unexpected staff list.");
+    renderStaffDirectory(result);
+    el.staffStatus.textContent = `${result.staff.length} staff account${result.staff.length === 1 ? "" : "s"}`;
+    announce("Staff account changes saved.");
+    return result;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      showSignIn("Your session has ended. Sign in again to manage staff accounts.");
+      return;
+    }
+    showStaffError(error instanceof Error ? error.message : "The change could not be confirmed. Refresh and try again.");
+  } finally {
+    staffInFlight = false;
+    el.staffCreateButton.disabled = false;
+    if (staffDirectory) renderStaffDirectory(staffDirectory);
+  }
+}
+
+async function submitStaffCreate(event) {
+  event.preventDefault();
+  if (staffInFlight) return;
+  const result = await sendStaffMutation(`${AUTH_API}/staff`, "POST", {
+    username: el.staffUsername.value,
+    password: el.staffPassword.value,
+    roleName: el.staffRole.value,
+  });
+  if (result) {
+    el.staffCreateForm.reset();
+    if (staffDirectory?.roles.length) el.staffRole.value = staffDirectory.roles[0].name;
+  } else {
+    el.staffPassword.value = "";
+  }
+}
+
+async function handleStaffAction(event) {
+  const button = event.target.closest("[data-staff-action]");
+  if (!button || staffInFlight) return;
+  const staff = staffDirectory?.staff.find((item) => item.userId === button.dataset.staffId);
+  if (!staff || staff.userId === currentStaff?.userId) return;
+  const patch = button.dataset.staffAction === "role"
+    ? { roleName: el.staffList.querySelector(`[data-staff-role="${CSS.escape(staff.userId)}"]`)?.value }
+    : { disabled: !staff.disabled };
+  if (patch.roleName === undefined && button.dataset.staffAction === "role") {
+    showStaffError("Choose a role before saving.");
+    return;
+  }
+  await sendStaffMutation(`${AUTH_API}/staff/${encodeURIComponent(staff.userId)}`, "PATCH", patch);
 }
 
 async function checkSession() {
@@ -823,6 +1120,11 @@ if (pendingCreate) {
 el.refresh.addEventListener("click", () => fetchRuns());
 el.createForm.addEventListener("submit", createRun);
 el.authForm.addEventListener("submit", submitSignIn);
+el.bootstrapForm.addEventListener("submit", submitBootstrap);
+el.setupToggle.addEventListener("click", () => toggleBootstrapForm(true));
+el.setupCancel.addEventListener("click", () => toggleBootstrapForm(false));
+el.staffCreateForm.addEventListener("submit", submitStaffCreate);
+el.staffList.addEventListener("click", handleStaffAction);
 el.authRetry.addEventListener("click", checkSession);
 el.signOut.addEventListener("click", signOut);
 window.addEventListener("offline", enterOfflineMode);

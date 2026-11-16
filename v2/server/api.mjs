@@ -58,6 +58,10 @@ function safeRouteName(url) {
   if (url.pathname === "/api/v2/auth/sign-in") return "auth.sign_in";
   if (url.pathname === "/api/v2/auth/session") return "auth.session";
   if (url.pathname === "/api/v2/auth/sign-out") return "auth.sign_out";
+  if (url.pathname === "/api/v2/auth/bootstrap-status") return "auth.bootstrap_status";
+  if (url.pathname === "/api/v2/auth/bootstrap") return "auth.bootstrap";
+  if (url.pathname === "/api/v2/auth/staff") return "auth.staff";
+  if (/^\/api\/v2\/auth\/staff\/[0-9a-f-]{36}$/i.test(url.pathname)) return "auth.staff_item";
   if (url.pathname === "/api/v2/runs") return "runs.collection";
   if (/^\/api\/v2\/runs\/[^/]+\/commands$/.test(url.pathname)) return "runs.command";
   if (/^\/api\/v2\/runs\/[^/]+$/.test(url.pathname)) return "runs.detail";

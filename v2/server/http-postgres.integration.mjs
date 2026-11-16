@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import pg from "pg";
-import { hashPassword } from "./auth-adapter.mjs";
 import { startV2Server } from "./main.mjs";
 
-const { Pool } = pg;
-const MANAGER_ID = "73000000-0000-4000-8000-000000000001";
-const OPERATOR_ID = "73000000-0000-4000-8000-000000000002";
 const MANAGER_PASSWORD = "v2-test-manager-password";
 const OPERATOR_PASSWORD = "v2-test-operator-password";
+const BOOTSTRAP_CODE = "v2-test-initial-manager-bootstrap-code";
 
 async function jsonResponse(response) {
   return response.json();
@@ -34,6 +30,23 @@ async function signIn(baseUrl, username, password) {
   return { cookieHeader, csrfToken };
 }
 
+async function bootstrap(baseUrl, bootstrapCode) {
+  const response = await fetch(`${baseUrl}/api/v2/auth/bootstrap`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: baseUrl,
+      "Sec-Fetch-Site": "same-origin",
+    },
+    body: JSON.stringify({
+      bootstrapCode,
+      username: "V2IntegrationManager",
+      password: MANAGER_PASSWORD,
+    }),
+  });
+  return response;
+}
+
 async function main() {
   const adminConnectionString = process.env.V2_TEST_ADMIN_URL;
   const apiConnectionString = process.env.V2_DATABASE_URL;
@@ -41,23 +54,8 @@ async function main() {
     throw new Error("The disposable V2 PostgreSQL URLs are required for this integration check.");
   }
 
-  const admin = new Pool({ connectionString: adminConnectionString, max: 1 });
   let serverInstance;
   try {
-    const managerHash = await hashPassword(MANAGER_PASSWORD);
-    const operatorHash = await hashPassword(OPERATOR_PASSWORD);
-    await admin.query(
-      `INSERT INTO v2.staff_accounts (id, username, password_hash, disabled)
-       VALUES ($1::uuid, $2::text, $3::text, false),
-              ($4::uuid, $5::text, $6::text, false)`,
-      [MANAGER_ID, "V2IntegrationManager", managerHash, OPERATOR_ID, "V2IntegrationOperator", operatorHash],
-    );
-    await admin.query(
-      `INSERT INTO v2.user_roles (user_id, role_name)
-       VALUES ($1::uuid, 'manager'), ($2::uuid, 'operator')`,
-      [MANAGER_ID, OPERATOR_ID],
-    );
-
     const logs = [];
     serverInstance = await startV2Server({
       env: {
@@ -65,6 +63,7 @@ async function main() {
         NODE_ENV: "development",
         PORT: "0",
         V2_DATABASE_URL: apiConnectionString,
+        V2_INITIAL_MANAGER_BOOTSTRAP_CODE: BOOTSTRAP_CODE,
       },
       logger: (entry) => logs.push(entry),
     });
@@ -78,8 +77,65 @@ async function main() {
     const unauthenticated = await fetch(`${baseUrl}/api/v2/auth/session`);
     assert.equal(unauthenticated.status, 401);
 
-    const manager = await signIn(baseUrl, "V2IntegrationManager", MANAGER_PASSWORD);
+    const bootstrapStatus = await fetch(`${baseUrl}/api/v2/auth/bootstrap-status`);
+    assert.equal(bootstrapStatus.status, 200);
+    assert.deepEqual(await jsonResponse(bootstrapStatus), { available: true });
+
+    const rejectedBootstrap = await bootstrap(baseUrl, "incorrect-v2-bootstrap-code");
+    assert.equal(rejectedBootstrap.status, 401);
+    assert.equal((await jsonResponse(rejectedBootstrap)).error, "First-manager setup could not be completed.");
+
+    const bootstrapResponse = await bootstrap(baseUrl, BOOTSTRAP_CODE);
+    assert.equal(bootstrapResponse.status, 201);
+    const bootstrapBody = await jsonResponse(bootstrapResponse);
+    assert.equal(bootstrapBody.staff.role, "manager");
+    assert.doesNotMatch(JSON.stringify(bootstrapBody), /v2-test-initial-manager-bootstrap-code|v2-test-manager-password|argon2id|v2_session/);
+    const managerCookies = bootstrapResponse.headers.getSetCookie().map((cookie) => cookie.split(";", 1)[0]);
+    const manager = {
+      cookieHeader: managerCookies.join("; "),
+      csrfToken: managerCookies.find((cookie) => cookie.startsWith("v2_csrf="))?.slice("v2_csrf=".length),
+    };
+    assert.match(manager.csrfToken ?? "", /^[A-Za-z0-9_-]{43}$/);
+
+    const bootstrapClosed = await fetch(`${baseUrl}/api/v2/auth/bootstrap-status`);
+    assert.deepEqual(await jsonResponse(bootstrapClosed), { available: false });
+    const duplicateBootstrap = await bootstrap(baseUrl, BOOTSTRAP_CODE);
+    assert.equal(duplicateBootstrap.status, 409);
+
+    const createStaff = await fetch(`${baseUrl}/api/v2/auth/staff`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: manager.cookieHeader,
+        "X-CSRF-Token": manager.csrfToken,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({
+        username: "V2IntegrationOperator",
+        password: OPERATOR_PASSWORD,
+        roleName: "operator",
+      }),
+    });
+    assert.equal(createStaff.status, 201);
+    const directory = await jsonResponse(createStaff);
+    assert.equal(directory.staff.length, 2);
+    assert.equal(directory.roles.length, 2);
+    assert.doesNotMatch(JSON.stringify(directory), /v2-test-operator-password|argon2id|v2_session/);
+
+    const operatorDeniedRead = await fetch(`${baseUrl}/api/v2/auth/staff`);
+    assert.equal(operatorDeniedRead.status, 401);
+
     const operator = await signIn(baseUrl, "V2IntegrationOperator", OPERATOR_PASSWORD);
+    const managerRoster = await fetch(`${baseUrl}/api/v2/auth/staff`, {
+      headers: { Cookie: manager.cookieHeader },
+    });
+    assert.equal(managerRoster.status, 200);
+    assert.equal((await jsonResponse(managerRoster)).staff.length, 2);
+    const operatorRoster = await fetch(`${baseUrl}/api/v2/auth/staff`, {
+      headers: { Cookie: operator.cookieHeader },
+    });
+    assert.equal(operatorRoster.status, 403);
 
     const createdResponse = await fetch(`${baseUrl}/api/v2/runs`, {
       method: "POST",
@@ -150,6 +206,79 @@ async function main() {
     assert.equal(conflict.outcome, "conflict");
     assert.equal(conflict.currentRun.revision, 1);
 
+    const roleChange = await fetch(`${baseUrl}/api/v2/auth/staff/${directory.staff.find((staff) => staff.username === "v2integrationoperator").userId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: manager.cookieHeader,
+        "X-CSRF-Token": manager.csrfToken,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ roleName: "manager" }),
+    });
+    assert.equal(roleChange.status, 200);
+    const changedDirectory = await jsonResponse(roleChange);
+    assert.equal(changedDirectory.staff.find((staff) => staff.username === "v2integrationoperator").role, "manager");
+
+    const oldOperatorSession = await fetch(`${baseUrl}/api/v2/auth/session`, {
+      headers: { Cookie: operator.cookieHeader },
+    });
+    assert.equal(oldOperatorSession.status, 401);
+    const promotedOperator = await signIn(baseUrl, "V2IntegrationOperator", OPERATOR_PASSWORD);
+    assert.equal((await fetch(`${baseUrl}/api/v2/auth/session`, {
+      headers: { Cookie: promotedOperator.cookieHeader },
+    })).status, 200);
+
+    const demoteOperator = await fetch(`${baseUrl}/api/v2/auth/staff/${directory.staff.find((staff) => staff.username === "v2integrationoperator").userId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: manager.cookieHeader,
+        "X-CSRF-Token": manager.csrfToken,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ roleName: "operator" }),
+    });
+    assert.equal(demoteOperator.status, 200);
+    const demotedOperator = await signIn(baseUrl, "V2IntegrationOperator", OPERATOR_PASSWORD);
+
+    const disableOperator = await fetch(`${baseUrl}/api/v2/auth/staff/${directory.staff.find((staff) => staff.username === "v2integrationoperator").userId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: manager.cookieHeader,
+        "X-CSRF-Token": manager.csrfToken,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ disabled: true }),
+    });
+    assert.equal(disableOperator.status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/v2/auth/session`, {
+      headers: { Cookie: demotedOperator.cookieHeader },
+    })).status, 401);
+    const disabledSignIn = await fetch(`${baseUrl}/api/v2/auth/sign-in`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
+      body: JSON.stringify({ username: "V2IntegrationOperator", password: OPERATOR_PASSWORD }),
+    });
+    assert.equal(disabledSignIn.status, 401);
+
+    const lastManagerChange = await fetch(`${baseUrl}/api/v2/auth/staff/${bootstrapBody.staff.userId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: manager.cookieHeader,
+        "X-CSRF-Token": manager.csrfToken,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ disabled: true }),
+    });
+    assert.equal(lastManagerChange.status, 409);
+
     const signOut = await fetch(`${baseUrl}/api/v2/auth/sign-out`, {
       method: "POST",
       headers: {
@@ -161,16 +290,19 @@ async function main() {
     });
     assert.equal(signOut.status, 204);
 
-    const operatorStillValid = await fetch(`${baseUrl}/api/v2/auth/session`, {
+    const disabledOperatorSession = await fetch(`${baseUrl}/api/v2/auth/session`, {
       headers: { Cookie: operator.cookieHeader },
     });
-    assert.equal(operatorStillValid.status, 200);
+    assert.equal(disabledOperatorSession.status, 401);
     assert.equal(JSON.stringify(logs).includes(MANAGER_PASSWORD), false);
     assert.equal(JSON.stringify(logs).includes(OPERATOR_PASSWORD), false);
-    console.log("V2 HTTP/PostgreSQL check passed: separate staff sessions share run revisions and detect stale actions.");
+    assert.equal(JSON.stringify(logs).includes(BOOTSTRAP_CODE), false);
+    for (const cookie of [manager.cookieHeader, operator.cookieHeader, promotedOperator.cookieHeader, demotedOperator.cookieHeader]) {
+      assert.equal(JSON.stringify(logs).includes(cookie), false);
+    }
+    console.log("V2 HTTP/PostgreSQL check passed: guarded bootstrap, manager staff control, session revocation, and shared run state.");
   } finally {
     if (serverInstance) await serverInstance.close();
-    await admin.end();
   }
 }
 

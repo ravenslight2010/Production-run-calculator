@@ -18,6 +18,21 @@ function fakeAuthAdapter({ session = null } = {}) {
       throw new Error("not used");
     },
     async signOut() {},
+    async bootstrapAvailable() {
+      return false;
+    },
+    async bootstrapManager() {
+      throw new Error("not used");
+    },
+    async listStaff() {
+      return { staff: [], roles: [] };
+    },
+    async createStaffAccount() {
+      throw new Error("not used");
+    },
+    async updateStaffAccount() {
+      throw new Error("not used");
+    },
     sessionCookie() {
       return "v2_session=test";
     },

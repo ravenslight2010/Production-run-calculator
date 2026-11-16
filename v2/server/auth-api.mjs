@@ -32,7 +32,7 @@ async function readJsonBody(request) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_AUTH_BODY_BYTES) throw new V2AuthError(413, "The sign-in request is too large.");
+    if (size > MAX_AUTH_BODY_BYTES) throw new V2AuthError(413, "The request is too large.");
     chunks.push(chunk);
   }
   if (size === 0) throw new V2AuthError(400, "A JSON request body is required.");
@@ -59,20 +59,20 @@ function requireSignInKeys(body) {
 function assertSameOriginRequest(request) {
   const fetchSite = request.headers["sec-fetch-site"];
   if (fetchSite === "cross-site") {
-    throw new V2AuthError(403, "This sign-in request was not same-origin.");
+    throw new V2AuthError(403, "This request was not same-origin.");
   }
 
   const origin = request.headers.origin;
   if (origin === undefined) return;
   if (typeof origin !== "string" || origin.length > 512) {
-    throw new V2AuthError(403, "This sign-in request was not same-origin.");
+    throw new V2AuthError(403, "This request was not same-origin.");
   }
   const host = request.headers.host;
   let parsedOrigin;
   try {
     parsedOrigin = new URL(origin);
   } catch {
-    throw new V2AuthError(403, "This sign-in request was not same-origin.");
+    throw new V2AuthError(403, "This request was not same-origin.");
   }
   if (
     (parsedOrigin.protocol !== "https:" && parsedOrigin.protocol !== "http:")
@@ -84,7 +84,7 @@ function assertSameOriginRequest(request) {
     || parsedOrigin.search
     || parsedOrigin.hash
   ) {
-    throw new V2AuthError(403, "This sign-in request was not same-origin.");
+    throw new V2AuthError(403, "This request was not same-origin.");
   }
 }
 
@@ -101,6 +101,10 @@ function routeOperation(pathname) {
   if (pathname === `${AUTH_PREFIX}/sign-in`) return "sign_in";
   if (pathname === `${AUTH_PREFIX}/session`) return "session";
   if (pathname === `${AUTH_PREFIX}/sign-out`) return "sign_out";
+  if (pathname === `${AUTH_PREFIX}/bootstrap-status`) return "bootstrap_status";
+  if (pathname === `${AUTH_PREFIX}/bootstrap`) return "bootstrap";
+  if (pathname === `${AUTH_PREFIX}/staff`) return "staff_collection";
+  if (/^\/api\/v2\/auth\/staff\/[0-9a-f-]{36}$/i.test(pathname)) return "staff_item";
   return "unknown";
 }
 
@@ -110,7 +114,21 @@ export function createAuthApi({
   secureCookies = process.env.NODE_ENV === "production",
   logger = () => {},
 } = {}) {
-  for (const method of ["signIn", "authenticate", "verifyCsrf", "signOut", "sessionCookie", "csrfCookie", "clearSessionCookie", "clearCsrfCookie"]) {
+  for (const method of [
+    "signIn",
+    "authenticate",
+    "verifyCsrf",
+    "signOut",
+    "sessionCookie",
+    "csrfCookie",
+    "clearSessionCookie",
+    "clearCsrfCookie",
+    "bootstrapAvailable",
+    "bootstrapManager",
+    "listStaff",
+    "createStaffAccount",
+    "updateStaffAccount",
+  ]) {
     if (typeof auth?.[method] !== "function") {
       throw new TypeError(`A V2 authentication adapter with ${method}() is required.`);
     }
@@ -131,6 +149,43 @@ export function createAuthApi({
 
     const operation = routeOperation(url.pathname);
     try {
+      if (operation === "bootstrap_status") {
+        if (request.method !== "GET") {
+          sendJson(response, 405, { error: "This method is not allowed for setup status." }, { Allow: "GET" });
+          return true;
+        }
+        if (url.search) throw new V2AuthError(400, "Setup status does not accept query parameters.");
+        sendJson(response, 200, { available: await auth.bootstrapAvailable({ clientKey: getClientKey(request) }) });
+        return true;
+      }
+
+      if (operation === "bootstrap") {
+        if (request.method !== "POST") {
+          sendJson(response, 405, { error: "This method is not allowed for first-manager setup." }, { Allow: "POST" });
+          return true;
+        }
+        assertSameOriginRequest(request);
+        if (url.search) throw new V2AuthError(400, "First-manager setup does not accept query parameters.");
+        const body = await readJsonBody(request);
+        const keys = Object.keys(body).sort();
+        if (keys.length !== 3 || keys[0] !== "bootstrapCode" || keys[1] !== "password" || keys[2] !== "username") {
+          throw new V2AuthError(400, "The setup request contains missing or unsupported fields.");
+        }
+        const result = await auth.bootstrapManager({
+          bootstrapCode: body.bootstrapCode,
+          username: body.username,
+          password: body.password,
+          clientKey: getClientKey(request),
+        });
+        sendJson(response, 201, { staff: result.staff, expiresAt: result.expiresAt }, {
+          "Set-Cookie": [
+            auth.sessionCookie(result.token, { secure: secureCookies }),
+            auth.csrfCookie(result.csrfToken, { secure: secureCookies }),
+          ],
+        });
+        return true;
+      }
+
       if (operation === "sign_in") {
         if (request.method !== "POST") {
           sendJson(response, 405, { error: "This method is not allowed for sign-in." }, { Allow: "POST" });
@@ -185,6 +240,95 @@ export function createAuthApi({
             auth.clearSessionCookie({ secure: secureCookies }),
             auth.clearCsrfCookie({ secure: secureCookies }),
           ],
+        });
+        return true;
+      }
+
+      if (operation === "staff_collection") {
+        if (request.method !== "GET" && request.method !== "POST") {
+          sendJson(response, 405, { error: "This method is not allowed for staff accounts." }, { Allow: "GET, POST" });
+          return true;
+        }
+        if (url.search) throw new V2AuthError(400, "Staff accounts do not accept query parameters.");
+        if (request.method === "POST") assertSameOriginRequest(request);
+        const current = await auth.authenticate(request);
+        if (current?.verified !== true) {
+          sendJson(response, 401, { error: "Sign in to manage staff accounts." });
+          return true;
+        }
+        if (!current.capabilities.includes("manage-staff")) {
+          sendJson(response, 403, { error: "You do not have permission to manage staff accounts." });
+          return true;
+        }
+        if (
+          request.method === "POST"
+          && await auth.verifyCsrf(request, current) !== true
+        ) {
+          sendJson(response, 403, { error: "Refresh your session before changing staff accounts." });
+          return true;
+        }
+        if (request.method === "GET") {
+          sendJson(response, 200, await auth.listStaff(current.actorId));
+          return true;
+        }
+
+        const body = await readJsonBody(request);
+        const keys = Object.keys(body).sort();
+        if (keys.length !== 3 || keys[0] !== "password" || keys[1] !== "roleName" || keys[2] !== "username") {
+          throw new V2AuthError(400, "The staff account request contains missing or unsupported fields.");
+        }
+        await auth.createStaffAccount({
+          actorId: current.actorId,
+          username: body.username,
+          password: body.password,
+          roleName: body.roleName,
+          clientKey: getClientKey(request),
+        });
+        sendJson(response, 201, await auth.listStaff(current.actorId));
+        return true;
+      }
+
+      if (operation === "staff_item") {
+        if (request.method !== "PATCH") {
+          sendJson(response, 405, { error: "This method is not allowed for staff account changes." }, { Allow: "PATCH" });
+          return true;
+        }
+        assertSameOriginRequest(request);
+        if (url.search) throw new V2AuthError(400, "Staff account changes do not accept query parameters.");
+        const current = await auth.authenticate(request);
+        if (current?.verified !== true) {
+          sendJson(response, 401, { error: "Sign in to manage staff accounts." });
+          return true;
+        }
+        if (!current.capabilities.includes("manage-staff")) {
+          sendJson(response, 403, { error: "You do not have permission to manage staff accounts." });
+          return true;
+        }
+        if (await auth.verifyCsrf(request, current) !== true) {
+          sendJson(response, 403, { error: "Refresh your session before changing staff accounts." });
+          return true;
+        }
+
+        const body = await readJsonBody(request);
+        const keys = Object.keys(body);
+        if (
+          keys.length < 1
+          || keys.length > 2
+          || keys.some((key) => key !== "disabled" && key !== "roleName")
+        ) {
+          throw new V2AuthError(400, "The staff account change contains missing or unsupported fields.");
+        }
+        const staffId = url.pathname.slice(`${AUTH_PREFIX}/staff/`.length);
+        const updated = await auth.updateStaffAccount({
+          actorId: current.actorId,
+          staffId,
+          disabled: body.disabled,
+          roleName: body.roleName,
+          clientKey: getClientKey(request),
+        });
+        sendJson(response, 200, {
+          ...await auth.listStaff(current.actorId),
+          outcome: updated.outcome,
         });
         return true;
       }

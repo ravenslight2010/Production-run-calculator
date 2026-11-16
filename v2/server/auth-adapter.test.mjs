@@ -88,6 +88,29 @@ test("bounds concurrent Argon2id password checks under login pressure", async ()
   assert.equal(rejected[0].reason.status, 429);
 });
 
+test("first-manager status is closed without a configured secret and rate-limited when open", async () => {
+  let queryCount = 0;
+  const query = async () => {
+    queryCount += 1;
+    return { rows: [{ available: true }] };
+  };
+  const closed = createAuthAdapter({ query });
+  assert.equal(await closed.bootstrapAvailable(), false);
+  assert.equal(queryCount, 0);
+
+  const configured = createAuthAdapter({
+    query,
+    bootstrapSecret: "a".repeat(32),
+    bootstrapStatusLimit: { maxAttempts: 1, windowMs: 60_000 },
+  });
+  assert.equal(await configured.bootstrapAvailable({ clientKey: "bootstrap-client" }), true);
+  await assert.rejects(
+    configured.bootstrapAvailable({ clientKey: "bootstrap-client" }),
+    { name: "V2AuthError", status: 429 },
+  );
+  assert.equal(queryCount, 1);
+});
+
 test("sign-in normalizes username, creates a fresh opaque session, and never sends hashes to the client", async (t) => {
   const { adapter, calls, sessions } = await createFixture(t);
   const result = await adapter.signIn({
