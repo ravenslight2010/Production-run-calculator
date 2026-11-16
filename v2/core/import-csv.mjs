@@ -1,3 +1,5 @@
+import { setupImportCsvTemplates } from "./import-csv-templates.mjs";
+
 const MAX_CSV_BYTES = 1024 * 1024;
 const MAX_ROWS = 2000;
 const MAX_CELL_LENGTH = 20_000;
@@ -165,11 +167,9 @@ function ensureUnique(records, rowNumber, seen) {
 }
 
 export function parseSetupImportCsv(kind, text) {
-  const definitions = {
-    products: ["code", "name", "unit"],
-    recipes: ["code", "name", "product_code", "definition_json"],
-    "production-setups": ["code", "name", "product_code", "config_json"],
-  };
+  const definitions = Object.fromEntries(
+    Object.entries(setupImportCsvTemplates).map(([key, template]) => [key, template.headers]),
+  );
   const headers = definitions[kind];
   if (!headers) fail("Choose a supported import type.");
   const rows = validateHeaders(parseRows(text), headers);

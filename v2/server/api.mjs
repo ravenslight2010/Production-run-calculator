@@ -19,6 +19,7 @@ const WEB_ASSETS = new Map([
   ["/favicon.ico", { file: new URL("../web/favicon.svg", import.meta.url), type: "image/svg+xml" }],
   ["/v2/web/app.js", { file: new URL("../web/app.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/core/station-workflows.mjs", { file: new URL("../core/station-workflows.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
+  ["/v2/core/import-csv-templates.mjs", { file: new URL("../core/import-csv-templates.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/inventory.js", { file: new URL("../web/inventory.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/write-gate.mjs", { file: new URL("../web/write-gate.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/styles.css", { file: new URL("../web/styles.css", import.meta.url), type: "text/css; charset=utf-8" }],
@@ -60,6 +61,7 @@ function safeRouteName(url) {
   if (url.pathname === "/service-worker.js") return "web.service_worker";
   if (url.pathname === "/v2/web/app.js") return "web.app";
   if (url.pathname === "/v2/core/station-workflows.mjs") return "web.station_workflows";
+  if (url.pathname === "/v2/core/import-csv-templates.mjs") return "web.import_csv_templates";
   if (url.pathname === "/v2/web/inventory.js") return "web.inventory";
   if (url.pathname === "/v2/web/write-gate.mjs") return "web.write-gate";
   if (url.pathname === "/v2/web/styles.css") return "web.styles";

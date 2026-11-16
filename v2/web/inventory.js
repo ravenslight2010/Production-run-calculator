@@ -1,3 +1,9 @@
+import {
+  openingCountCsvTemplate,
+  renderImportCsvTemplate,
+  setupImportCsvTemplates,
+} from "../core/import-csv-templates.mjs";
+
 const IMPORTS = "/api/v2/imports";
 const INVENTORY = "/api/v2/inventory";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -10,7 +16,9 @@ const byId = (id) => document.getElementById(id);
 const dom = {
   panel: byId("manager-tools"), error: byId("manager-error"),
   importForm: byId("setup-import-form"), importKind: byId("import-kind"), importFile: byId("import-file"),
-  template: byId("csv-template"), importPreview: byId("import-preview"), importActions: byId("import-actions"),
+  templateColumns: byId("csv-template-columns"), templateDownload: byId("csv-template-download"),
+  openingTemplateDownload: byId("opening-count-template-download"),
+  importPreview: byId("import-preview"), importActions: byId("import-actions"),
   importApply: byId("import-apply-button"), importRetry: byId("import-retry-button"), importHistory: byId("import-history"),
   warehouseForm: byId("warehouse-create-form"), warehouseName: byId("warehouse-name"), warehouseSelect: byId("warehouse-select"),
   stockRows: byId("stock-rows"), stockEmpty: byId("stock-empty"), movementHistory: byId("movement-history"),
@@ -252,12 +260,22 @@ function renderPending() {
   }
 }
 function updateTemplates() {
-  const templates = {
-    products: "Columns: code,name,unit",
-    recipes: "Columns: code,name,product_code,definition_json",
-    "production-setups": "Columns: code,name,product_code,config_json",
-  };
-  dom.template.textContent = templates[dom.importKind.value] || "";
+  const template = setupImportCsvTemplates[dom.importKind.value];
+  if (!template) {
+    dom.templateColumns.textContent = "";
+    dom.templateDownload.hidden = true;
+    return;
+  }
+  dom.templateColumns.textContent = `Columns: ${template.headers.join(", ")}. `;
+  updateTemplateDownload(dom.templateDownload, template);
+  dom.templateDownload.hidden = false;
+}
+function updateTemplateDownload(link, template) {
+  if (link.dataset.objectUrl) URL.revokeObjectURL(link.dataset.objectUrl);
+  const objectUrl = URL.createObjectURL(new Blob([renderImportCsvTemplate(template)], { type: "text/csv;charset=utf-8" }));
+  link.dataset.objectUrl = objectUrl;
+  link.href = objectUrl;
+  link.download = template.fileName;
 }
 function renderImports() {
   dom.importHistory.replaceChildren();
@@ -845,6 +863,7 @@ function bind() {
   dom.panel.querySelectorAll("input,select,button").forEach((control) => { control.dataset.actionControl = "true"; });
 }
 export function initializeInventory() {
+  updateTemplateDownload(dom.openingTemplateDownload, openingCountCsvTemplate);
   bind();
   updateReadOnly();
 }

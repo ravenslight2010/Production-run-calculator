@@ -6,6 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { chromium } from "../../node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/index.mjs";
+import { parseOpeningCountCsv, parseSetupImportCsv } from "../core/import-csv.mjs";
+import {
+  openingCountCsvTemplate,
+  renderImportCsvTemplate,
+  setupImportCsvTemplates,
+} from "../core/import-csv-templates.mjs";
 
 const CSRF_TOKEN = "a".repeat(43);
 const STAFF_ID = "72000000-0000-4000-8000-000000000001";
@@ -42,6 +48,7 @@ const WEB_ASSETS = new Map([
   ["/v2/web/inventory.js", ["../web/inventory.js", "text/javascript; charset=utf-8"]],
   ["/v2/web/styles.css", ["../web/styles.css", "text/css; charset=utf-8"]],
   ["/v2/web/write-gate.mjs", ["../web/write-gate.mjs", "text/javascript; charset=utf-8"]],
+  ["/v2/core/import-csv-templates.mjs", ["../core/import-csv-templates.mjs", "text/javascript; charset=utf-8"]],
   ["/v2/core/station-workflows.mjs", ["../core/station-workflows.mjs", "text/javascript; charset=utf-8"]],
 ]);
 
@@ -141,7 +148,7 @@ function applyCommand(fixture, command) {
   return { outcome: "accepted", replayed: false, run: resultRun };
 }
 
-async function createFixture(t, viewport = { width: 1440, height: 900 }) {
+async function createFixture(t, viewport = { width: 1440, height: 900 }, { manager = false } = {}) {
   const fixture = { run: newRun(), receipts: new Map(), pageErrors: [] };
   const server = createServer(async (request, response) => {
     const asset = WEB_ASSETS.get(new URL(request.url, "http://v2.test").pathname);
@@ -189,10 +196,26 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }) {
               userId: STAFF_ID,
               username: "station_tester",
               role: "manager",
-              capabilities: ["station.command"],
+              capabilities: ["station.command", ...(manager ? ["manage-inventory"] : [])],
             },
           }),
         });
+        return;
+      }
+      if (manager && url.pathname === "/api/v2/imports" && request.method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ imports: [] }) });
+        return;
+      }
+      if (manager && url.pathname === "/api/v2/inventory/warehouses" && request.method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ warehouses: [] }) });
+        return;
+      }
+      if (manager && url.pathname === "/api/v2/inventory/products" && request.method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ products: [] }) });
+        return;
+      }
+      if (manager && url.pathname === "/api/v2/inventory/opening-counts" && request.method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ counts: [] }) });
         return;
       }
       if (url.pathname === "/api/v2/runs" && request.method() === "GET") {
@@ -330,4 +353,45 @@ test("server auto-tracking and station timers are shared across devices", async 
   assert.equal(fixture.run.stationProgress.line.progress.timerStatus, "paused");
   assert.ok(Number(fixture.run.stationProgress.line.progress.timerElapsedMs) >= 0);
   assert.deepEqual(fixture.pageErrors, []);
+});
+
+test("manager downloads each CSV template with parser-valid synthetic examples", async (t) => {
+  const fixture = await createFixture(t, undefined, { manager: true });
+  const { page } = await fixture.openDevice();
+  await page.locator("#manager-tools:not([hidden])").waitFor();
+  await page.getByText("No setup imports recorded yet.").waitFor();
+
+  for (const [kind, template] of Object.entries(setupImportCsvTemplates)) {
+    await page.locator("#import-kind").selectOption(kind);
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.locator("#csv-template-download").click(),
+    ]);
+    assert.equal(download.suggestedFilename(), template.fileName);
+    const csv = await readFile(await download.path(), "utf8");
+    assert.equal(csv, renderImportCsvTemplate(template));
+    assert.equal(parseSetupImportCsv(kind, csv).length, template.rows.length);
+  }
+
+  const [countDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator("#opening-count-template-download").click(),
+  ]);
+  assert.equal(countDownload.suggestedFilename(), openingCountCsvTemplate.fileName);
+  const countCsv = await readFile(await countDownload.path(), "utf8");
+  assert.equal(countCsv, renderImportCsvTemplate(openingCountCsvTemplate));
+  parseOpeningCountCsv(countCsv, setupImportCsvTemplates.products.rows.map(([code]) => code));
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const link = page.locator("#csv-template-download");
+    await link.scrollIntoViewIfNeeded();
+    const bounds = await link.boundingBox();
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= viewport.width,
+      `template download link fits ${viewport.width}×${viewport.height}`);
+  }
 });

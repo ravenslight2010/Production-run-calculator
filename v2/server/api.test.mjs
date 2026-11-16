@@ -113,6 +113,11 @@ test("serves the V2 sign-in page and local assets with restrictive browser heade
     assert.equal(writeGate.status, 200);
     assert.match(await writeGate.text(), /canWriteRunState/);
 
+    const csvTemplates = await fetch(`${baseUrl}/v2/core/import-csv-templates.mjs`);
+    assert.equal(csvTemplates.status, 200);
+    assert.match(csvTemplates.headers.get("content-type"), /javascript/);
+    assert.match(await csvTemplates.text(), /openingCountCsvTemplate/);
+
     const styles = await fetch(`${baseUrl}/v2/web/styles.css`);
     assert.equal(styles.status, 200);
     assert.match(styles.headers.get("content-type"), /text\/css/);

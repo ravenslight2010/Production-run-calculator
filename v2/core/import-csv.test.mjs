@@ -6,6 +6,11 @@ import {
   parseOpeningCountCsv,
   parseSetupImportCsv,
 } from "./import-csv.mjs";
+import {
+  openingCountCsvTemplate,
+  renderImportCsvTemplate,
+  setupImportCsvTemplates,
+} from "./import-csv-templates.mjs";
 
 const csvCell = (value) => `"${String(value).replaceAll('"', '""')}"`;
 
@@ -32,6 +37,24 @@ test("recipe and production setup rows require JSON objects", () => {
     () => parseSetupImportCsv("production-setups", "code,name,product_code,config_json\nLINE,Line,FLOUR,[]\n"),
     (error) => error instanceof ImportCsvError && error.field === "config_json",
   );
+});
+
+test("download templates parse with canonical headers and synthetic example rows", () => {
+  for (const [kind, template] of Object.entries(setupImportCsvTemplates)) {
+    const csv = renderImportCsvTemplate(template);
+    const records = parseSetupImportCsv(kind, csv);
+    assert.equal(records.length, template.rows.length);
+    assert.match(csv, /TEMPLATE-/u);
+  }
+
+  const productCodes = setupImportCsvTemplates.products.rows.map(([code]) => code);
+  const countCsv = renderImportCsvTemplate(openingCountCsvTemplate);
+  const counts = parseOpeningCountCsv(countCsv, productCodes);
+  assert.deepEqual(counts.map(({ productCode, quantity }) => [productCode, quantity]), [
+    ["TEMPLATE-FLOUR", "0"],
+    ["TEMPLATE-CHEESE", "0"],
+  ]);
+  assert.deepEqual(openingCountCsvTemplate.rows.map(([code]) => code), productCodes);
 });
 
 test("rejects malformed headers, duplicate keys, broken quoting, and oversized files", () => {

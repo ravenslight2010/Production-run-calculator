@@ -246,7 +246,7 @@
             <section class="manager-card" aria-labelledby="import-heading">
               <p class="eyebrow">PRODUCTS · RECIPES · PRODUCTION SETUP</p>
               <h3 id="import-heading">Review setup import</h3>
-              <p class="manager-help">Use the V2 CSV columns shown after selecting an import type. Missing rows never delete existing setup.</p>
+              <p class="manager-help">Download a CSV starter and replace its example rows. Import products first; recipe and production setup rows reference product codes already in V2. Missing rows never delete existing setup.</p>
               <form id="setup-import-form" class="manager-form">
                 <label class="field" for="import-kind">
                   <span>Import type</span>
@@ -256,7 +256,10 @@
                     <option value="production-setups">Production setup</option>
                   </select>
                 </label>
-                <p class="csv-template" id="csv-template" aria-live="polite"></p>
+                <p class="csv-template" id="csv-template" aria-live="polite">
+                  <span id="csv-template-columns"></span>
+                  <a class="button button-secondary button-small" id="csv-template-download" download>Download CSV template</a>
+                </p>
                 <label class="field" for="import-file">
                   <span>CSV file</span>
                   <input id="import-file" name="file" type="file" accept=".csv,text/csv" required aria-describedby="csv-template" />
@@ -369,12 +372,15 @@
                 </label>
                 <label class="field" for="opening-count-file">
                   <span>Physical-count CSV</span>
-                  <input id="opening-count-file" name="file" type="file" accept=".csv,text/csv" required />
+                  <input id="opening-count-file" name="file" type="file" accept=".csv,text/csv" required aria-describedby="opening-count-template" />
                 </label>
                 <button class="button button-primary" id="opening-count-submit" type="submit">Review physical count</button>
                 <button class="button button-secondary" id="opening-count-retry" type="button" hidden>Retry the same count</button>
               </form>
-              <p class="csv-template">Columns: <code>product_code,quantity</code>. Use a fresh physical count, with a row for each active product.</p>
+              <p class="csv-template" id="opening-count-template">
+                <span>Columns: <code>product_code,quantity</code>. Replace the synthetic product codes with every active product and enter the counted quantity, including zero.</span>
+                <a class="button button-secondary button-small" id="opening-count-template-download" download>Download count template</a>
+              </p>
               <div class="manager-preview" id="opening-count-preview" aria-live="polite" hidden></div>
               <div class="manager-actions" id="opening-count-actions" hidden>
                 <button class="button button-secondary" id="opening-count-mark-reviewed" type="button">Confirm count review</button>
