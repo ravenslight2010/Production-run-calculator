@@ -3,6 +3,16 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-11-16 — Public CI excludes for source-library reconciliation API suites
+
+**File(s):** `scripts/src/public-source-api-test-excludes.mjs`, `scripts/src/public-source-api-test-excludes.test.mjs`, `scripts/src/run-api-unit-tests-isolated.mts`, `artifacts/api-server/scripts/run-unit-tests.mjs`, `artifacts/api-server/scripts/filter-release-integration-tests.mjs`, `artifacts/api-server/package.json`
+
+**Problem:** With `CI_PUBLIC_SOURCE=1` the private audit `attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json` is absent. `run-unit-tests.mjs` already excluded the Capture unit + Heal integration suites, but release gates launched API unit tests via `run-api-unit-tests-isolated.mts` and integration shards via an unfiltered `find`, so those suites still imported the missing audit and failed release standard evidence.
+
+**Fix:** Shared public-source exclude helper; isolated unit runner applies the same vitest `--exclude` list; release integration `find` pipes through a filter that drops the Heal suite only when public CI lacks the audit. Dedicated `! -path` inventory strings are unchanged so shard membership checks stay valid. Private-source CI (assets present or `CI_PUBLIC_SOURCE` unset) still runs the suites.
+
+**Why it was needed:** Unblocks PR release gates on public checkouts without removing private audits or weakening private-source coverage. Observed sync.convergence "timed out waiting for matching data frame" left as unrelated flake (5s SSE wait), not addressed here.
+
 ## 2026-11-16 — Startup-failure smoke + nightly secrets `if` + sync incident age fixture
 
 **File(s):** `scripts/src/verify-startup-failures.mts`, `.github/workflows/nightly-large-spec.yml`, `artifacts/api-server/src/routes/incidentsAi.test.ts`
