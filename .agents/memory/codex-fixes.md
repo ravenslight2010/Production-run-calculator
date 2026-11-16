@@ -3,6 +3,19 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-11-16 — Public CI build-source gates + pinned-Node cache race
+
+**File(s):** `scripts/src/build-source-identity.test.mjs`, `scripts/src/build-source-integration.test.mjs`, `scripts/src/run-release-node.test.sh`
+
+**Problem:** With `CI_PUBLIC_SOURCE=1`, release gates failed three ways:
+1. Identity mutation property still expected proprietary reconciliation audit / pool-approval paths to change the sealed hash, but `fingerprintSource` intentionally omits those assets under public CI.
+2. Integration isolate copied the public inventory (no private audits) while child prepare/build ran without `CI_PUBLIC_SOURCE`, so preparation exited 1 (`Required build-source inputs are missing`).
+3. Pinned-Node fallback interrupt test raced: it signaled `NPX_STARTED` before writing `npm_config_cache` to the capture file, so CI could observe "started" with an empty cache path (`Pinned-Node fallback did not expose its temporary cache path`).
+
+**Fix:** Omit proprietary paths from the mutation-must-change list under public CI and assert mutations there are hash no-ops; forward `CI_PUBLIC_SOURCE` into isolated build children and skip proprietary embed assertions when public; write the private cache path before the started marker and wait for both.
+
+**Why it was needed:** Unblocks PR #179 Release gates on public checkouts without inventing private audits or weakening full-source seals when `CI_PUBLIC_SOURCE` is unset.
+
 ## 2026-11-16 — Sync convergence missed-NOTIFY wait honors idle drain interval
 
 **File(s):** `artifacts/api-server/src/lib/syncOutbox.ts`, `artifacts/api-server/src/lib/syncOutbox.test.ts`, `artifacts/api-server/src/routes/sync.convergence.integration.test.ts`

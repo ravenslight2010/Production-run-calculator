@@ -17,12 +17,18 @@ import {
   sealBuildIdentity, sourceRecordDigest, validateBuildInfo,
 } from "./build-source-identity.mjs";
 
+const publicCiSource =
+  process.env.CI_PUBLIC_SOURCE === "1" || process.env.CI_PUBLIC_SOURCE === "true";
+
 // Keep child output in memory only. Never inherit DB/provider/auth credentials,
 // deployment labels, NODE_OPTIONS, or pnpm configuration from the workspace.
+// Forward CI_PUBLIC_SOURCE so isolated prepare/build match the parent's public
+// inventory (proprietary audits are absent from the copied tree).
 function environment(extra = {}) {
   return {
     PATH: `${path.dirname(process.execPath)}:${process.env.PATH}`,
     HOME: os.tmpdir(), NODE_ENV: "production", CI: "1",
+    ...(publicCiSource ? { CI_PUBLIC_SOURCE: process.env.CI_PUBLIC_SOURCE } : {}),
     ...extra,
   };
 }
@@ -189,28 +195,36 @@ test("real API/web producers, finalized PWA and bundled public getter share one 
     const apiBuild = await run(api, process.execPath, ["build.mjs"]);
     assert.equal(apiBuild.code, 0, "real API build must succeed");
     assert(existsSync(path.join(api, "dist/index.mjs")));
-    const bundledApprovalLoader = await import(
-      pathToFileURL(path.join(api, "dist/source-library-approval.mjs")).href
-    );
-    const bundledManifest = path.join(api, "dist",
-      path.basename(bundledApprovalLoader.DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS));
-    const bundledReport = readFileSync(path.join(api, "dist/source-library-reconciliation-report.json"));
-    const approval = bundledApprovalLoader.loadSourceLibraryPoolExceptionApproval(
-      bundledManifest, bundledReport, path.join(api, "dist"),
-    );
-    assert.equal(approval.formatVersion, 2, "real production bundle must load the active approval");
-    assert.equal(approval.approvedDifferences.length, 10);
-    const approvalManifest = JSON.parse(readFileSync(bundledManifest, "utf8"));
-    const reviewedCapturePath = path.join(api, "dist", approvalManifest.reviewedEvidence.capturePath);
-    const reviewedCaptureBytes = readFileSync(reviewedCapturePath);
-    rmSync(reviewedCapturePath);
-    assert.throws(
-      () => bundledApprovalLoader.loadSourceLibraryPoolExceptionApproval(
+    if (publicCiSource) {
+      assert.equal(
+        existsSync(path.join(api, "dist/source-library-reconciliation-report.json")),
+        false,
+        "public CI must not invent proprietary reconciliation embeds",
+      );
+    } else {
+      const bundledApprovalLoader = await import(
+        pathToFileURL(path.join(api, "dist/source-library-approval.mjs")).href
+      );
+      const bundledManifest = path.join(api, "dist",
+        path.basename(bundledApprovalLoader.DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS));
+      const bundledReport = readFileSync(path.join(api, "dist/source-library-reconciliation-report.json"));
+      const approval = bundledApprovalLoader.loadSourceLibraryPoolExceptionApproval(
         bundledManifest, bundledReport, path.join(api, "dist"),
-      ),
-      "missing referenced evidence must fail the production loader",
-    );
-    writeFileSync(reviewedCapturePath, reviewedCaptureBytes);
+      );
+      assert.equal(approval.formatVersion, 2, "real production bundle must load the active approval");
+      assert.equal(approval.approvedDifferences.length, 10);
+      const approvalManifest = JSON.parse(readFileSync(bundledManifest, "utf8"));
+      const reviewedCapturePath = path.join(api, "dist", approvalManifest.reviewedEvidence.capturePath);
+      const reviewedCaptureBytes = readFileSync(reviewedCapturePath);
+      rmSync(reviewedCapturePath);
+      assert.throws(
+        () => bundledApprovalLoader.loadSourceLibraryPoolExceptionApproval(
+          bundledManifest, bundledReport, path.join(api, "dist"),
+        ),
+        "missing referenced evidence must fail the production loader",
+      );
+      writeFileSync(reviewedCapturePath, reviewedCaptureBytes);
+    }
     assert.equal(existsSync(apiInfo), false, "API alone cannot acquire a release stamp");
     assert.throws(() => sealBuildIdentity(root), /Both API and web/);
 
