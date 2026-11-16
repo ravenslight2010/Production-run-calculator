@@ -3,6 +3,16 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-11-16 — Sync convergence missed-NOTIFY wait honors idle drain interval
+
+**File(s):** `artifacts/api-server/src/lib/syncOutbox.ts`, `artifacts/api-server/src/lib/syncOutbox.test.ts`, `artifacts/api-server/src/routes/sync.convergence.integration.test.ts`
+
+**Problem:** `startSyncOutboxListener` polls with `DRAIN_IDLE_INTERVAL_MS` (15s) when lag diagnostics are idle. The convergence soak inserts a durable outbox row without `pg_notify` and waited only 8s for the master-data/profiles frame, so periodic drain often missed the deadline (`timed out waiting for matching data frame` on Release gates).
+
+**Fix:** Exported `DRAIN_INTERVAL_MS` / `DRAIN_IDLE_INTERVAL_MS`. The missed-notification `readMatchingFrame` now waits `DRAIN_IDLE_INTERVAL_MS + 5_000`, and the soak `it` timeout is 60s so that idle wait fits with earlier two-process work. Unit tests assert idle > active and advance timers with the exported active interval. Production idle poll cadence is unchanged.
+
+**Why it was needed:** Unblocks PR #179 Release gates without shortening the production idle drain that reduces pool pressure.
+
 ## 2026-11-16 — public-source-api-test-excludes.d.mts sidecar for scripts typecheck
 
 **File(s):** `scripts/src/public-source-api-test-excludes.d.mts`
