@@ -21,8 +21,8 @@ The first usable V2 release is a web/PWA production tool with:
 
 ## Architecture and deployment boundary
 
-- Keep the published V1 project, its runtime, deployment configuration, and
-  database untouched while developing V2.
+- V1 is no longer live. Preserve its source baseline and data while developing
+  V2 under `v2/`; do not move shared V1 code until dependency ownership is mapped.
 - V2 must be a separate Replit project for an independent database and
   deployment. A second artifact in the V1 project is not isolation: artifacts
   in one project share backend, database, secrets, and publishing lifecycle.
@@ -47,8 +47,9 @@ The first usable V2 release is a web/PWA production tool with:
 
 ## Current V2 source status
 
-The source is under this `v2/` directory. It is not yet a runnable or deployed
-application, and no separate V2 Replit project or artifact has been created.
+The source is under this `v2/` directory and is registered as its own workspace
+package. It is not deployed, and no separate V2 Replit project or artifact has
+been created.
 
 - `core/run-lifecycle.mjs` contains the server-time, revision-checked lifecycle
   model for start, pause, resume, and completion.
@@ -57,31 +58,51 @@ application, and no separate V2 Replit project or artifact has been created.
   transaction boundary.
 - `core/run-service.mjs` provides authorized creation, detail reads, and bounded
   facility-scoped run lists through database functions.
-- `db/0001-run-control.sql` and `db/run-local-tests.sh` define and test the
-  initial V2 schema and lifecycle transaction against a disposable local
-  PostgreSQL cluster, including run creation, canonical timestamps, scoped
-  reads, and command retry/concurrency checks.
+- `db/0001-run-control.sql` and `db/0002-staff-auth.sql` define the V2 run and
+  staff-auth schemas. Their local checks use a disposable PostgreSQL cluster,
+  including run creation, canonical timestamps, scoped reads, command
+  retry/concurrency, role-scoped identity, opaque session lookup, revocation,
+  and HTTP requests through a restricted API role.
+- `server/auth-adapter.mjs` provides V2-owned Argon2id password verification,
+  rate-limited sign-in service logic, opaque hashed sessions, CSRF verification,
+  and run-action authorization.
+- `server/auth-api.mjs` provides JSON sign-in, session-read, and sign-out routes.
+  Sign-in sets an HttpOnly session cookie and a separate CSRF cookie; tokens and
+  credentials are not returned in JSON.
 - `server/run-api.mjs` is a request-scoped HTTP handler factory with bounded
   JSON input, safe errors, and required authentication and CSRF adapters.
-- `api/openapi.yaml` records the local V2 run-control API contract.
-- `web/` contains the run-control screen draft and uses the matching API routes,
-  but no executable API host or real session/CSRF adapter is connected yet.
-- There is no production data connection, V1 data migration, browser/device
-  verification, or separate V2 Replit project.
+- `server/api.mjs` serves the V2 web page/assets and composes authentication,
+  health, and run routes with restrictive browser headers, request IDs, and
+  bounded, payload-free request logs.
+- `server/main.mjs` starts the API with `pg`, a bounded pool, startup database
+  probe, `/healthz`, and graceful shutdown. It requires `V2_DATABASE_URL` and
+  never reads V1 `DATABASE_URL`; it does not run migrations automatically.
+- `api/openapi.yaml` records the health, authentication, and run-control routes.
+- `web/` now connects the username/password sign-in, session check, sign-out,
+  and run controls to the V2 API. It keeps run data hidden until the server
+  confirms a session, disables writes while offline or until a fresh run-list
+  read completes, and binds saved uncertain actions to their original staff
+  account.
+- A disposable PostgreSQL-backed HTTP integration test creates two separate
+  staff sessions, verifies both see the same run, applies a lifecycle command
+  from one session, and confirms the other session receives the new revision
+  and a conflict for a stale command.
+- There is no controlled manager/account provisioning, station workflow,
+  inventory/import implementation, auto-track worker, PWA recovery, or real
+  browser/device verification yet.
+- There is no production data connection, V1 data migration, or separate V2
+  Replit project.
 
 ## Next implementation milestone
 
-Complete the run-control slice in this order:
+Continue the first usable run-control slice in this order:
 
-1. Add the V2 session, permission, and CSRF adapters plus an executable API host
-   that uses a V2-only database connection.
-2. Wire the run services and HTTP handler to that host without importing V1
-   runtime, database credentials, or session state.
-3. Connect `web/` end to end and handle conflicts, uncertain responses,
-   reconnects, and foreground refreshes without inventing success.
-4. Test run creation and lifecycle transitions against disposable PostgreSQL;
-   verify two independent browser sessions converge on the same server revision.
-5. Keep a separate-project VM, database, restart, publish, and capacity pilot as
+1. Add a controlled first-manager bootstrap and manager-only account/role
+   management. Do not add public registration or copy V1 hashes, accounts,
+   sessions, or data without the separate cutover process.
+2. Verify the sign-in and run-control interface in a real browser at phone and
+   desktop sizes, including background/foreground recovery and retained actions.
+3. Keep a separate-project VM, database, restart, publish, and capacity pilot as
    a pre-release gate.
 
 ## Focused checks
@@ -89,10 +110,13 @@ Complete the run-control slice in this order:
 Run from the source repository root:
 
 ```sh
-node --test v2/core/*.test.mjs v2/server/*.test.mjs
-bash v2/db/run-local-tests.sh
+pnpm --filter @workspace/lucia-v2 test
+pnpm --filter @workspace/lucia-v2 test:db
+node --check v2/server/main.mjs
 node --check v2/web/app.js
 ```
 
 The PostgreSQL script creates and removes its own temporary local cluster. Do
-not point it at V1 or any shared development or production database.
+not point it at V1 or any shared development or production database. Password
+hash transfer remains a separate cutover decision; this work has not copied any
+V1 accounts, credentials, sessions, or data.

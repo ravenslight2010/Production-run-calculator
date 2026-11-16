@@ -1,4 +1,7 @@
+import { canWriteRunState } from "./write-gate.mjs";
+
 const API = "/api/v2/runs";
+const AUTH_API = "/api/v2/auth";
 const POLL_INTERVAL_MS = 15000;
 const PENDING_PREFIX = "fieldline:v2:pending-command:";
 const PENDING_CREATE_KEY = "fieldline:v2:pending-create";
@@ -7,6 +10,20 @@ const COMMANDS = new Set(["start", "pause", "resume", "complete"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const el = {
+  authPanel: document.querySelector("#auth-panel"),
+  authStatus: document.querySelector("#auth-status"),
+  authError: document.querySelector("#auth-error"),
+  authErrorTitle: document.querySelector("#auth-error-title"),
+  authErrorMessage: document.querySelector("#auth-error-message"),
+  authForm: document.querySelector("#auth-form"),
+  authUsername: document.querySelector("#auth-username"),
+  authPassword: document.querySelector("#auth-password"),
+  authSubmit: document.querySelector("#auth-submit"),
+  authRetry: document.querySelector("#auth-retry"),
+  authenticatedApp: document.querySelector("#authenticated-app"),
+  accountControls: document.querySelector("#account-controls"),
+  staffLabel: document.querySelector("#staff-label"),
+  signOut: document.querySelector("#sign-out-button"),
   connection: document.querySelector("#connection-indicator"),
   connectionLabel: document.querySelector("#connection-label"),
   lastCheck: document.querySelector("#last-check"),
@@ -31,6 +48,12 @@ let selectedRunId = null;
 let refreshInFlight = false;
 let createInFlight = false;
 let commandInFlight = false;
+let authCheckInFlight = false;
+let authInFlight = false;
+let signOutInFlight = false;
+let currentStaff = null;
+let authGeneration = 0;
+let serverStateConfirmed = false;
 let lastKnownRun = null;
 let pendingCreate = loadPendingCreate();
 
@@ -39,8 +62,15 @@ function isObject(value) {
 }
 
 function getCsrfHeaders() {
-  const token = document.querySelector('meta[name="csrf-token"]')?.content?.trim();
-  return token ? { "X-CSRF-Token": token } : null;
+  try {
+    const cookie = document.cookie.split(";").map((part) => part.trim());
+    const values = cookie.filter((part) => part.startsWith("v2_csrf="));
+    if (values.length !== 1) return null;
+    const token = values[0].slice("v2_csrf=".length);
+    return /^[A-Za-z0-9_-]{43}$/.test(token) ? { "X-CSRF-Token": token } : null;
+  } catch {
+    return null;
+  }
 }
 
 function isTimestamp(value, nullable = false) {
@@ -69,6 +99,14 @@ function validateRun(run) {
   return run;
 }
 
+class ApiError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function readJson(response, { allowCommandConflict = false } = {}) {
   let body;
   try {
@@ -82,7 +120,7 @@ async function readJson(response, { allowCommandConflict = false } = {}) {
     const message = isObject(body) && typeof body.error === "string"
       ? body.error
       : "The request was not accepted. Refresh the run state before trying again.";
-    throw new Error(message);
+    throw new ApiError(response.status, message);
   }
   if (!isObject(body)) throw new Error("The server returned an unexpected response. Refresh and try again.");
   return body;
@@ -101,6 +139,228 @@ function showError(message, title = "Could not update run state") {
 
 function clearError() {
   el.globalError.hidden = true;
+}
+
+function isStaffRecord(staff) {
+  return isObject(staff)
+    && typeof staff.userId === "string"
+    && UUID.test(staff.userId)
+    && typeof staff.username === "string"
+    && staff.username.length >= 3
+    && staff.username.length <= 40
+    && typeof staff.role === "string"
+    && staff.role.length > 0
+    && Array.isArray(staff.capabilities)
+    && staff.capabilities.length <= 100
+    && staff.capabilities.every((capability) => typeof capability === "string" && capability.length <= 80);
+}
+
+function clearUserScopedState() {
+  authGeneration += 1;
+  runs = [];
+  selectedRunId = null;
+  lastKnownRun = null;
+  serverStateConfirmed = false;
+  render();
+}
+
+function canWriteNow() {
+  return canWriteRunState({
+    authenticated: Boolean(currentStaff),
+    online: typeof navigator === "undefined" || navigator.onLine !== false,
+    serverStateConfirmed,
+  });
+}
+
+function enterOfflineMode() {
+  serverStateConfirmed = false;
+  setConnection(false);
+  updateCreateFormForAuth();
+  renderRun(selectedRun());
+  if (currentStaff) {
+    showError("This device is offline. V2 is read-only until a fresh server check succeeds.", "Offline — read-only");
+  }
+}
+
+function requireWritableState() {
+  if (!currentStaff) {
+    showSignIn("Sign in to load the current server state before changing anything.");
+    return false;
+  }
+  if (navigator.onLine === false) {
+    enterOfflineMode();
+    return false;
+  }
+  if (!serverStateConfirmed) {
+    showError("The server has not confirmed current state. Refresh and wait for confirmation before changing anything.", "Read-only until refreshed");
+    return false;
+  }
+  return true;
+}
+
+function updateCreateFormForAuth() {
+  const writable = canWriteNow();
+  if (!pendingCreate) {
+    el.label.disabled = createInFlight || !writable;
+    el.target.disabled = createInFlight || !writable;
+    el.createButton.disabled = createInFlight || !writable;
+    el.createButton.textContent = "Prepare run";
+    return;
+  }
+  el.label.disabled = true;
+  el.target.disabled = true;
+  const belongsToCurrentStaff = currentStaff?.userId === pendingCreate.actorId;
+  el.createButton.disabled = !belongsToCurrentStaff || createInFlight || !writable;
+  el.createButton.textContent = belongsToCurrentStaff ? "Retry same request" : "Another account's request";
+  el.createNote.textContent = belongsToCurrentStaff
+    ? "The server may have received this request. Retry uses the same request ID and run details."
+    : "This unconfirmed request belongs to another staff account. Sign in as that person to confirm it.";
+}
+
+function showAuthError(title, message) {
+  el.authErrorTitle.textContent = title;
+  el.authErrorMessage.textContent = message;
+  el.authError.hidden = false;
+}
+
+function showSignIn(message = null, { title = "Sign-in needed", retry = false } = {}) {
+  if (currentStaff) clearUserScopedState();
+  currentStaff = null;
+  el.authPanel.hidden = false;
+  el.authForm.hidden = false;
+  el.authSubmit.disabled = authInFlight;
+  el.authRetry.hidden = !retry;
+  el.authStatus.textContent = message ? "Your session is not confirmed." : "Sign in to load the current server state.";
+  el.accountControls.hidden = true;
+  el.authenticatedApp.hidden = true;
+  if (message) showAuthError(title, message);
+  else el.authError.hidden = true;
+  updateCreateFormForAuth();
+  if (!authInFlight) {
+    window.requestAnimationFrame(() => el.authUsername.focus());
+  }
+}
+
+function showAuthenticated(staff) {
+  if (!isStaffRecord(staff)) {
+    throw new Error("The server returned an unexpected staff session. Sign in again.");
+  }
+  if (currentStaff?.userId !== staff.userId) clearUserScopedState();
+  currentStaff = staff;
+  serverStateConfirmed = false;
+  el.authPanel.hidden = true;
+  el.authError.hidden = true;
+  el.accountControls.hidden = false;
+  el.authenticatedApp.hidden = false;
+  el.staffLabel.textContent = `${staff.username} · ${staff.role}`;
+  el.signOut.disabled = false;
+  updateCreateFormForAuth();
+  announce(`Signed in as ${staff.username}.`);
+  setConnection(true);
+  document.querySelector("#page-title")?.focus();
+  void fetchRuns();
+}
+
+async function checkSession() {
+  if (authCheckInFlight || authInFlight) return;
+  authCheckInFlight = true;
+  el.authStatus.textContent = "Checking your saved session…";
+  el.authForm.hidden = true;
+  el.authRetry.hidden = true;
+  el.authError.hidden = true;
+  try {
+    const response = await fetch(`${AUTH_API}/session`, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (response.status === 401) {
+      setConnection(true);
+      showSignIn();
+      return;
+    }
+    const body = await readJson(response);
+    showAuthenticated(body.staff);
+  } catch (error) {
+    setConnection(false);
+    showSignIn(
+      "The app could not verify the saved session. Check the connection, then try again.",
+      { title: "Session check unavailable", retry: true },
+    );
+  } finally {
+    authCheckInFlight = false;
+  }
+}
+
+async function submitSignIn(event) {
+  event.preventDefault();
+  if (authInFlight) return;
+  authInFlight = true;
+  el.authSubmit.disabled = true;
+  el.authStatus.textContent = "Checking your staff account…";
+  el.authError.hidden = true;
+  el.authUsername.removeAttribute("aria-invalid");
+  el.authPassword.removeAttribute("aria-invalid");
+  try {
+    const response = await fetch(`${AUTH_API}/sign-in`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        username: el.authUsername.value,
+        password: el.authPassword.value,
+      }),
+    });
+    const body = await readJson(response);
+    if (!isStaffRecord(body.staff) || !isTimestamp(body.expiresAt)) {
+      throw new Error("The server returned an incomplete sign-in result. Try again.");
+    }
+    el.authForm.reset();
+    showAuthenticated(body.staff);
+  } catch (error) {
+    el.authPassword.value = "";
+    if (error instanceof ApiError && error.status === 401) {
+      el.authUsername.setAttribute("aria-invalid", "true");
+      el.authPassword.setAttribute("aria-invalid", "true");
+    }
+    showAuthError(
+      error instanceof ApiError && error.status === 401 ? "Sign-in failed" : "Sign-in could not be completed",
+      error instanceof Error ? error.message : "Check your connection and try again.",
+    );
+    el.authStatus.textContent = "Your run state is not loaded until sign-in succeeds.";
+  } finally {
+    authInFlight = false;
+    if (!currentStaff) el.authSubmit.disabled = false;
+  }
+}
+
+async function signOut() {
+  if (!currentStaff || authInFlight || signOutInFlight || createInFlight || commandInFlight) return;
+  const csrf = getCsrfHeaders();
+  if (!csrf) {
+    showError("Your CSRF session token is unavailable. Refresh the session before signing out.", "Sign-out unavailable");
+    return;
+  }
+  signOutInFlight = true;
+  el.signOut.disabled = true;
+  try {
+    const response = await fetch(`${AUTH_API}/sign-out`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", ...csrf },
+    });
+    if (response.status !== 204) await readJson(response);
+    showSignIn("You are signed out. Sign in again to load current server state.");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      showSignIn("Your session has ended. Sign in again to load current server state.");
+    } else {
+      showError(error instanceof Error ? error.message : "The sign-out result is not confirmed. Check the connection and try again.", "Sign-out not confirmed");
+    }
+  } finally {
+    signOutInFlight = false;
+    el.signOut.disabled = false;
+  }
 }
 
 function setConnection(online) {
@@ -134,7 +394,8 @@ function loadPendingCreate() {
     const raw = localStorage.getItem(PENDING_CREATE_KEY);
     if (!raw) return null;
     const pending = JSON.parse(raw);
-    if (!isObject(pending) || !UUID.test(pending.requestId) || !isObject(pending.setupSnapshot)
+    if (!isObject(pending) || !UUID.test(pending.requestId) || !UUID.test(pending.actorId)
+      || !isObject(pending.setupSnapshot)
       || typeof pending.setupSnapshot.label !== "string" || !pending.setupSnapshot.label.trim()
       || !Number.isSafeInteger(pending.setupSnapshot.targetCases) || pending.setupSnapshot.targetCases < 1) return null;
     return pending;
@@ -149,10 +410,7 @@ function savePendingCreate(pending) {
     pendingCreate = pending;
     el.label.value = pending.setupSnapshot.label;
     el.target.value = String(pending.setupSnapshot.targetCases);
-    el.label.disabled = true;
-    el.target.disabled = true;
-    el.createButton.textContent = "Retry same request";
-    el.createNote.textContent = "The server may have received this request. Retry uses the same request ID and run details.";
+    updateCreateFormForAuth();
   } catch {
     pendingCreate = null;
     showError("This device could not save the request identity. Run creation is paused; refresh the register before trying again.", "Retry protection unavailable");
@@ -163,9 +421,7 @@ function clearPendingCreate() {
   try {
     localStorage.removeItem(PENDING_CREATE_KEY);
     pendingCreate = null;
-    el.label.disabled = false;
-    el.target.disabled = false;
-    el.createButton.textContent = "Prepare run";
+    updateCreateFormForAuth();
   } catch {
     showError("The server returned a result, but this device could not clear the saved request identity. Refresh the register before creating another run.", "Local storage unavailable");
   }
@@ -176,7 +432,8 @@ function getPending(runId) {
     const raw = localStorage.getItem(pendingStorageKey(runId));
     if (!raw) return null;
     const pending = JSON.parse(raw);
-    if (!isObject(pending) || !UUID.test(pending.commandId) || !COMMANDS.has(pending.commandType)
+    if (!isObject(pending) || !UUID.test(pending.commandId) || !UUID.test(pending.actorId)
+      || !COMMANDS.has(pending.commandType)
       || !Number.isSafeInteger(pending.expectedRevision) || pending.expectedRevision < 0
       || pending.runId !== runId) return null;
     return pending;
@@ -188,8 +445,10 @@ function getPending(runId) {
 function storePending(pending) {
   try {
     localStorage.setItem(pendingStorageKey(pending.runId), JSON.stringify(pending));
+    return true;
   } catch {
     showError("This device could not save the retry identity. Do not repeat the action on another device; refresh to check the server state.", "Retry protection unavailable");
+    return false;
   }
 }
 
@@ -212,6 +471,7 @@ function renderRun(run) {
     return;
   }
   const pending = getPending(run.id);
+  const pendingOwnedByCurrentStaff = pending?.actorId === currentStaff?.userId;
   const actions = {
     planned: [["start", "Start run", "primary"]],
     running: [["pause", "Pause run", "secondary"], ["complete", "Finish run", "caution"]],
@@ -219,10 +479,10 @@ function renderRun(run) {
     completed: [],
   }[run.status];
   const actionMarkup = actions.length
-    ? actions.map(([command, label, style]) => `<button class="button button-${style}" type="button" data-command="${command}" data-testid="button-${command}" ${pending || commandInFlight ? "disabled" : ""}>${label}${command === "start" || command === "resume" ? '<span class="button-arrow" aria-hidden="true">→</span>' : ""}</button>`).join("")
+    ? actions.map(([command, label, style]) => `<button class="button button-${style}" type="button" data-command="${command}" data-testid="button-${command}" ${pending || commandInFlight || !canWriteNow() ? "disabled" : ""}>${label}${command === "start" || command === "resume" ? '<span class="button-arrow" aria-hidden="true">→</span>' : ""}</button>`).join("")
     : `<p class="control-note">This run is finished. Its state remains available in the server register.</p>`;
   const pendingMarkup = pending
-    ? `<div class="pending-box" role="status"><p><strong>${escapeHtml(commandTitle(pending.commandType))} needs confirmation.</strong> The request may have reached the server. Retry sends the same command identity.</p><button type="button" data-retry-command="true" data-testid="button-retry-command" ${commandInFlight ? "disabled" : ""}>Retry same action</button></div>`
+    ? `<div class="pending-box" role="status"><p><strong>${pendingOwnedByCurrentStaff ? `${escapeHtml(commandTitle(pending.commandType))} needs confirmation.` : "This saved action belongs to another staff account."}</strong> ${pendingOwnedByCurrentStaff ? "The request may have reached the server. Retry sends the same command identity." : "Sign in as the original operator to confirm it. It will not be resent under this account."}</p>${pendingOwnedByCurrentStaff ? `<button type="button" data-retry-command="true" data-testid="button-retry-command" ${commandInFlight || !canWriteNow() ? "disabled" : ""}>Retry same action</button>` : ""}</div>`
     : "";
   el.runContent.innerHTML = `<div class="status-row"><span class="status-pill ${run.status}" data-testid="status-run">${statusLabel(run.status)}</span></div>
     <h2 class="run-label" id="run-label" data-testid="text-run-label">${escapeHtml(run.setupSnapshot.label)}</h2>
@@ -270,21 +530,46 @@ function selectedRun() {
   return runs.find((run) => run.id === selectedRunId) || null;
 }
 
+function mergeServerRuns(serverRuns, currentRuns) {
+  const currentById = new Map(currentRuns.map((run) => [run.id, run]));
+  const merged = serverRuns.map((serverRun) => {
+    const currentRun = currentById.get(serverRun.id);
+    currentById.delete(serverRun.id);
+    return currentRun && currentRun.revision > serverRun.revision ? currentRun : serverRun;
+  });
+  merged.push(...currentById.values());
+  return merged;
+}
+
 function render() {
   renderRuns();
   renderRun(selectedRun());
 }
 
 async function fetchRuns({ quiet = false } = {}) {
-  if (refreshInFlight) return;
+  if (!currentStaff) return false;
+  if (navigator.onLine === false) {
+    enterOfflineMode();
+    return false;
+  }
+  if (refreshInFlight) return false;
+  serverStateConfirmed = false;
+  updateCreateFormForAuth();
+  renderRun(selectedRun());
   refreshInFlight = true;
+  const requestGeneration = authGeneration;
   if (!quiet) el.refresh.disabled = true;
   try {
     const response = await fetch(API, { method: "GET", credentials: "include", headers: { Accept: "application/json" } });
     const body = await readJson(response);
+    if (requestGeneration !== authGeneration || !currentStaff) return;
+    if (navigator.onLine === false) {
+      enterOfflineMode();
+      return false;
+    }
     if (!Array.isArray(body.runs)) throw new Error("The server returned an unexpected run list. Refresh again to retry.");
     const nextRuns = body.runs.map(validateRun);
-    runs = nextRuns;
+    runs = mergeServerRuns(nextRuns, runs);
     if (!runs.some((run) => run.id === selectedRunId)) {
       const activeRun = runs.find((run) => run.status === "running" || run.status === "paused");
       selectedRunId = activeRun?.id || [...runs].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]?.id || null;
@@ -293,17 +578,32 @@ async function fetchRuns({ quiet = false } = {}) {
     clearError();
     setConnection(true);
     setLastCheck();
+    serverStateConfirmed = true;
+    updateCreateFormForAuth();
     render();
+    return true;
   } catch (error) {
+    if (requestGeneration !== authGeneration || !currentStaff) return false;
+    if (error instanceof ApiError && error.status === 401) {
+      setConnection(true);
+      showSignIn("Your sign-in has expired. Sign in again to reload the current server state.");
+      return false;
+    }
+    serverStateConfirmed = false;
     setConnection(false);
     showError(error instanceof Error ? error.message : "Check the connection and refresh state.", "Could not load current state");
+    updateCreateFormForAuth();
     if (runs.length === 0) {
       el.runContent.innerHTML = `<div class="status-row"><span class="status-pill planned">State unavailable</span></div><h2 class="run-label" id="run-label">Waiting for server state</h2><p class="control-note">Run controls stay unavailable until the canonical state loads. Check the connection, then refresh.</p>`;
       el.runsList.innerHTML = `<div class="empty-runs">Run register is unavailable. Refresh to try again.</div>`;
-    }
+    } else render();
+    return false;
   } finally {
     refreshInFlight = false;
     el.refresh.disabled = false;
+    if (requestGeneration !== authGeneration && currentStaff) {
+      queueMicrotask(() => { void fetchRuns({ quiet: true }); });
+    }
   }
 }
 
@@ -321,6 +621,11 @@ async function fetchOneRun(runId) {
 }
 
 async function beginCommand(run, commandType) {
+  if (!currentStaff) {
+    showSignIn("Sign in to load the current server state before changing a run.");
+    return;
+  }
+  if (!requireWritableState()) return;
   if (commandInFlight || getPending(run.id)) return;
   if (!getCsrfHeaders()) {
     showError("Your secure session is unavailable. Sign in again before changing run state.", "Sign-in required");
@@ -331,8 +636,7 @@ async function beginCommand(run, commandType) {
     commandType,
     expectedRevision: run.revision,
   };
-  const pending = { ...payload, runId: run.id };
-  storePending(pending);
+  const pending = { ...payload, runId: run.id, actorId: currentStaff.userId };
   await sendCommand(pending);
 }
 
@@ -343,18 +647,30 @@ async function retryCommand(runId) {
     showError("No saved command is available to retry. Refresh the run state before acting.", "Retry unavailable");
     return;
   }
+  if (pending.actorId !== currentStaff?.userId) {
+    showError("This saved action belongs to a different staff account. Sign in as its original operator to retry it.", "Action belongs to another account");
+    return;
+  }
+  if (!requireWritableState()) return;
   await sendCommand(pending);
 }
 
 async function sendCommand(pending) {
+  if (!currentStaff || pending.actorId !== currentStaff.userId) {
+    showError("Sign in as the staff member who created this action before retrying it.", "Action belongs to another account");
+    return;
+  }
+  if (!requireWritableState()) return;
   const csrf = getCsrfHeaders();
   if (!csrf) {
     showError("Your secure session is unavailable. Sign in again, then retry the same saved action.", "Sign-in required");
     return;
   }
+  if (!getPending(pending.runId) && !storePending(pending)) return;
   commandInFlight = true;
   render();
-  let definitive = false;
+    let definitive = false;
+    let conflictNotice = null;
   try {
     const response = await fetch(`${API}/${encodeURIComponent(pending.runId)}/commands`, {
       method: "POST",
@@ -377,7 +693,6 @@ async function sendCommand(pending) {
       upsertRun(run);
       definitive = true;
       clearPending(pending.runId);
-      clearError();
       announce(`${commandTitle(pending.commandType)} accepted. Current state is ${run.status}.`);
     } else {
       const canonical = body.currentRun ? validateRun(body.currentRun) : await fetchOneRun(pending.runId);
@@ -385,18 +700,25 @@ async function sendCommand(pending) {
       upsertRun(canonical);
       definitive = true;
       clearPending(pending.runId);
-      const message = body.outcome === "conflict"
+      conflictNotice = body.outcome === "conflict"
         ? "The run changed on another device. The latest server state is shown; review it before choosing an action."
         : `That action is not valid while the run is ${canonical.status}. The latest server state is shown.`;
-      showError(message, body.outcome === "conflict" ? "Run changed elsewhere" : "Action not available");
-      announce(message);
     }
     selectedRunId = pending.runId;
     lastKnownRun = selectedRun();
-    setConnection(true);
-    setLastCheck();
+    const refreshed = await fetchRuns({ quiet: true });
+    if (refreshed && conflictNotice) {
+      showError(conflictNotice, body.outcome === "conflict" ? "Run changed elsewhere" : "Action not available");
+      announce(conflictNotice);
+    }
   } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      showSignIn("Your sign-in has expired. The saved action is retained; sign in as the same operator to confirm it.");
+      return;
+    }
+    serverStateConfirmed = false;
     setConnection(false);
+    updateCreateFormForAuth();
     showError(error instanceof Error ? error.message : "The result is uncertain. Retry the same action; its command identity will be preserved.", "Action needs confirmation");
   } finally {
     if (definitive) clearPending(pending.runId);
@@ -414,6 +736,15 @@ function upsertRun(run) {
 async function createRun(event) {
   event.preventDefault();
   if (createInFlight) return;
+  if (!currentStaff) {
+    showSignIn("Sign in to load the current server state before preparing a run.");
+    return;
+  }
+  if (pendingCreate && pendingCreate.actorId !== currentStaff.userId) {
+    showError("This unconfirmed run request belongs to another staff account. Sign in as that person to confirm it.", "Request belongs to another account");
+    return;
+  }
+  if (!requireWritableState()) return;
   const csrf = getCsrfHeaders();
   if (!csrf) {
     showError("Your secure session is unavailable. Sign in again before creating a run.", "Sign-in required");
@@ -427,6 +758,7 @@ async function createRun(event) {
   }
   const request = pendingCreate || {
     requestId: crypto.randomUUID(),
+    actorId: currentStaff.userId,
     setupSnapshot: { label, targetCases },
   };
   if (!pendingCreate) {
@@ -462,14 +794,19 @@ async function createRun(event) {
     setConnection(true);
     setLastCheck();
     announce(body.replayed ? "Previously prepared run confirmed on the server." : "Run prepared on the server.");
+    await fetchRuns({ quiet: true });
   } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      showSignIn("Your sign-in has expired. The saved run request is retained; sign in as the same operator to confirm it.");
+      return;
+    }
+    serverStateConfirmed = false;
     showError(error instanceof Error ? error.message : "Run creation could not be confirmed. Retry the same request; its identity and details are preserved.", "Run not confirmed");
     el.createNote.textContent = "Not confirmed. Retry uses the same request ID and details; do not start a different creation request.";
     setConnection(false);
   } finally {
     createInFlight = false;
-    el.createButton.disabled = false;
-    if (pendingCreate) el.createButton.textContent = "Retry same request";
+    updateCreateFormForAuth();
     render();
   }
 }
@@ -485,12 +822,25 @@ if (pendingCreate) {
 
 el.refresh.addEventListener("click", () => fetchRuns());
 el.createForm.addEventListener("submit", createRun);
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) fetchRuns({ quiet: true });
+el.authForm.addEventListener("submit", submitSignIn);
+el.authRetry.addEventListener("click", checkSession);
+el.signOut.addEventListener("click", signOut);
+window.addEventListener("offline", enterOfflineMode);
+window.addEventListener("online", () => {
+  if (currentStaff) void fetchRuns({ quiet: true });
+  else void checkSession();
 });
-window.addEventListener("focus", () => fetchRuns({ quiet: true }));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  if (currentStaff) fetchRuns({ quiet: true });
+  else checkSession();
+});
+window.addEventListener("focus", () => {
+  if (currentStaff) fetchRuns({ quiet: true });
+  else checkSession();
+});
 window.setInterval(() => {
-  if (!document.hidden) fetchRuns({ quiet: true });
+  if (!document.hidden && currentStaff && navigator.onLine !== false) fetchRuns({ quiet: true });
 }, POLL_INTERVAL_MS);
 
-fetchRuns();
+void checkSession();

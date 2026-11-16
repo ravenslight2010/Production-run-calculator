@@ -1,8 +1,9 @@
 # V2 development area
 
-This directory is an isolated, code-only starting point for V2. It is not
-registered as a workspace, workflow, artifact, or deployment, and it must not
-connect to V1 databases or credentials.
+This directory is an isolated V2 build area. V1 is no longer live; preserve its
+source baseline and data while replacing functionality here in stages. V2 is a
+separate package in the source workspace, not a V1 artifact, workflow, or
+deployment. It must not connect to V1 databases, credentials, or sessions.
 
 See [HANDOFF.md](./HANDOFF.md) for the approved V2 scope, data-transfer
 decisions, current implementation status, and the next run-control milestone.
@@ -12,21 +13,32 @@ Prepared 2026-11-10; current V1 checks are bound to revision
 `dc6e5205f55fa74005373c6d7f06fae8df0f3399`. It preserves evidence and
 recommendations, not authorization to implement or cut over.
 
-The first slice now contains a pure run-lifecycle model and a PostgreSQL
-transaction boundary for start, pause, resume, and complete. That boundary
-records idempotency receipts, revisions, audit events, and outbox events
-atomically, and has been tested against a disposable local PostgreSQL instance.
-Run creation, bounded facility-scoped reads, a request-scoped HTTP handler, an
-OpenAPI contract, and a run-control screen draft are also present. It is not yet
-a usable app: the session and CSRF adapters, executable API host, browser-to-API
-integration, station state, the auto-track worker, PWA behavior, and
-two-session/browser verification are still missing.
+The first slice contains a pure run-lifecycle model and a PostgreSQL transaction
+boundary for start, pause, resume, and complete. That boundary records
+idempotency receipts, revisions, audit events, and outbox events atomically.
+Run creation, bounded facility-scoped reads, V2-owned staff sign-in/session
+routes, a V2-only API host, restrictive browser response headers, an OpenAPI
+contract, and a browser sign-in/run-control flow are also present. The disposable
+PostgreSQL check exercises actual HTTP requests from two separate staff sessions
+and verifies shared revisions and stale-action conflicts. Browser-side writes
+remain disabled offline and until the latest run state is confirmed from V2.
 
-The database function is backend-only. A future API must derive facility and
-actor identity from verified authorization, compute the request hash itself,
-and never expose database credentials or direct SQL access to a browser. The
-schema revokes public table access; grant the future API role only schema use
-and execute permission for the command function, not direct table writes.
+It is not yet a usable app: there is no controlled manager/account provisioning,
+station-specific workflow, full inventory, product/setup import, auto-track
+worker, PWA recovery, or real browser/device verification. No separate V2
+Replit project or deployment exists.
+
+Database functions are backend-only. The API must derive facility and actor
+identity from verified V2 authorization, compute request hashes itself, and
+never expose database credentials or direct SQL access to a browser. The schema
+revokes public table access; the API role receives execute permission for
+approved functions, not direct table writes. The V2 host requires
+`V2_DATABASE_URL`; it never falls back to `DATABASE_URL`, runs no migrations at
+startup, and refuses to start if it cannot connect to its configured database.
+No V1 sessions or data have been copied.
+Authentication uses the Node 24.22.2 built-in Argon2id implementation with a
+bounded number of concurrent password checks; only salted password hashes are
+stored in the V2 database.
 Production deployment validation still requires a separate V2 Replit project
 and disposable database; that is not a prerequisite to writing isolated code
 here.
@@ -34,12 +46,16 @@ here.
 Run the current focused checks from the repository root:
 
 ```sh
-node --test v2/core/*.test.mjs v2/server/*.test.mjs
-bash v2/db/run-local-tests.sh
+pnpm --filter @workspace/lucia-v2 test
+pnpm --filter @workspace/lucia-v2 test:db
+node --check v2/server/main.mjs
 node --check v2/web/app.js
 ```
 
-The SQL script creates a temporary PostgreSQL cluster under the system temp
+The database script creates a temporary PostgreSQL cluster under the system temp
 directory, binds it to loopback only, runs schema/lifecycle/receipt checks,
-server-owned create/read checks, and concurrent retry/conflict checks, then
-stops and removes the cluster. It does not read or write either V1 database.
+server-owned create/read checks, concurrent retry/conflict checks, and HTTP
+integration through a restricted V2 API role, then stops and removes the
+cluster. It does not read or write either V1 database.
+`pg@8.23.1` is the V2 package's pinned PostgreSQL driver (MIT); the production
+dependency audit reported no known vulnerabilities when checked.

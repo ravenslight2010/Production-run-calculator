@@ -43,9 +43,13 @@ PSQL=(
 
 "${PSQL[@]}" -f "$ROOT/v2/db/0001-run-control.sql" >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0001-run-control.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/0002-staff-auth.sql" >/dev/null
+"${PSQL[@]}" -f "$ROOT/v2/db/0002-staff-auth.test.sql"
 
 "${PSQL[@]}" -c "
   CREATE ROLE v2_api_test NOLOGIN;
+  CREATE ROLE v2_api_login LOGIN;
+  GRANT v2_api_test TO v2_api_login;
   GRANT USAGE ON SCHEMA v2 TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.create_planned_run(uuid, uuid, text, text, jsonb) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.get_run(uuid, uuid) TO v2_api_test;
@@ -53,7 +57,53 @@ PSQL=(
   GRANT EXECUTE ON FUNCTION v2.apply_run_lifecycle_command(
     uuid, uuid, uuid, text, text, text, bigint
   ) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.find_staff_for_sign_in(text) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.open_staff_session(uuid, text, text, timestamptz) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.resolve_staff_session(text) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.revoke_staff_session(text) TO v2_api_test;
 " >/dev/null
+
+"${PSQL[@]}" -c "
+  INSERT INTO v2.staff_accounts (id, username, password_hash, disabled)
+  VALUES (
+    '72000000-0000-4000-8000-000000000001',
+    'V2ApiRoleCheck',
+    'argon2id\$v=19\$m=19456,t=2,p=1\$c2FsdA==\$aGFzaA==',
+    false
+  );
+  INSERT INTO v2.user_roles (user_id, role_name)
+  VALUES ('72000000-0000-4000-8000-000000000001', 'operator');
+" >/dev/null
+
+API_AUTH_LOOKUP="$("${PSQL[@]}" -c "
+  SET ROLE v2_api_test;
+  SELECT staff_id::text || '|' || disabled
+    FROM v2.find_staff_for_sign_in('v2apirolecheck');
+  RESET ROLE;
+")"
+if [[ "$API_AUTH_LOOKUP" != "72000000-0000-4000-8000-000000000001|false" ]]; then
+  echo "Restricted API role could not perform V2 sign-in lookup: $API_AUTH_LOOKUP" >&2
+  exit 1
+fi
+
+API_AUTH_SESSION="$("${PSQL[@]}" -c "
+  SET ROLE v2_api_test;
+  SELECT v2.open_staff_session(
+    '72000000-0000-4000-8000-000000000001',
+    repeat('a', 64),
+    repeat('b', 64),
+    clock_timestamp() + interval '1 day'
+  );
+  SELECT actor_id::text || '|' || role_name || '|' ||
+         (csrf_hash = repeat('b', 64))
+    FROM v2.resolve_staff_session(repeat('a', 64));
+  SELECT v2.revoke_staff_session(repeat('a', 64));
+  RESET ROLE;
+")"
+if [[ "$API_AUTH_SESSION" != $'t\n72000000-0000-4000-8000-000000000001|operator|true\nt' ]]; then
+  echo "Restricted API role could not open, resolve, and revoke a V2 session: $API_AUTH_SESSION" >&2
+  exit 1
+fi
 
 "${PSQL[@]}" -c "
   WITH test_time AS (
@@ -222,16 +272,37 @@ if [[ "$CREATE_RACE_STATE" != "1|1|1|1" ]]; then
   exit 1
 fi
 
-if "${PSQL[@]}" -c "SET ROLE v2_api_test; SELECT count(*) FROM v2.runs;" \
-  > /dev/null 2> "$TMP_DIR/direct-table-access.log"; then
-  echo "API role unexpectedly has direct table access" >&2
-  exit 1
-fi
-if ! grep -q "permission denied" "$TMP_DIR/direct-table-access.log"; then
-  cat "$TMP_DIR/direct-table-access.log" >&2
-  echo "Direct table access failed for an unexpected reason" >&2
-  exit 1
-fi
+assert_no_direct_table_access() {
+  local table="$1"
+  if "${PSQL[@]}" -c "SET ROLE v2_api_test; SELECT count(*) FROM $table;" \
+    > /dev/null 2> "$TMP_DIR/direct-table-access.log"; then
+    echo "API role unexpectedly has direct access to $table" >&2
+    exit 1
+  fi
+  if ! grep -q "permission denied" "$TMP_DIR/direct-table-access.log"; then
+    cat "$TMP_DIR/direct-table-access.log" >&2
+    echo "Direct access to $table failed for an unexpected reason" >&2
+    exit 1
+  fi
+}
+assert_no_direct_table_access "v2.runs"
+assert_no_direct_table_access "v2.staff_accounts"
+assert_no_direct_table_access "v2.staff_sessions"
+assert_no_direct_table_access "v2.user_roles"
+assert_no_direct_table_access "v2.roles"
+assert_no_direct_table_access "v2.facility_scope"
+
+ENCODED_DB_USER="$(python3 - "$DB_USER" <<'PY'
+import sys
+import urllib.parse
+
+print(urllib.parse.quote(sys.argv[1], safe=""))
+PY
+)"
+V2_TEST_ADMIN_URL="postgresql://$ENCODED_DB_USER@127.0.0.1:$PORT/v2_test"
+V2_API_URL="postgresql://v2_api_login@127.0.0.1:$PORT/v2_test"
+V2_TEST_ADMIN_URL="$V2_TEST_ADMIN_URL" V2_DATABASE_URL="$V2_API_URL" \
+  NODE_ENV=development PORT=0 node "$ROOT/v2/server/http-postgres.integration.mjs"
 
 SAME_COMMAND_SQL="
   SELECT (result->>'outcome') || '|' || (result->>'replayed') || '|' ||
@@ -319,6 +390,8 @@ fi
 
 printf 'Run schema and lifecycle checks passed.\n'
 printf 'Restricted API role check passed: %s\n' "$API_ROLE_RESULT"
+printf 'V2 auth function access passed: %s\n' "$API_AUTH_LOOKUP / session lookup / revoke"
+printf 'Restricted API role has no direct table access (runs and auth data).\n'
 printf 'Restricted API run creation passed: %s\n' "$CREATE_RESULT"
 printf 'Run creation replay passed: %s\n' "$REPLAY_RESULT"
 printf 'Facility-scoped run reads passed: %s\n' "$READ_RESULT"

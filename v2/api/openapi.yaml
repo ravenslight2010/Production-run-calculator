@@ -10,6 +10,98 @@ servers:
 security:
   - v2Session: []
 paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      summary: Check API and V2 database availability
+      security: []
+      responses:
+        "200":
+          description: API can query its configured V2 database
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+  /api/v2/auth/sign-in:
+    post:
+      operationId: signIn
+      summary: Sign in with a V2 staff account
+      description: >
+        Creates a fresh V2-only session. The server sets an HttpOnly session
+        cookie and a separate readable CSRF cookie; credentials and tokens are
+        never returned in the response body.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthSignIn"
+      responses:
+        "200":
+          description: Sign-in accepted; session and CSRF cookies are set
+          headers:
+            Set-Cookie:
+              description: Separate v2_session and v2_csrf cookies
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+  /api/v2/auth/session:
+    get:
+      operationId: getSession
+      summary: Read the current V2 staff session
+      responses:
+        "200":
+          description: Public staff identity and session expiry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+  /api/v2/auth/sign-out:
+    post:
+      operationId: signOut
+      summary: Revoke the current V2 staff session
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Session revoked or already absent; V2 auth cookies cleared
+        "403":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
   /api/v2/runs:
     get:
       operationId: listRuns
@@ -47,6 +139,9 @@ paths:
     post:
       operationId: createRun
       summary: Create a planned run
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
       description: >
         requestId is an idempotency key. Repeating the same request returns the
         original run; reusing the key for different details returns 409.
@@ -124,6 +219,9 @@ paths:
     post:
       operationId: applyRunCommand
       summary: Apply a revision-guarded run lifecycle command
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/CsrfToken"
@@ -184,6 +282,10 @@ components:
       type: apiKey
       in: cookie
       name: v2_session
+    v2CsrfCookie:
+      type: apiKey
+      in: cookie
+      name: v2_csrf
   parameters:
     RunId:
       in: path
@@ -199,6 +301,49 @@ components:
       schema:
         type: string
   schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          const: ok
+    AuthSignIn:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 40
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AuthSession:
+      type: object
+      required: [staff, expiresAt]
+      properties:
+        staff:
+          $ref: "#/components/schemas/Staff"
+        expiresAt:
+          type: string
+          format: date-time
+    Staff:
+      type: object
+      required: [userId, username, role, capabilities]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        username:
+          type: string
+        role:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
     RunSetup:
       type: object
       additionalProperties: false

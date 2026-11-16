@@ -1,0 +1,17 @@
+{
+  "name": "@workspace/lucia-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.22.2"
+  },
+  "scripts": {
+    "start": "node server/main.mjs",
+    "test": "node --test core/*.test.mjs server/*.test.mjs web/*.test.mjs",
+    "test:db": "bash db/run-local-tests.sh"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  }
+}

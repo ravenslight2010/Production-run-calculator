@@ -13,11 +13,12 @@ class RunApiError extends Error {
   }
 }
 
-function sendJson(response, status, body) {
+function sendJson(response, status, body, headers = {}) {
   response.writeHead(status, {
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
     "X-Content-Type-Options": "nosniff",
+    ...headers,
   });
   response.end(JSON.stringify(body));
 }
@@ -60,7 +61,9 @@ function requireExactKeys(value, expectedKeys) {
 }
 
 function safeStatus(error) {
-  const knownService = error?.name === "RunServiceError" || error?.name === "RunCommandServiceError";
+  const knownService = error?.name === "RunServiceError"
+    || error?.name === "RunCommandServiceError"
+    || error?.name === "V2AuthError";
   if (error instanceof RunApiError) return error.status;
   if (knownService && Number.isInteger(error.status) && error.status >= 400 && error.status <= 599) {
     return error.status;
@@ -71,7 +74,8 @@ function safeStatus(error) {
 function safeMessage(error) {
   if (error instanceof RunApiError
     || error?.name === "RunServiceError"
-    || error?.name === "RunCommandServiceError") {
+    || error?.name === "RunCommandServiceError"
+    || error?.name === "V2AuthError") {
     return error.message;
   }
   return "The run request could not be completed. Refresh and try again.";
@@ -101,7 +105,14 @@ function normalizePathRunId(value) {
   return decoded.toLowerCase();
 }
 
-export function createRunApi({ runs, commands, authenticate, verifyCsrf, maxBodyBytes = DEFAULT_MAX_BODY_BYTES }) {
+export function createRunApi({
+  runs,
+  commands,
+  authenticate,
+  verifyCsrf,
+  maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
+  logger = () => {},
+}) {
   if (!runs || typeof runs.create !== "function" || typeof runs.get !== "function" || typeof runs.list !== "function") {
     throw new TypeError("Run read and creation services are required.");
   }
@@ -114,6 +125,7 @@ export function createRunApi({ runs, commands, authenticate, verifyCsrf, maxBody
   if (typeof verifyCsrf !== "function") {
     throw new TypeError("A server CSRF verification adapter is required.");
   }
+  if (typeof logger !== "function") throw new TypeError("A structured logger is required.");
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1 || maxBodyBytes > 1024 * 1024) {
     throw new TypeError("maxBodyBytes must be an integer from 1 byte to 1 MiB.");
   }
@@ -175,12 +187,31 @@ export function createRunApi({ runs, commands, authenticate, verifyCsrf, maxBody
 
       throw new RunApiError(405, "This method is not allowed for the run route.");
     } catch (error) {
-      sendJson(response, safeStatus(error), { error: safeMessage(error) });
+      const status = safeStatus(error);
+      if (status >= 500) {
+        logger({
+          event: "v2.run_api.error",
+          requestId: request.v2RequestId ?? null,
+          status,
+          errorName: typeof error?.name === "string" ? error.name.slice(0, 80) : "UnknownError",
+        });
+      }
+      const headers = Number.isSafeInteger(error?.retryAfterSeconds)
+        ? { "Retry-After": String(error.retryAfterSeconds) }
+        : {};
+      sendJson(response, status, { error: safeMessage(error) }, headers);
     }
   };
 }
 
-export function createRunApiForDatabase({ pool, authorize, authenticate, verifyCsrf, maxBodyBytes }) {
+export function createRunApiForDatabase({
+  pool,
+  authorize,
+  authenticate,
+  verifyCsrf,
+  maxBodyBytes,
+  logger,
+}) {
   if (!pool || typeof pool.query !== "function") {
     throw new TypeError("A V2 PostgreSQL pool is required.");
   }
@@ -191,5 +222,5 @@ export function createRunApiForDatabase({ pool, authorize, authenticate, verifyC
   const query = (sql, params) => pool.query(sql, params);
   const runs = createRunService({ query, authorize });
   const commands = createRunCommandService({ query, authorize });
-  return createRunApi({ runs, commands, authenticate, verifyCsrf, maxBodyBytes });
+  return createRunApi({ runs, commands, authenticate, verifyCsrf, maxBodyBytes, logger });
 }
