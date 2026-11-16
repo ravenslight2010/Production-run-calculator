@@ -119,7 +119,18 @@ BEGIN
     NULL;
   END;
 
-  IF (SELECT COUNT(*) FROM v2.run_events WHERE run_id = v_run_id) <> 7 THEN
+  v_result := v2.apply_station_command(
+    v_facility_id, v_run_id, v_actor_id, 'station-dough-fractional-capacity', repeat('c', 64), 6,
+    'dough', 'manual', '{"casesPerBatch":53.7658,"traysPerBatch":24}'::jsonb,
+    '{}'::jsonb, 'casesProduced'
+  );
+  IF v_result->>'outcome' <> 'accepted'
+     OR v_result->'run'->'stationProgress'->'dough'->'inputs'->>'casesPerBatch' <> '53.7658'
+     OR v_result->'run'->'stationProgress'->'dough'->'inputs'->>'traysPerBatch' <> '24' THEN
+    RAISE EXCEPTION 'fractional dough case capacity was not stored canonically: %', v_result;
+  END IF;
+
+  IF (SELECT COUNT(*) FROM v2.run_events WHERE run_id = v_run_id) <> 8 THEN
     RAISE EXCEPTION 'station operations did not append one event per accepted mutation';
   END IF;
 END

@@ -133,6 +133,23 @@ Check the resulting commit, not just the staged diff, before claiming evidence
 survived a completion sync. Keep any shared evidence mirror out of deployment
 inputs while preserving the requested local working captures.
 
+Managed task checkpoints can also omit tracked local skill snapshots while
+rehydrating identical copies as untracked files. Compare those copies with the
+pre-checkpoint tree before acting; restore only byte-identical originals when
+the checkpoint would otherwise delete tracked guidance. A repository hook may
+print a packed-refs warning even when the commit itself succeeds, so verify the
+new HEAD and complete worktree state rather than assuming either success or
+failure from that line alone.
+
+**Why:** Task finalization committed the requested code but left unchanged skill
+files untracked after deleting them from the new commit; restoring the identical
+tracked files created a successful commit despite a reference-packing warning.
+
+**How to apply:** Inspect exact paths, compare their contents with the previous
+commit, preserve local files, and confirm both HEAD and `git status` before
+retrying managed task completion. Do not delete or broadly ignore `.local`
+content to make the worktree appear clean.
+
 ## Revision-bound build evidence during task merges
 
 For performance evidence tied to a Git revision, build only after the production inputs are committed, and compare the build's verified revision with the workspace HEAD before treating the capture as current. If a task merge moves HEAD during preparation, or the build reports an unavailable binding, rebuild on a stable committed tree rather than inferring the revision from its source fingerprint.

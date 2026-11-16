@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "../../node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/index.mjs";
+import { chromium } from "../../node_modules/.pnpm/node_modules/playwright/index.mjs";
 import { parseOpeningCountCsv, parseSetupImportCsv } from "../core/import-csv.mjs";
 import {
   openingCountCsvTemplate,
@@ -284,6 +284,28 @@ test("two live sessions preserve a manual edit when another device wins first", 
   await deviceB.page.getByText("Saved to the shared run.").waitFor();
   assert.equal(fixture.run.stationProgress.line.progress.casesProduced, 7);
   assert.equal(fixture.run.revision, 3);
+  assert.deepEqual(fixture.pageErrors, []);
+});
+
+test("dough capacity accepts four decimals and survives a reload", async (t) => {
+  const { fixture, openDevice } = await createFixture(t);
+  const { page } = await openDevice();
+
+  await page.getByTestId("tab-station-dough").click();
+  const capacityInput = page.locator('[data-station-field="casesPerBatch"]');
+  assert.equal(await capacityInput.getAttribute("step"), "0.0001");
+  await capacityInput.fill("53.7658");
+  await page.getByTestId("button-save-station").click();
+  await page.getByText("Saved to the shared run.").waitFor();
+  assert.equal(fixture.run.stationProgress.dough.inputs.casesPerBatch, 53.7658);
+
+  await page.reload();
+  await page.locator("#station-panel:not([hidden])").waitFor({ timeout: 5000 });
+  await page.getByTestId("tab-station-dough").click();
+  assert.equal(
+    await page.locator('[data-station-field="casesPerBatch"]').inputValue(),
+    "53.7658",
+  );
   assert.deepEqual(fixture.pageErrors, []);
 });
 

@@ -261,7 +261,7 @@ BEGIN
     WHEN 'dough' THEN
       v_allowed_inputs := v_allowed_inputs || ARRAY['casesPerBatch', 'traysPerBatch'];
       v_allowed_progress := ARRAY['casesProduced', 'traysOnLine', 'batchesReady', 'batchesMade'];
-      v_integer_fields := v_integer_fields || ARRAY['casesPerBatch', 'traysPerBatch', 'casesProduced', 'traysOnLine', 'batchesReady', 'batchesMade'];
+      v_integer_fields := v_integer_fields || ARRAY['traysPerBatch', 'casesProduced', 'traysOnLine', 'batchesReady', 'batchesMade'];
     WHEN 'cheese' THEN
       v_allowed_inputs := v_allowed_inputs || ARRAY['pizzasPerCase', 'ozPerPizza', 'batchLbs'];
       v_allowed_progress := ARRAY['casesCompleted', 'batchesMade', 'stockOnLineLbs'];

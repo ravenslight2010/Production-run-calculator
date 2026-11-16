@@ -3,6 +3,16 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-11-16 — Preserve the approved fractional dough case yield
+
+**File(s):** `v2/core/station-workflows.mjs`, `v2/core/station-workflows.test.mjs`, `v2/db/0003-production-stations.sql`, `v2/db/0003-production-stations.test.sql`, `v2/web/app.js`, `v2/e2e/station-sync.browser.test.mjs`, `v2/core/station-workflow-floor-examples.md`
+
+**Problem:** V2 treated the 53.7658-case workbook yield as 53 whole cases per batch, causing a 107-case run to estimate three batches instead of two.
+
+**Fix:** Recorded the owner's fractional-yield choice, allowed four decimal places for dough capacity, removed its whole-number restriction, and updated boundary, database, and browser regressions.
+
+**Why it was needed:** The approved 645.19 doughballs per batch and 12 pizzas per case represent about 53.7658 cases per batch; preserving that fraction matches cumulative whole-batch production without changing the source recipe.
+
 ## 2026-10-20 — Redact tracked operational details
 
 **File(s):** `.agents/memory/codex-fixes.md`

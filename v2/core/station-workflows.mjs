@@ -1,7 +1,8 @@
 const MAX_VALUE = 1_000_000;
 const MAX_DECIMAL_PLACES = 3;
+const MAX_DECIMAL_PLACES_BY_FIELD = new Map([["casesPerBatch", 4]]);
 const INTEGER_FIELDS = new Set([
-  "timerDurationSeconds", "casesPerSkid", "casesPerBatch", "traysPerBatch",
+  "timerDurationSeconds", "casesPerSkid", "traysPerBatch",
   "pizzasPerCase", "casesProduced", "casesOnLine", "casesInFreezer",
   "traysOnLine", "batchesReady", "batchesMade", "casesCompleted", "casesPacked", "barrelsMade",
 ]);
@@ -67,8 +68,9 @@ function requireFiniteNumber(value, field) {
     throw new StationWorkflowError(`${field} must be a finite number from 0 to ${MAX_VALUE}.`);
   }
   const decimalPlaces = String(value).split(".")[1]?.length ?? 0;
-  if (decimalPlaces > MAX_DECIMAL_PLACES) {
-    throw new StationWorkflowError(`${field} supports at most ${MAX_DECIMAL_PLACES} decimal places.`);
+  const maxDecimalPlaces = MAX_DECIMAL_PLACES_BY_FIELD.get(field) ?? MAX_DECIMAL_PLACES;
+  if (decimalPlaces > maxDecimalPlaces) {
+    throw new StationWorkflowError(`${field} supports at most ${maxDecimalPlaces} decimal places.`);
   }
   if (INTEGER_FIELDS.has(field) && !Number.isInteger(value)) {
     throw new StationWorkflowError(`${field} must be a whole number.`);

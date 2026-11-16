@@ -1170,7 +1170,11 @@ function renderStationPanel(run) {
         const raw = group[field];
         const fallback = station.progress.includes(field) ? 0 : (field === "autoTrackRatePerMinute" ? 0 : "");
         const value = raw === undefined || raw === null ? fallback : raw;
-        const step = ["stockOnLineLbs", "stockConsumedLbs", "stockBarrels", "autoTrackRatePerMinute", "ozPerPizza", "batchLbs", "barrelLbs"].includes(field) ? "0.001" : "1";
+        const step = field === "casesPerBatch"
+          ? "0.0001"
+          : ["stockOnLineLbs", "stockConsumedLbs", "stockBarrels", "autoTrackRatePerMinute", "ozPerPizza", "batchLbs", "barrelLbs"].includes(field)
+            ? "0.001"
+            : "1";
         return `<label class="field station-field" for="station-${field}">
           <span>${label}${unit ? ` · ${unit}` : ""}</span>
           <input id="station-${field}" name="${field}" type="number" inputmode="decimal" min="0" max="1000000"

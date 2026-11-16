@@ -211,6 +211,16 @@ test("validates required station setup and timer values", () => {
     stationKey: "line",
     changes: { autoTrackRatePerMinute: 600.1 },
   }), /600 or less/);
+
+  const fractionalDoughCapacity = validateStationCommand({
+    stationKey: "dough",
+    changes: { casesPerBatch: 53.7658 },
+  });
+  assert.equal(fractionalDoughCapacity.inputs.casesPerBatch, 53.7658);
+  assert.throws(() => validateStationCommand({
+    stationKey: "dough",
+    changes: { casesPerBatch: 53.76581 },
+  }), /at most 4 decimal places/);
 });
 
 test("matches the cheese workbook's explicit worked calculation", () => {
@@ -247,15 +257,16 @@ test("uses the approved count-only case target for line and dough planning", () 
     completionPercent: 0,
   });
 
-  // Source yield is 645.19 doughballs/batch; 12 pizzas/case gives 53 complete
-  // cases/batch when represented by V2's integer casesPerBatch field.
-  const doughballYield = (310.5 * 16) / 7.7;
-  assert.ok(Math.abs(doughballYield - 645.19) < 0.01);
+  // Owner-approved capacity preserves the 645.19 doughballs/batch yield:
+  // 645.19 / 12 pizzas per case = 53.7658 cases per batch.
+  const calculatedYieldFromRecipeInputs = (310.5 * 16) / 7.7;
+  const approvedDoughballYield = 645.19;
+  assert.ok(Math.abs(calculatedYieldFromRecipeInputs - approvedDoughballYield) < 0.01);
   assert.deepEqual(calculateStationMetrics({
     stationKey: "dough",
     run: floorExampleRun,
     state: {
-      inputs: { casesPerBatch: Math.floor(645.19 / 12) },
+      inputs: { casesPerBatch: Number((approvedDoughballYield / 12).toFixed(4)) },
       progress: { casesProduced: 0, batchesMade: 0 },
     },
   }), {
@@ -354,28 +365,20 @@ test("matches workbook-based recipe pounds, station allowances, and skid target"
   });
 });
 
-test("keeps the dough whole-case rounding boundary visible against workbook yield", () => {
+test("preserves fractional workbook yield at dough batch boundaries", () => {
   const yieldDoughballsPerBatch = 645.19;
   const pizzasPerCase = 12;
-  const wholeCasesPerBatch = Math.floor(yieldDoughballsPerBatch / pizzasPerCase);
+  const casesPerBatch = Number((yieldDoughballsPerBatch / pizzasPerCase).toFixed(4));
   const batchesAt = (targetCases) => calculateStationMetrics({
     stationKey: "dough",
     run: { setupSnapshot: { targetCases } },
-    state: { inputs: { casesPerBatch: wholeCasesPerBatch }, progress: { batchesMade: 0 } },
+    state: { inputs: { casesPerBatch }, progress: { batchesMade: 0 } },
   }).batchesNeeded;
 
-  assert.deepEqual([batchesAt(53), batchesAt(54)], [1, 2]);
-
-  const targetCases = 107;
-  const v1Batches = Math.ceil((targetCases * pizzasPerCase) / yieldDoughballsPerBatch);
-  const v2Batches = batchesAt(targetCases);
-
-  // V1's fractional yield requires two batches; V2's integer capacity of 53
-  // cases requires three. Keep this documented until the owner selects a policy.
-  assert.deepEqual({ v1Batches, v2Batches }, {
-    v1Batches: 2,
-    v2Batches: 3,
-  });
+  assert.deepEqual(
+    [batchesAt(53), batchesAt(54), batchesAt(107), batchesAt(108)],
+    [1, 2, 2, 3],
+  );
 });
 
 test("covers Sauce barrel, Frontline supply, and Packaging skid boundaries", () => {

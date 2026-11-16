@@ -27,12 +27,13 @@ the source cells and expected results must be reviewed before updating the pins.
 | Cheese / Frontline recipe | `attached_assets/source-library/specs/Aldo's_Pizza_Specs_-_09_1784339783417.xlsx`, `OZ!B24`: 2.90 oz/pizza. `attached_assets/source-library/cheese/Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer_-_07.10.26_1784339826076.xlsx`, `Aldo!B13:B17`: 20.000 + 35.000 + 0.300 + 0.300 = 55.600 lb/batch. | Cheese: 119.63 lb, 3 batches. Frontline: the V2 +20 lb allowance yields 139.63 lb; with 20 lb on line and 10 lb consumed (test-state values, not workbook facts), 2 batches remain to make. |
 | Pepperoni | `attached_assets/source-library/specs/Aldo's_Pizza_Specs_-_09_1784339783417.xlsx`, `OZ!C25`: 1.90 oz/pizza. No positive pepperoni batch weight is supplied by the cited workbooks. | 78.38 lb; batch count remains unknown (`null`) rather than inventing a recipe size. |
 | Sauce | `attached_assets/source-library/specs/Aldo's_Pizza_Specs_-_09_1784339783417.xlsx`, `OZ!B23`: 4.00 oz/pizza. `attached_assets/source-library/sauce/Aldo_Pizza_Sauce_02_1784339518984.xlsx`, `Sheet1!C19`: 271.50 lb recipe batch. | V2 adds its 30 lb preparation allowance: 195 lb total; 0.72 estimated barrels; 1 full barrel remains to make when none are made. |
-| Dough | `attached_assets/source-library/dough/Aldo's_Dough_Mixing_Procedure_-_09_1784339683714.xlsx`, `Sheet1!D11`: 310.50 lb/batch; `C32`: 7.7 oz/doughball; `E32`: 645.19 doughballs/batch; `F32`: 24 doughballs/tray. | The yield formula gives 645.19 doughballs/batch. For 55 cases at 12 pizzas/case, V1 needs 2 batches; a V2 input of 53 whole cases/batch also gives 2. |
+| Dough | `attached_assets/source-library/dough/Aldo's_Dough_Mixing_Procedure_-_09_1784339683714.xlsx`, `Sheet1!D11`: 310.50 lb/batch; `C32`: 7.7 oz/doughball; `E32`: 645.19 doughballs/batch; `F32`: 24 doughballs/tray. | The yield formula gives 645.19 doughballs/batch. At 12 pizzas/case, the approved fractional capacity is 53.7658 cases/batch. For 55 cases, V2 needs 2 batches. |
 | Packaging remainder | Shipping guide `Sheet1!F3`: 60 cases/skid; the count-only target is 55 cases. | 1 skid needed, none complete, 0 cases on the current skid before packing. Boundary checks cover 59, 60, and 61 packed cases. |
 
 ## Boundary checks
 
-- Dough with 53 cases/batch: 53 cases needs 1 batch; 54 needs 2.
+- Dough with the approved 53.7658 cases/batch: 53 cases needs 1 batch; 54 and
+  107 need 2 batches; 108 needs 3.
 - Sauce at 80 and 81 cases produces 0.99 and 1.01 estimated barrels, requiring
   1 and 2 full barrels respectively.
 - Frontline supply immediately below and at the 139.63 lb requirement changes
@@ -43,23 +44,26 @@ the source cells and expected results must be reviewed before updating the pins.
 - The supplied Pepperoni specification supports pounds but not a recipe batch
   count; synthetic tests continue to cover the positive-batch-weight path.
 
-## Owner review required; no setup values were changed
+## Approved dough rule and remaining owner review
 
-1. The source dough yield is fractional: 645.19 doughballs / 12 pizzas per case =
-   53.7658 cases per batch. V2 stores `casesPerBatch` as an integer. Flooring to
-   53 matches V1 at 55 cases but diverges at 107 cases (V1: 2 batches; V2: 3).
-   No single whole-case capacity exactly represents the source yield at every run
-   size. The owner must choose whether V2 should accept a fractional yield or
-   retain a conservative whole-case capacity.
-2. V1's applicator-1 math adds 20 lb and reports fractional batches. V2 exposes
+On 2026-11-16, the owner approved preserving the fractional dough yield. V2
+uses 53.7658 cases per batch (645.19 doughballs / 12 pizzas per case, rounded
+to four decimal places) and calculates batches as
+`ceil(targetCases / casesPerBatch)`. This yields 1 batch for 53 cases, 2 for
+54 and 107, and 3 for 108. The approved recipe yield and case size are
+unchanged; V2 accepts four decimal places for this capacity.
+
+The following separate source-mapping questions remain open:
+
+1. V1's applicator-1 math adds 20 lb and reports fractional batches. V2 exposes
    that 20 lb in Frontline, rounds pounds to hundredths, and reports whole batches.
    The test uses source-backed applicator rate/recipe values but synthetic
    on-line/consumed progress. Confirm that this station mapping and whole-batch
    behavior are intended.
-3. V1 Sauce math adds 30 lb and uses cases per layer; V2 matches the 30 lb
+2. V1 Sauce math adds 30 lb and uses cases per layer; V2 matches the 30 lb
    allowance but has no cases-per-layer input. The comparison uses the planned
    case target without a layer buffer. Confirm whether V2 intentionally omits
    that V1 buffer.
-4. The Pepperoni sheet gives 1.90 oz/pizza, but its notation does not establish a
+3. The Pepperoni sheet gives 1.90 oz/pizza, but its notation does not establish a
    separate batch weight or an unambiguous stick allowance. V2 reports pounds
    and leaves batches unknown until an approved batch size is supplied.
