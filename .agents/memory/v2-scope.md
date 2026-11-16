@@ -9,6 +9,14 @@ V2's first usable release should include run control, every production station, 
 
 The product has one production facility. It may have multiple warehouses for inventory; warehouses are inventory locations, not separate production facilities. Do not build facility switching or multi-facility workflows unless the owner later requests them. A single internal facility identity may still be used as a data-ownership or authorization boundary.
 
+## Setup import format
+
+The owner approved V2 CSV templates as the first format for product, recipe, production-setup, and physical opening-count imports. Do not assume legacy workbook support.
+
+**Why:** The owner explicitly selected CSV templates rather than starting with existing spreadsheet workbooks.
+
+**How to apply:** Keep the V2 headers and validation explicit and reviewable. Add Excel/workbook parsing only after a separate approval.
+
 ## Sign-in model
 
 V2 should rebuild the current username/password sign-in using V2-owned accounts and sessions. Staff must sign in fresh; do not reuse V1 sessions or reset tokens. The method for provisioning V2 accounts and the transfer of any password hashes remain separate cutover decisions.

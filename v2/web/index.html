@@ -232,6 +232,159 @@
             </form>
           </div>
         </section>
+        <section class="manager-tools" id="manager-tools" aria-labelledby="manager-tools-title" hidden>
+          <div class="manager-tools-heading">
+            <div>
+              <p class="eyebrow intro-kicker">MANAGER WORKSPACE <span class="intro-rule"></span> V2</p>
+              <h2 id="manager-tools-title">Setup & inventory</h2>
+              <p class="manager-tools-copy">Review setup imports and manage stock by warehouse. Every change is recorded by the server.</p>
+            </div>
+          </div>
+          <div class="manager-error" id="manager-error" role="alert" hidden></div>
+
+          <div class="manager-grid">
+            <section class="manager-card" aria-labelledby="import-heading">
+              <p class="eyebrow">PRODUCTS · RECIPES · PRODUCTION SETUP</p>
+              <h3 id="import-heading">Review setup import</h3>
+              <p class="manager-help">Use the V2 CSV columns shown after selecting an import type. Missing rows never delete existing setup.</p>
+              <form id="setup-import-form" class="manager-form">
+                <label class="field" for="import-kind">
+                  <span>Import type</span>
+                  <select id="import-kind" name="kind" required>
+                    <option value="products">Products</option>
+                    <option value="recipes">Recipes</option>
+                    <option value="production-setups">Production setup</option>
+                  </select>
+                </label>
+                <p class="csv-template" id="csv-template" aria-live="polite"></p>
+                <label class="field" for="import-file">
+                  <span>CSV file</span>
+                  <input id="import-file" name="file" type="file" accept=".csv,text/csv" required aria-describedby="csv-template" />
+                </label>
+                <button class="button button-primary" id="import-review-button" type="submit">Validate and review</button>
+                <button class="button button-secondary" id="import-retry-button" type="button" hidden>Retry the same import</button>
+              </form>
+              <div id="import-preview" class="manager-preview" aria-live="polite" hidden></div>
+              <div class="manager-actions" id="import-actions" hidden>
+                <button class="button button-primary" id="import-apply-button" type="button">Apply reviewed import</button>
+              </div>
+              <h4 class="manager-subheading">Recent imports</h4>
+              <ul class="manager-list" id="import-history" aria-live="polite"></ul>
+            </section>
+
+            <section class="manager-card" aria-labelledby="warehouse-heading">
+              <p class="eyebrow">ONE FACILITY · MULTIPLE LOCATIONS</p>
+              <h3 id="warehouse-heading">Warehouse stock</h3>
+              <form id="warehouse-create-form" class="manager-form manager-inline-form">
+                <label class="field" for="warehouse-name">
+                  <span>New warehouse</span>
+                  <input id="warehouse-name" name="name" type="text" maxlength="120" autocomplete="off" required />
+                </label>
+                <button class="button button-secondary" id="warehouse-create-button" type="submit">Add warehouse</button>
+              </form>
+              <label class="field" for="warehouse-select">
+                <span>Selected warehouse</span>
+                <select id="warehouse-select" name="warehouse" required></select>
+              </label>
+              <div class="inventory-table-wrap">
+                <table class="inventory-table">
+                  <caption>Current product stock in the selected warehouse</caption>
+                  <thead><tr><th scope="col">Product</th><th scope="col">On hand</th></tr></thead>
+                  <tbody id="stock-rows"></tbody>
+                </table>
+              </div>
+              <p class="manager-empty" id="stock-empty" hidden>No active products yet. Import products before recording stock.</p>
+              <h4 class="manager-subheading">Recent stock movements</h4>
+              <ul class="manager-list" id="movement-history" aria-live="polite"></ul>
+              <button class="button button-secondary button-small" id="movement-load-more" type="button" hidden>Load older movements</button>
+            </section>
+
+            <section class="manager-card" aria-labelledby="movement-heading">
+              <p class="eyebrow">AUDITABLE STOCK CHANGES</p>
+              <h3 id="movement-heading">Receive or adjust stock</h3>
+              <form id="movement-form" class="manager-form">
+                <label class="field" for="movement-type">
+                  <span>Change type</span>
+                  <select id="movement-type" name="type">
+                    <option value="receipt">Receive stock</option>
+                    <option value="adjustment">Adjust stock</option>
+                  </select>
+                </label>
+                <label class="field" for="movement-product">
+                  <span>Product</span>
+                  <select id="movement-product" name="productCode" required></select>
+                </label>
+                <label class="field" for="movement-quantity">
+                  <span>Quantity</span>
+                  <input id="movement-quantity" name="quantity" type="text" inputmode="decimal" maxlength="20" placeholder="e.g. 12.5" aria-describedby="movement-quantity-help" required />
+                </label>
+                <p class="field-hint" id="movement-quantity-help">Up to six decimal places. Adjustments may be positive or negative; receipts must be positive.</p>
+                <label class="field" for="movement-reason">
+                  <span>Reason</span>
+                  <input id="movement-reason" name="reason" type="text" minlength="3" maxlength="500" required />
+                </label>
+                <p class="manager-help" id="movement-stock-gate" role="status" hidden></p>
+                <button class="button button-primary" id="movement-submit" type="submit">Record stock change</button>
+              </form>
+              <p class="manager-help">Adjustments may add or remove stock, but cannot make on-hand negative.</p>
+            </section>
+
+            <section class="manager-card" aria-labelledby="transfer-heading">
+              <p class="eyebrow">WAREHOUSE TRANSFER</p>
+              <h3 id="transfer-heading">Move stock</h3>
+              <form id="transfer-form" class="manager-form">
+                <label class="field" for="transfer-from">
+                  <span>From</span>
+                  <select id="transfer-from" name="sourceWarehouseId" required></select>
+                </label>
+                <label class="field" for="transfer-to">
+                  <span>To</span>
+                  <select id="transfer-to" name="targetWarehouseId" required></select>
+                </label>
+                <label class="field" for="transfer-product">
+                  <span>Product</span>
+                  <select id="transfer-product" name="productCode" required></select>
+                </label>
+                <label class="field" for="transfer-quantity">
+                  <span>Quantity</span>
+                  <input id="transfer-quantity" name="quantity" type="text" inputmode="decimal" maxlength="20" placeholder="e.g. 3" required />
+                </label>
+                <label class="field" for="transfer-reason">
+                  <span>Reason</span>
+                  <input id="transfer-reason" name="reason" type="text" minlength="3" maxlength="500" required />
+                </label>
+                <p class="manager-help" id="transfer-stock-gate" role="status" hidden></p>
+                <button class="button button-primary" id="transfer-submit" type="submit">Transfer stock</button>
+              </form>
+            </section>
+
+            <section class="manager-card manager-card-wide" aria-labelledby="opening-count-heading">
+              <p class="eyebrow">FRESH PHYSICAL COUNT · NO V1 BALANCES</p>
+              <h3 id="opening-count-heading">Set opening stock</h3>
+              <p class="manager-help">Count every active product, including zero quantities. Review the staged count before applying it. A warehouse cannot receive an opening count after stock movements begin.</p>
+              <form id="opening-count-form" class="manager-form manager-inline-form">
+                <label class="field" for="opening-warehouse">
+                  <span>Warehouse</span>
+                  <select id="opening-warehouse" name="warehouseId" required></select>
+                </label>
+                <label class="field" for="opening-count-file">
+                  <span>Physical-count CSV</span>
+                  <input id="opening-count-file" name="file" type="file" accept=".csv,text/csv" required />
+                </label>
+                <button class="button button-primary" id="opening-count-submit" type="submit">Review physical count</button>
+                <button class="button button-secondary" id="opening-count-retry" type="button" hidden>Retry the same count</button>
+              </form>
+              <p class="csv-template">Columns: <code>product_code,quantity</code>. Use a fresh physical count, with a row for each active product.</p>
+              <div class="manager-preview" id="opening-count-preview" aria-live="polite" hidden></div>
+              <div class="manager-actions" id="opening-count-actions" hidden>
+                <button class="button button-secondary" id="opening-count-mark-reviewed" type="button">Confirm count review</button>
+                <button class="button button-primary" id="opening-count-apply" type="button" disabled>Apply opening count</button>
+              </div>
+              <h4 class="manager-subheading">Recent physical counts</h4>
+              <ul class="manager-list" id="opening-count-history" aria-live="polite"></ul>
+            </section>
+          </div>
+        </section>
         <footer class="page-footer"><span>FIELDLINE <i>—</i> FLOOR SYSTEMS</span><span>SERVER-AUTHORITATIVE CONTROL</span></footer>
         </div>
       </main>

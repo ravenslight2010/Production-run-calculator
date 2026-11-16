@@ -73,6 +73,9 @@ async function main() {
     const page = await fetch(baseUrl);
     assert.equal(page.status, 200);
     assert.match(await page.text(), /Sign in to the floor/);
+    const inventoryAsset = await fetch(`${baseUrl}/v2/web/inventory.js`);
+    assert.equal(inventoryAsset.status, 200);
+    assert.match(await inventoryAsset.text(), /opening-count-history/);
 
     const unauthenticated = await fetch(`${baseUrl}/api/v2/auth/session`);
     assert.equal(unauthenticated.status, 401);
@@ -89,6 +92,7 @@ async function main() {
     assert.equal(bootstrapResponse.status, 201);
     const bootstrapBody = await jsonResponse(bootstrapResponse);
     assert.equal(bootstrapBody.staff.role, "manager");
+    const MANAGER_ID = bootstrapBody.staff.userId;
     assert.doesNotMatch(JSON.stringify(bootstrapBody), /v2-test-initial-manager-bootstrap-code|v2-test-manager-password|argon2id|v2_session/);
     const managerCookies = bootstrapResponse.headers.getSetCookie().map((cookie) => cookie.split(";", 1)[0]);
     const manager = {
@@ -136,6 +140,178 @@ async function main() {
       headers: { Cookie: operator.cookieHeader },
     });
     assert.equal(operatorRoster.status, 403);
+
+    const operatorInventory = await fetch(`${baseUrl}/api/v2/inventory/warehouses`, {
+      headers: { Cookie: operator.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(operatorInventory.status, 403, "operators must not read manager inventory data");
+
+    async function managerPost(path, body) {
+      return sessionPost(manager, path, body);
+    }
+    async function sessionPost(session, path, body) {
+      return fetch(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: session.cookieHeader,
+          "X-CSRF-Token": session.csrfToken,
+        },
+        body: JSON.stringify(body),
+      });
+    }
+
+    const mainWarehouseResponse = await managerPost("/api/v2/inventory/warehouses", {
+      requestId: "73000000-0000-4000-8000-000000000201",
+      name: "Integration Main",
+    });
+    assert.equal(mainWarehouseResponse.status, 201, await mainWarehouseResponse.clone().text());
+    const mainWarehouse = (await jsonResponse(mainWarehouseResponse)).warehouse;
+    assert.equal(mainWarehouse.name, "Integration Main");
+    const targetWarehouseResponse = await managerPost("/api/v2/inventory/warehouses", {
+      requestId: "73000000-0000-4000-8000-000000000202",
+      name: "Integration Prep",
+    });
+    assert.equal(targetWarehouseResponse.status, 201, await targetWarehouseResponse.clone().text());
+    const targetWarehouse = (await jsonResponse(targetWarehouseResponse)).warehouse;
+    const openingWarehouseResponse = await managerPost("/api/v2/inventory/warehouses", {
+      requestId: "73000000-0000-4000-8000-000000000203",
+      name: "Integration Opening",
+    });
+    assert.equal(openingWarehouseResponse.status, 201, await openingWarehouseResponse.clone().text());
+    const openingWarehouse = (await jsonResponse(openingWarehouseResponse)).warehouse;
+
+    const productImportRequest = {
+      requestId: "73000000-0000-4000-8000-000000000204",
+      kind: "products",
+      csv: "code,name,unit\nCORN,Test Flour,lb\n",
+    };
+    const stagedImportResponse = await managerPost("/api/v2/imports", productImportRequest);
+    assert.equal(stagedImportResponse.status, 201, await stagedImportResponse.clone().text());
+    const stagedImport = await jsonResponse(stagedImportResponse);
+    assert.equal(stagedImport.outcome, "staged");
+    assert.equal(stagedImport.records[0].code, "CORN");
+    const reopenedImportResponse = await fetch(`${baseUrl}/api/v2/imports/${stagedImport.importId}`, {
+      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(reopenedImportResponse.status, 200);
+    const reopenedImport = await jsonResponse(reopenedImportResponse);
+    assert.equal(reopenedImport.import.status, "staged");
+    assert.equal(reopenedImport.import.records[0].name, "Test Flour");
+    const importRetryResponse = await managerPost("/api/v2/imports", productImportRequest);
+    assert.equal(importRetryResponse.status, 200);
+    assert.equal((await jsonResponse(importRetryResponse)).importId, stagedImport.importId);
+    const applyImportResponse = await sessionPost(manager, `/api/v2/imports/${stagedImport.importId}/apply`, {});
+    assert.equal(applyImportResponse.status, 200);
+    assert.equal((await jsonResponse(applyImportResponse)).outcome, "applied");
+    const applyImportRetry = await managerPost(`/api/v2/imports/${stagedImport.importId}/apply`, {});
+    assert.equal((await jsonResponse(applyImportRetry)).replayed, true);
+
+    async function establishOpeningCount(warehouse, requestId, quantity) {
+      const staged = await managerPost("/api/v2/inventory/opening-counts", {
+        requestId,
+        warehouseId: warehouse.id,
+        csv: `product_code,quantity\nCORN,${quantity}\n`,
+      });
+      assert.equal(staged.status, 201, await staged.clone().text());
+      const count = await jsonResponse(staged);
+      const historyResponse = await fetch(`${baseUrl}/api/v2/inventory/opening-counts?limit=50`, {
+        headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+      });
+      assert.equal(historyResponse.status, 200);
+      const history = await jsonResponse(historyResponse);
+      const historyItem = history.counts.find((item) => item.id === count.countId);
+      assert.equal(historyItem.status, "staged", "staged physical counts must be discoverable after reload");
+      assert.equal(historyItem.warehouseId, warehouse.id);
+      const detailResponse = await fetch(`${baseUrl}/api/v2/inventory/opening-counts/${count.countId}`, {
+        headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+      });
+      assert.equal(detailResponse.status, 200);
+      assert.equal((await jsonResponse(detailResponse)).count.rows[0].quantity, quantity);
+      const reviewed = await sessionPost(manager, `/api/v2/inventory/opening-counts/${count.countId}/review`, {});
+      assert.equal(reviewed.status, 200);
+      const applied = await sessionPost(manager, `/api/v2/inventory/opening-counts/${count.countId}/apply`, {});
+      assert.equal(applied.status, 200);
+      assert.equal((await jsonResponse(applied)).outcome, "applied");
+      return count;
+    }
+    await establishOpeningCount(mainWarehouse, "73000000-0000-4000-8000-000000000208", "0");
+    await establishOpeningCount(targetWarehouse, "73000000-0000-4000-8000-000000000209", "0");
+
+    const receiptRequest = {
+      commandId: "73000000-0000-4000-8000-000000000205",
+      warehouseId: mainWarehouse.id,
+      productCode: "CORN",
+      type: "receipt",
+      quantity: "5.5",
+      reason: "Integration receipt",
+    };
+    const receiptResponse = await managerPost("/api/v2/inventory/movements", receiptRequest);
+    assert.equal(receiptResponse.status, 200);
+    assert.equal((await jsonResponse(receiptResponse)).quantity, "5.500000");
+    const receiptRetry = await managerPost("/api/v2/inventory/movements", receiptRequest);
+    assert.equal((await jsonResponse(receiptRetry)).replayed, true);
+    const transferResponse = await managerPost("/api/v2/inventory/transfers", {
+      commandId: "73000000-0000-4000-8000-000000000206",
+      sourceWarehouseId: mainWarehouse.id,
+      targetWarehouseId: targetWarehouse.id,
+      productCode: "CORN",
+      quantity: "1",
+      reason: "Integration warehouse transfer",
+    });
+    assert.equal(transferResponse.status, 200);
+    assert.equal((await jsonResponse(transferResponse)).sourceQuantity, "4.500000");
+    const movementPageUrl = new URL(`${baseUrl}/api/v2/inventory/movements`);
+    movementPageUrl.searchParams.set("warehouseId", mainWarehouse.id);
+    movementPageUrl.searchParams.set("limit", "1");
+    const firstMovementPage = await fetch(movementPageUrl, {
+      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(firstMovementPage.status, 200);
+    const firstPage = await jsonResponse(firstMovementPage);
+    assert.equal(firstPage.movements.length, 1);
+    assert.ok(firstPage.nextCursor);
+    assert.equal(firstPage.movements[0].actorId, MANAGER_ID);
+    movementPageUrl.searchParams.set("beforeAt", firstPage.nextCursor.occurredAt);
+    movementPageUrl.searchParams.set("beforeId", firstPage.nextCursor.id);
+    const secondMovementPage = await fetch(movementPageUrl, {
+      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(secondMovementPage.status, 200);
+    const secondPage = await jsonResponse(secondMovementPage);
+    assert.equal(secondPage.movements.length, 1);
+    assert.equal(secondPage.movements[0].id === firstPage.movements[0].id, false);
+    assert.equal(secondPage.nextCursor, null);
+
+    const stagedCountResponse = await managerPost("/api/v2/inventory/opening-counts", {
+      requestId: "73000000-0000-4000-8000-000000000207",
+      warehouseId: openingWarehouse.id,
+      csv: "product_code,quantity\nCORN,2\n",
+    });
+    assert.equal(stagedCountResponse.status, 201, await stagedCountResponse.clone().text());
+    const stagedCount = await jsonResponse(stagedCountResponse);
+    const reviewCountResponse = await managerPost(`/api/v2/inventory/opening-counts/${stagedCount.countId}/review`, {});
+    assert.equal(reviewCountResponse.status, 200);
+    const applyCountResponse = await managerPost(`/api/v2/inventory/opening-counts/${stagedCount.countId}/apply`, {});
+    assert.equal(applyCountResponse.status, 200);
+    assert.equal((await jsonResponse(applyCountResponse)).outcome, "applied");
+    const openingStockResponse = await fetch(
+      `${baseUrl}/api/v2/inventory/stock?warehouseId=${openingWarehouse.id}`,
+      { headers: { Cookie: manager.cookieHeader, Accept: "application/json" } },
+    );
+    assert.equal(openingStockResponse.status, 200);
+    assert.equal((await jsonResponse(openingStockResponse)).stock[0].quantity, "2.000000");
+    const managerWarehouses = await fetch(`${baseUrl}/api/v2/inventory/warehouses`, {
+      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(managerWarehouses.status, 200);
+    assert.equal((await jsonResponse(managerWarehouses)).warehouses.length, 3);
+    const appliedImportHistory = await fetch(`${baseUrl}/api/v2/imports?limit=50`, {
+      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal((await jsonResponse(appliedImportHistory)).imports[0].appliedBy, MANAGER_ID);
+    const undoImportedProduct = await managerPost(`/api/v2/imports/${stagedImport.importId}/undo`, {});
+    assert.equal(undoImportedProduct.status, 409, "undo must not remove a product referenced by stock");
 
     const createdResponse = await fetch(`${baseUrl}/api/v2/runs`, {
       method: "POST",
@@ -351,7 +527,7 @@ async function main() {
     for (const cookie of [manager.cookieHeader, operator.cookieHeader, promotedOperator.cookieHeader, demotedOperator.cookieHeader]) {
       assert.equal(JSON.stringify(logs).includes(cookie), false);
     }
-    console.log("V2 HTTP/PostgreSQL check passed: guarded staff setup, session revocation, and shared lifecycle/station revisions across sessions.");
+    console.log("V2 HTTP/PostgreSQL check passed: manager setup, inventory, and shared lifecycle/station revisions are authorized and persistent.");
   } finally {
     if (serverInstance) await serverInstance.close();
   }

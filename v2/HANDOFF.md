@@ -65,6 +65,19 @@ been created.
   progress, manual corrections, stale-revision conflicts, idempotent retries,
   role-scoped identity, opaque session lookup, and HTTP requests through a
   restricted API role.
+- `db/0004-import-inventory.sql` adds products, recipes and production setups,
+  one-facility/multiple-warehouse stock, an append-only movement ledger, and
+  reviewed opening counts. Stock changes are blocked until each warehouse has
+  an applied physical opening count; no V1 stock or movement history is copied.
+- `core/import-csv.mjs` accepts bounded V2 CSV templates for products, recipes,
+  production setup, and opening counts. Imports are staged with server-computed
+  idempotency, reopenable for manager review, and guarded for safe undo.
+- `server/inventory-api.mjs` exposes manager-only, facility-scoped inventory
+  functions. It derives actor/scope from the V2 session, enforces CSRF on writes,
+  rate-limits CSV staging, and returns safe errors.
+- The manager workspace in `web/` reviews import history and rows, manages
+  warehouse stock/transfers, reopens physical counts, and shows the actor,
+  reason, and timestamp for paginated ledger entries.
 - `server/auth-adapter.mjs` provides V2-owned Argon2id password verification,
   rate-limited sign-in service logic, opaque hashed sessions, CSRF verification,
   and run/station action authorization.
@@ -79,37 +92,42 @@ been created.
 - `server/main.mjs` starts the API with `pg`, a bounded pool, startup database
   probe, `/healthz`, and graceful shutdown. It requires `V2_DATABASE_URL` and
   never reads V1 `DATABASE_URL`; it does not run migrations automatically.
-- `api/openapi.yaml` records the health, authentication, run-control, and
-  production-station routes and response models.
+- `api/openapi.yaml` records health, authentication, manager setup, run control,
+  production stations, imports, and inventory routes.
 - `web/` now connects the username/password sign-in, session check, sign-out,
   run controls, and the Line, Dough, Cheese, Pepperoni, Sauce, Frontline, and
   Packaging station workflows to the V2 API. Station edits, timers, and
   automatic progress use server revisions and canonical responses. The browser
   retains a cached read-only run view offline, refreshes on wake/reconnect, and
   keeps uncertain manual station actions bound to their original staff account.
-- A disposable PostgreSQL-backed HTTP integration test exercises guarded
-  first-manager setup and manager-only staff changes. Two separate staff
-  sessions share a run, race station edits against one revision, and confirm
-  that one update wins while the other receives the current canonical state.
+  Manager tools add reviewed setup imports and multi-warehouse inventory; their
+  writes require manager authorization, a confirmed server state, and CSRF.
+- Disposable PostgreSQL checks cover guarded first-manager setup and staff
+  changes, separate-session run/station conflicts, manager and non-manager
+  inventory access, import retries and reopening, review/application,
+  warehouse scoping,
+  physical-count gating, concurrent stock changes, and balance-to-ledger
+  reconciliation. The same check exercises separate staff sessions on run
+  revisions and stale-command conflicts.
 - V2 now has one-time, secret-guarded first-manager setup plus manager-only
   staff creation, disablement, role changes, and account-session revocation.
   The setup path never imports V1 credentials or sessions.
 - Browser automation covers manual-edit conflicts between sessions, offline
   reload and reconnection, plus server-driven station timers and automatic
   progress across desktop and phone-sized Chromium contexts. This is emulated
-  browser evidence, not physical-device coverage.
-- There is no approved setup-data import, warehouse inventory implementation,
-  or supervised auto-track worker.
+  browser evidence, not physical-device coverage. Manager inventory screens
+  have not been exercised in a real browser.
+- Automatic station progress does not run without a browser worker. Production
+  deployment, a separate V2 project, and physical-device verification remain
+  future work.
 - There is no production data connection, V1 data migration, or separate V2
   Replit project.
 
-## Next implementation milestone
+## Remaining V2 validation
 
-Continue the first usable V2 release in this order:
-
-1. Import approved setup data and implement warehouse inventory without
-   transferring V1 balances; establish opening inventory from a new physical
-   count.
+1. Verify the manager inventory UI in an authenticated browser using a disposable
+   V2 database, including imports, reviewed opening counts, stock movements,
+   warehouse transfers, pagination, and mobile/tablet layouts.
 2. Verify station calculations against approved floor examples and test station
    workflows on real phones and tablets.
 3. Keep a separate-project VM/database/restart/capacity pilot as a pre-release

@@ -515,6 +515,543 @@ paths:
           $ref: "#/components/responses/Error"
         "405":
           $ref: "#/components/responses/Error"
+  /api/v2/imports:
+    get:
+      operationId: listSetupImports
+      summary: List recent setup import history
+      description: Manager-only, facility-scoped history; at most 100 records.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Recent imports
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [imports]
+                properties:
+                  imports:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ImportHistoryItem"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: stageSetupImport
+      summary: Validate and stage one setup CSV
+      description: >
+        Manager-only. Supported CSV kinds are products, recipes, and
+        production-setups. The server computes the request hash; retry the
+        same requestId and CSV after an uncertain response.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupImportRequest"
+      responses:
+        "201":
+          description: CSV validated and staged for review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupImportPreview"
+        "200":
+          description: Previously staged request confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupImportPreview"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+  /api/v2/imports/{importId}:
+    get:
+      operationId: getSetupImport
+      summary: Reopen a setup import for manager review
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+      responses:
+        "200":
+          description: Stored validated import rows and audit identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [import]
+                properties:
+                  import:
+                    $ref: "#/components/schemas/SetupImportDetail"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v2/imports/{importId}/apply:
+    post:
+      operationId: applySetupImport
+      summary: Apply a reviewed setup import
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Import applied or confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/imports/{importId}/undo:
+    post:
+      operationId: undoSetupImport
+      summary: Safely undo an applied setup import
+      description: Undo is blocked when later changes depend on imported records.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Import undone or confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/warehouses:
+    get:
+      operationId: listInventoryWarehouses
+      summary: List warehouses in the authenticated facility
+      description: Manager-only; warehouses are locations within one facility.
+      responses:
+        "200":
+          description: Facility warehouses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [warehouses]
+                properties:
+                  warehouses:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Warehouse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createInventoryWarehouse
+      summary: Create a warehouse location
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWarehouseRequest"
+      responses:
+        "201":
+          description: Warehouse created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarehouseCreated"
+        "200":
+          description: Existing warehouse creation confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarehouseCreated"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/products:
+    get:
+      operationId: listInventoryProducts
+      summary: List active inventory products
+      responses:
+        "200":
+          description: Active facility products
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [products]
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InventoryProduct"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/stock:
+    get:
+      operationId: listWarehouseStock
+      summary: Read stock for one warehouse
+      parameters:
+        - in: query
+          name: warehouseId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Active products and on-hand quantities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stock]
+                properties:
+                  stock:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StockItem"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/movements:
+    get:
+      operationId: listInventoryMovements
+      summary: List stock movements for a warehouse
+      parameters:
+        - in: query
+          name: warehouseId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - in: query
+          name: beforeAt
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Timestamp from the last item on the previous page; provide with beforeId.
+        - in: query
+          name: beforeId
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Movement ID from the last item on the previous page; provide with beforeAt.
+      responses:
+        "200":
+          description: Bounded page from the append-only warehouse movement ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [movements, nextCursor]
+                properties:
+                  movements:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InventoryMovement"
+                  nextCursor:
+                    type: [object, "null"]
+                    required: [occurredAt, id]
+                    properties:
+                      occurredAt:
+                        type: string
+                        format: date-time
+                      id:
+                        type: string
+                        format: uuid
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: recordInventoryMovement
+      summary: Receive or adjust stock in a warehouse
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryMovementRequest"
+      responses:
+        "200":
+          description: Movement accepted or confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryMovementResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/transfers:
+    post:
+      operationId: transferInventory
+      summary: Transfer stock between two warehouses
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryTransferRequest"
+      responses:
+        "200":
+          description: Transfer accepted or confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryTransferResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/opening-counts:
+    get:
+      operationId: listOpeningCounts
+      summary: List recent physical counts for manager review
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Facility-scoped opening count summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [counts]
+                properties:
+                  counts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OpeningCountSummary"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: stageOpeningCount
+      summary: Stage a physical opening count for review
+      description: Every active product, including zero quantities, must be counted.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpeningCountRequest"
+      responses:
+        "201":
+          description: Count staged for manager review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningCount"
+        "200":
+          description: Previously staged count confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningCount"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/opening-counts/{countId}:
+    get:
+      operationId: getOpeningCount
+      summary: Read a staged or applied opening count
+      parameters:
+        - $ref: "#/components/parameters/CountId"
+      responses:
+        "200":
+          description: Count review and application state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count]
+                properties:
+                  count:
+                    $ref: "#/components/schemas/OpeningCountRecord"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/opening-counts/{countId}/review:
+    post:
+      operationId: reviewOpeningCount
+      summary: Record manager review of an opening count
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CountId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Review recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningCountResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/opening-counts/{countId}/apply:
+    post:
+      operationId: applyOpeningCount
+      summary: Apply a reviewed physical opening count
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CountId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Count applied or confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningCountResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     v2Session:
@@ -533,6 +1070,29 @@ components:
       schema:
         type: string
         format: uuid
+    ImportId:
+      in: path
+      name: importId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CountId:
+      in: path
+      name: countId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Limit:
+      in: query
+      name: limit
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
     CsrfToken:
       in: header
       name: X-CSRF-Token
@@ -879,6 +1439,498 @@ components:
         currentStatus:
           type: string
           enum: [planned, running, paused, completed]
+    SetupImportRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, kind, csv]
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        kind:
+          type: string
+          enum: [products, recipes, production-setups]
+        csv:
+          type: string
+          maxLength: 1048576
+    SetupImportProduct:
+      type: object
+      required: [code, name, unit]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+    SetupImportMasterRecord:
+      type: object
+      required: [code, name, productCode, data]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        productCode:
+          type: string
+        data:
+          type: object
+    SetupImportPreview:
+      type: object
+      required: [outcome, importId, kind, rowCount, replayed, records]
+      properties:
+        outcome:
+          type: string
+          enum: [staged, applied, undone]
+        importId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [products, recipes, production-setups]
+        rowCount:
+          type: integer
+          minimum: 1
+          maximum: 2000
+        replayed:
+          type: boolean
+        records:
+          type: array
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/SetupImportProduct"
+              - $ref: "#/components/schemas/SetupImportMasterRecord"
+    ImportResult:
+      type: object
+      required: [outcome, importId, kind, replayed]
+      properties:
+        outcome:
+          type: string
+          enum: [applied, undone]
+        importId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [products, recipes, production-setups]
+        replayed:
+          type: boolean
+    ImportHistoryItem:
+      type: object
+      required: [id, kind, status, rowCount, createdBy, appliedBy, undoneBy, createdAt, appliedAt, undoneAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [products, recipes, production-setups]
+        status:
+          type: string
+          enum: [staged, applied, undone]
+        rowCount:
+          type: integer
+        createdBy:
+          type: string
+          format: uuid
+        appliedBy:
+          type: [string, "null"]
+          format: uuid
+        undoneBy:
+          type: [string, "null"]
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        appliedAt:
+          type: [string, "null"]
+          format: date-time
+        undoneAt:
+          type: [string, "null"]
+          format: date-time
+    SetupImportDetail:
+      type: object
+      required: [id, kind, status, records, createdBy, appliedBy, undoneBy, createdAt, appliedAt, undoneAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [products, recipes, production-setups]
+        status:
+          type: string
+          enum: [staged, applied, undone]
+        records:
+          type: array
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/SetupImportProduct"
+              - $ref: "#/components/schemas/SetupImportMasterRecord"
+        createdBy:
+          type: string
+          format: uuid
+        appliedBy:
+          type: [string, "null"]
+          format: uuid
+        undoneBy:
+          type: [string, "null"]
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        appliedAt:
+          type: [string, "null"]
+          format: date-time
+        undoneAt:
+          type: [string, "null"]
+          format: date-time
+    CreateWarehouseRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, name]
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+    Warehouse:
+      type: object
+      required: [id, name, active, createdAt, openingCountApplied]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        openingCountApplied:
+          type: boolean
+    WarehouseCreated:
+      type: object
+      required: [outcome, replayed, warehouse]
+      properties:
+        outcome:
+          const: created
+        replayed:
+          type: boolean
+        warehouse:
+          $ref: "#/components/schemas/Warehouse"
+    InventoryProduct:
+      type: object
+      required: [id, code, name, unit, active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        active:
+          type: boolean
+    StockItem:
+      type: object
+      required: [productId, code, name, unit, quantity, revision]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        quantity:
+          type: string
+          pattern: "^[0-9]+(\\.[0-9]{1,6})?$"
+        revision:
+          type: integer
+          minimum: 0
+    InventoryMovement:
+      type: object
+      required: [id, movementGroupId, productCode, productName, unit, type, quantityDelta, reason, actorId, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        movementGroupId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        productName:
+          type: string
+        unit:
+          type: string
+        type:
+          type: string
+          enum: [receipt, adjustment, transfer_out, transfer_in, opening_count]
+        quantityDelta:
+          type: string
+        reason:
+          type: string
+        actorId:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    InventoryMovementRequest:
+      type: object
+      additionalProperties: false
+      required: [commandId, warehouseId, productCode, type, quantity, reason]
+      properties:
+        commandId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        warehouseId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        type:
+          type: string
+          enum: [receipt, adjustment]
+        quantity:
+          type: string
+          pattern: "^-?[0-9]+(\\.[0-9]{1,6})?$"
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+    InventoryMovementResult:
+      type: object
+      required: [outcome, replayed, movementId, warehouseId, productCode, quantity, revision]
+      properties:
+        outcome:
+          const: accepted
+        replayed:
+          type: boolean
+        movementId:
+          type: string
+          format: uuid
+        warehouseId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        quantity:
+          type: string
+        revision:
+          type: integer
+    InventoryTransferRequest:
+      type: object
+      additionalProperties: false
+      required: [commandId, sourceWarehouseId, targetWarehouseId, productCode, quantity, reason]
+      properties:
+        commandId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        sourceWarehouseId:
+          type: string
+          format: uuid
+        targetWarehouseId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        quantity:
+          type: string
+          pattern: "^[1-9][0-9]*(\\.[0-9]{1,6})?$"
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+    InventoryTransferResult:
+      type: object
+      required:
+        - outcome
+        - replayed
+        - transferId
+        - productCode
+        - quantity
+        - sourceWarehouseId
+        - sourceQuantity
+        - sourceRevision
+        - targetWarehouseId
+        - targetQuantity
+        - targetRevision
+      properties:
+        outcome:
+          const: accepted
+        replayed:
+          type: boolean
+        transferId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        quantity:
+          type: string
+        sourceWarehouseId:
+          type: string
+          format: uuid
+        sourceQuantity:
+          type: string
+        sourceRevision:
+          type: integer
+        targetWarehouseId:
+          type: string
+          format: uuid
+        targetQuantity:
+          type: string
+        targetRevision:
+          type: integer
+    OpeningCountRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, warehouseId, csv]
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        warehouseId:
+          type: string
+          format: uuid
+        csv:
+          type: string
+          maxLength: 1048576
+    OpeningCount:
+      type: object
+      required: [outcome, countId, warehouseId, rowCount, replayed, rows]
+      properties:
+        outcome:
+          type: string
+          enum: [staged, reviewed, applied]
+        countId:
+          type: string
+          format: uuid
+        warehouseId:
+          type: string
+          format: uuid
+        rowCount:
+          type: integer
+          minimum: 1
+        replayed:
+          type: boolean
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpeningCountRow"
+    OpeningCountRow:
+      type: object
+      required: [productCode, quantity]
+      properties:
+        productCode:
+          type: string
+        quantity:
+          type: string
+    OpeningCountRecord:
+      type: object
+      required: [id, warehouseId, status, rows, createdBy, reviewedBy, appliedBy, createdAt, reviewedAt, appliedAt, result]
+      properties:
+        id:
+          type: string
+          format: uuid
+        warehouseId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [staged, reviewed, applied]
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpeningCountRow"
+        createdBy:
+          type: string
+          format: uuid
+        reviewedBy:
+          type: [string, "null"]
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: [string, "null"]
+          format: date-time
+        appliedAt:
+          type: [string, "null"]
+          format: date-time
+        appliedBy:
+          type: [string, "null"]
+          format: uuid
+        result:
+          type: [object, "null"]
+    OpeningCountSummary:
+      type: object
+      required: [id, warehouseId, warehouseName, status, rowCount, createdBy, reviewedBy, appliedBy, createdAt, reviewedAt, appliedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        warehouseId:
+          type: string
+          format: uuid
+        warehouseName:
+          type: string
+        status:
+          type: string
+          enum: [staged, reviewed, applied]
+        rowCount:
+          type: integer
+          minimum: 1
+        createdBy:
+          type: string
+          format: uuid
+        reviewedBy:
+          type: [string, "null"]
+          format: uuid
+        appliedBy:
+          type: [string, "null"]
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: [string, "null"]
+          format: date-time
+        appliedAt:
+          type: [string, "null"]
+          format: date-time
+    OpeningCountResult:
+      type: object
+      required: [outcome, countId, warehouseId, rowCount, replayed]
+      properties:
+        outcome:
+          type: string
+          enum: [reviewed, applied]
+        countId:
+          type: string
+          format: uuid
+        warehouseId:
+          type: string
+          format: uuid
+        rowCount:
+          type: integer
+        replayed:
+          type: boolean
     Error:
       type: object
       required: [error]

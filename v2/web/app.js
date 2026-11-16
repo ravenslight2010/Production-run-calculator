@@ -1,5 +1,6 @@
 import { canWriteRunState } from "./write-gate.mjs";
 import { STATIONS, calculateStationMetrics } from "/v2/core/station-workflows.mjs";
+import { initializeInventory, updateInventoryContext } from "./inventory.js";
 
 const API = "/api/v2/runs";
 const AUTH_API = "/api/v2/auth";
@@ -244,6 +245,7 @@ function clearUserScopedState() {
   lastKnownRun = null;
   serverStateConfirmed = false;
   stationConflictDraft = null;
+  updateInventoryContext(currentStaff, false);
   render();
 }
 
@@ -257,6 +259,7 @@ function canWriteNow() {
 
 function enterOfflineMode() {
   serverStateConfirmed = false;
+  updateInventoryContext(currentStaff, false);
   setConnection(false);
   updateCreateFormForAuth();
   renderRun(selectedRun());
@@ -387,6 +390,7 @@ function showSignIn(message = null, { title = "Sign-in needed", retry = false } 
   currentStaff = null;
   staffGeneration += 1;
   staffDirectory = null;
+  updateInventoryContext(null, false);
   el.authPanel.hidden = false;
   el.authForm.hidden = false;
   el.bootstrapForm.hidden = true;
@@ -414,6 +418,7 @@ function showAuthenticated(staff) {
   if (currentStaff?.userId !== staff.userId) clearUserScopedState();
   currentStaff = staff;
   serverStateConfirmed = false;
+  updateInventoryContext(currentStaff, false);
   el.authPanel.hidden = true;
   el.bootstrapForm.hidden = true;
   el.setupToggle.hidden = true;
@@ -1466,6 +1471,7 @@ async function fetchRuns({ quiet = false } = {}) {
   }
   if (refreshInFlight) return false;
   serverStateConfirmed = false;
+  updateInventoryContext(currentStaff, false);
   updateCreateFormForAuth();
   renderRun(selectedRun());
   refreshInFlight = true;
@@ -1491,6 +1497,7 @@ async function fetchRuns({ quiet = false } = {}) {
     setConnection(true);
     setLastCheck();
     serverStateConfirmed = true;
+    updateInventoryContext(currentStaff, canWriteNow());
     updateCreateFormForAuth();
     render();
     saveOfflineCache();
@@ -1504,6 +1511,7 @@ async function fetchRuns({ quiet = false } = {}) {
       return false;
     }
     serverStateConfirmed = false;
+    updateInventoryContext(currentStaff, false);
     setConnection(false);
     saveOfflineCache();
     showError(error instanceof Error ? error.message : "Check the connection and refresh state.", "Could not load current state");
@@ -1632,6 +1640,7 @@ async function sendCommand(pending) {
       return;
     }
     serverStateConfirmed = false;
+    updateInventoryContext(currentStaff, false);
     setConnection(false);
     updateCreateFormForAuth();
     showError(error instanceof Error ? error.message : "The result is uncertain. Retry the same action; its command identity will be preserved.", "Action needs confirmation");
@@ -1716,6 +1725,7 @@ async function createRun(event) {
       return;
     }
     serverStateConfirmed = false;
+    updateInventoryContext(currentStaff, false);
     showError(error instanceof Error ? error.message : "Run creation could not be confirmed. Retry the same request; its identity and details are preserved.", "Run not confirmed");
     el.createNote.textContent = "Not confirmed. Retry uses the same request ID and details; do not start a different creation request.";
     setConnection(false);
@@ -1735,6 +1745,7 @@ if (pendingCreate) {
   el.createNote.textContent = "A previous request needs confirmation. Retry sends the same request ID and run details; it will not retry automatically.";
 }
 
+initializeInventory();
 el.refresh.addEventListener("click", () => fetchRuns());
 el.createForm.addEventListener("submit", createRun);
 el.stationForm.addEventListener("submit", submitStationForm);

@@ -1,4 +1,4 @@
-const CACHE_NAME = "fieldline-v2-shell-1";
+const CACHE_NAME = "fieldline-v2-shell-2";
 const SHELL_URLS = [
   "/",
   "/manifest.webmanifest",
@@ -6,6 +6,7 @@ const SHELL_URLS = [
   "/v2/web/styles.css",
   "/v2/web/write-gate.mjs",
   "/v2/web/app.js",
+  "/v2/web/inventory.js",
   "/v2/core/station-workflows.mjs",
 ];
 

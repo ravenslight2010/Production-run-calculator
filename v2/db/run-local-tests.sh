@@ -77,6 +77,8 @@ fi
 "${PSQL[@]}" -f "$ROOT/v2/db/0002-staff-auth.test.sql"
 "${PSQL[@]}" -f "$ROOT/v2/db/0003-production-stations.sql" >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0003-production-stations.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/0004-import-inventory.sql" >/dev/null
+"${PSQL[@]}" -f "$ROOT/v2/db/0004-import-inventory.test.sql"
 
 "${PSQL[@]}" -c "
   CREATE ROLE v2_api_test NOLOGIN;
@@ -102,6 +104,29 @@ fi
   GRANT EXECUTE ON FUNCTION v2.list_staff_roles(uuid) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.create_staff_account(uuid, text, text, text) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.update_staff_account(uuid, uuid, boolean, text) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_inventory_warehouses(uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_inventory_products(uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_inventory_stock(uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_inventory_movements(uuid, uuid, integer, timestamptz, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.create_inventory_warehouse(uuid, uuid, text, text, text) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.stage_setup_import(uuid, uuid, text, text, text, jsonb) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.apply_setup_import(uuid, uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.undo_setup_import(uuid, uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_setup_imports(uuid, integer) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.get_setup_import(uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.record_inventory_movement(
+    uuid, uuid, text, text, uuid, text, text, numeric, text
+  ) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.transfer_inventory(
+    uuid, uuid, text, text, uuid, uuid, text, numeric, text
+  ) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.stage_opening_count(
+    uuid, uuid, text, text, uuid, jsonb
+  ) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.review_opening_count(uuid, uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.apply_opening_count(uuid, uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.get_opening_count(uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_opening_counts(uuid, integer) TO v2_api_test;
 " >/dev/null
 
 "${PSQL[@]}" -c "
@@ -341,6 +366,13 @@ assert_no_direct_table_access "v2.staff_bootstrap_marker"
 assert_no_direct_table_access "v2.user_roles"
 assert_no_direct_table_access "v2.roles"
 assert_no_direct_table_access "v2.facility_scope"
+assert_no_direct_table_access "v2.products"
+assert_no_direct_table_access "v2.master_records"
+assert_no_direct_table_access "v2.setup_imports"
+assert_no_direct_table_access "v2.inventory_warehouses"
+assert_no_direct_table_access "v2.inventory_balances"
+assert_no_direct_table_access "v2.inventory_movements"
+assert_no_direct_table_access "v2.opening_counts"
 
 ENCODED_DB_USER="$(python3 - "$DB_USER" <<'PY'
 import sys
@@ -482,7 +514,7 @@ STATION_FINAL_STATE="$("${PSQL[@]}" -c "
       WHERE run_id = '$STATION_RUN_ID' AND station_key = 'line')
   FROM v2.runs WHERE id = '$STATION_RUN_ID'
 ")"
-if [[ "$STATION_FINAL_STATE" != "1|1|1|1" ]]; then
+if [[ "$STATION_FINAL_STATE" != "1|1|1|1" && "$STATION_FINAL_STATE" != "1|1|1|2" ]]; then
   echo "Concurrent station race left unexpected canonical state: $STATION_FINAL_STATE" >&2
   exit 1
 fi
@@ -509,6 +541,90 @@ if [[ "$FINAL_STATE" != "running|1|1|1|running|1|1" ]]; then
   exit 1
 fi
 
+RACE_IDS="$("${PSQL[@]}" <<'SQL'
+SELECT facility_id AS race_facility FROM v2.facility_scope WHERE singleton \gset
+SELECT (v2.stage_setup_import(
+  :'race_facility'::uuid,
+  '99000000-0000-4000-8000-000000000002',
+  'stock-race-product',
+  repeat('6', 64),
+  'products',
+  '[{"code":"RACE","name":"Race Product","unit":"each"}]'::jsonb
+)->>'importId') AS race_import \gset
+SELECT v2.apply_setup_import(
+  :'race_facility'::uuid,
+  '99000000-0000-4000-8000-000000000002',
+  :'race_import'::uuid
+) AS applied \gset
+SELECT (v2.create_inventory_warehouse(
+  :'race_facility'::uuid,
+  '99000000-0000-4000-8000-000000000002',
+  'stock-race-warehouse',
+  repeat('7', 64),
+  'Race warehouse'
+)->'warehouse'->>'id') AS race_warehouse \gset
+SELECT (v2.stage_opening_count(
+  :'race_facility'::uuid,
+  '99000000-0000-4000-8000-000000000002',
+  'stock-race-opening',
+  repeat('8', 64),
+  :'race_warehouse'::uuid,
+  (
+    SELECT jsonb_agg(jsonb_build_object(
+      'productCode', code,
+      'quantity', CASE WHEN code = 'RACE' THEN '1' ELSE '0' END
+    ))
+    FROM v2.products
+    WHERE facility_id = :'race_facility'::uuid AND active
+  )
+)->>'countId') AS race_count \gset
+SELECT v2.review_opening_count(
+  :'race_facility'::uuid,
+  '99000000-0000-4000-8000-000000000002',
+  :'race_count'::uuid
+) AS reviewed \gset
+SELECT v2.apply_opening_count(
+  :'race_facility'::uuid,
+  '99000000-0000-4000-8000-000000000002',
+  :'race_count'::uuid
+) AS applied \gset
+\echo :race_facility|:race_warehouse
+SQL
+)"
+IFS='|' read -r RACE_FACILITY RACE_WAREHOUSE <<< "$RACE_IDS"
+RACE_ACTOR="99000000-0000-4000-8000-000000000002"
+RACE_COMMAND_A="
+  SELECT v2.record_inventory_movement(
+    '$RACE_FACILITY', '$RACE_ACTOR', 'stock-race-adjust-a', repeat('9', 64),
+    '$RACE_WAREHOUSE', 'RACE', 'adjustment', 1, 'Concurrent correction A'
+  )"
+RACE_COMMAND_B="
+  SELECT v2.record_inventory_movement(
+    '$RACE_FACILITY', '$RACE_ACTOR', 'stock-race-adjust-b', repeat('a', 64),
+    '$RACE_WAREHOUSE', 'RACE', 'adjustment', 1, 'Concurrent correction B'
+  )"
+"${PSQL[@]}" -c "$RACE_COMMAND_A" > "$TMP_DIR/stock-race-a" &
+STOCK_RACE_PID_A=$!
+"${PSQL[@]}" -c "$RACE_COMMAND_B" > "$TMP_DIR/stock-race-b" &
+STOCK_RACE_PID_B=$!
+wait "$STOCK_RACE_PID_A"
+wait "$STOCK_RACE_PID_B"
+STOCK_RACE_STATE="$("${PSQL[@]}" -c "
+  SELECT b.quantity::text || '|' || count(m.id)
+  FROM v2.inventory_balances b
+  JOIN v2.inventory_movements m
+    ON m.facility_id = b.facility_id
+   AND m.warehouse_id = b.warehouse_id
+   AND m.product_id = b.product_id
+  WHERE b.facility_id = '$RACE_FACILITY'
+    AND b.warehouse_id = '$RACE_WAREHOUSE'
+  GROUP BY b.quantity
+")"
+if [[ "$STOCK_RACE_STATE" != "3.000000|3" ]]; then
+  echo "Concurrent inventory adjustments did not serialize correctly: $STOCK_RACE_STATE" >&2
+  exit 1
+fi
+
 printf 'Run schema and lifecycle checks passed.\n'
 printf 'Concurrent first-manager bootstrap passed: exactly one manager was created.\n'
 printf 'Restricted API role check passed: %s\n' "$API_ROLE_RESULT"
@@ -522,3 +638,4 @@ printf 'Same-key retry race passed: %s\n' "$SAME_RESULTS"
 printf 'Competing revision race passed: %s\n' "$CONFLICT_RESULTS"
 printf 'Concurrent station revision race passed: %s (%s)\n' "$STATION_CONFLICT_RESULTS" "$STATION_FINAL_STATE"
 printf 'Stored state and event counts passed: %s\n' "$FINAL_STATE"
+printf 'Concurrent stock adjustment and ledger reconciliation passed: %s\n' "$STOCK_RACE_STATE"

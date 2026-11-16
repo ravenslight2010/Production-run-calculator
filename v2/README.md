@@ -14,12 +14,11 @@ Prepared 2026-11-10; current V1 checks are bound to revision
 recommendations, not authorization to implement or cut over.
 
 The V2 source includes server-owned run lifecycle and production-station
-transactions, authenticated run creation and reads, V2-owned sign-in/session
-routes, and controlled manager setup. Line, Dough, Cheese, Pepperoni, Sauce,
-Frontline, and Packaging have station-specific inputs and progress, baseline
-validated calculations, shared timers, manual correction, and server-clock
-automatic progress. Run and station updates use revisions, idempotency receipts,
-events, and outbox records.
+routes, plus controlled manager setup. Line, Dough, Cheese, Pepperoni, Sauce,
+Frontline, and Packaging have station-specific inputs and progress, validated
+calculations, shared timers, manual correction, and server-clock automatic
+progress. Run and station updates use revisions, idempotency receipts, events,
+and outbox records.
 
 A secret-guarded first-manager setup is available only when
 `V2_INITIAL_MANAGER_BOOTSTRAP_CODE` is configured and neither a staff account nor
@@ -30,15 +29,24 @@ after bootstrap. Never place it in source, chat, or browser storage.
 
 The browser provides a read-only cached view while disconnected and refreshes
 from the server before writes resume. Disposable PostgreSQL checks cover
-bootstrap, manager account changes, and concurrent station updates from separate
-staff sessions. Browser tests cover desktop and phone-sized views, manual
-conflicts, offline reload/recovery, automatic progress, and timers across
-sessions.
+bootstrap, manager account changes, station updates, setup import retries, and
+warehouse inventory reconciliation. Browser tests cover desktop and phone-sized
+station views, manual conflicts, offline reload/recovery, automatic progress,
+and timers across sessions.
 
-V2 remains incomplete as a production replacement. Approved setup-data import,
-full warehouse inventory, a supervised worker for automatic progress while no
-browser is connected, production deployment, and physical-device verification
-remain separate work. No separate V2 Replit project or deployment exists.
+Manager-only setup imports and inventory also run against the V2 database. The
+first import format is V2 CSV for products, recipes, production setup, and
+reviewed physical opening counts. Managers can reopen staged imports, apply or
+safely undo them, manage multiple warehouses in the one facility, and review a
+paginated append-only movement history. A warehouse cannot receive stock
+changes until its physical opening count is reviewed and applied. No V1
+balances, stock history, credentials, or sessions are copied.
+
+V2 remains incomplete as a production replacement: manager inventory screens
+have not been verified in a real browser, automatic progress does not run
+without an active browser, and production deployment and physical-device
+verification remain separate. No separate V2 Replit project or deployment
+exists.
 
 Database functions are backend-only. The API must derive facility and actor
 identity from verified V2 authorization, compute request hashes itself, and
@@ -66,9 +74,10 @@ node --check v2/web/app.js
 ```
 
 The database script creates a temporary PostgreSQL cluster under the system temp
-directory, binds it to loopback only, runs schema/lifecycle/receipt checks,
-server-owned create/read checks, concurrent retry/conflict checks, and HTTP
-integration through a restricted V2 API role, then stops and removes the
-cluster. It does not read or write either V1 database.
+directory, binds it to loopback only, runs schema, lifecycle, import, opening
+count, inventory-ledger, reconciliation, and concurrent stock checks; it also
+exercises manager-authenticated imports and warehouse operations over HTTP
+through a restricted V2 API role. It then stops and removes the cluster. It
+does not read or write either V1 database.
 `pg@8.23.1` is the V2 package's pinned PostgreSQL driver (MIT); the production
 dependency audit reported no known vulnerabilities when checked.
