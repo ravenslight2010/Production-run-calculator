@@ -1,6 +1,6 @@
 ---
-name: Check dependency licenses-dc9500
-description: >-
+name: check-dependency-licenses-dc9500
+description: >
   Use this skill when adding dependencies or before releasing, or when the user
   asks whether a library is safe to use commercially or mentions open-source
   license or IP compliance.

@@ -1,6 +1,6 @@
 ---
-name: Make apps resilient to abuse and overload-dc9500
-description: >-
+name: make-apps-resilient-to-abuse-and-overload-dc9500
+description: >
   Use when building public endpoints, APIs, auth/login routes, forms, file
   uploads, search, or any endpoint that calls a paid service (AI, email, SMS) —
   to add rate limiting, timeouts, and quotas that prevent abuse, runaway cost,

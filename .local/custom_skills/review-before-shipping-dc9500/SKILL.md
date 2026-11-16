@@ -1,6 +1,6 @@
 ---
-name: Review before shipping-dc9500
-description: >-
+name: review-before-shipping-dc9500
+description: >
   Use this skill before committing, opening a pull request, merging, deploying,
   or publishing, or when the user says the app is "done", "ready to ship", or
   "ready to go live".

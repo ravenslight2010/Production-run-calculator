@@ -1,6 +1,6 @@
 ---
-name: Handle personal and sensitive data-dc9500
-description: >-
+name: handle-personal-and-sensitive-data-dc9500
+description: >
   Use when building anything that collects, stores, logs, or transmits user data
   — sign-up, profiles, payments, uploads, analytics, logging — or when the user
   mentions PII, GDPR, CCPA, HIPAA, PCI, or privacy.
