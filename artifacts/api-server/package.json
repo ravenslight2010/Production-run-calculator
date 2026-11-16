@@ -32,7 +32,7 @@
     "benchmark:second-pass-reviewer-live": "../../scripts/node_modules/.bin/tsx scripts/benchmark-second-pass-reviewer-live.mts"
   },
   "dependencies": {
-    "@google/genai": "^2.29.1",
+    "@google/genai": "^3.3.0",
     "@workspace/ai-memory": "workspace:*",
     "@workspace/anomaly": "workspace:*",
     "@workspace/api-zod": "workspace:*",
@@ -65,14 +65,14 @@
     "express": "^5.3.0",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
-    "web-push": "^3.6.7",
+    "web-push": "^4.0.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
-    "@types/node": "catalog:",
+    "@types/node": "26.6.6",
     "@types/pg": "^8.23.1",
     "@types/web-push": "^3.6.4",
     "@workspace/typescript-api-v6": "workspace:*",
@@ -80,7 +80,7 @@
     "esbuild-plugin-pino": "^2.3.3",
     "pg": "^8.23.1",
     "pino-pretty": "^13.2.0",
-    "thread-stream": "4.2.0",
-    "vitest": "5.0.5"
+    "thread-stream": "4.2.1",
+    "vitest": "5.1.0"
   }
 }

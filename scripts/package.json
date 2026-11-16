@@ -135,10 +135,10 @@
     "xlsx": "npm:@e965/xlsx@^0.20.3"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
+    "@types/node": "26.6.6",
     "fast-check": "^4.10.2",
     "github-actionlint": "1.7.12",
     "tsx": "catalog:",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }
