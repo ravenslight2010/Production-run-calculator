@@ -92,6 +92,11 @@ been created.
 - `server/main.mjs` starts the API with `pg`, a bounded pool, startup database
   probe, `/healthz`, and graceful shutdown. It requires `V2_DATABASE_URL` and
   never reads V1 `DATABASE_URL`; it does not run migrations automatically.
+- `core/station-auto-track-worker.mjs` advances due station counters on the
+  server without an open browser. Database-backed leases coordinate instances,
+  while the existing station transaction remains responsible for pause-aware
+  time, idempotency, target caps, and fractional carry. Worker state is exposed
+  from `/healthz`; retry and shutdown behavior is covered by local checks.
 - `api/openapi.yaml` records health, authentication, manager setup, run control,
   production stations, imports, and inventory routes.
 - `web/` now connects the username/password sign-in, session check, sign-out,

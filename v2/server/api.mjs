@@ -91,6 +91,7 @@ export function createV2Api({
   secureCookies = process.env.NODE_ENV === "production",
   logger = (record) => console.log(JSON.stringify(record)),
   healthTimeoutMs = 2000,
+  workerHealth,
 }) {
   if (!pool || typeof pool.query !== "function") throw new TypeError("A V2 PostgreSQL pool is required.");
   for (const method of ["authenticate", "verifyCsrf", "authorizeRun", "signIn", "signOut", "sessionCookie", "csrfCookie"]) {
@@ -100,6 +101,9 @@ export function createV2Api({
   }
   if (typeof getClientKey !== "function") throw new TypeError("A trusted client-key resolver is required.");
   if (typeof logger !== "function") throw new TypeError("A structured logger is required.");
+  if (workerHealth !== undefined && typeof workerHealth !== "function") {
+    throw new TypeError("workerHealth must be a function when provided.");
+  }
   if (!Number.isSafeInteger(healthTimeoutMs) || healthTimeoutMs < 100 || healthTimeoutMs > 10_000) {
     throw new TypeError("healthTimeoutMs must be between 100 and 10000.");
   }
@@ -159,7 +163,9 @@ export function createV2Api({
         }
         try {
           await pool.query({ text: "SELECT 1", query_timeout: healthTimeoutMs });
-          sendJson(response, 200, { status: "ok" });
+          const body = { status: "ok" };
+          if (workerHealth) body.stationWorker = workerHealth();
+          sendJson(response, 200, body);
         } catch (error) {
           logger({
             event: "v2.health.unavailable",

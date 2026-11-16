@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { createAuthAdapter } from "./auth-adapter.mjs";
 import { createV2Api } from "./api.mjs";
+import { createStationAutoTrackWorker } from "../core/station-auto-track-worker.mjs";
 
 const { Pool } = pg;
 
@@ -85,6 +86,32 @@ export async function startV2Server({ env = process.env, logger = logStructured 
   const connectionString = requiredV2DatabaseUrl(env);
   const port = boundedInteger(env.PORT, 3000, 0, 65535, "PORT", "V2_INVALID_PORT");
   const poolMax = boundedInteger(env.V2_DB_POOL_MAX, 5, 1, 20, "V2_DB_POOL_MAX", "V2_INVALID_POOL_SIZE");
+  const stationWorkerOptions = {
+    pollIntervalMs: boundedInteger(
+      env.V2_STATION_WORKER_POLL_MS,
+      1000,
+      100,
+      30_000,
+      "V2_STATION_WORKER_POLL_MS",
+      "V2_INVALID_STATION_WORKER_POLL",
+    ),
+    leaseSeconds: boundedInteger(
+      env.V2_STATION_WORKER_LEASE_SECONDS,
+      30,
+      10,
+      300,
+      "V2_STATION_WORKER_LEASE_SECONDS",
+      "V2_INVALID_STATION_WORKER_LEASE",
+    ),
+    batchSize: boundedInteger(
+      env.V2_STATION_WORKER_BATCH_SIZE,
+      50,
+      1,
+      500,
+      "V2_STATION_WORKER_BATCH_SIZE",
+      "V2_INVALID_STATION_WORKER_BATCH",
+    ),
+  };
   const pool = new Pool({
     connectionString,
     application_name: "lucia-production-assistant-v2",
@@ -119,12 +146,18 @@ export async function startV2Server({ env = process.env, logger = logStructured 
     bootstrapSecret: env.V2_INITIAL_MANAGER_BOOTSTRAP_CODE,
     logger,
   });
+  const stationWorker = createStationAutoTrackWorker({
+    query: (text, values) => pool.query(text, values),
+    logger,
+    ...stationWorkerOptions,
+  });
   const api = createV2Api({
     pool,
     authAdapter,
     getClientKey: getClientKeyResolver(env),
     secureCookies: env.NODE_ENV !== "development",
     logger,
+    workerHealth: () => stationWorker.getHealth(),
   });
   const server = createServer(api);
   server.requestTimeout = 15_000;
@@ -151,10 +184,12 @@ export async function startV2Server({ env = process.env, logger = logStructured 
   }
 
   const address = server.address();
+  stationWorker.start();
   logger({
     event: "v2.server.started",
     port: typeof address === "object" && address ? address.port : port,
     poolMax,
+    stationWorker: true,
   });
 
   let closing = false;
@@ -170,12 +205,13 @@ export async function startV2Server({ env = process.env, logger = logStructured 
       await closed;
     } finally {
       clearTimeout(forceClose);
+      await stationWorker.stop();
+      await pool.end();
     }
-    await pool.end();
     logger({ event: "v2.server.stopped" });
   };
 
-  return { server, pool, close };
+  return { server, pool, stationWorker, close };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

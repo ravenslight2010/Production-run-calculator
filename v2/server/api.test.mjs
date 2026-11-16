@@ -85,6 +85,31 @@ test("health endpoint performs a bounded database probe and emits request identi
   assert.equal("url" in logs[0], false);
 });
 
+test("health endpoint exposes station worker health without leaking worker identifiers", async () => {
+  const workerHealth = {
+    status: "degraded",
+    lastCycleAt: "2026-11-16T12:00:00.000Z",
+    lastSuccessAt: "2026-11-16T11:59:00.000Z",
+    consecutiveFailures: 2,
+    lastErrorName: "ConnectionError",
+    processedLastCycle: 0,
+  };
+  const handler = createV2Api({
+    pool: { async query() { return { rows: [{ "?column?": 1 }] }; } },
+    authAdapter: fakeAuthAdapter(),
+    getClientKey: () => "test-client",
+    logger: () => {},
+    workerHealth: () => workerHealth,
+  });
+
+  await withServer(handler, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/healthz`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "ok", stationWorker: workerHealth });
+    assert.doesNotMatch(response.headers.get("cache-control"), /public/i);
+  });
+});
+
 test("serves the V2 sign-in page and local assets with restrictive browser headers", async () => {
   const handler = createV2Api({
     pool: { async query() { throw new Error("static requests should not query the database"); } },

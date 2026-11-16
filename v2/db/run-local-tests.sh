@@ -77,6 +77,45 @@ fi
 "${PSQL[@]}" -f "$ROOT/v2/db/0002-staff-auth.test.sql"
 "${PSQL[@]}" -f "$ROOT/v2/db/0003-production-stations.sql" >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0003-production-stations.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/0003-worker-leases.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/0003-station-worker-pause.test.sql"
+LEASE_RACE_SQL_A="
+  SELECT COALESCE(v2.claim_worker_lease(
+    'station-auto-track-race',
+    '73000000-0000-4000-8000-000000000003',
+    30
+  )::text, 'none')
+"
+LEASE_RACE_SQL_B="
+  SELECT COALESCE(v2.claim_worker_lease(
+    'station-auto-track-race',
+    '73000000-0000-4000-8000-000000000004',
+    30
+  )::text, 'none')
+"
+"${PSQL[@]}" -c "$LEASE_RACE_SQL_A" > "$TMP_DIR/lease-race-1" &
+LEASE_RACE_PID_A=$!
+"${PSQL[@]}" -c "$LEASE_RACE_SQL_B" > "$TMP_DIR/lease-race-2" &
+LEASE_RACE_PID_B=$!
+wait "$LEASE_RACE_PID_A"
+wait "$LEASE_RACE_PID_B"
+LEASE_RACE_RESULTS="$(cat "$TMP_DIR/lease-race-1" "$TMP_DIR/lease-race-2" | sort | tr '\n' ' ')"
+if [[ "$LEASE_RACE_RESULTS" != "1 none " ]]; then
+  echo "Competing station worker lease claims produced unexpected results: $LEASE_RACE_RESULTS" >&2
+  exit 1
+fi
+"${PSQL[@]}" -c "
+  SELECT v2.release_worker_lease(
+    'station-auto-track-race',
+    '73000000-0000-4000-8000-000000000003',
+    1
+  );
+  SELECT v2.release_worker_lease(
+    'station-auto-track-race',
+    '73000000-0000-4000-8000-000000000004',
+    1
+  );
+" >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0004-import-inventory.sql" >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0004-import-inventory.test.sql"
 
@@ -94,6 +133,10 @@ fi
   GRANT EXECUTE ON FUNCTION v2.apply_station_command(
     uuid, uuid, uuid, text, text, bigint, text, text, jsonb, jsonb, text
   ) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.claim_worker_lease(text, uuid, integer) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.heartbeat_worker_lease(text, uuid, bigint, integer) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.release_worker_lease(text, uuid, bigint) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_due_station_auto_track(integer) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.find_staff_for_sign_in(text) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.open_staff_session(uuid, text, text, timestamptz) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.resolve_staff_session(text) TO v2_api_test;
@@ -128,6 +171,32 @@ fi
   GRANT EXECUTE ON FUNCTION v2.get_opening_count(uuid, uuid) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.list_opening_counts(uuid, integer) TO v2_api_test;
 " >/dev/null
+
+API_WORKER_ACCESS="$("${PSQL[@]}" -c "
+  SET ROLE v2_api_test;
+  SELECT v2.claim_worker_lease(
+    'station-auto-track-api-test',
+    '20000000-0000-4000-8000-000000000009',
+    30
+  );
+  SELECT v2.heartbeat_worker_lease(
+    'station-auto-track-api-test',
+    '20000000-0000-4000-8000-000000000009',
+    1,
+    30
+  );
+  SELECT count(*) >= 0 FROM v2.list_due_station_auto_track(10);
+  SELECT v2.release_worker_lease(
+    'station-auto-track-api-test',
+    '20000000-0000-4000-8000-000000000009',
+    1
+  );
+  RESET ROLE;
+")"
+if [[ "$API_WORKER_ACCESS" != $'1\nt\nt\nt' ]]; then
+  echo "Restricted API role could not access station worker functions safely: $API_WORKER_ACCESS" >&2
+  exit 1
+fi
 
 "${PSQL[@]}" -c "
   INSERT INTO v2.staff_accounts (id, username, password_hash, disabled)
@@ -628,6 +697,7 @@ fi
 printf 'Run schema and lifecycle checks passed.\n'
 printf 'Concurrent first-manager bootstrap passed: exactly one manager was created.\n'
 printf 'Restricted API role check passed: %s\n' "$API_ROLE_RESULT"
+printf 'Restricted API station worker function access passed: %s\n' "$API_WORKER_ACCESS"
 printf 'V2 auth function access passed: %s\n' "$API_AUTH_LOOKUP / session lookup / revoke"
 printf 'Restricted API role has no direct table access (runs and auth data).\n'
 printf 'Restricted API run creation passed: %s\n' "$CREATE_RESULT"
@@ -637,5 +707,6 @@ printf 'Concurrent run creation passed: %s (%s)\n' "$CREATE_RACE_FLAGS" "$CREATE
 printf 'Same-key retry race passed: %s\n' "$SAME_RESULTS"
 printf 'Competing revision race passed: %s\n' "$CONFLICT_RESULTS"
 printf 'Concurrent station revision race passed: %s (%s)\n' "$STATION_CONFLICT_RESULTS" "$STATION_FINAL_STATE"
+printf 'Competing station worker lease claim passed: %s\n' "$LEASE_RACE_RESULTS"
 printf 'Stored state and event counts passed: %s\n' "$FINAL_STATE"
 printf 'Concurrent stock adjustment and ledger reconciliation passed: %s\n' "$STOCK_RACE_STATE"

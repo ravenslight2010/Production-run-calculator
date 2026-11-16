@@ -1,5 +1,131 @@
 BEGIN;
 
+CREATE FUNCTION v2.claim_worker_lease(
+  p_lease_name text,
+  p_owner_id uuid,
+  p_ttl_seconds integer
+)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+DECLARE
+  v_now timestamptz := clock_timestamp();
+  v_generation bigint;
+BEGIN
+  IF p_lease_name IS NULL OR length(p_lease_name) NOT BETWEEN 1 AND 100
+     OR p_owner_id IS NULL OR p_ttl_seconds IS NULL
+     OR p_ttl_seconds NOT BETWEEN 10 AND 300 THEN
+    RAISE EXCEPTION 'Invalid worker lease request' USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO v2.worker_leases (
+    lease_name, owner_id, generation, heartbeat_at, expires_at
+  ) VALUES (
+    p_lease_name, p_owner_id, 1, v_now, v_now + make_interval(secs => p_ttl_seconds)
+  )
+  ON CONFLICT (lease_name) DO UPDATE
+    SET owner_id = EXCLUDED.owner_id,
+        generation = v2.worker_leases.generation + 1,
+        heartbeat_at = EXCLUDED.heartbeat_at,
+        expires_at = EXCLUDED.expires_at
+    WHERE v2.worker_leases.owner_id IS NULL
+       OR v2.worker_leases.expires_at <= v_now
+  RETURNING generation INTO v_generation;
+
+  RETURN v_generation;
+END
+$$;
+
+CREATE FUNCTION v2.heartbeat_worker_lease(
+  p_lease_name text,
+  p_owner_id uuid,
+  p_generation bigint,
+  p_ttl_seconds integer
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+DECLARE
+  v_now timestamptz := clock_timestamp();
+BEGIN
+  IF p_lease_name IS NULL OR length(p_lease_name) NOT BETWEEN 1 AND 100
+     OR p_owner_id IS NULL OR p_generation IS NULL OR p_generation < 1
+     OR p_ttl_seconds IS NULL OR p_ttl_seconds NOT BETWEEN 10 AND 300 THEN
+    RAISE EXCEPTION 'Invalid worker lease heartbeat' USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE v2.worker_leases
+    SET heartbeat_at = v_now,
+        expires_at = v_now + make_interval(secs => p_ttl_seconds)
+    WHERE lease_name = p_lease_name
+      AND owner_id = p_owner_id
+      AND generation = p_generation
+      AND expires_at > v_now;
+  RETURN FOUND;
+END
+$$;
+
+CREATE FUNCTION v2.release_worker_lease(
+  p_lease_name text,
+  p_owner_id uuid,
+  p_generation bigint
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+BEGIN
+  IF p_lease_name IS NULL OR length(p_lease_name) NOT BETWEEN 1 AND 100
+     OR p_owner_id IS NULL OR p_generation IS NULL OR p_generation < 1 THEN
+    RAISE EXCEPTION 'Invalid worker lease release' USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE v2.worker_leases
+    SET owner_id = NULL,
+        heartbeat_at = NULL,
+        expires_at = NULL
+    WHERE lease_name = p_lease_name
+      AND owner_id = p_owner_id
+      AND generation = p_generation;
+  RETURN FOUND;
+END
+$$;
+
+CREATE FUNCTION v2.list_due_station_auto_track(p_limit integer)
+RETURNS TABLE (
+  facility_id uuid,
+  run_id uuid,
+  expected_revision bigint,
+  station_key text
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, v2
+AS $$
+BEGIN
+  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN
+    RAISE EXCEPTION 'Invalid station worker batch size' USING ERRCODE = '22023';
+  END IF;
+
+  RETURN QUERY
+    SELECT r.facility_id, r.id, r.revision, s.station_key
+    FROM v2.runs AS r
+    JOIN v2.run_station_progress AS s
+      ON s.facility_id = r.facility_id AND s.run_id = r.id
+    WHERE r.status = 'running'
+      AND s.next_due_at IS NOT NULL
+      AND s.next_due_at <= clock_timestamp()
+      AND COALESCE((s.inputs->>'autoTrackRatePerMinute')::numeric, 0) > 0
+    ORDER BY s.next_due_at, r.facility_id, r.id, s.station_key
+    LIMIT p_limit;
+END
+$$;
+
 CREATE OR REPLACE FUNCTION v2.run_snapshot(p_facility_id uuid, p_run_id uuid)
 RETURNS jsonb
 LANGUAGE sql
@@ -520,6 +646,10 @@ $$;
 REVOKE ALL ON FUNCTION v2.apply_station_command(
   uuid, uuid, uuid, text, text, bigint, text, text, jsonb, jsonb, text
 ) FROM PUBLIC;
+REVOKE ALL ON FUNCTION v2.claim_worker_lease(text, uuid, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION v2.heartbeat_worker_lease(text, uuid, bigint, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION v2.release_worker_lease(text, uuid, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION v2.list_due_station_auto_track(integer) FROM PUBLIC;
 
 COMMENT ON FUNCTION v2.apply_station_command(
   uuid, uuid, uuid, text, text, bigint, text, text, jsonb, jsonb, text
