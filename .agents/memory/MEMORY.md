@@ -142,4 +142,4 @@
 - [Health and reminders](operational-health-policy.md) — Packaging shows factual status, not timed fault warnings; approval-expiry reminders start seven days before expiry.
 - [Vitest source-file reads](vitest-source-file-reads.md) — filesystem contracts need an explicit package root; transformed source URLs may not be file URLs.
 - [Follow-up task scope](follow-up-task-scope.md) — keep investigation, implementation, tests and verification together; avoid recursive proposals unless the outcome is independent.
-- [V2 scope](v2-scope.md) — upgraded successor, not a downgrade; preserve app capabilities and stage implementation without cutting agreed release scope.
+- [V2 scope](v2-scope.md) — upgraded successor; preserve features, stage implementation, and treat warehouses as inventory locations within one facility.
