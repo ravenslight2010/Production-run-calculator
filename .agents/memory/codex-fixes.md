@@ -3,6 +3,16 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-11-16 — public-source-api-test-excludes.d.mts sidecar for scripts typecheck
+
+**File(s):** `scripts/src/public-source-api-test-excludes.d.mts`
+
+**Problem:** `run-api-unit-tests-isolated.mts` imports `./public-source-api-test-excludes.mjs` without a companion `.d.mts`, so scripts typecheck failed with TS7016 (and blocked Typecheck + Native Windows CI on PR #179).
+
+**Fix:** Added `scripts/src/public-source-api-test-excludes.d.mts` declaring the exported constants and helpers (`PUBLIC_SOURCE_API_TEST_EXCLUDES`, `isPublicCiSource`, `publicSourceApiTestExcludes`, `vitestPublicSourceExcludeArgs`, `warnPublicSourceApiTestExcludes`) to match the `.mjs` module, following nearby sidecar patterns.
+
+**Why it was needed:** Restores `@workspace/scripts` typecheck after the public-source exclude helper landed without declaration types.
+
 ## 2026-11-16 — Public CI excludes for source-library reconciliation API suites
 
 **File(s):** `scripts/src/public-source-api-test-excludes.mjs`, `scripts/src/public-source-api-test-excludes.test.mjs`, `scripts/src/run-api-unit-tests-isolated.mts`, `artifacts/api-server/scripts/run-unit-tests.mjs`, `artifacts/api-server/scripts/filter-release-integration-tests.mjs`, `artifacts/api-server/package.json`
