@@ -1,111 +1,294 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type RefObject } from "react";
+import { RefreshCw } from "lucide-react";
 import type { UpdateState } from "../pwaUpdateCoordinator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { useAppUpdateContext } from "./appUpdateContext";
+import { DropdownMenuItem } from "./ui/dropdown-menu";
 
-const labels = {
-  unchecked: "Not checked", checking: "Checking", current: "Current",
-  ready: "Update ready", waiting: "Waiting for work to save", deferred: "Update paused", updating: "Updating", blocked: "Blocked by work",
-  offline: "Offline", failed: "Update failed", confirmed: "Update complete",
+const labels: Record<UpdateState["phase"], string> = {
+  unchecked: "Not checked",
+  checking: "Checking",
+  current: "Current",
+  ready: "Update ready",
+  waiting: "Waiting for work to save",
+  deferred: "Update paused",
+  updating: "Updating",
+  blocked: "Blocked by work",
+  offline: "Offline",
+  failed: "Update failed",
+  confirmed: "Update complete",
 };
+
+const attentionPhases = new Set<UpdateState["phase"]>([
+  "ready",
+  "waiting",
+  "deferred",
+  "blocked",
+  "offline",
+  "failed",
+]);
+
+export function appUpdateStatusLabel(
+  state: UpdateState,
+  developmentPreview = false,
+): string {
+  return developmentPreview ? "Development preview" : labels[state.phase];
+}
+
+export function appUpdateNeedsAttention(state: UpdateState): boolean {
+  return attentionPhases.has(state.phase);
+}
+
+export function useAppUpdateMenuDialog() {
+  const [open, setOpen] = useState(false);
+  const openAfterMenuCloseRef = useRef(false);
+
+  const requestOpenAfterMenuClose = (closeMenu: () => void) => {
+    openAfterMenuCloseRef.current = true;
+    closeMenu();
+  };
+  const handleMenuCloseAutoFocus = (event: { preventDefault: () => void }): boolean => {
+    if (!openAfterMenuCloseRef.current) return false;
+    openAfterMenuCloseRef.current = false;
+    event.preventDefault();
+    window.requestAnimationFrame(() => setOpen(true));
+    return true;
+  };
+
+  return { open, setOpen, requestOpenAfterMenuClose, handleMenuCloseAutoFocus };
+}
+
+export function AppUpdateMenuEntry({
+  state,
+  developmentPreview = false,
+  onSelect,
+}: {
+  state: UpdateState;
+  developmentPreview?: boolean;
+  onSelect: () => void;
+}) {
+  const status = appUpdateStatusLabel(state, developmentPreview);
+  const needsAttention = appUpdateNeedsAttention(state);
+  return (
+    <DropdownMenuItem
+      aria-label={`App updates — ${status}${needsAttention ? ", needs attention" : ""}`}
+      data-testid="menu-app-updates"
+      onSelect={onSelect}
+    >
+      <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+      <span>App updates</span>
+      <span className="ml-auto text-xs text-muted-foreground">{status}</span>
+      {needsAttention && (
+        <span className="rounded-sm border border-amber-500/60 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+          Needs attention
+        </span>
+      )}
+    </DropdownMenuItem>
+  );
+}
+
+function statusMessage(state: UpdateState, developmentPreview: boolean): string {
+  if (developmentPreview) {
+    return "Published updates are not checked in this development preview.";
+  }
+  switch (state.phase) {
+    case "blocked":
+      return "Sign in if safety cannot be checked. Finish and end the live run, save changed forms, finish the import review, and wait for pending operations before updating. A paused run still blocks updates. If this screen cannot open your work, finish it from another signed-in tab or device. Your work has not been discarded.";
+    case "failed":
+      return "The update could not be confirmed. Keep working or check again when online.";
+    case "offline":
+      return "Keep working offline. Reconnect and check again to update.";
+    case "confirmed":
+      return "This page is running the requested version.";
+    case "checking":
+      return "Checking for a newer published version.";
+    case "ready":
+      return "A newer version is available. Updating remains protected while work is in progress.";
+    case "waiting":
+      return "Update requested. It will install after the live run is ended, changed forms and open work are finished, and sync succeeds. If sync reports an error, retry or resolve it first. You can cancel the request.";
+    case "deferred":
+      return "The queued update was cancelled. Automatic installation is paused until you check for updates or request it again.";
+    case "updating":
+      return "Preparing the update. This page will move only after the existing safety checks pass.";
+    case "current":
+      return "This page is running the latest confirmed version.";
+    case "unchecked":
+    default:
+      return "Check for a newer published version. Saved work is kept.";
+  }
+}
+
+export function AppUpdateDetailsDialog({
+  state,
+  check,
+  update,
+  cancelUpdate,
+  developmentPreview = false,
+  open,
+  onOpenChange,
+  returnFocusRef,
+}: {
+  state: UpdateState;
+  check: () => void;
+  update: () => void;
+  cancelUpdate: () => void;
+  developmentPreview?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+}) {
+  const busy = ["checking", "waiting", "updating"].includes(state.phase);
+  const hasNewVersion = Boolean(state.target && state.target !== state.running);
+  const showCancel = !developmentPreview && hasNewVersion && state.phase === "waiting";
+  const showUpdate = !developmentPreview && hasNewVersion && state.phase !== "waiting";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="w-[calc(100vw-2rem)] max-w-lg gap-4 p-4 sm:p-6 [&>button:last-child]:min-h-[48px] [&>button:last-child]:min-w-[48px]"
+        style={{
+          width: "min(32rem, calc(100vw - 32px))",
+          maxWidth: "calc(100vw - 32px)",
+        }}
+        data-testid="app-update-dialog"
+        onCloseAutoFocus={(event) => {
+          if (!returnFocusRef) return;
+          event.preventDefault();
+          window.requestAnimationFrame(() => returnFocusRef.current?.focus());
+        }}
+      >
+        <DialogHeader className="pr-7">
+          <DialogTitle>App updates</DialogTitle>
+          <DialogDescription>{appUpdateStatusLabel(state, developmentPreview)}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 text-sm">
+          <p role="status" aria-live="polite" data-testid="app-update-explanation">
+            {statusMessage(state, developmentPreview)}
+          </p>
+          {!developmentPreview && (
+            <dl className="grid grid-cols-1 gap-2 rounded-md border border-border/70 p-3 text-xs sm:grid-cols-2">
+              <div className="min-w-0">
+                <dt className="text-muted-foreground">Running version</dt>
+                <dd className="break-all font-mono" data-testid="running-build">{state.running}</dd>
+              </div>
+              {state.target && (
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground">Available version</dt>
+                  <dd className="break-all font-mono" data-testid="available-build">{state.target}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+        </div>
+
+        {!developmentPreview && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+            <button
+              type="button"
+              className="min-h-[48px] rounded-md border border-border px-3 text-sm font-medium hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={busy}
+              onClick={check}
+              data-testid="button-check-for-updates"
+            >
+              Check for updates
+            </button>
+            {showCancel && (
+              <button
+                type="button"
+                className="min-h-[48px] rounded-md border border-border px-3 text-sm font-medium hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                onClick={cancelUpdate}
+                data-testid="button-cancel-app-update"
+              >
+                Cancel queued update
+              </button>
+            )}
+            {showUpdate && (
+              <button
+                type="button"
+                className="min-h-[48px] rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={busy}
+                onClick={update}
+                data-testid="button-update-app"
+              >
+                {state.phase === "deferred" ? "Resume update" : "Update app"}
+              </button>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function AppUpdateControl({
   state,
   check,
   update,
   cancelUpdate,
-  autoReloadSafe,
-  autoReloadIdle,
   developmentPreview = false,
 }: {
-  state: UpdateState; check: () => void; update: () => void; cancelUpdate: () => void;
-  autoReloadSafe?: boolean;
-  autoReloadIdle?: boolean;
+  state: UpdateState;
+  check: () => void;
+  update: () => void;
+  cancelUpdate: () => void;
   developmentPreview?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const busy = state.phase === "checking" || state.phase === "waiting" || state.phase === "updating";
-  let message: ReactNode = developmentPreview
-    ? "Published updates are not checked in this development preview."
-    : "Check for a newer published version. Saved work is kept.";
-  if (!developmentPreview) {
-    if (state.phase === "blocked") message = "Sign in if safety cannot be checked. Finish and end the live run, save changed forms, finish the import review, and wait for pending operations before updating. A paused run still blocks updates. If this screen cannot open your work, finish it from another signed-in tab or device. Your work has not been discarded.";
-    if (state.phase === "failed") message = "The update could not be confirmed. Keep working or check again when online.";
-    if (state.phase === "offline") message = "Keep working offline. Reconnect and check again to update.";
-    if (state.phase === "confirmed") message = "This page is running the requested version.";
-    if (state.phase === "checking") message = "Checking for a newer published version.";
-    if (state.phase === "ready") message = "A newer version is available. Updating remains protected while work is in progress.";
-    if (state.phase === "waiting") message = "Update requested. It will install after the live run is ended, changed forms and open work are finished, and sync succeeds. If sync reports an error, retry or resolve it first. You can cancel the request.";
-    if (state.phase === "deferred") message = "The queued update was cancelled. Automatic installation is paused until you check for updates or request it again.";
-    if (state.phase === "updating") message = "Preparing the update. This page will move only after the existing safety checks pass.";
-  }
-  const showAttention = developmentPreview || !["unchecked", "current"].includes(state.phase);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const status = appUpdateStatusLabel(state, developmentPreview);
+
   return (
-    <aside
-      className="relative z-10 max-h-[calc(100dvh-5rem)] w-full overflow-y-auto overscroll-contain border-b border-border/80 bg-background text-foreground"
-      aria-label="App updates"
-      data-testid="app-update-control"
-      data-update-reload-safe={autoReloadSafe === undefined ? undefined : String(autoReloadSafe)}
-      data-update-reload-idle={autoReloadIdle === undefined ? undefined : String(autoReloadIdle)}
+    <div
+      className="fixed bottom-3 right-3 z-40 max-w-[calc(100vw-1.5rem)]"
+      data-testid="app-update-fallback"
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 sm:px-4">
-        <button
-          type="button"
-          className="min-h-10 rounded px-2 text-left text-sm font-semibold hover:bg-muted/60"
-          aria-expanded={open}
-          aria-controls="app-update-details"
-          onClick={() => setOpen(!open)}
-          data-testid="button-app-update-details"
-        >
-          App updates · {developmentPreview ? "Development preview" : labels[state.phase]}
-        </button>
-        {!developmentPreview && <button
-          type="button"
-          className="min-h-10 rounded border border-border px-3 text-sm font-medium hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={busy}
-          onClick={check}
-          data-testid="button-check-for-updates"
-        >
-          Check for updates
-        </button>}
-        {!developmentPreview && state.target && state.target !== state.running && state.phase === "waiting" ? (
-          <button
-            type="button"
-            className="min-h-10 rounded border border-border px-3 text-sm font-medium hover:bg-muted/60"
-            onClick={cancelUpdate}
-            data-testid="button-cancel-app-update"
-          >
-            Cancel queued update
-          </button>
-        ) : !developmentPreview && state.target && state.target !== state.running && (
-          <button
-            type="button"
-            className="min-h-10 rounded border border-border px-3 text-sm font-medium hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={busy}
-            onClick={update}
-            data-testid="button-update-app"
-          >
-            {state.phase === "deferred" ? "Resume update" : "Update app"}
-          </button>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="inline-flex min-h-[48px] max-w-full flex-wrap items-center justify-end gap-2 rounded-md border border-border/70 px-3 text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        aria-label={`App updates — ${status}${appUpdateNeedsAttention(state) ? ", needs attention" : ""}`}
+        onClick={() => setOpen(true)}
+        data-testid="button-app-update-fallback"
+      >
+        <span>App updates</span>
+        <span aria-hidden="true">·</span>
+        <span>{status}</span>
+        {appUpdateNeedsAttention(state) && (
+          <span className="rounded-sm border border-amber-500/60 px-1.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+            Needs attention
+          </span>
         )}
-        {showAttention && (
-          <p className="w-full break-words px-2 pb-1 text-xs text-muted-foreground" role="status" aria-live="polite">
-            {developmentPreview ? "Development preview" : labels[state.phase]}. {message}
-          </p>
-        )}
-        {open && (
-          <div
-            id="app-update-details"
-            className="w-full space-y-1 border-t border-border/70 px-2 py-2 text-xs"
-            data-testid="app-update-details"
-          >
-            {!developmentPreview && <p className="break-all">Running version: <code data-testid="running-build">{state.running}</code></p>}
-            {!developmentPreview && state.target && <p className="break-all">Available version: <code>{state.target}</code></p>}
-            {developmentPreview
-              ? <p>Development preview. Published update checks are disabled here.</p>
-              : !showAttention && <p>{labels[state.phase]}. {message}</p>}
-            {state.stage && <p>Update stage: {state.stage}</p>}
-          </div>
-        )}
-      </div>
-    </aside>
+      </button>
+      <AppUpdateDetailsDialog
+        state={state}
+        check={check}
+        update={update}
+        cancelUpdate={cancelUpdate}
+        developmentPreview={developmentPreview}
+        open={open}
+        onOpenChange={setOpen}
+        returnFocusRef={triggerRef}
+      />
+    </div>
+  );
+}
+
+export function AppUpdateFallbackFromContext() {
+  const { state, check, update, cancelUpdate, developmentPreview } = useAppUpdateContext();
+  return (
+    <AppUpdateControl
+      state={state}
+      check={check}
+      update={update}
+      cancelUpdate={cancelUpdate}
+      developmentPreview={developmentPreview}
+    />
   );
 }

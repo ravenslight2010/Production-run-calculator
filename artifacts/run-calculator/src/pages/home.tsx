@@ -904,6 +904,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AppUpdateDetailsDialog,
+  AppUpdateMenuEntry,
+  useAppUpdateMenuDialog,
+} from "../components/AppUpdateControl";
+import { useAppUpdateContext } from "../components/appUpdateContext";
 import { DeferredSurface } from "../departments/DeferredDepartmentSurface";
 
 const LazyDeferredManagementSurface = lazy(() => {
@@ -4466,6 +4472,19 @@ export default function Home() {
   const [showAlertSettings, setShowAlertSettings] = useState(false);
   const [headerMoreMenuOpen, setHeaderMoreMenuOpen] = useState(false);
   const openAlertSettingsAfterMenuCloseRef = useRef(false);
+  const {
+    open: showAppUpdateDialog,
+    setOpen: setShowAppUpdateDialog,
+    requestOpenAfterMenuClose: requestAppUpdateDialogAfterMenuClose,
+    handleMenuCloseAutoFocus: handleAppUpdateMenuCloseAutoFocus,
+  } = useAppUpdateMenuDialog();
+  const {
+    state: appUpdateState,
+    check: checkAppUpdates,
+    update: requestAppUpdate,
+    cancelUpdate: cancelAppUpdate,
+    developmentPreview: appUpdateDevelopmentPreview,
+  } = useAppUpdateContext();
   const queueAlertSettingsOpenAfterMenuClose = (source: "click" | "select") => {
     openAlertSettingsAfterMenuCloseRef.current = true;
     setHeaderMoreMenuOpen(false);
@@ -18798,14 +18817,14 @@ export default function Home() {
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                className="[&_[role=menuitem]]:min-h-10"
+                className="[&_[role=menuitem]]:min-h-[48px]"
                 onCloseAutoFocus={(event) => {
-                  if (!openAlertSettingsAfterMenuCloseRef.current) return;
-                  openAlertSettingsAfterMenuCloseRef.current = false;
-                  event.preventDefault();
-                  window.requestAnimationFrame(() => {
-                    setShowAlertSettings(true);
-                  });
+                  if (handleAppUpdateMenuCloseAutoFocus(event)) return;
+                  if (openAlertSettingsAfterMenuCloseRef.current) {
+                    openAlertSettingsAfterMenuCloseRef.current = false;
+                    event.preventDefault();
+                    window.requestAnimationFrame(() => setShowAlertSettings(true));
+                  }
                 }}
               >
                 {canViewManagerAttention && (
@@ -18828,6 +18847,13 @@ export default function Home() {
                     )}
                   </DropdownMenuItem>
                 )}
+                <AppUpdateMenuEntry
+                  state={appUpdateState}
+                  developmentPreview={appUpdateDevelopmentPreview}
+                  onSelect={() => {
+                    requestAppUpdateDialogAfterMenuClose(() => setHeaderMoreMenuOpen(false));
+                  }}
+                />
                 <DropdownMenuItem onClick={() => setActiveTab("stoppages")}>
                   <OctagonX className="w-4 h-4 mr-2" /> Stoppages
                 </DropdownMenuItem>
@@ -18932,6 +18958,16 @@ export default function Home() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <AppUpdateDetailsDialog
+              state={appUpdateState}
+              check={checkAppUpdates}
+              update={requestAppUpdate}
+              cancelUpdate={cancelAppUpdate}
+              developmentPreview={appUpdateDevelopmentPreview}
+              open={showAppUpdateDialog}
+              onOpenChange={setShowAppUpdateDialog}
+              returnFocusRef={managerAttentionTriggerRef}
+            />
           </div>
         </header>
 

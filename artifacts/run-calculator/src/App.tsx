@@ -1,5 +1,4 @@
 import {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -10,7 +9,7 @@ import {
   Suspense,
   type ReactNode,
 } from "react";
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { registerMasterDataQueryClient } from "./masterData";
 import { Toaster } from "@/components/ui/toaster";
@@ -41,7 +40,9 @@ import {
 } from "./updateReloadSafety";
 import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
 import { createUpdateCoordinator, type UpdateState } from "./pwaUpdateCoordinator";
-import { AppUpdateControl } from "./components/AppUpdateControl";
+import {
+  AppUpdateContext,
+} from "./components/appUpdateContext";
 import { QcImportReviewBadge } from "./components/QcImportReviewBadge";
 import {
   RECIPE_QC_REVIEW_NOTICE_EVENT,
@@ -73,6 +74,11 @@ const LazyHome = lazy(() => {
       throw error;
     });
 });
+const LazyAppUpdateFallbackFromContext = lazy(() =>
+  import("./components/AppUpdateControl").then((module) => ({
+    default: module.AppUpdateFallbackFromContext,
+  })),
+);
 
 function AppLoadingSurface({
   error,
@@ -239,20 +245,22 @@ function AppRoutes() {
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route component={NotFound} />
       </Switch>
+      <AppUpdateFallbackGate />
       <Toaster />
     </TooltipProvider>
   );
 }
 
-type AppUpdateContextValue = {
-  updateAndReload: (canReload?: () => boolean, verifyBeforeReload?: () => Promise<boolean>) => Promise<void>;
-  scheduleSafeIdleRecovery: (
-    safeAtFailure: boolean,
-    recover: (canReload: () => boolean) => void | Promise<void>,
-  ) => () => void;
-};
-
-const AppUpdateContext = createContext<AppUpdateContextValue | null>(null);
+function AppUpdateFallbackGate() {
+  const { isAuthenticated, startupError } = useAuth();
+  const [location] = useLocation();
+  if (isAuthenticated && location === "/" && !startupError) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyAppUpdateFallbackFromContext />
+    </Suspense>
+  );
+}
 
 function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const stopUpdateWatchRef = useRef<(() => void) | undefined>(undefined);
@@ -424,16 +432,16 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
 
   return (
     <AppUpdateContext.Provider value={{
+      state: updateState,
+      check: () => void coordinator.check(),
+      update: () => void coordinator.requestUpdate(),
+      cancelUpdate: () => coordinator.cancelQueuedUpdate(),
+      autoReloadSafe: calculatorSafe,
+      autoReloadIdle: updateIdle,
+      developmentPreview: import.meta.env.DEV,
       updateAndReload: handleUpdateAndReload,
       scheduleSafeIdleRecovery,
     }}>
-      <AppUpdateControl state={updateState}
-        check={() => void coordinator.check()}
-        update={() => void coordinator.requestUpdate()}
-        cancelUpdate={() => coordinator.cancelQueuedUpdate()}
-        autoReloadSafe={calculatorSafe}
-        autoReloadIdle={updateIdle}
-        developmentPreview={import.meta.env.DEV} />
       {children}
     </AppUpdateContext.Provider>
   );

@@ -1,3 +1,4 @@
+import type { ComponentProps, ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -5,10 +6,32 @@ import ErrorBoundary, { isMissingNotificationError, isStaleDeploymentAssetError 
 import { reportIncident } from "../inventoryShared";
 import { reportAutomaticUpdateReloadSafety } from "../updateReloadSafety";
 import { checkPreHomeReloadSafety } from "../pwaStartupSafety";
+import { AppUpdateContext, type AppUpdateContextValue } from "./appUpdateContext";
 
 vi.mock("../inventoryShared", () => ({ reportIncident: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../pwaStartupSafety", () => ({ checkPreHomeReloadSafety: vi.fn().mockResolvedValue(true) }));
 function ThrowError({ error }: { error: Error }): never { throw error; }
+const appUpdateContext: AppUpdateContextValue = {
+  state: { phase: "current", running: "fixture-build" },
+  check: vi.fn(),
+  update: vi.fn(),
+  cancelUpdate: vi.fn(),
+  autoReloadSafe: false,
+  autoReloadIdle: false,
+  developmentPreview: false,
+  updateAndReload: vi.fn(async () => {}),
+  scheduleSafeIdleRecovery: vi.fn(() => () => {}),
+};
+function renderBoundary(
+  children: ReactNode,
+  props: Omit<ComponentProps<typeof ErrorBoundary>, "children"> = {},
+) {
+  return render(
+    <AppUpdateContext.Provider value={appUpdateContext}>
+      <ErrorBoundary {...props}>{children}</ErrorBoundary>
+    </AppUpdateContext.Provider>,
+  );
+}
 afterEach(() => {
   cleanup(); sessionStorage.clear(); reportAutomaticUpdateReloadSafety(false);
   vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks();
@@ -37,13 +60,27 @@ describe("recovery error classification", () => {
 });
 
 describe("ErrorBoundary guarded recovery", () => {
+  it("keeps the compact app update fallback available on error screens", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const previousUrl = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState({}, "", `${window.location.pathname}?screen=fixture`);
+    try {
+      renderBoundary(<ThrowError error={new Error("Update fallback screen fixture")} />);
+      expect(await screen.findByTestId("app-update-fallback")).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: /App updates — Current/ }));
+      expect(await screen.findByRole("dialog", { name: "App updates" })).toBeTruthy();
+    } finally {
+      window.history.replaceState({}, "", previousUrl);
+    }
+  });
+
   it("shows the safe diagnostic reference", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(reportIncident).mockResolvedValueOnce({
       incidentId: "fixture", correlationId: "corr-visible", diagnosis: null,
       workaround: null, recurrence: null, aiGenerated: false,
     });
-    render(<ErrorBoundary><ThrowError error={new Error("Failed to render")} /></ErrorBoundary>);
+    renderBoundary(<ThrowError error={new Error("Failed to render")} />);
     expect(await screen.findByText("corr-visible")).not.toBeNull();
   });
   it.each([true, false])("keeps explicit update gated by captured and fresh safety (%s)", async safe => {
@@ -51,9 +88,10 @@ describe("ErrorBoundary guarded recovery", () => {
     reportAutomaticUpdateReloadSafety(safe);
     vi.mocked(checkPreHomeReloadSafety).mockResolvedValue(true);
     const update = vi.fn().mockResolvedValue(undefined);
-    render(<ErrorBoundary onUpdateAndReload={update}>
-      <ThrowError error={new Error("Can't find variable: Notification")} />
-    </ErrorBoundary>);
+    renderBoundary(
+      <ThrowError error={new Error("Can't find variable: Notification")} />,
+      { onUpdateAndReload: update },
+    );
     expect(update).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Update and reload" }));
     expect(update).toHaveBeenCalledOnce();
@@ -71,9 +109,10 @@ describe("ErrorBoundary guarded recovery", () => {
     Object.defineProperty(window, "location", { configurable: true, value: { ...window.location, reload } });
     localStorage.setItem("fixture-pending-work", "retained");
     const update = vi.fn(() => new Promise<void>(() => {}));
-    render(<ErrorBoundary onUpdateAndReload={update}>
-      <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
-    </ErrorBoundary>);
+    renderBoundary(
+      <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />,
+      { onUpdateAndReload: update },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Update and reload" }));
     await vi.advanceTimersByTimeAsync(60_000);
     expect(update).toHaveBeenCalledOnce();
@@ -90,7 +129,7 @@ describe("ErrorBoundary guarded recovery", () => {
     const update = vi.fn().mockResolvedValue(undefined);
     const error = new TypeError("Failed to fetch dynamically imported module: https://fixture.test/assets/diagnostics-abc123.js");
     error.stack = "x".repeat(8000);
-    render(<ErrorBoundary onUpdateAndReload={update}><ThrowError error={error} /></ErrorBoundary>);
+    renderBoundary(<ThrowError error={error} />, { onUpdateAndReload: update });
     await userEvent.click(screen.getByRole("button", { name: "Update and reload" }));
     await userEvent.click(screen.getByRole("button", { name: "Update and reload" }));
     expect(update).toHaveBeenCalledTimes(2);
@@ -109,9 +148,10 @@ describe("ErrorBoundary guarded recovery", () => {
     let recover: ((guard: () => boolean) => void | Promise<void>) | undefined;
     const schedule = vi.fn((safe, action) => { expect(safe).toBe(true); recover = action; return vi.fn(); });
     const update = vi.fn().mockResolvedValue(undefined);
-    render(<ErrorBoundary onUpdateAndReload={update} scheduleSafeIdleRecovery={schedule}>
-      <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
-    </ErrorBoundary>);
+    renderBoundary(
+      <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />,
+      { onUpdateAndReload: update, scheduleSafeIdleRecovery: schedule },
+    );
     expect(schedule).toHaveBeenCalledOnce();
     expect(update).not.toHaveBeenCalled();
     await recover?.(() => false);
@@ -127,9 +167,10 @@ describe("ErrorBoundary guarded recovery", () => {
     let recover: ((guard: () => boolean) => void | Promise<void>) | undefined;
     const schedule = vi.fn((_safe, action) => { recover = action; return vi.fn(); });
     const update = vi.fn().mockResolvedValue(undefined);
-    render(<ErrorBoundary onUpdateAndReload={update} scheduleSafeIdleRecovery={schedule}>
-      <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
-    </ErrorBoundary>);
+    renderBoundary(
+      <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />,
+      { onUpdateAndReload: update, scheduleSafeIdleRecovery: schedule },
+    );
     await recover?.(() => true);
     expect(update).not.toHaveBeenCalled();
     expect(sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1")).toBeNull();
@@ -139,7 +180,10 @@ describe("ErrorBoundary guarded recovery", () => {
   });
   it("keeps unrelated failures out of update recovery", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    render(<ErrorBoundary onUpdateAndReload={vi.fn()}><ThrowError error={new Error("Failed to load a recipe")} /></ErrorBoundary>);
+    renderBoundary(
+      <ThrowError error={new Error("Failed to load a recipe")} />,
+      { onUpdateAndReload: vi.fn() },
+    );
     expect(screen.getByRole("button", { name: "Reload the app" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Update and reload" })).toBeNull();
   });

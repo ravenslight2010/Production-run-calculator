@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { reportBrowserFailure } from "../browserIncidentCapture";
@@ -13,6 +13,12 @@ import {
   getAutomaticUpdateReloadSafety,
   reportAutomaticUpdateReloadSafety,
 } from "../updateReloadSafety";
+
+const LazyAppUpdateFallbackFromContext = lazy(() =>
+  import("./AppUpdateControl").then((module) => ({
+    default: module.AppUpdateFallbackFromContext,
+  })),
+);
 
 type Props = {
   children: ReactNode;
@@ -186,6 +192,9 @@ export default class ErrorBoundary extends Component<Props, State> {
             <RefreshCw className="w-4 h-4 mr-2" />{" "}
             {needsUpdate ? "Update and reload" : "Reload the app"}
           </Button>
+          <Suspense fallback={null}>
+            <LazyAppUpdateFallbackFromContext />
+          </Suspense>
         </div>
       </main>
     );
