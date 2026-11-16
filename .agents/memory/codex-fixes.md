@@ -8,7 +8,7 @@ description: Running log of every fix Codex has made. Check this BEFORE making c
 **File(s):** `scripts/src/verify-startup-failures.mts`, `.github/workflows/nightly-large-spec.yml`, `artifacts/api-server/src/routes/incidentsAi.test.ts`
 
 **Problem:**
-- `pnpm run check:startup-failures` spawned the guarded API `dev` launcher, which always runs `apply-audit-log-protection` against `DATABASE_URL` before failpoints. With the smoke's intentional unreachable URL (`127.0.0.1:1`), the process exited before `/api/readyz` could report degraded startup stages.
+- `pnpm run check:startup-failures` spawned the guarded API `dev` launcher, which always runs `apply-audit-log-protection` against `DATABASE_URL` before failpoints. With the smoke's intentional unreachable database URL, the process exited before `/api/readyz` could report degraded startup stages.
 - Tip commit `eef44b26` gated the Gemini benchmark with a step-level `if: secrets.*`, which actionlint rejects (`secrets` is not available in step `if`). Artifact upload also failed when the step was skipped.
 - Sync incident diagnostics test used a fixed `requestObservedAt` of 2026-10-16; after 30 days that falls outside `buildIncidentContext`'s acceptance window and drops the field.
 
