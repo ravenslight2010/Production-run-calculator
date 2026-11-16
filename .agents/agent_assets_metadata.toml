@@ -236,3 +236,17 @@ mtime_ms = 1794278525730
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/b1af7f64-3b81-4c64-bfe1-08bab6323407/7f0a20d9-b742-41d6-a95c-e0f0f275ed43"
 storage_version_token = "1794278604434684"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "68mfSM0PQ4MywFp7F9dNp"
+uri = "file://docs/dependency-upgrade-report-2026-11-16.md"
+type = "text"
+title = "Dependency upgrade report"
+description = "Package changes, verification results, remaining holds, and release status."
+logical_id = "d6aa3ac0-9424-4efa-9c09-6a46b2babdba"
+content_hash = "sha256:ef70c2820c12d4eb3061e7a7f22992ca143c2a282f0f36eab351b8f267e50da5"
+size = 6964
+mtime_ms = 1794850801176
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/d6aa3ac0-9424-4efa-9c09-6a46b2babdba/dbb34352-f998-4c03-b225-d83289665d6e"
+storage_version_token = "1794850840275055"
+content_type = "text/markdown"

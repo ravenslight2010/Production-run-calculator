@@ -59,3 +59,31 @@ does not automatically pick up later Debian security updates.
   | `python3-minimal` | `3.11.2-1+b1` |
   | `python3.11` | `3.11.2-6+deb12u8` |
   | `python3.11-minimal` | `3.11.2-6+deb12u8` |
+
+### 2026-11-16 — align snapshot with the pinned Node image
+
+- Snapshot: changed from `20260824T000000Z` to `20261015T000000Z`.
+- Base image: `node:24.22.2-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9`
+- Reason: the pinned image contains `perl-base` `5.36.0-7+deb12u4`, while the
+  August snapshot offered `perl-base` `5.36.0-7+deb12u3` alongside `perl`
+  `5.36.0-7+deb12u3`, so installing builder tools failed. The October snapshot
+  provides matching `perl` and `perl-base` `5.36.0-7+deb12u4`. No Debian
+  security advisory triggered this compatibility refresh.
+- No-cache API image build: passed on 2026-11-16 with
+  `docker build --no-cache --progress=plain --target api -t runcalc-api:debian-snapshot-review .`
+- Builder package versions (`dpkg-query -W` output; package then version):
+
+  | Package | Version |
+  | --- | --- |
+  | `build-essential` | `12.9` |
+  | `g++` | `4:12.2.0-3` |
+  | `g++-12` | `12.2.0-14+deb12u1` |
+  | `gcc` | `4:12.2.0-3` |
+  | `gcc-12` | `12.2.0-14+deb12u1` |
+  | `git` | `1:2.39.5-0+deb12u3` |
+  | `make` | `4.3-4.1` |
+  | `python3` | `3.11.2-1+b1` |
+  | `python3-minimal` | `3.11.2-1+b1` |
+  | `python3.11` | `3.11.2-6+deb12u9` |
+  | `python3.11-minimal` | `3.11.2-6+deb12u9` |
+- Next scheduled review: first week of January 2027.
