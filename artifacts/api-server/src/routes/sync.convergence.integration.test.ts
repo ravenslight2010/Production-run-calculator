@@ -28,6 +28,10 @@ import {
   stopIsolatedSyncProcess,
   stopIsolatedSyncProcesses,
 } from "./syncConvergenceProcess";
+import { DRAIN_IDLE_INTERVAL_MS } from "../lib/syncOutbox";
+
+/** Missed-NOTIFY recovery waits on the idle poll path; allow one full idle interval plus buffer. */
+const MISSED_NOTIFICATION_DRAIN_TIMEOUT_MS = DRAIN_IDLE_INTERVAL_MS + 5_000;
 
 type DbModule = typeof import("@workspace/db");
 type SyncPayload = Record<string, unknown>;
@@ -1141,7 +1145,7 @@ describe("multi-client sync convergence soak", () => {
           && frame.family === "profiles"
           && frame.senderId === "missed-notification-writer"
         ),
-        8_000,
+        MISSED_NOTIFICATION_DRAIN_TIMEOUT_MS,
       );
       expect(polledMissedNotification).toMatchObject({
         type: "master-data",
@@ -1331,7 +1335,9 @@ describe("multi-client sync convergence soak", () => {
           );
       }
     }
-  }, 30_000);
+  // Idle missed-NOTIFY drain alone may take DRAIN_IDLE_INTERVAL_MS + buffer; keep headroom
+  // for two-process setup, latency samples, and gap recovery earlier in this soak.
+  }, 60_000);
 
   it("retries a transient outbox delivery failure without advancing its cursor", async () => {
     const syncOutbox = await import("../lib/syncOutbox");

@@ -73,9 +73,10 @@ type SyncOutboxTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 const NOTIFY_CHANNEL = "sync_outbox";
 const BATCH_SIZE = 100;
 const RETENTION_DAYS = 7;
-const DRAIN_INTERVAL_MS = 5_000;
+/** Active outbox poll cadence while lag diagnostics report pending work. */
+export const DRAIN_INTERVAL_MS = 5_000;
 /** When the outbox is idle (no pending lag), poll less often to cut pool pressure. */
-const DRAIN_IDLE_INTERVAL_MS = 15_000;
+export const DRAIN_IDLE_INTERVAL_MS = 15_000;
 const RETENTION_INTERVAL_MS = 60 * 60_000;
 export const SYNC_OUTBOX_LAG_WARNING_MS = 30_000;
 const SYNC_OUTBOX_LAG_MAX_MS = 7 * 24 * 60 * 60_000;
