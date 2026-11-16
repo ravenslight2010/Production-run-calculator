@@ -56,7 +56,8 @@ describe("WarehouseSwitchoverBanner", () => {
     render(<WarehouseSwitchoverBanner />);
 
     expect(screen.getByTestId("banner-warehouse-switchover")).toBeTruthy();
-    expect(screen.getByText(/0\.6 skids to switchover — stage packaging/)).toBeTruthy();
+    expect(screen.getByText("Stage next run")).toBeTruthy();
+    expect(screen.getByText(/Warehouse: 0\.6 skids to switchover — stage packaging/)).toBeTruthy();
     expect(screen.getByTestId("text-switchover-packaging-stage").textContent)
       .toContain("frontline should already be staged; packaging goes now");
     expect(screen.getByText(/12 cases left at the press/)).toBeTruthy();

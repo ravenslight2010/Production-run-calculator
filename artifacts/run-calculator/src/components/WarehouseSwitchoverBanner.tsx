@@ -95,6 +95,9 @@ export function WarehouseSwitchoverBanner() {
       <Truck className="w-4 h-4 shrink-0 mt-0.5 text-violet-400" />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">
+          Stage next run
+        </p>
+        <p className="text-xs font-semibold text-violet-500 dark:text-violet-300 mt-0.5">
           {model.shortRun
             ? "Warehouse: short run (under 2 skids) — stage frontline + packaging for the next 2+ runs now"
             : `Warehouse: ${fmtNum(model.skidsLeft, 1)} skid${model.skidsLeft === 1 ? "" : "s"} to switchover — stage ${model.packagingStage ? "packaging" : "frontline"} for the next run`}

@@ -419,7 +419,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           <div className={`mb-4 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
+                Packaging quick check — no tab switch{caseAutoActive ? " · Auto" : ""}
               </p>
               {hasCps && expectedTotal !== null && (
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${

@@ -61,7 +61,7 @@ function uid(): string {
 async function createAuthorizedServerFixture(
   username: string,
   valueOverrides: Partial<FormValues> = {},
-  options: { startedAtOffsetMs?: number } = {},
+  options: { startedAtOffsetMs?: number; manualDoughTracking?: boolean } = {},
 ): Promise<{ token: string; brand: string; flavor: string; runId: string; startedAt: number }> {
   const auth = await authorizedFixtures.createAccount({
     username,
@@ -133,6 +133,7 @@ async function createAuthorizedServerFixture(
           endedAt: undefined,
           metaUpdatedAt: now,
           seeded: false,
+          ...(options.manualDoughTracking ? { autoTrackDisabled: true } : {}),
         }],
         currentIndex: 0,
         currentRunId: runId,
@@ -148,6 +149,130 @@ async function createAuthorizedServerFixture(
   });
   return { token: auth.token, brand, flavor, runId, startedAt };
 }
+
+test("manual batch reminder stays docked, actionable, and out of the station navigation", async ({
+  page,
+}) => {
+  const fixture = await createAuthorizedServerFixture(
+    uid(),
+    {},
+    { startedAtOffsetMs: 10 * 60_000, manualDoughTracking: true },
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: fixture.token,
+    url: API_BASE,
+  }]);
+  const preferenceResponse = await page.request.post("/api/me/notification-prefs", {
+    data: { prefs: { batchDue: false } },
+  });
+  expect(preferenceResponse.ok(), "could not set the fixture's browser-alert preference").toBe(true);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+  const dock = page.getByTestId("batch-due-notice-dock");
+  await expect(dock).toBeVisible({ timeout: 15_000 });
+  const prefResponse = await page.request.get("/api/me");
+  expect(prefResponse.ok()).toBe(true);
+  const me = await prefResponse.json() as { notificationPrefs?: Record<string, boolean> };
+  expect(me.notificationPrefs?.batchDue).toBe(false);
+
+  const viewports = [
+    { name: "320px phone portrait", width: 320, height: 740 },
+    { name: "phone portrait", width: 390, height: 844 },
+    { name: "phone landscape", width: 568, height: 320 },
+    { name: "reduced-height phone viewport", width: 390, height: 420 },
+    { name: "tablet portrait", width: 768, height: 1024 },
+    { name: "tablet landscape", width: 1024, height: 768 },
+    { name: "desktop", width: 1280, height: 800 },
+  ] as const;
+
+  for (const viewport of viewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    if (viewport.width < 640) {
+      await expect(dock, viewport.name).toBeVisible();
+    } else {
+      await expect(dock, viewport.name).toBeHidden();
+    }
+
+    const layout = await page.evaluate(() => {
+      const nav = document.querySelector<HTMLElement>(".station-nav");
+      const toastViewport = document.querySelector<HTMLElement>(".toast-viewport");
+      const shell = document.querySelector<HTMLElement>(".app-shell");
+      const visibleDock = document.querySelector<HTMLElement>(
+        '[data-testid="batch-due-notice-dock"]',
+      );
+      const navRect = nav?.getBoundingClientRect();
+      const toastRect = toastViewport?.getBoundingClientRect();
+      const dockRect = visibleDock?.getBoundingClientRect();
+      return {
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        navTop: navRect?.top ?? null,
+        navHeight: navRect?.height ?? null,
+        toastBottom: toastRect?.bottom ?? null,
+        dockTop: dockRect?.top ?? null,
+        dockBottom: dockRect?.bottom ?? null,
+        dockHeight: dockRect?.height ?? null,
+        shellPaddingBottom: shell ? Number.parseFloat(getComputedStyle(shell).paddingBottom) : null,
+      };
+    });
+    expect(layout.scrollWidth, `${viewport.name}: horizontal overflow`).toBeLessThanOrEqual(
+      layout.viewportWidth + 1,
+    );
+    expect(layout.navTop, `${viewport.name}: station navigation missing`).not.toBeNull();
+    expect(layout.toastBottom, `${viewport.name}: toast viewport missing`).not.toBeNull();
+    expect(layout.toastBottom!, `${viewport.name}: toast viewport overlaps station navigation`)
+      .toBeLessThanOrEqual(layout.navTop!);
+    if (viewport.width < 640) {
+      expect(layout.dockBottom!, `${viewport.name}: dock overlaps station navigation`)
+        .toBeLessThan(layout.navTop!);
+      expect(
+        layout.shellPaddingBottom!,
+        `${viewport.name}: page content does not clear the dock and navigation`,
+      ).toBeGreaterThanOrEqual(layout.navHeight! + layout.dockHeight!);
+      for (const testId of [
+        "button-open-dough-from-batch-reminder",
+        "button-dismiss-batch-reminder-dock",
+      ]) {
+        const target = await page.getByTestId(testId).boundingBox();
+        expect(target, `${viewport.name}: ${testId} is missing`).not.toBeNull();
+        expect(target!.height, `${viewport.name}: ${testId} is too short`).toBeGreaterThanOrEqual(44);
+        expect(target!.width, `${viewport.name}: ${testId} is too narrow`).toBeGreaterThanOrEqual(44);
+        expect(target!.x, `${viewport.name}: ${testId} leaves the viewport`).toBeGreaterThanOrEqual(0);
+        expect(target!.x + target!.width, `${viewport.name}: ${testId} leaves the viewport`)
+          .toBeLessThanOrEqual(viewport.width);
+      }
+    }
+  }
+
+  // A reduced-height viewport approximates the space available while a phone
+  // keyboard is open; the fixed reminder actions must remain reachable.
+  await page.setViewportSize({ width: 390, height: 420 });
+  await expect(page.getByTestId("button-dismiss-batch-reminder-dock")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByTestId("tab-warehouse").click();
+  await expect(page.getByTestId("tab-warehouse")).toHaveAttribute("data-state", "active");
+  await expect(dock).toBeVisible();
+  const openDough = page.getByTestId("button-open-dough-from-batch-reminder");
+  await openDough.focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByTestId("button-dismiss-batch-reminder-dock")).toBeFocused();
+  const focusOutlineWidth = await page.getByTestId("button-dismiss-batch-reminder-dock")
+    .evaluate((element) => Number.parseFloat(getComputedStyle(element).outlineWidth));
+  expect(focusOutlineWidth, "keyboard focus should remain visibly indicated").toBeGreaterThan(0);
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("tab-dough")).toHaveAttribute("data-state", "active");
+  await expect(dock).toBeVisible();
+  await page.getByTestId("button-dismiss-batch-reminder-dock").focus();
+  await page.keyboard.press("Enter");
+  await expect(dock).toBeHidden();
+  await expect(page.getByTestId("input-batchesReady")).toHaveValue("0");
+  await page.getByTestId("tab-run").click();
+  await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
+});
 
 async function runAuthoritativeAutoTrackTick(
   page: Page,

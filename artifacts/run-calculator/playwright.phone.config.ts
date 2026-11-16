@@ -52,6 +52,15 @@ export default defineConfig({
       },
     },
     {
+      name: "webkit-batch-due-notice",
+      testMatch: "live-sauce-dough-phone.spec.ts",
+      grep: /manual batch reminder stays docked, actionable, and out of the station navigation/,
+      use: {
+        ...devices["Desktop Safari"],
+        ...(webkitOptions ? { launchOptions: webkitOptions } : {}),
+      },
+    },
+    {
       name: "mobile-slow-network",
       testMatch: "management-performance.spec.ts",
       grep: /@mobile-slow-network/,

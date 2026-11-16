@@ -97,6 +97,7 @@ import { hasUnsavedFormValueChanges } from "../domain/runSyncPolicy";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
+import { BatchDueNoticeDock } from "../components/BatchDueNoticeDock";
 import { LiveRunTabContent } from "../components/live-stations/LiveRunTabContent";
 import { AUTO_SUPPRESS_MS, fmtMS } from "../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
@@ -21164,6 +21165,10 @@ export default function Home() {
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
         <main>
+          <BatchDueNoticeDock
+            enabled={screenMode === null}
+            onNavigateToDough={() => setActiveTab("dough")}
+          />
           {screenMode ? (
             <DeferredSurface
               label="screen mode"

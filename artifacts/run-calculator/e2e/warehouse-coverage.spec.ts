@@ -1093,7 +1093,10 @@ test("shows the Warehouse switchover handoff through real tab navigation", async
     await expect(page.getByTestId("warehouse-page-heading")).toBeVisible();
     await expect(banner).toBeVisible();
     await expect(banner).toContainText(
-      "0.6 skids to switchover — stage packaging for the next run",
+      "Stage next run",
+    );
+    await expect(banner).toContainText(
+      "Warehouse: 0.6 skids to switchover — stage packaging for the next run",
     );
     await expect(banner).toContainText(
       "frontline should already be staged; packaging goes now",

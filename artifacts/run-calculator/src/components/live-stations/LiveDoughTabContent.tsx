@@ -578,7 +578,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             <div className={`mt-2 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
                               <div className="flex items-center justify-between mb-2">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
+                                  Packaging quick check — no tab switch{caseAutoActive ? " · Auto" : ""}
                                 </p>
                                 {hasCps && expectedTotal !== null && (
                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
@@ -746,7 +746,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     ? Math.min(spinSecCard, Math.max(0, (dueMs - nowTime.getTime()) / 1000))
                     : null;
                   return (
-                    <div className={`mb-4 rounded-xl border overflow-hidden ${showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/60"}`}>
+                    <div
+                      className={`batch-reminder-inline mb-4 rounded-xl border overflow-hidden ${showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/60"}`}
+                      data-batch-due={showBatchDue ? "true" : "false"}
+                    >
                       <div className="px-4 py-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />

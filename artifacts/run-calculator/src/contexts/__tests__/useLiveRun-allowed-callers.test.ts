@@ -113,6 +113,11 @@ const ALLOWED_FILES = new Set<string>([
   // without widening WarehouseTabCtx's memoized dependency list.
   "components/WarehouseSwitchoverBanner.tsx",
 
+  // BatchDueNoticeDock.tsx — the fixed reminder stays mounted across station
+  // tabs and must read the authoritative showBatchDue state and its dismiss
+  // setter. The subscription only re-renders this small, fixed notice.
+  "components/BatchDueNoticeDock.tsx",
+
   // Extracted live station surfaces intentionally subscribe to the shared
   // per-second production clock for countdowns, cadence, and live counters.
   "components/live-stations/LivePackagingTabContent.tsx",

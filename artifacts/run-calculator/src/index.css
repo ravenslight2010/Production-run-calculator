@@ -229,6 +229,7 @@
   --app-gutter: 0.75rem;
   --app-content-max: 64rem;
   --app-bottom-nav-space: calc(4rem + env(safe-area-inset-bottom));
+  --batch-due-dock-space: 8rem;
   --app-dialog-gutter: max(0.75rem, env(safe-area-inset-left));
 }
 
@@ -362,6 +363,39 @@
   overflow-wrap: anywhere;
   overflow: visible;
   text-overflow: clip;
+}
+
+/*
+ * Keep the manual batch reminder outside the scrolling station content. The
+ * extra clearance also moves transient toasts above both the dock and fixed
+ * station navigation while the reminder is waiting for acknowledgment.
+ */
+.batch-due-notice-dock {
+  position: fixed;
+  z-index: 40;
+  right: max(0.5rem, env(safe-area-inset-right));
+  bottom: calc(var(--app-bottom-nav-space) + 0.5rem);
+  left: max(0.5rem, env(safe-area-inset-left));
+  pointer-events: none;
+}
+
+.batch-due-notice-panel {
+  pointer-events: auto;
+}
+
+@media (max-width: 39.999rem) {
+  main:has(.batch-due-notice-dock) .app-shell {
+    padding-bottom: calc(var(--app-bottom-nav-space) + var(--batch-due-dock-space));
+  }
+
+  body:has(.batch-due-notice-dock) .toast-viewport {
+    bottom: calc(var(--app-bottom-nav-space) + var(--batch-due-dock-space) + 0.5rem);
+    max-height: calc(100dvh - var(--app-bottom-nav-space) - var(--batch-due-dock-space) - 0.5rem);
+  }
+
+  .batch-reminder-inline[data-batch-due="true"] {
+    display: none;
+  }
 }
 
 .responsive-dialog-overlay {
