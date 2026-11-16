@@ -1,8 +1,6 @@
 ---
 name: vet-dependencies-before-adding-dc9500
-description: >
-  Use this skill when adding, upgrading, or installing any third-party package
-  or library (npm, pip, etc.), or when the user asks to add a dependency.
+description: "Use this skill when adding, upgrading, or installing any third-party package or library (npm, pip, etc.), or when the user asks to add a dependency."
 ---
 **Activation:** On-demand — Agent loads this when you add/upgrade a package. Agent-actionable: it verifies the package and runs the audit itself.
 

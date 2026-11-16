@@ -1,9 +1,6 @@
 ---
 name: review-before-shipping-dc9500
-description: >
-  Use this skill before committing, opening a pull request, merging, deploying,
-  or publishing, or when the user says the app is "done", "ready to ship", or
-  "ready to go live".
+description: "Use this skill before committing, opening a pull request, merging, deploying, or publishing, or when the user says the app is \"done\", \"ready to ship\", or \"ready to go live\"."
 ---
 **Activation:** On-demand — fires before merge/publish or when you say it's "ready." Agent-actionable: it runs the gate checks; the final ship decision is yours.
 

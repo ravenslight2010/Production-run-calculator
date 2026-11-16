@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { TextDecoder } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";

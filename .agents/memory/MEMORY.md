@@ -136,6 +136,7 @@
 - [Local build](local-production-graph-build.md) + [source hashes](typescript-source-bundle-hashing.md) + [field checks](field-check-evidence-boundary.md) — dev identity only; unknown is not success.
 - [Operational runtime notes](operational-runtime-index.md) — less frequent build, browser, evidence, cleanup, host and workflow constraints.
 - [Runtime parity](pinned-node-nix-runner.md) + [Replit staging](replit-staging-project-boundary.md) + [test handoff](staging-test-handoff.md) — pin Node 24.22.2; published staging needs a separate project and local tests need the owner's environment.
+- [Node typings](node-typings-runtime-major.md) — keep `@types/node` aligned with the runtime major; type-only declarations can still expose unsupported APIs.
 - [Prep](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) + [stock corrections](completed-run-stock-corrections.md) — prepare from raw; use prepared stock; reconcile edits durably.
 - [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require run-bound activity, Tunnel/Warehouse confirmation and serving-revision logs.
 - [Retention pagination](retention-pagination-consistency.md) — shifted offset pages require scoped revision checks and bounded full restarts, not deduplication.

@@ -1,11 +1,6 @@
 ---
 name: validate-and-encode-untrusted-input-dc9500
-description: >
-  Use whenever the app accepts input from any source the server doesn't control
-  — form fields, query/path params, headers, JSON/API request bodies, file
-  uploads, webhooks, third-party API responses, and LLM output — to prevent
-  SQL/NoSQL/command injection, XSS, and SSRF through allow-list validation,
-  parameterized/safe APIs, and contextual output encoding.
+description: "Use whenever the app accepts input from any source the server doesn't control — form fields, query/path params, headers, JSON/API request bodies, file uploads, webhooks, third-party API responses, and LLM output — to prevent SQL/NoSQL/command injection, XSS, and SSRF through allow-list validation, parameterized/safe APIs, and contextual output encoding."
 ---
 
 **Activation:** On-demand — fires when handling any externally-controlled input. Guardrail + actionable: Agent applies validation, parameterized queries, and output encoding in the code it writes.

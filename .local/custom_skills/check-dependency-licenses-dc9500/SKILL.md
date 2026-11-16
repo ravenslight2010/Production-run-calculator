@@ -1,9 +1,6 @@
 ---
 name: check-dependency-licenses-dc9500
-description: >
-  Use this skill when adding dependencies or before releasing, or when the user
-  asks whether a library is safe to use commercially or mentions open-source
-  license or IP compliance.
+description: "Use this skill when adding dependencies or before releasing, or when the user asks whether a library is safe to use commercially or mentions open-source license or IP compliance."
 ---
 **Activation:** On-demand — fires when adding a dependency or before release. Agent-actionable: it inspects dependency licenses itself; license-vs-policy calls are escalated to you.
 

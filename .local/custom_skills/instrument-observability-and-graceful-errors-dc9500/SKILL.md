@@ -1,10 +1,6 @@
 ---
 name: instrument-observability-and-graceful-errors-dc9500
-description: >
-  Use when building backend services, APIs, scheduled jobs, or anything going to
-  production — to add structured logging, health checks, and graceful error
-  handling so the app is debuggable in production without leaking internals to
-  users.
+description: "Use when building backend services, APIs, scheduled jobs, or anything going to production — to add structured logging, health checks, and graceful error handling so the app is debuggable in production without leaking internals to users."
 ---
 
 **Activation:** On-demand — fires when building backend/production code. Guardrail + actionable: Agent adds the logging/error handling/health checks in code; reading the live logs/resources happens in the Publishing tool.

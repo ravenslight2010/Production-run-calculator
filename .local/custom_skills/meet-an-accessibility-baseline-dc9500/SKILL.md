@@ -1,10 +1,6 @@
 ---
 name: meet-an-accessibility-baseline-dc9500
-description: >
-  Use this skill when building or changing any user-facing UI — pages, forms,
-  navigation, modals, components — especially for customer-facing or public
-  apps. Ensures the app meets basic WCAG accessibility so it doesn't exclude
-  users or fail an audit.
+description: "Use this skill when building or changing any user-facing UI — pages, forms, navigation, modals, components — especially for customer-facing or public apps. Ensures the app meets basic WCAG accessibility so it doesn't exclude users or fail an audit."
 ---
 **Activation:** On-demand — fires when building user-facing UI. Guardrail: it shapes the markup/styles Agent produces and verifies key screens.
 

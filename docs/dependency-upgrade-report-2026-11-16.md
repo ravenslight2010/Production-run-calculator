@@ -42,10 +42,10 @@ workspace catalog entry; its resolved version did not change. Vitest and
 `@vitest/mocker` overrides now match Vitest `5.1.0`, and the esbuild override
 range is `^0.28.2`.
 
-`@types/node` is type-only and remains on major 26, as it was before this task;
-it does not select the Node runtime. All runtime and build execution was
-verified on Node `24.22.2`. A future type-surface alignment decision is listed
-with the remaining dependency holds below.
+`@types/node` is type-only and does not select the Node runtime. It was initially
+updated to `26.6.6`, then aligned with the Node 24 type surface during the
+follow-up below (resolved `24.19.2`). All runtime and build execution was
+verified on Node `24.22.2`.
 
 ## Runtime, workflows, and containers
 
@@ -123,12 +123,51 @@ weakened or skipped; this local environment cannot verify that case.
   `vite-plugin-pwa` / Workbox. The production audit is clean.
 - `node-domexception@1.0.0` remains deprecated transitively through the
   Google-auth/fetch dependency chain; no upstream fix was available.
-- Existing `web-push` is MPL-2.0. No dependency was added, but the license
-  remains subject to the workspace's policy review.
-- Review whether the type-only `@types/node` major should align to Node 24, or
-  remain intentionally ahead of the runtime.
+- Existing `web-push` is MPL-2.0. Its initial version review was pending; the
+  policy owner's approval of `web-push@4.0.0` is recorded in the follow-up below.
 - `npm` prints informational warnings for the existing pnpm-only
   `auto-install-peers` and `strict-peer-dependencies` configuration keys.
+
+## Follow-up reassessment — 2026-11-16
+
+The registry was rechecked at `2026-11-16 18:14Z` with the pinned Node
+`24.22.2` / pnpm `12.21.0` toolchain:
+
+- `@testing-library/user-event` `14.6.11` was published at `2026-11-16
+  00:48:29Z`, and `14.6.12` at `2026-11-16 02:31:48Z`. Both are still inside
+  the workspace's 24-hour minimum-age window. Keep `14.6.10`; do not bypass the
+  policy. Recheck after `2026-11-17 02:31:48Z`; update to `14.6.12` only if the
+  calculator tests pass.
+- TypeScript's `latest` tag remains `7.0.2`; `7.1` is still beta and the `next`
+  tag is a development build. TypeDoc `0.28.20` still declares TypeScript peers
+  only through `6.0.x`. Keep TypeScript 6.0.3 authoritative and TypeScript 7
+  advisory-only; the compatibility blockers remain.
+- Align the type-only `@types/node` catalog with the Node 24 runtime at
+  `^24.19.2` (resolved `24.19.2`). The full workspace typecheck passed on Node
+  `24.22.2` after making the API test's Node `TextDecoder` import explicit.
+- The full audit still reports one low-severity, development-only
+  `deepmerge@4.3.1` finding (`GHSA-gcqx-w48m-w2h4`) through
+  `vite-plugin-pwa@2.0.0` → `workbox-build@7.4.1` →
+  `@rollup/plugin-node-resolve@16.0.3`. The advisory lists no patched version;
+  those parent versions are current, and no safe override can select a fix.
+  The production audit reports no known vulnerabilities.
+- The deprecated `node-domexception@1.0.0` path remains through
+  `node-fetch@3.3.2` → `fetch-blob@3.2.0`. Current `node-fetch@3.3.2` still
+  requires `fetch-blob` 3.x, while `fetch-blob@4.0.0` is outside that range.
+  The latest `@google/genai@3.3.0` still requires
+  `google-auth-library@^10.3.0`; the newer Google Auth 11.x line is not a
+  compatible parent update. No supported upstream update removes the path.
+- Frozen install passed, full workspace typecheck passed, and `pnpm peers`
+  found peer requirements satisfied (with existing undeclared-peer warnings).
+  Full audit remains nonzero only for the single low deepmerge advisory;
+  production audit passed. On `2026-11-16`, the owner accepted the residual
+  build-time finding temporarily until upstream publishes a fix. This is risk
+  acceptance, not a clean full-audit result.
+- The existing license approval is version-specific to `web-push@3.6.7`.
+  On `2026-11-16`, the authorized policy owner approved `web-push@4.0.0` under
+  MPL-2.0. This approval applies only to version `4.0.0`; no broader MPL
+  approval is inferred. See
+  [`web-push-license-approval-2026-11-16.md`](evidence/web-push-license-approval-2026-11-16.md).
 
 The standard release check did not run release gates because published release
 evidence is missing. Production readiness is **NO-GO**. No production database

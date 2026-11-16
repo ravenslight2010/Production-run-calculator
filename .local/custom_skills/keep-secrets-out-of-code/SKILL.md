@@ -1,6 +1,6 @@
 ---
 name: keep-secrets-out-of-code
-description: Use this skill whenever wiring up an API key, token, password, database URL, OAuth client secret, or any credential, and before every commit or publish.
+description: "Use this skill whenever wiring up an API key, token, password, database URL, OAuth client secret, or any credential, and before every commit or publish."
 ---
 **Activation:** On-demand — fires when wiring a credential or before commit/publish. Agent-actionable: it moves secrets to env/Secrets and scans the diff itself.
 
