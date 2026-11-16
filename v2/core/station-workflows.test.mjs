@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   calculateStationMetrics,
   STATIONS,
@@ -7,6 +9,42 @@ import {
 } from "./station-workflows.mjs";
 
 const run = { setupSnapshot: { label: "Synthetic run", targetCases: 120 } };
+const floorExampleRun = { setupSnapshot: { label: "Workbook example", targetCases: 55 } };
+
+const floorExampleSources = [
+  {
+    path: "../../attached_assets/source-library/cheese/Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer_-_07.10.26_1784339826076.xlsx",
+    sha256: "21432dc3c0260f578d66989830458f51c19d2524ebf0453efcf7b761e78d9878",
+  },
+  {
+    path: "../../attached_assets/source-library/specs/Aldo's_Pizza_Specs_-_09_1784339783417.xlsx",
+    sha256: "54c6e9660c5da91e80f41180d5b181d53758d55e688ad5684e5217d130fc100c",
+  },
+  {
+    path: "../../attached_assets/source-library/dough/Aldo's_Dough_Mixing_Procedure_-_09_1784339683714.xlsx",
+    sha256: "f6d80526acda8ea185c067fc8a2ea229cfc43d3346c61423f7ba3301930d7900",
+  },
+  {
+    path: "../../attached_assets/source-library/sauce/Aldo_Pizza_Sauce_02_1784339518984.xlsx",
+    sha256: "e42ab181171c5abdbbbe17b28fdca2d2053ae22356c1cf65f0f19feb4c1d1f74",
+  },
+  {
+    path: "../../attached_assets/source-library/shipping/Shipping_and_Palletizing_Guide_07.02.2026_1784339849858.xlsx",
+    sha256: "bf76dcf04c37218e41a1a16d118922647b0e488e5264365696c65705799e8de6",
+  },
+  {
+    path: "../../attached_assets/source-library/schedule/Production_Schedule_7-8-26_1784339875921.xlsx",
+    sha256: "f7066f55fc9f335daa691a5ab4d915c3a26ccc08f8e57b5038d4bf0db119c46d",
+  },
+];
+
+test("pins the exact workbook versions used by the floor examples", () => {
+  for (const source of floorExampleSources) {
+    const workbook = readFileSync(new URL(source.path, import.meta.url));
+    const sha256 = createHash("sha256").update(workbook).digest("hex");
+    assert.equal(sha256, source.sha256, `${source.path} changed; re-review its cited cells`);
+  }
+});
 
 test("exposes each production workflow and its server-owned auto-track field", () => {
   assert.deepEqual(Object.keys(STATIONS), [
@@ -173,4 +211,230 @@ test("validates required station setup and timer values", () => {
     stationKey: "line",
     changes: { autoTrackRatePerMinute: 600.1 },
   }), /600 or less/);
+});
+
+test("matches the cheese workbook's explicit worked calculation", () => {
+  // Cheese workbook, Edwardo sheet: 1,092 cases x 12 pizzas/case, 0.01 oz/pizza.
+  // Recipe rows B29:B30 total 6.25 lb per batch.
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "cheese",
+    run: { setupSnapshot: { targetCases: 1092 } },
+    state: {
+      inputs: { pizzasPerCase: 12, ozPerPizza: 0.01, batchLbs: 6.25 },
+      progress: { casesCompleted: 0, batchesMade: 0 },
+    },
+  }), {
+    targetCases: 1092,
+    casesCompleted: 0,
+    casesRemaining: 1092,
+    ingredientLbsNeeded: 8.19,
+    batchesNeeded: 2,
+    batchesRemaining: 2,
+  });
+});
+
+test("uses the approved count-only case target for line and dough planning", () => {
+  // Only schedule cell E8 (55 planned cases) is used; schedule identity and notes
+  // are intentionally absent. V1's importer maps the Units column to cases.
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "line",
+    run: floorExampleRun,
+    state: { progress: { casesProduced: 0, casesOnLine: 0, casesInFreezer: 0 } },
+  }), {
+    targetCases: 55,
+    casesRemaining: 55,
+    workInProgress: 0,
+    completionPercent: 0,
+  });
+
+  // Source yield is 645.19 doughballs/batch; 12 pizzas/case gives 53 complete
+  // cases/batch when represented by V2's integer casesPerBatch field.
+  const doughballYield = (310.5 * 16) / 7.7;
+  assert.ok(Math.abs(doughballYield - 645.19) < 0.01);
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "dough",
+    run: floorExampleRun,
+    state: {
+      inputs: { casesPerBatch: Math.floor(645.19 / 12) },
+      progress: { casesProduced: 0, batchesMade: 0 },
+    },
+  }), {
+    targetCases: 55,
+    casesProduced: 0,
+    casesRemaining: 55,
+    batchesNeeded: 2,
+    batchesRemaining: 2,
+  });
+});
+
+test("matches workbook-based recipe pounds, station allowances, and skid target", () => {
+  // Specs OZ sheet B24 gives 2.90 oz/pizza; cheese recipe B13:B17 totals 55.6 lb.
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "cheese",
+    run: floorExampleRun,
+    state: {
+      inputs: { pizzasPerCase: 12, ozPerPizza: 2.9, batchLbs: 55.6 },
+      progress: { casesCompleted: 0, batchesMade: 0 },
+    },
+  }), {
+    targetCases: 55,
+    casesCompleted: 0,
+    casesRemaining: 55,
+    ingredientLbsNeeded: 119.63,
+    batchesNeeded: 3,
+    batchesRemaining: 3,
+  });
+
+  // Specs OZ sheet C25 gives 1.90 oz/pizza. No positive pepperoni batch weight
+  // is present in the cited workbooks, so the batch count remains unknown.
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "pepperoni",
+    run: floorExampleRun,
+    state: {
+      inputs: { pizzasPerCase: 12, ozPerPizza: 1.9 },
+      progress: { casesCompleted: 0, batchesMade: 0 },
+    },
+  }), {
+    targetCases: 55,
+    casesCompleted: 0,
+    casesRemaining: 55,
+    ingredientLbsNeeded: 78.38,
+    batchesNeeded: null,
+    batchesRemaining: null,
+  });
+
+  // Specs OZ sheet B23 gives 4 oz/pizza; the sauce procedure totals 271.5 lb.
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "sauce",
+    run: floorExampleRun,
+    state: {
+      inputs: { pizzasPerCase: 12, ozPerPizza: 4, barrelLbs: 271.5 },
+      progress: { barrelsMade: 0, stockBarrels: 0 },
+    },
+  }), {
+    targetCases: 55,
+    totalIngredientLbs: 195,
+    barrelsNeeded: 0.72,
+    barrelsMade: 0,
+    barrelsRemaining: 1,
+    stockBarrels: 0,
+  });
+
+  // Frontline uses the source cheese-mix rate and recipe size. 20 lb on line
+  // plus 10 lb already consumed are explicit test-state values, not workbook data.
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "frontline",
+    run: floorExampleRun,
+    state: {
+      inputs: { pizzasPerCase: 12, ozPerPizza: 2.9, batchLbs: 55.6 },
+      progress: { batchesMade: 0, stockOnLineLbs: 20, stockConsumedLbs: 10 },
+    },
+  }), {
+    targetCases: 55,
+    totalIngredientLbs: 139.63,
+    stockOnLineLbs: 20,
+    stockConsumedLbs: 10,
+    batchesNeeded: 3,
+    batchesToMake: 2,
+    batchesMade: 0,
+  });
+
+  // Shipping guide gives 60 cases/skid; the approved count-only target is 55.
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "packaging",
+    run: floorExampleRun,
+    state: { inputs: { casesPerSkid: 60 }, progress: { casesPacked: 0 } },
+  }), {
+    targetCases: 55,
+    casesPacked: 0,
+    casesRemaining: 55,
+    skidsNeeded: 1,
+    completedSkids: 0,
+    casesOnCurrentSkid: 0,
+  });
+});
+
+test("keeps the dough whole-case rounding boundary visible against workbook yield", () => {
+  const yieldDoughballsPerBatch = 645.19;
+  const pizzasPerCase = 12;
+  const wholeCasesPerBatch = Math.floor(yieldDoughballsPerBatch / pizzasPerCase);
+  const batchesAt = (targetCases) => calculateStationMetrics({
+    stationKey: "dough",
+    run: { setupSnapshot: { targetCases } },
+    state: { inputs: { casesPerBatch: wholeCasesPerBatch }, progress: { batchesMade: 0 } },
+  }).batchesNeeded;
+
+  assert.deepEqual([batchesAt(53), batchesAt(54)], [1, 2]);
+
+  const targetCases = 107;
+  const v1Batches = Math.ceil((targetCases * pizzasPerCase) / yieldDoughballsPerBatch);
+  const v2Batches = batchesAt(targetCases);
+
+  // V1's fractional yield requires two batches; V2's integer capacity of 53
+  // cases requires three. Keep this documented until the owner selects a policy.
+  assert.deepEqual({ v1Batches, v2Batches }, {
+    v1Batches: 2,
+    v2Batches: 3,
+  });
+});
+
+test("covers Sauce barrel, Frontline supply, and Packaging skid boundaries", () => {
+  const sauceForCases = (targetCases) => calculateStationMetrics({
+    stationKey: "sauce",
+    run: { setupSnapshot: { targetCases } },
+    state: {
+      inputs: { pizzasPerCase: 12, ozPerPizza: 4, barrelLbs: 271.5 },
+      progress: { barrelsMade: 0 },
+    },
+  });
+  assert.deepEqual(
+    [sauceForCases(80).barrelsNeeded, sauceForCases(81).barrelsNeeded],
+    [0.99, 1.01],
+  );
+  assert.deepEqual(
+    [sauceForCases(80).barrelsRemaining, sauceForCases(81).barrelsRemaining],
+    [1, 2],
+  );
+
+  const frontlineAtSupply = (stockOnLineLbs) => calculateStationMetrics({
+    stationKey: "frontline",
+    run: floorExampleRun,
+    state: {
+      inputs: { pizzasPerCase: 12, ozPerPizza: 2.9, batchLbs: 55.6 },
+      progress: { stockOnLineLbs, stockConsumedLbs: 50 },
+    },
+  }).batchesToMake;
+  assert.equal(frontlineAtSupply(89.629), 1);
+  assert.equal(frontlineAtSupply(89.63), 0);
+
+  const packagingAt = (casesPacked) => calculateStationMetrics({
+    stationKey: "packaging",
+    run: floorExampleRun,
+    state: { inputs: { casesPerSkid: 60 }, progress: { casesPacked } },
+  });
+  assert.deepEqual(
+    [59, 60, 61].map((casesPacked) => {
+      const result = packagingAt(casesPacked);
+      return [result.completedSkids, result.casesOnCurrentSkid];
+    }),
+    [[0, 59], [1, 0], [1, 1]],
+  );
+});
+
+test("caps line completion and work-in-progress at valid boundaries", () => {
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "line",
+    run: floorExampleRun,
+    state: { progress: { casesProduced: 56, casesOnLine: 3, casesInFreezer: 4 } },
+  }), {
+    targetCases: 55,
+    casesRemaining: 0,
+    workInProgress: 7,
+    completionPercent: 100,
+  });
+  assert.throws(() => calculateStationMetrics({
+    stationKey: "line",
+    run: { setupSnapshot: { targetCases: 0 } },
+    state: { progress: {} },
+  }), /valid target case count/);
 });
