@@ -57,9 +57,22 @@ async function withApi(t, overrides = {}, options = {}) {
         : { outcome: "conflict", expectedRevision: 0, currentRun: { ...RUN, status: "running", revision: 1 } };
     },
   };
+  const stations = {
+    execute: async (input) => {
+      calls.push(["station", input]);
+      return {
+        outcome: "accepted",
+        replayed: false,
+        commandId: input.command.commandId,
+        stationKey: input.command.stationKey,
+        run: { ...RUN, revision: 1, stationProgress: { [input.command.stationKey]: { progress: input.command.changes } } },
+      };
+    },
+  };
   const handler = createRunApi({
     runs: { ...runs, ...overrides.runs },
     commands: { ...commands, ...overrides.commands },
+    stations: { ...stations, ...overrides.stations },
     authenticate: overrides.authenticate ?? (async () => AUTH),
     verifyCsrf: overrides.verifyCsrf ?? (async (request, auth) => auth === AUTH && request.headers["x-csrf-token"] === "ok"),
     maxBodyBytes: options.maxBodyBytes ?? 16 * 1024,
@@ -88,6 +101,57 @@ test("serves facility-scoped list and detail reads with no-store JSON responses"
   assert.equal(detailResponse.status, 200);
   assert.deepEqual((await detailResponse.json()).run, RUN);
   assert.deepEqual(calls[1], ["get", { auth: AUTH, runId: RUN_ID }]);
+});
+
+test("accepts validated station commands and returns canonical run state", async (t) => {
+  const { baseUrl, calls } = await withApi(t);
+  const response = await send(baseUrl, `/api/v2/runs/${RUN_ID}/stations/packaging/commands`, {
+    method: "POST",
+    body: {
+      commandId: "00000000-0000-4000-8000-000000000020",
+      mode: "manual",
+      expectedRevision: 0,
+      changes: { casesPacked: 5 },
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.outcome, "accepted");
+  assert.equal(body.run.stationProgress.packaging.progress.casesPacked, 5);
+  assert.deepEqual(calls[0], ["station", {
+    auth: AUTH,
+    command: {
+      commandId: "00000000-0000-4000-8000-000000000020",
+      mode: "manual",
+      expectedRevision: 0,
+      changes: { casesPacked: 5 },
+      runId: RUN_ID,
+      stationKey: "packaging",
+    },
+  }]);
+});
+
+test("rejects station mutations without CSRF and keeps stale station edits as conflicts", async (t) => {
+  const denied = await withApi(t, { verifyCsrf: async () => false });
+  const path = `/api/v2/runs/${RUN_ID}/stations/dough/commands`;
+  const body = {
+    commandId: "00000000-0000-4000-8000-000000000021",
+    mode: "manual",
+    expectedRevision: 0,
+    changes: { casesProduced: 3 },
+  };
+  const deniedResponse = await send(denied.baseUrl, path, { method: "POST", body });
+  assert.equal(deniedResponse.status, 403);
+  assert.equal(denied.calls.length, 0);
+
+  const conflict = await withApi(t, {
+    stations: {
+      execute: async () => ({ outcome: "conflict", currentRun: { ...RUN, revision: 2 } }),
+    },
+  });
+  const conflictResponse = await send(conflict.baseUrl, path, { method: "POST", body });
+  assert.equal(conflictResponse.status, 409);
+  assert.equal((await conflictResponse.json()).currentRun.revision, 2);
 });
 
 test("creates runs with server authorization and returns replay status", async (t) => {

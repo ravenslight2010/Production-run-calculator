@@ -1,5 +1,6 @@
 import { createRunCommandService } from "../core/run-command-service.mjs";
 import { createRunService } from "../core/run-service.mjs";
+import { createStationCommandService } from "../core/station-command-service.mjs";
 
 const API_PREFIX = "/api/v2/runs";
 const RUN_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -63,6 +64,7 @@ function requireExactKeys(value, expectedKeys) {
 function safeStatus(error) {
   const knownService = error?.name === "RunServiceError"
     || error?.name === "RunCommandServiceError"
+    || error?.name === "RunStationServiceError"
     || error?.name === "V2AuthError";
   if (error instanceof RunApiError) return error.status;
   if (knownService && Number.isInteger(error.status) && error.status >= 400 && error.status <= 599) {
@@ -75,6 +77,7 @@ function safeMessage(error) {
   if (error instanceof RunApiError
     || error?.name === "RunServiceError"
     || error?.name === "RunCommandServiceError"
+    || error?.name === "RunStationServiceError"
     || error?.name === "V2AuthError") {
     return error.message;
   }
@@ -108,6 +111,7 @@ function normalizePathRunId(value) {
 export function createRunApi({
   runs,
   commands,
+  stations,
   authenticate,
   verifyCsrf,
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
@@ -118,6 +122,9 @@ export function createRunApi({
   }
   if (!commands || typeof commands.execute !== "function") {
     throw new TypeError("The lifecycle command service is required.");
+  }
+  if (stations !== undefined && typeof stations?.execute !== "function") {
+    throw new TypeError("The station command service must provide execute().");
   }
   if (typeof authenticate !== "function") {
     throw new TypeError("A server authentication adapter is required.");
@@ -159,6 +166,27 @@ export function createRunApi({
           setupSnapshot: body.setupSnapshot,
         });
         sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      const stationMatch = url.pathname.match(/^\/api\/v2\/runs\/([^/]+)\/stations\/([^/]+)\/commands$/);
+      if (stationMatch && request.method === "POST") {
+        if (!stations) throw new RunApiError(404, "Station route not found.");
+        const runId = normalizePathRunId(stationMatch[1]);
+        let stationKey;
+        try {
+          stationKey = decodeURIComponent(stationMatch[2]);
+        } catch {
+          throw new RunApiError(400, "Station key is invalid.");
+        }
+        const body = await readJsonBody(request, maxBodyBytes);
+        requireExactKeys(body, ["commandId", "mode", "expectedRevision", "changes"]);
+        const result = await stations.execute({
+          auth,
+          command: { ...body, runId, stationKey },
+        });
+        const status = ["accepted", "not_due", "not_enabled"].includes(result?.outcome) ? 200 : 409;
+        sendJson(response, status, result);
         return;
       }
 
@@ -222,5 +250,6 @@ export function createRunApiForDatabase({
   const query = (sql, params) => pool.query(sql, params);
   const runs = createRunService({ query, authorize });
   const commands = createRunCommandService({ query, authorize });
-  return createRunApi({ runs, commands, authenticate, verifyCsrf, maxBodyBytes, logger });
+  const stations = createStationCommandService({ query, authorize });
+  return createRunApi({ runs, commands, stations, authenticate, verifyCsrf, maxBodyBytes, logger });
 }

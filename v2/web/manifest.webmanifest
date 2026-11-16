@@ -1,0 +1,18 @@
+{
+  "name": "Fieldline Production Floor",
+  "short_name": "Fieldline",
+  "description": "Shared production run and station control.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f1f0e8",
+  "theme_color": "#f1f0e8",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

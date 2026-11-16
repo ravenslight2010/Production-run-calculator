@@ -58,14 +58,16 @@ been created.
   transaction boundary.
 - `core/run-service.mjs` provides authorized creation, detail reads, and bounded
   facility-scoped run lists through database functions.
-- `db/0001-run-control.sql` and `db/0002-staff-auth.sql` define the V2 run and
-  staff-auth schemas. Their local checks use a disposable PostgreSQL cluster,
-  including run creation, canonical timestamps, scoped reads, command
-  retry/concurrency, role-scoped identity, opaque session lookup, revocation,
-  and HTTP requests through a restricted API role.
+- `db/0001-run-control.sql`, `db/0002-staff-auth.sql`, and
+  `db/0003-production-stations.sql` define V2 run, staff-auth, and station
+  state. Local checks use a disposable PostgreSQL cluster, including run
+  creation, canonical timestamps, scoped reads, station timers and automatic
+  progress, manual corrections, stale-revision conflicts, idempotent retries,
+  role-scoped identity, opaque session lookup, and HTTP requests through a
+  restricted API role.
 - `server/auth-adapter.mjs` provides V2-owned Argon2id password verification,
   rate-limited sign-in service logic, opaque hashed sessions, CSRF verification,
-  and run-action authorization.
+  and run/station action authorization.
 - `server/auth-api.mjs` provides JSON sign-in, session-read, and sign-out routes.
   Sign-in sets an HttpOnly session cookie and a separate CSRF cookie; tokens and
   credentials are not returned in JSON.
@@ -77,34 +79,41 @@ been created.
 - `server/main.mjs` starts the API with `pg`, a bounded pool, startup database
   probe, `/healthz`, and graceful shutdown. It requires `V2_DATABASE_URL` and
   never reads V1 `DATABASE_URL`; it does not run migrations automatically.
-- `api/openapi.yaml` records the health, authentication, and run-control routes.
+- `api/openapi.yaml` records the health, authentication, run-control, and
+  production-station routes and response models.
 - `web/` now connects the username/password sign-in, session check, sign-out,
-  and run controls to the V2 API. It keeps run data hidden until the server
-  confirms a session, disables writes while offline or until a fresh run-list
-  read completes, and binds saved uncertain actions to their original staff
-  account.
-- A disposable PostgreSQL-backed HTTP integration test creates two separate
-  staff sessions, verifies both see the same run, applies a lifecycle command
-  from one session, and confirms the other session receives the new revision
-  and a conflict for a stale command.
+  run controls, and the Line, Dough, Cheese, Pepperoni, Sauce, Frontline, and
+  Packaging station workflows to the V2 API. Station edits, timers, and
+  automatic progress use server revisions and canonical responses. The browser
+  retains a cached read-only run view offline, refreshes on wake/reconnect, and
+  keeps uncertain manual station actions bound to their original staff account.
+- A disposable PostgreSQL-backed HTTP integration test exercises guarded
+  first-manager setup and manager-only staff changes. Two separate staff
+  sessions share a run, race station edits against one revision, and confirm
+  that one update wins while the other receives the current canonical state.
 - V2 now has one-time, secret-guarded first-manager setup plus manager-only
   staff creation, disablement, role changes, and account-session revocation.
   The setup path never imports V1 credentials or sessions.
-- Station workflow, inventory/import implementation, auto-track worker, PWA
-  recovery, and real browser/device verification are still incomplete.
+- Browser automation covers manual-edit conflicts between sessions, offline
+  reload and reconnection, plus server-driven station timers and automatic
+  progress across desktop and phone-sized Chromium contexts. This is emulated
+  browser evidence, not physical-device coverage.
+- There is no approved setup-data import, warehouse inventory implementation,
+  or supervised auto-track worker.
 - There is no production data connection, V1 data migration, or separate V2
   Replit project.
 
 ## Next implementation milestone
 
-Continue the first usable run-control slice in this order:
+Continue the first usable V2 release in this order:
 
-1. Verify sign-in, run control, and manager setup/account changes in real
-   Chromium and WebKit browsers at desktop, phone, and tablet sizes.
-2. Continue implementing every production station, full inventory, import,
-   auto-tracking, and PWA recovery without reducing the V2 launch scope.
-3. Keep a separate-project VM, database, restart, publish, and capacity pilot as
-   a pre-release gate.
+1. Import approved setup data and implement warehouse inventory without
+   transferring V1 balances; establish opening inventory from a new physical
+   count.
+2. Verify station calculations against approved floor examples and test station
+   workflows on real phones and tablets.
+3. Keep a separate-project VM/database/restart/capacity pilot as a pre-release
+   gate.
 
 ## Focused checks
 
@@ -112,6 +121,7 @@ Run from the source repository root:
 
 ```sh
 pnpm --filter @workspace/lucia-v2 test
+pnpm --filter @workspace/lucia-v2 test:browser
 pnpm --filter @workspace/lucia-v2 test:db
 node --check v2/server/main.mjs
 node --check v2/web/app.js

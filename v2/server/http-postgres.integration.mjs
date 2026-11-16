@@ -206,6 +206,57 @@ async function main() {
     assert.equal(conflict.outcome, "conflict");
     assert.equal(conflict.currentRun.revision, 1);
 
+    const stationCommands = await Promise.all([
+      fetch(`${baseUrl}/api/v2/runs/${created.run.id}/stations/line/commands`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: manager.cookieHeader,
+          "X-CSRF-Token": manager.csrfToken,
+        },
+        body: JSON.stringify({
+          commandId: "73000000-0000-4000-8000-000000000104",
+          expectedRevision: 1,
+          mode: "manual",
+          changes: { casesProduced: 2 },
+        }),
+      }),
+      fetch(`${baseUrl}/api/v2/runs/${created.run.id}/stations/line/commands`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: operator.cookieHeader,
+          "X-CSRF-Token": operator.csrfToken,
+        },
+        body: JSON.stringify({
+          commandId: "73000000-0000-4000-8000-000000000105",
+          expectedRevision: 1,
+          mode: "manual",
+          changes: { casesProduced: 3 },
+        }),
+      }),
+    ]);
+    assert.deepEqual(stationCommands.map((response) => response.status).sort(), [200, 409]);
+    const stationBodies = await Promise.all(stationCommands.map(jsonResponse));
+    const acceptedStation = stationBodies.find((body) => body.outcome === "accepted");
+    const conflictedStation = stationBodies.find((body) => body.outcome === "conflict");
+    assert.ok(acceptedStation);
+    assert.ok(conflictedStation);
+    assert.equal(acceptedStation.run.revision, 2);
+    assert.equal(conflictedStation.currentRun.revision, 2);
+    assert.equal(
+      conflictedStation.currentRun.stationProgress.line.progress.casesProduced,
+      acceptedStation.run.stationProgress.line.progress.casesProduced,
+    );
+
+    const operatorStationRead = await fetch(`${baseUrl}/api/v2/runs/${created.run.id}`, {
+      headers: { Cookie: operator.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(operatorStationRead.status, 200);
+    const sharedStationRun = (await jsonResponse(operatorStationRead)).run;
+    assert.equal(sharedStationRun.revision, 2);
+    assert.equal(sharedStationRun.stationProgress.line.progress.casesProduced, acceptedStation.run.stationProgress.line.progress.casesProduced);
+
     const roleChange = await fetch(`${baseUrl}/api/v2/auth/staff/${directory.staff.find((staff) => staff.username === "v2integrationoperator").userId}`, {
       method: "PATCH",
       headers: {
@@ -300,7 +351,7 @@ async function main() {
     for (const cookie of [manager.cookieHeader, operator.cookieHeader, promotedOperator.cookieHeader, demotedOperator.cookieHeader]) {
       assert.equal(JSON.stringify(logs).includes(cookie), false);
     }
-    console.log("V2 HTTP/PostgreSQL check passed: guarded bootstrap, manager staff control, session revocation, and shared run state.");
+    console.log("V2 HTTP/PostgreSQL check passed: guarded staff setup, session revocation, and shared lifecycle/station revisions across sessions.");
   } finally {
     if (serverInstance) await serverInstance.close();
   }

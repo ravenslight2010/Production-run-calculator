@@ -1,10 +1,18 @@
 import { canWriteRunState } from "./write-gate.mjs";
+import { STATIONS, calculateStationMetrics } from "/v2/core/station-workflows.mjs";
 
 const API = "/api/v2/runs";
 const AUTH_API = "/api/v2/auth";
-const POLL_INTERVAL_MS = 15000;
+const POLL_INTERVAL_MS = 3000;
+const AUTO_TRACK_INTERVAL_MS = 1000;
+const STATION_STATUSES = new Set(["not_started", "running", "paused", "completed"]);
+const TIMER_STATUSES = new Set(["idle", "running", "paused"]);
+const TIMER_FIELDS = new Set(["timerStatus", "timerStartedAt", "timerPausedAt", "timerElapsedMs"]);
+const TRACKING_FIELDS = new Set(["autoTrackLastAt", "autoTrackRemainder"]);
 const PENDING_PREFIX = "fieldline:v2:pending-command:";
 const PENDING_CREATE_KEY = "fieldline:v2:pending-create";
+const PENDING_STATION_PREFIX = "fieldline:v2:pending-station:";
+const OFFLINE_CACHE_KEY = "fieldline:v2:last-confirmed-state";
 const RUN_STATUSES = new Set(["planned", "running", "paused", "completed"]);
 const COMMANDS = new Set(["start", "pause", "resume", "complete"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -57,6 +65,18 @@ const el = {
   label: document.querySelector("#setup-label"),
   target: document.querySelector("#target-cases"),
   announcer: document.querySelector("#live-announcer"),
+  stationPanel: document.querySelector("#station-panel"),
+  stationTabs: document.querySelector("#station-tabs"),
+  stationLabel: document.querySelector("#station-label"),
+  stationState: document.querySelector("#station-state"),
+  stationRevision: document.querySelector("#station-revision"),
+  stationMetrics: document.querySelector("#station-metrics"),
+  stationForm: document.querySelector("#station-form"),
+  stationFields: document.querySelector("#station-fields"),
+  stationSaveButton: document.querySelector("#station-save-button"),
+  stationSaveNote: document.querySelector("#station-save-note"),
+  stationTimerValue: document.querySelector("#station-timer-value"),
+  stationTimerControls: document.querySelector("#station-timer-controls"),
 };
 
 let runs = [];
@@ -77,6 +97,10 @@ let staffGeneration = 0;
 let staffDirectory = null;
 let serverStateConfirmed = false;
 let lastKnownRun = null;
+let selectedStationKey = "line";
+let stationActionInFlight = false;
+let stationConflictDraft = null;
+let cachedServerClock = null;
 let pendingCreate = loadPendingCreate();
 
 function isObject(value) {
@@ -113,6 +137,40 @@ function validateRun(run) {
     || run.setupSnapshot.targetCases < 1 || !Array.isArray(run.pauseIntervals)) {
     throw new Error("The server returned run data in an unexpected format. Refresh to load the current state.");
   }
+  if (run.serverNow !== undefined && !isTimestamp(run.serverNow)) {
+    throw new Error("The server returned an invalid server clock. Refresh to load the current state.");
+  }
+  if (typeof run.serverNow === "string") {
+    cachedServerClock = { serverMs: Date.parse(run.serverNow), receivedAt: performance.now() };
+  }
+  if (run.stationProgress !== undefined) {
+    if (!isObject(run.stationProgress)) {
+      throw new Error("The server returned station data in an unexpected format. Refresh to load the current state.");
+    }
+    for (const [stationKey, state] of Object.entries(run.stationProgress)) {
+      const definition = STATIONS[stationKey];
+      const progressFields = new Set([...definition?.progress || [], ...TIMER_FIELDS, ...TRACKING_FIELDS]);
+      if (!Object.hasOwn(STATIONS, stationKey) || !isObject(state)
+        || !Number.isSafeInteger(state.revision) || state.revision < 0
+        || !STATION_STATUSES.has(state.status)
+        || !isObject(state.inputs) || !isObject(state.progress)
+        || Object.entries(state.inputs).some(([key, value]) =>
+          !definition.inputs.includes(key) || typeof value !== "number" || !Number.isFinite(value) || value < 0)
+        || Object.entries(state.progress).some(([key, value]) => {
+          if (!progressFields.has(key)) return true;
+          if (key === "timerStatus") return !TIMER_STATUSES.has(value);
+          if (key === "timerStartedAt" || key === "timerPausedAt" || key === "autoTrackLastAt") return !isTimestamp(value, true);
+          return typeof value !== "number" || !Number.isFinite(value) || value < 0;
+        })
+        || !isTimestamp(state.updatedAt)
+        || !isTimestamp(state.startedAt, true)
+        || !isTimestamp(state.pausedAt, true)
+        || !isTimestamp(state.completedAt, true)
+        || !isTimestamp(state.nextDueAt, true)) {
+        throw new Error("The server returned invalid station progress. Refresh to load the current state.");
+      }
+    }
+  }
   for (const interval of run.pauseIntervals) {
     if (!isObject(interval) || !isTimestamp(interval.startedAt) || !isTimestamp(interval.endedAt, true)) {
       throw new Error("The server returned run history in an unexpected format. Refresh to load the current state.");
@@ -129,7 +187,7 @@ class ApiError extends Error {
   }
 }
 
-async function readJson(response, { allowCommandConflict = false } = {}) {
+async function readJson(response, { allowCommandConflict = false, allowStationConflict = false } = {}) {
   let body;
   try {
     body = await response.json();
@@ -138,7 +196,9 @@ async function readJson(response, { allowCommandConflict = false } = {}) {
   }
   const knownCommandConflict = allowCommandConflict && response.status === 409
     && ["conflict", "invalid_transition"].includes(body?.outcome);
-  if (!response.ok && !knownCommandConflict) {
+  const knownStationConflict = allowStationConflict && response.status === 409
+    && ["conflict", "invalid_transition"].includes(body?.outcome);
+  if (!response.ok && !knownCommandConflict && !knownStationConflict) {
     const message = isObject(body) && typeof body.error === "string"
       ? body.error
       : "The request was not accepted. Refresh the run state before trying again.";
@@ -183,6 +243,7 @@ function clearUserScopedState() {
   selectedRunId = null;
   lastKnownRun = null;
   serverStateConfirmed = false;
+  stationConflictDraft = null;
   render();
 }
 
@@ -199,9 +260,82 @@ function enterOfflineMode() {
   setConnection(false);
   updateCreateFormForAuth();
   renderRun(selectedRun());
+  renderStationPanel(selectedRun());
   if (currentStaff) {
+    saveOfflineCache();
     showError("This device is offline. V2 is read-only until a fresh server check succeeds.", "Offline — read-only");
   }
+}
+
+function saveOfflineCache() {
+  if (!currentStaff || runs.length === 0) return;
+  try {
+    localStorage.setItem(OFFLINE_CACHE_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      staff: {
+        userId: currentStaff.userId,
+        username: currentStaff.username,
+        role: currentStaff.role,
+        capabilities: currentStaff.capabilities,
+      },
+      runs,
+      selectedRunId,
+      stationKey: selectedStationKey,
+    }));
+  } catch {
+    // A full browser store must not prevent online or offline read-only use.
+  }
+}
+
+function clearOfflineCache() {
+  try {
+    localStorage.removeItem(OFFLINE_CACHE_KEY);
+  } catch {
+    // Cache cleanup is best-effort; it never changes server authorization.
+  }
+}
+
+function restoreOfflineCache() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OFFLINE_CACHE_KEY) || "null");
+    if (!isObject(saved) || !isStaffRecord(saved.staff) || !Array.isArray(saved.runs)
+      || saved.runs.length > 100 || !isTimestamp(saved.savedAt)) return null;
+    const cachedRuns = saved.runs.map(validateRun);
+    if (!cachedRuns.length) return null;
+    return {
+      staff: saved.staff,
+      runs: cachedRuns,
+      selectedRunId: UUID.test(saved.selectedRunId || "") ? saved.selectedRunId : null,
+      stationKey: Object.hasOwn(STATIONS, saved.stationKey) ? saved.stationKey : "line",
+      savedAt: saved.savedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function showOfflineCachedSession(saved) {
+  authGeneration += 1;
+  currentStaff = saved.staff;
+  runs = saved.runs;
+  selectedRunId = runs.some((run) => run.id === saved.selectedRunId)
+    ? saved.selectedRunId
+    : runs.find((run) => run.status === "running" || run.status === "paused")?.id || runs[0]?.id || null;
+  selectedStationKey = saved.stationKey;
+  lastKnownRun = selectedRun();
+  serverStateConfirmed = false;
+  el.authPanel.hidden = true;
+  el.authenticatedApp.hidden = false;
+  el.accountControls.hidden = false;
+  el.staffLabel.textContent = `${saved.staff.username} · ${saved.staff.role}`;
+  el.signOut.disabled = false;
+  setConnection(false);
+  updateCreateFormForAuth();
+  render();
+  const savedTime = new Intl.DateTimeFormat(undefined, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  }).format(new Date(saved.savedAt));
+  showError(`Showing the last server-confirmed state saved ${savedTime}. Changes are unavailable until the connection is confirmed.`, "Offline — read-only");
 }
 
 function requireWritableState() {
@@ -246,7 +380,10 @@ function showAuthError(title, message) {
 }
 
 function showSignIn(message = null, { title = "Sign-in needed", retry = false } = {}) {
-  if (currentStaff) clearUserScopedState();
+  if (currentStaff) {
+    clearOfflineCache();
+    clearUserScopedState();
+  }
   currentStaff = null;
   staffGeneration += 1;
   staffDirectory = null;
@@ -573,6 +710,7 @@ async function checkSession() {
     });
     if (response.status === 401) {
       setConnection(true);
+      clearOfflineCache();
       showSignIn();
       return;
     }
@@ -580,6 +718,11 @@ async function checkSession() {
     showAuthenticated(body.staff);
   } catch (error) {
     setConnection(false);
+    const saved = restoreOfflineCache();
+    if (saved) {
+      showOfflineCachedSession(saved);
+      return;
+    }
     showSignIn(
       "The app could not verify the saved session. Check the connection, then try again.",
       { title: "Session check unavailable", retry: true },
@@ -632,7 +775,7 @@ async function submitSignIn(event) {
 }
 
 async function signOut() {
-  if (!currentStaff || authInFlight || signOutInFlight || createInFlight || commandInFlight) return;
+  if (!currentStaff || authInFlight || signOutInFlight || createInFlight || commandInFlight || stationActionInFlight) return;
   const csrf = getCsrfHeaders();
   if (!csrf) {
     showError("Your CSRF session token is unavailable. Refresh the session before signing out.", "Sign-out unavailable");
@@ -647,9 +790,11 @@ async function signOut() {
       headers: { Accept: "application/json", ...csrf },
     });
     if (response.status !== 204) await readJson(response);
+    clearOfflineCache();
     showSignIn("You are signed out. Sign in again to load current server state.");
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
+      clearOfflineCache();
       showSignIn("Your session has ended. Sign in again to load current server state.");
     } else {
       showError(error instanceof Error ? error.message : "The sign-out result is not confirmed. Check the connection and try again.", "Sign-out not confirmed");
@@ -841,6 +986,476 @@ function mergeServerRuns(serverRuns, currentRuns) {
 function render() {
   renderRuns();
   renderRun(selectedRun());
+  renderStationPanel(selectedRun());
+}
+
+const STATION_FIELD_META = Object.freeze({
+  autoTrackRatePerMinute: ["Auto-track rate", "cases / minute"],
+  timerDurationSeconds: ["Timer duration", "seconds"],
+  casesPerSkid: ["Cases per skid", "cases"],
+  casesPerBatch: ["Cases per dough batch", "cases"],
+  traysPerBatch: ["Trays per dough batch", "trays"],
+  pizzasPerCase: ["Pizzas per case", "pizzas"],
+  ozPerPizza: ["Ounces per pizza", "oz"],
+  batchLbs: ["Pounds per batch", "lb"],
+  barrelLbs: ["Pounds per Sauce barrel", "lb"],
+  casesProduced: ["Cases produced", "cases"],
+  casesOnLine: ["Cases on line", "cases"],
+  casesInFreezer: ["Cases in freezer", "cases"],
+  traysOnLine: ["Trays on line", "trays"],
+  batchesReady: ["Batches ready", "batches"],
+  batchesMade: ["Batches made", "batches"],
+  casesCompleted: ["Cases completed", "cases"],
+  stockOnLineLbs: ["Stock on line", "lb"],
+  casesPacked: ["Cases packed", "cases"],
+  barrelsMade: ["Full barrels made", "barrels"],
+  stockBarrels: ["Barrels on hand", "barrels"],
+  stockConsumedLbs: ["Stock consumed", "lb"],
+});
+
+const STATION_METRIC_LABELS = Object.freeze({
+  targetCases: "Run target",
+  casesRemaining: "Cases remaining",
+  workInProgress: "Work in progress",
+  completionPercent: "Run completion",
+  casesProduced: "Cases produced",
+  batchesNeeded: "Batches needed",
+  batchesRemaining: "Batches remaining",
+  casesPacked: "Cases packed",
+  skidsNeeded: "Skids needed",
+  completedSkids: "Completed skids",
+  casesOnCurrentSkid: "Cases on current skid",
+  casesCompleted: "Cases completed",
+  ingredientLbsNeeded: "Ingredient needed",
+  totalIngredientLbs: "Total ingredient needed",
+  barrelsNeeded: "Barrels needed",
+  barrelsMade: "Barrels made",
+  barrelsRemaining: "Barrels remaining",
+  stockBarrels: "Barrels on hand",
+  stockOnLineLbs: "Stock on line",
+  stockConsumedLbs: "Stock consumed",
+  batchesToMake: "Batches still to make",
+});
+
+function stationPendingKey(runId, stationKey) {
+  return `${PENDING_STATION_PREFIX}${runId}:${stationKey}`;
+}
+
+function loadPendingStation(runId, stationKey) {
+  try {
+    const pending = JSON.parse(localStorage.getItem(stationPendingKey(runId, stationKey)) || "null");
+    if (!isObject(pending) || pending.runId !== runId || pending.stationKey !== stationKey
+      || !UUID.test(pending.commandId) || !UUID.test(pending.actorId)
+      || !Number.isSafeInteger(pending.expectedRevision) || pending.expectedRevision < 0
+      || !["manual", "timer_start", "timer_pause", "timer_resume", "timer_reset"].includes(pending.mode)
+      || !isObject(pending.changes)) return null;
+    return pending;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingStation(pending) {
+  try {
+    localStorage.setItem(stationPendingKey(pending.runId, pending.stationKey), JSON.stringify(pending));
+    return true;
+  } catch {
+    showError("This device could not save the station retry identity. Refresh the run before making another edit.", "Retry protection unavailable");
+    return false;
+  }
+}
+
+function clearPendingStation(runId, stationKey) {
+  try {
+    localStorage.removeItem(stationPendingKey(runId, stationKey));
+  } catch {
+    showError("The server responded, but this device could not clear its saved station action. Refresh state before another edit.", "Local storage unavailable");
+  }
+}
+
+function hasPendingStationCommand(runId) {
+  return Object.keys(STATIONS).some((stationKey) => loadPendingStation(runId, stationKey) !== null);
+}
+
+function currentServerNowMs(run) {
+  if (cachedServerClock && Number.isFinite(cachedServerClock.serverMs)) {
+    return cachedServerClock.serverMs + Math.max(0, performance.now() - cachedServerClock.receivedAt);
+  }
+  return run?.serverNow ? Date.parse(run.serverNow) : Date.now();
+}
+
+function activeTimerElapsedMs(run, stationState) {
+  const progress = stationState?.progress || {};
+  const stored = Math.max(0, Number(progress.timerElapsedMs) || 0);
+  if (progress.timerStatus !== "running" || !isTimestamp(progress.timerStartedAt)) return stored;
+  const started = Date.parse(progress.timerStartedAt);
+  const now = currentServerNowMs(run);
+  if (!Number.isFinite(started) || !Number.isFinite(now)) return stored;
+  let pausedMs = 0;
+  for (const interval of run.pauseIntervals || []) {
+    const pauseStart = Date.parse(interval.startedAt);
+    const pauseEnd = interval.endedAt ? Date.parse(interval.endedAt) : now;
+    if (!Number.isFinite(pauseStart) || !Number.isFinite(pauseEnd)) continue;
+    pausedMs += Math.max(0, Math.min(now, pauseEnd) - Math.max(started, pauseStart));
+  }
+  return stored + Math.max(0, now - started - pausedMs);
+}
+
+function formatTimer(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
+}
+
+function stationStateFor(run, stationKey) {
+  return run?.stationProgress?.[stationKey] || { status: "not_started", revision: 0, inputs: {}, progress: {} };
+}
+
+function setStationSaveNote(message, state = "") {
+  el.stationSaveNote.textContent = message;
+  el.stationSaveNote.dataset.state = state;
+}
+
+function renderStationPanel(run) {
+  if (!run || !currentStaff) {
+    el.stationPanel.hidden = true;
+    return;
+  }
+  el.stationPanel.hidden = false;
+  if (!Object.hasOwn(STATIONS, selectedStationKey)) selectedStationKey = "line";
+  el.stationRevision.textContent = `RUN REV ${String(run.revision).padStart(2, "0")}`;
+  el.stationTabs.innerHTML = Object.entries(STATIONS).map(([key, station]) => `
+    <button type="button" class="station-tab" role="tab" aria-selected="${key === selectedStationKey}"
+      aria-controls="station-fields" data-station-key="${key}" data-testid="tab-station-${key}">${station.label}</button>
+  `).join("");
+  el.stationTabs.querySelectorAll("[data-station-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedStationKey = button.dataset.stationKey;
+      stationConflictDraft = null;
+      renderStationPanel(selectedRun());
+    });
+  });
+
+  const station = STATIONS[selectedStationKey];
+  const state = stationStateFor(run, selectedStationKey);
+  const readOnly = !canWriteNow() || run.status === "completed";
+  const draft = stationConflictDraft?.runId === run.id
+    && stationConflictDraft.stationKey === selectedStationKey
+    ? stationConflictDraft.changes
+    : {};
+  const inputs = { ...state.inputs, ...Object.fromEntries(Object.entries(draft).filter(([key]) => station.inputs.includes(key))) };
+  const progress = { ...state.progress, ...Object.fromEntries(Object.entries(draft).filter(([key]) => station.progress.includes(key))) };
+  el.stationLabel.textContent = station.label.toUpperCase();
+  el.stationState.textContent = state.progress.timerStatus
+    ? `Timer ${state.progress.timerStatus.replace("_", " ")}`
+    : state.status.replace("_", " ");
+  const metrics = calculateStationMetrics({ stationKey: selectedStationKey, run, state: { inputs, progress } });
+  el.stationMetrics.innerHTML = Object.entries(metrics)
+    .filter(([key, value]) => value !== null && value !== undefined && STATION_METRIC_LABELS[key])
+    .map(([key, value]) => `<div class="station-metric"><span>${STATION_METRIC_LABELS[key]}</span><strong>${escapeHtml(formatMetric(value, key))}</strong></div>`)
+    .join("");
+
+  const makeFields = (title, group, fields) => `
+    <div class="station-field-group">
+      <h3>${title}</h3>
+      ${fields.map((field) => {
+        const [label, unit] = STATION_FIELD_META[field] || [field, ""];
+        const raw = group[field];
+        const fallback = station.progress.includes(field) ? 0 : (field === "autoTrackRatePerMinute" ? 0 : "");
+        const value = raw === undefined || raw === null ? fallback : raw;
+        const step = ["stockOnLineLbs", "stockConsumedLbs", "stockBarrels", "autoTrackRatePerMinute", "ozPerPizza", "batchLbs", "barrelLbs"].includes(field) ? "0.001" : "1";
+        return `<label class="field station-field" for="station-${field}">
+          <span>${label}${unit ? ` · ${unit}` : ""}</span>
+          <input id="station-${field}" name="${field}" type="number" inputmode="decimal" min="0" max="1000000"
+            step="${step}" value="${escapeHtml(value)}" data-station-field="${field}" ${readOnly ? "disabled" : ""} />
+        </label>`;
+      }).join("")}
+    </div>`;
+  el.stationFields.innerHTML = `
+    <div class="station-field-groups">
+      ${makeFields("Station setup", inputs, station.inputs)}
+      ${makeFields("Recorded progress", progress, station.progress)}
+    </div>
+    <div class="station-pending" id="station-pending" hidden></div>`;
+
+  const pending = loadPendingStation(run.id, selectedStationKey);
+  const pendingBox = document.querySelector("#station-pending");
+  if (pending) {
+    pendingBox.hidden = false;
+    const mine = pending.actorId === currentStaff.userId;
+    pendingBox.innerHTML = `<span>${mine ? "A station update needs confirmation. Retry uses the same request ID." : "A saved update belongs to another staff account."}</span>${mine ? '<button type="button" data-retry-station="true">Retry same update</button>' : ""}`;
+    pendingBox.querySelector("[data-retry-station]")?.addEventListener("click", () => { void retryStationCommand(pending); });
+  }
+
+  const canMutate = canWriteNow() && run.status !== "completed" && !stationActionInFlight
+    && !hasPendingStationCommand(run.id);
+  el.stationSaveButton.disabled = !canMutate;
+  el.stationSaveButton.textContent = stationConflictDraft?.runId === run.id
+    && stationConflictDraft.stationKey === selectedStationKey
+    ? "Review and save my values"
+    : "Save station values";
+  if (!canWriteNow()) {
+    setStationSaveNote("Read-only until the server confirms this run again.", "warning");
+  } else if (stationConflictDraft?.runId === run.id && stationConflictDraft.stationKey === selectedStationKey) {
+    setStationSaveNote("Another device changed the run. Your entries remain here; review them and save again.", "warning");
+  } else if (pending) {
+    setStationSaveNote("Confirm the saved update before making another station edit.", "warning");
+  } else {
+    setStationSaveNote("", "");
+  }
+
+  renderStationTimerControls(run, state, canMutate);
+  updateStationTimer();
+}
+
+function formatMetric(value, key) {
+  if (key === "completionPercent") return `${Number(value).toFixed(1)}%`;
+  if (["ingredientLbsNeeded", "totalIngredientLbs", "stockOnLineLbs", "stockConsumedLbs"].includes(key)) return `${Number(value).toFixed(2)} lb`;
+  if (key === "barrelsNeeded" || key === "stockBarrels") return `${Number(value).toFixed(2)} barrels`;
+  return Number.isInteger(value) ? value.toLocaleString() : Number(value).toFixed(2);
+}
+
+function renderStationTimerControls(run, state, canMutate) {
+  const timerStatus = state.progress.timerStatus || "idle";
+  const duration = Number(state.inputs.timerDurationSeconds) || 0;
+  const actions = [];
+  if (timerStatus === "idle") actions.push(["timer_start", "Start timer"]);
+  if (timerStatus === "running") actions.push(["timer_pause", "Pause timer"]);
+  if (timerStatus === "paused") actions.push(["timer_resume", "Resume timer"]);
+  if (timerStatus !== "idle") actions.push(["timer_reset", "Reset"]);
+  el.stationTimerControls.innerHTML = actions.map(([mode, label]) => `
+    <button type="button" data-timer-mode="${mode}" ${!canMutate
+      || ((mode === "timer_start" || mode === "timer_resume") && (duration <= 0 || run.status !== "running"))
+      ? "disabled" : ""}>${label}</button>
+  `).join("");
+  el.stationTimerControls.querySelectorAll("[data-timer-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void submitStationCommand({
+        runId: run.id,
+        stationKey: selectedStationKey,
+        mode: button.dataset.timerMode,
+        changes: {},
+      });
+    });
+  });
+}
+
+function updateStationTimer() {
+  const run = selectedRun();
+  if (!run || !Object.hasOwn(STATIONS, selectedStationKey)) return;
+  const state = stationStateFor(run, selectedStationKey);
+  const progress = state.progress || {};
+  const status = progress.timerStatus || "idle";
+  if (status === "idle") {
+    el.stationTimerValue.textContent = "Not started";
+    return;
+  }
+  const elapsed = activeTimerElapsedMs(run, state);
+  const duration = (Number(state.inputs?.timerDurationSeconds) || 0) * 1000;
+  const remaining = Math.max(0, duration - elapsed);
+  el.stationTimerValue.textContent = status === "running" && duration > 0 && remaining === 0
+    ? `Done · ${formatTimer(elapsed)}`
+    : `${formatTimer(remaining > 0 ? remaining : elapsed)}${status === "paused" ? " · paused" : ""}`;
+}
+
+async function submitStationForm(event) {
+  event.preventDefault();
+  const run = selectedRun();
+  if (!run || !requireWritableState()) return;
+  if (run.status === "completed") {
+    setStationSaveNote("Completed runs are read-only.", "warning");
+    return;
+  }
+  const changes = {};
+  const station = STATIONS[selectedStationKey];
+  const current = stationStateFor(run, selectedStationKey);
+  const currentValues = { ...current.inputs, ...current.progress };
+  for (const input of el.stationFields.querySelectorAll("[data-station-field]")) {
+    if (input.value === "") continue;
+    const value = Number(input.value);
+    if (!Number.isFinite(value)) {
+      input.focus();
+      setStationSaveNote("Enter a valid number for each station value.", "error");
+      return;
+    }
+    const field = input.dataset.stationField;
+    const knownValue = currentValues[field]
+      ?? (station.progress.includes(field) || field === "autoTrackRatePerMinute" ? 0 : null);
+    if (knownValue === null || value !== Number(knownValue)) changes[field] = value;
+  }
+  if (Object.keys(changes).length === 0) {
+    setStationSaveNote("Enter at least one station value before saving.", "warning");
+    return;
+  }
+  await submitStationCommand({
+    runId: run.id,
+    stationKey: selectedStationKey,
+    mode: "manual",
+    changes,
+  });
+}
+
+async function submitStationCommand({ runId, stationKey, mode, changes }) {
+  if (!requireWritableState()) return;
+  if (stationActionInFlight || hasPendingStationCommand(runId)) {
+    setStationSaveNote("Confirm the earlier station update before sending another one.", "warning");
+    return;
+  }
+  const run = runs.find((item) => item.id === runId);
+  if (!run) {
+    setStationSaveNote("This run is no longer in the current register. Refresh before editing.", "error");
+    return;
+  }
+  const csrf = getCsrfHeaders();
+  if (!csrf) {
+    setStationSaveNote("Your secure session is unavailable. Sign in again before editing.", "error");
+    return;
+  }
+  const pending = {
+    runId,
+    stationKey,
+    actorId: currentStaff.userId,
+    commandId: crypto.randomUUID(),
+    expectedRevision: run.revision,
+    mode,
+    changes,
+  };
+  if (mode !== "auto_track" && !savePendingStation(pending)) return;
+  await sendStationCommand(pending);
+}
+
+async function retryStationCommand(pending) {
+  if (stationActionInFlight || !currentStaff || pending.actorId !== currentStaff.userId) return;
+  if (!requireWritableState()) return;
+  await sendStationCommand(pending);
+}
+
+async function sendStationCommand(pending) {
+  if (!currentStaff || pending.actorId !== currentStaff.userId) {
+    setStationSaveNote("Sign in as the staff member who created this update before retrying.", "error");
+    return;
+  }
+  if (!requireWritableState()) return;
+  const csrf = getCsrfHeaders();
+  if (!csrf) {
+    setStationSaveNote("Your secure session is unavailable. Sign in again, then retry the same update.", "error");
+    return;
+  }
+  stationActionInFlight = true;
+  renderStationPanel(selectedRun());
+  try {
+    const response = await fetch(`${API}/${encodeURIComponent(pending.runId)}/stations/${encodeURIComponent(pending.stationKey)}/commands`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...csrf },
+      body: JSON.stringify({
+        commandId: pending.commandId,
+        expectedRevision: pending.expectedRevision,
+        mode: pending.mode,
+        changes: pending.changes,
+      }),
+    });
+    const body = await readJson(response, { allowStationConflict: true });
+    if (!["accepted", "conflict", "invalid_transition", "not_due", "not_enabled"].includes(body.outcome)) {
+      throw new Error("The server returned an unknown station result. Retry the same update to confirm it.");
+    }
+    if (body.outcome === "accepted") {
+      if (!body.run) throw new Error("The server accepted the station update but did not return canonical state. Retry the same update.");
+      const canonical = validateRun(body.run);
+      if (canonical.id !== pending.runId) throw new Error("The server returned a different run for this station action.");
+      upsertRun(canonical);
+      clearPendingStation(pending.runId, pending.stationKey);
+      if (pending.mode === "manual" || pending.mode.startsWith("timer_")) stationConflictDraft = null;
+      setConnection(true);
+      setLastCheck();
+      serverStateConfirmed = true;
+      clearError();
+      setStationSaveNote(
+        pending.mode === "auto_track" ? "Automatic progress saved by the server." : "Saved to the shared run.",
+        "success",
+      );
+      announce(`${STATIONS[pending.stationKey].label} update saved.`);
+      saveOfflineCache();
+    } else if (body.outcome === "conflict") {
+      const canonical = validateRun(body.currentRun);
+      upsertRun(canonical);
+      clearPendingStation(pending.runId, pending.stationKey);
+      stationConflictDraft = pending.mode === "manual"
+        ? { runId: pending.runId, stationKey: pending.stationKey, changes: pending.changes }
+        : null;
+      serverStateConfirmed = true;
+      setConnection(true);
+      setLastCheck();
+      setStationSaveNote(
+        pending.mode === "manual"
+          ? "Another device changed the run. Your entries are kept below; review and save them again."
+          : "Another device advanced the run. The current server state is shown.",
+        "warning",
+      );
+      saveOfflineCache();
+    } else {
+      const canonical = validateRun(body.currentRun || body.run);
+      upsertRun(canonical);
+      clearPendingStation(pending.runId, pending.stationKey);
+      serverStateConfirmed = true;
+      setConnection(true);
+      if (body.outcome === "invalid_transition") {
+        setStationSaveNote("This station action is not available in the current run state.", "warning");
+      }
+    }
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      clearOfflineCache();
+      showSignIn("Your sign-in has expired. The saved station update remains available to retry after signing in again.");
+    } else if (error instanceof ApiError && [400, 403, 404, 413].includes(error.status)) {
+      if (pending.mode !== "auto_track") clearPendingStation(pending.runId, pending.stationKey);
+      setConnection(true);
+      setStationSaveNote(error.message, "error");
+      showError(error.message, "Station update not saved");
+    } else {
+      serverStateConfirmed = false;
+      setConnection(false);
+      setStationSaveNote(
+        error instanceof Error
+          ? (pending.mode === "auto_track"
+            ? `${error.message} Automatic progress will retry after reconnecting.`
+            : `${error.message} The same update is saved for retry.`)
+          : (pending.mode === "auto_track" ? "Automatic progress will retry after reconnecting." : "The update is not confirmed. Retry the saved update."),
+        "error",
+      );
+      showError(
+        pending.mode === "auto_track"
+          ? "Automatic progress is temporarily unavailable and will resume after reconnection."
+          : "The station update is not confirmed. Reconnect and retry the same saved action.",
+        pending.mode === "auto_track" ? "Automatic tracking paused" : "Station update needs confirmation",
+      );
+    }
+  } finally {
+    stationActionInFlight = false;
+    render();
+  }
+}
+
+async function advanceDueStations() {
+  const run = selectedRun();
+  if (!run || run.status !== "running" || !canWriteNow() || stationActionInFlight) return;
+  const now = currentServerNowMs(run);
+  for (const stationKey of Object.keys(STATIONS)) {
+    const state = stationStateFor(selectedRun(), stationKey);
+    const rate = Number(state.inputs?.autoTrackRatePerMinute) || 0;
+    const current = Number(state.progress?.[STATIONS[stationKey].autoTrackField]) || 0;
+    const due = Date.parse(state.nextDueAt || "");
+    if (rate <= 0 || current >= run.setupSnapshot.targetCases || !Number.isFinite(due) || due > now) continue;
+    await submitStationCommand({
+      runId: run.id,
+      stationKey,
+      mode: "auto_track",
+      changes: {},
+    });
+    if (!canWriteNow() || !currentStaff) return;
+  }
 }
 
 async function fetchRuns({ quiet = false } = {}) {
@@ -878,16 +1493,19 @@ async function fetchRuns({ quiet = false } = {}) {
     serverStateConfirmed = true;
     updateCreateFormForAuth();
     render();
+    saveOfflineCache();
     return true;
   } catch (error) {
     if (requestGeneration !== authGeneration || !currentStaff) return false;
     if (error instanceof ApiError && error.status === 401) {
       setConnection(true);
+      clearOfflineCache();
       showSignIn("Your sign-in has expired. Sign in again to reload the current server state.");
       return false;
     }
     serverStateConfirmed = false;
     setConnection(false);
+    saveOfflineCache();
     showError(error instanceof Error ? error.message : "Check the connection and refresh state.", "Could not load current state");
     updateCreateFormForAuth();
     if (runs.length === 0) {
@@ -1027,7 +1645,7 @@ async function sendCommand(pending) {
 function upsertRun(run) {
   const index = runs.findIndex((item) => item.id === run.id);
   if (index < 0) runs.push(run);
-  else runs[index] = run;
+  else if (runs[index].revision <= run.revision) runs[index] = run;
 }
 
 async function createRun(event) {
@@ -1119,6 +1737,7 @@ if (pendingCreate) {
 
 el.refresh.addEventListener("click", () => fetchRuns());
 el.createForm.addEventListener("submit", createRun);
+el.stationForm.addEventListener("submit", submitStationForm);
 el.authForm.addEventListener("submit", submitSignIn);
 el.bootstrapForm.addEventListener("submit", submitBootstrap);
 el.setupToggle.addEventListener("click", () => toggleBootstrapForm(true));
@@ -1144,5 +1763,14 @@ window.addEventListener("focus", () => {
 window.setInterval(() => {
   if (!document.hidden && currentStaff && navigator.onLine !== false) fetchRuns({ quiet: true });
 }, POLL_INTERVAL_MS);
+window.setInterval(() => {
+  if (!document.hidden && currentStaff && navigator.onLine !== false) void advanceDueStations();
+}, AUTO_TRACK_INTERVAL_MS);
+window.setInterval(updateStationTimer, 500);
+if ("serviceWorker" in navigator) {
+  void navigator.serviceWorker.register("/service-worker.js", { scope: "/" }).catch(() => {
+    // The live app still works when a browser or host disables service workers.
+  });
+}
 
 void checkSession();

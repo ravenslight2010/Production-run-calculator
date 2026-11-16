@@ -4,7 +4,7 @@ import { createAuthApi } from "./auth-api.mjs";
 import { createRunApiForDatabase } from "./run-api.mjs";
 
 const RESPONSE_SECURITY_HEADERS = {
-  "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:",
+  "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; worker-src 'self'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
@@ -13,8 +13,11 @@ const RESPONSE_SECURITY_HEADERS = {
 
 const WEB_ASSETS = new Map([
   ["/", { file: new URL("../web/index.html", import.meta.url), type: "text/html; charset=utf-8" }],
+  ["/manifest.webmanifest", { file: new URL("../web/manifest.webmanifest", import.meta.url), type: "application/manifest+json; charset=utf-8" }],
+  ["/service-worker.js", { file: new URL("../web/service-worker.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/favicon.ico", { file: new URL("../web/favicon.svg", import.meta.url), type: "image/svg+xml" }],
   ["/v2/web/app.js", { file: new URL("../web/app.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
+  ["/v2/core/station-workflows.mjs", { file: new URL("../core/station-workflows.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/write-gate.mjs", { file: new URL("../web/write-gate.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/styles.css", { file: new URL("../web/styles.css", import.meta.url), type: "text/css; charset=utf-8" }],
 ]);
@@ -51,7 +54,10 @@ function safeRouteName(url) {
   if (!url) return "invalid";
   if (url.pathname === "/") return "web.index";
   if (url.pathname === "/favicon.ico") return "web.favicon";
+  if (url.pathname === "/manifest.webmanifest") return "web.manifest";
+  if (url.pathname === "/service-worker.js") return "web.service_worker";
   if (url.pathname === "/v2/web/app.js") return "web.app";
+  if (url.pathname === "/v2/core/station-workflows.mjs") return "web.station_workflows";
   if (url.pathname === "/v2/web/write-gate.mjs") return "web.write-gate";
   if (url.pathname === "/v2/web/styles.css") return "web.styles";
   if (url.pathname === "/healthz") return "health";
@@ -64,6 +70,7 @@ function safeRouteName(url) {
   if (/^\/api\/v2\/auth\/staff\/[0-9a-f-]{36}$/i.test(url.pathname)) return "auth.staff_item";
   if (url.pathname === "/api/v2/runs") return "runs.collection";
   if (/^\/api\/v2\/runs\/[^/]+\/commands$/.test(url.pathname)) return "runs.command";
+  if (/^\/api\/v2\/runs\/[^/]+\/stations\/[^/]+\/commands$/.test(url.pathname)) return "runs.station_command";
   if (/^\/api\/v2\/runs\/[^/]+$/.test(url.pathname)) return "runs.detail";
   return "unmatched";
 }

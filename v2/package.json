@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node server/main.mjs",
     "test": "node --test core/*.test.mjs server/*.test.mjs web/*.test.mjs",
+    "test:browser": "node --test e2e/*.test.mjs",
     "test:db": "bash db/run-local-tests.sh"
   },
   "dependencies": {

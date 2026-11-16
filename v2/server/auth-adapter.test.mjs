@@ -222,6 +222,7 @@ test("sign-out revokes the session, and run authorization accepts only authentic
   };
   const auth = await adapter.authenticate(request);
   assert.equal(adapter.authorizeRun({ auth, action: "run.lifecycle.command" }), true);
+  assert.equal(adapter.authorizeRun({ auth, action: "station.command" }), true);
   assert.equal(adapter.authorizeRun({ auth, action: "staff.delete" }), false);
   assert.equal(adapter.authorizeRun({ auth: null, action: "run.read" }), false);
   assert.equal(await adapter.signOut(request), true);

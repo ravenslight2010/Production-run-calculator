@@ -13,7 +13,9 @@ const MAX_LOGIN_KEYS = 10_000;
 const PASSWORD_HASH_LENGTH = 32;
 const ARGON2_PARAMETERS = Object.freeze({ memory: 19_456, passes: 2, parallelism: 1 });
 const MAX_ACTIVE_PASSWORD_CHECKS = 4;
-const RUN_ACTIONS = new Set(["run.read", "run.create", "run.lifecycle.command"]);
+const RUN_ACTIONS = new Set([
+  "run.read", "run.create", "run.lifecycle.command", "station.read", "station.command",
+]);
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let activePasswordChecks = 0;

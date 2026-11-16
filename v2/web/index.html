@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#f1f0e8" />
     <meta name="description" content="Production run control" />
     <title>Run control — Fieldline</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -199,6 +200,37 @@
               <div><strong>Reconnected?</strong><p>State refreshes when this screen returns to view, and periodically while open.</p></div>
             </section>
           </aside>
+        </section>
+        <section class="station-panel" id="station-panel" aria-labelledby="station-heading" hidden>
+          <div class="station-heading-row">
+            <div>
+              <p class="eyebrow">PRODUCTION STATIONS</p>
+              <h2 id="station-heading">Station work</h2>
+              <p class="station-intro">Edits are saved to the shared run. Timer and automatic progress use server time.</p>
+            </div>
+            <span class="station-revision" id="station-revision" data-testid="text-station-revision"></span>
+          </div>
+          <div class="station-tabs" id="station-tabs" role="tablist" aria-label="Production station"></div>
+          <div class="station-content">
+            <div class="station-summary">
+              <div class="station-summary-header">
+                <span class="eyebrow" id="station-label">RUN / LINE</span>
+                <span class="station-state" id="station-state" data-testid="text-station-state">No progress</span>
+              </div>
+              <div class="station-metrics" id="station-metrics" aria-live="polite"></div>
+              <div class="station-timer" data-testid="station-timer">
+                <div><span class="eyebrow">STATION TIMER</span><strong id="station-timer-value">Not started</strong></div>
+                <div class="timer-controls" id="station-timer-controls"></div>
+              </div>
+            </div>
+            <form class="station-form" id="station-form">
+              <div id="station-fields"></div>
+              <div class="station-form-actions">
+                <p class="station-save-note" id="station-save-note" role="status" aria-live="polite"></p>
+                <button class="button button-primary" id="station-save-button" type="submit" data-testid="button-save-station">Save station values</button>
+              </div>
+            </form>
+          </div>
         </section>
         <footer class="page-footer"><span>FIELDLINE <i>—</i> FLOOR SYSTEMS</span><span>SERVER-AUTHORITATIVE CONTROL</span></footer>
         </div>

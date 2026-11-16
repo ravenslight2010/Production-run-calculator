@@ -75,6 +75,8 @@ if [[ "$("${PSQL[@]}" -c "SELECT v2.staff_bootstrap_open();")" != "t" ]]; then
   exit 1
 fi
 "${PSQL[@]}" -f "$ROOT/v2/db/0002-staff-auth.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/0003-production-stations.sql" >/dev/null
+"${PSQL[@]}" -f "$ROOT/v2/db/0003-production-stations.test.sql"
 
 "${PSQL[@]}" -c "
   CREATE ROLE v2_api_test NOLOGIN;
@@ -86,6 +88,9 @@ fi
   GRANT EXECUTE ON FUNCTION v2.list_runs(uuid, integer) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.apply_run_lifecycle_command(
     uuid, uuid, uuid, text, text, text, bigint
+  ) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.apply_station_command(
+    uuid, uuid, uuid, text, text, bigint, text, text, jsonb, jsonb, text
   ) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.find_staff_for_sign_in(text) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.open_staff_session(uuid, text, text, timestamptz) TO v2_api_test;
@@ -411,6 +416,77 @@ if [[ "$CONFLICT_RESULTS" != "accepted conflict " ]]; then
   exit 1
 fi
 
+STATION_RUN_ID="50000000-0000-4000-8000-000000000002"
+"${PSQL[@]}" -c "
+  WITH test_time AS (SELECT clock_timestamp() AS at)
+  INSERT INTO v2.runs (
+    facility_id, id, status, created_at, updated_at, started_at, setup_snapshot
+  )
+  SELECT
+    '50000000-0000-4000-8000-000000000001'::uuid,
+    '$STATION_RUN_ID'::uuid,
+    'running', at, at, at,
+    '{\"label\":\"Concurrent station test\",\"targetCases\":10}'::jsonb
+  FROM test_time
+" >/dev/null
+
+STATION_COMMAND_A_SQL="
+  SET ROLE v2_api_test;
+  SELECT (result->>'outcome') || '|' ||
+         COALESCE(result->'run'->>'revision', result->'currentRun'->>'revision')
+  FROM (
+    SELECT v2.apply_station_command(
+      '50000000-0000-4000-8000-000000000001',
+      '$STATION_RUN_ID',
+      '20000000-0000-4000-8000-000000000005',
+      'station-concurrent-a', repeat('f', 64), 0,
+      'line', 'manual', '{}'::jsonb, '{\"casesProduced\":1}'::jsonb,
+      'casesProduced'
+    ) AS result
+  ) AS command_result;
+  RESET ROLE;
+"
+STATION_COMMAND_B_SQL="
+  SET ROLE v2_api_test;
+  SELECT (result->>'outcome') || '|' ||
+         COALESCE(result->'run'->>'revision', result->'currentRun'->>'revision')
+  FROM (
+    SELECT v2.apply_station_command(
+      '50000000-0000-4000-8000-000000000001',
+      '$STATION_RUN_ID',
+      '20000000-0000-4000-8000-000000000006',
+      'station-concurrent-b', repeat('e', 64), 0,
+      'line', 'manual', '{}'::jsonb, '{\"casesProduced\":2}'::jsonb,
+      'casesProduced'
+    ) AS result
+  ) AS command_result;
+  RESET ROLE;
+"
+"${PSQL[@]}" -c "$STATION_COMMAND_A_SQL" > "$TMP_DIR/station-concurrent-1" &
+STATION_PID_1=$!
+"${PSQL[@]}" -c "$STATION_COMMAND_B_SQL" > "$TMP_DIR/station-concurrent-2" &
+STATION_PID_2=$!
+wait "$STATION_PID_1"
+wait "$STATION_PID_2"
+STATION_CONFLICT_RESULTS="$(cat "$TMP_DIR/station-concurrent-1" "$TMP_DIR/station-concurrent-2" | sort | tr '\n' ' ')"
+if [[ "$STATION_CONFLICT_RESULTS" != "accepted|1 conflict|1 " ]]; then
+  echo "Concurrent station revision race produced unexpected results: $STATION_CONFLICT_RESULTS" >&2
+  exit 1
+fi
+STATION_FINAL_STATE="$("${PSQL[@]}" -c "
+  SELECT revision || '|' ||
+    (SELECT count(*) FROM v2.run_events WHERE run_id = '$STATION_RUN_ID') || '|' ||
+    (SELECT count(*) FROM v2.command_receipts
+      WHERE command_id IN ('station-concurrent-a', 'station-concurrent-b')) || '|' ||
+    (SELECT progress->>'casesProduced' FROM v2.run_station_progress
+      WHERE run_id = '$STATION_RUN_ID' AND station_key = 'line')
+  FROM v2.runs WHERE id = '$STATION_RUN_ID'
+")"
+if [[ "$STATION_FINAL_STATE" != "1|1|1|1" ]]; then
+  echo "Concurrent station race left unexpected canonical state: $STATION_FINAL_STATE" >&2
+  exit 1
+fi
+
 FINAL_STATE="$("${PSQL[@]}" -c "
   SELECT
     (SELECT status || '|' || revision FROM v2.runs
@@ -444,4 +520,5 @@ printf 'Facility-scoped run reads passed: %s\n' "$READ_RESULT"
 printf 'Concurrent run creation passed: %s (%s)\n' "$CREATE_RACE_FLAGS" "$CREATE_RACE_STATE"
 printf 'Same-key retry race passed: %s\n' "$SAME_RESULTS"
 printf 'Competing revision race passed: %s\n' "$CONFLICT_RESULTS"
+printf 'Concurrent station revision race passed: %s (%s)\n' "$STATION_CONFLICT_RESULTS" "$STATION_FINAL_STATE"
 printf 'Stored state and event counts passed: %s\n' "$FINAL_STATE"

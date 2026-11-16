@@ -462,6 +462,59 @@ paths:
           $ref: "#/components/responses/Error"
         "405":
           $ref: "#/components/responses/Error"
+  /api/v2/runs/{runId}/stations/{stationKey}/commands:
+    post:
+      operationId: applyRunStationCommand
+      summary: Save or advance canonical production-station state
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/CsrfToken"
+        - in: path
+          name: stationKey
+          required: true
+          schema:
+            type: string
+            enum: [line, dough, cheese, pepperoni, sauce, frontline, packaging]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StationCommand"
+      responses:
+        "200":
+          description: Station edit or automatic/timer action accepted; response includes canonical run state
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/StationCommandAccepted"
+                  - $ref: "#/components/schemas/StationCommandNoChange"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: Stale run revision or invalid timer/production transition; includes current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StationCommandConflict"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     v2Session:
@@ -650,8 +703,10 @@ components:
         - pausedAt
         - resumedAt
         - completedAt
+        - serverNow
         - setupSnapshot
         - pauseIntervals
+        - stationProgress
       properties:
         id:
           type: string
@@ -681,12 +736,108 @@ components:
         completedAt:
           type: [string, "null"]
           format: date-time
+        serverNow:
+          type: string
+          format: date-time
         setupSnapshot:
           $ref: "#/components/schemas/RunSetup"
         pauseIntervals:
           type: array
           items:
             $ref: "#/components/schemas/PauseInterval"
+        stationProgress:
+          type: object
+          description: Canonical per-station inputs, progress, timer state, and revisions.
+          additionalProperties:
+            $ref: "#/components/schemas/StationState"
+    StationState:
+      type: object
+      required: [status, revision, inputs, progress, startedAt, pausedAt, completedAt, nextDueAt, updatedAt]
+      properties:
+        status:
+          type: string
+          enum: [not_started, running, paused, completed]
+        revision:
+          type: integer
+          minimum: 0
+        inputs:
+          type: object
+          additionalProperties:
+            type: number
+        progress:
+          type: object
+          description: Validated station counters and server-owned timer/auto-track anchors.
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        pausedAt:
+          type: [string, "null"]
+          format: date-time
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+        nextDueAt:
+          type: [string, "null"]
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    StationCommand:
+      type: object
+      additionalProperties: false
+      required: [commandId, expectedRevision, mode, changes]
+      properties:
+        commandId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        expectedRevision:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        mode:
+          type: string
+          enum: [manual, auto_track, timer_start, timer_pause, timer_resume, timer_reset]
+        changes:
+          type: object
+          description: Station-specific numeric setup or progress fields. Automatic/timer modes require an empty object.
+          additionalProperties:
+            type: number
+            minimum: 0
+    StationCommandAccepted:
+      type: object
+      required: [outcome, replayed, commandId, stationKey, run]
+      properties:
+        outcome:
+          const: accepted
+        replayed:
+          type: boolean
+        commandId:
+          type: string
+        stationKey:
+          type: string
+        run:
+          $ref: "#/components/schemas/Run"
+    StationCommandNoChange:
+      type: object
+      required: [outcome, currentRun]
+      properties:
+        outcome:
+          type: string
+          enum: [not_due, not_enabled]
+        currentRun:
+          $ref: "#/components/schemas/Run"
+    StationCommandConflict:
+      type: object
+      required: [outcome, currentRun]
+      properties:
+        outcome:
+          type: string
+          enum: [conflict, invalid_transition]
+        expectedRevision:
+          type: integer
+        currentRun:
+          $ref: "#/components/schemas/Run"
     RunCreated:
       type: object
       required: [outcome, replayed, run]
