@@ -1084,6 +1084,12 @@ test.describe("accessibility smoke", () => {
     const inFlight = new Set<Request>();
     const navigationRequests = new WeakSet<Request>();
     const navigationPaths = new Set<string>();
+    const reloadSensitivePaths = new Set([
+      "/api/me",
+      "/api/sync/today",
+      "/api/incidents",
+      "/api/field-checks/observations",
+    ]);
     const successfulOrigins = new Set<string>();
     let requestPhase = "post-auth journey";
     // Track requests from the first document, including those started before
@@ -1185,6 +1191,18 @@ test.describe("accessibility smoke", () => {
       }
       inFlight.delete(request);
     });
+    const waitForReloadSensitiveRequests = async () => {
+      await expect.poll(
+        () => Array.from(inFlight)
+          .filter(request => reloadSensitivePaths.has(new URL(request.url()).pathname))
+          .map(request => `${request.method()} ${new URL(request.url()).pathname}`)
+          .sort(),
+        {
+          timeout: 15_000,
+          message: "application requests should finish before the test intentionally reloads the page",
+        },
+      ).toEqual([]);
+    };
     const openEditor = async () => {
       await expect(page.getByTestId("operational-state-badge")).toHaveText(
         "Confirmed server baseline",
@@ -1303,6 +1321,7 @@ test.describe("accessibility smoke", () => {
     const saved = page.waitForResponse((response) => response.url().includes("/api/sync/today") && response.request().method() === "PUT");
     await saveButton.click();
     expect((await saved).ok()).toBe(true);
+    await waitForReloadSensitiveRequests();
     requestPhase = "persistence reload";
     markNavigation();
     await page.reload({ waitUntil: "load" });
@@ -1406,6 +1425,7 @@ test.describe("accessibility smoke", () => {
       await expect(runCompleteSwitch).not.toBeChecked();
 
       await page.keyboard.press("Escape");
+      await waitForReloadSensitiveRequests();
       requestPhase = "persistence reload";
       markNavigation();
       await page.reload({ waitUntil: "domcontentloaded" });

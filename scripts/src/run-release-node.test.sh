@@ -42,8 +42,8 @@ cleanup_test_root() {
 }
 trap cleanup_test_root EXIT
 
-REQUIRED_NODE_VERSION="24.20.0"
-REQUIRED_PNPM_VERSION="12.8.1"
+REQUIRED_NODE_VERSION="24.22.2"
+REQUIRED_PNPM_VERSION="12.21.0"
 
 assert_contains() {
   local haystack="$1"

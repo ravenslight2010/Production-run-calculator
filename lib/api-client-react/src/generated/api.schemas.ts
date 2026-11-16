@@ -78,7 +78,7 @@ export interface MasterDataApplyRequest {
   expectedStateHash: string;
 }
 
-export interface MasterDataUndoRequest { [key: string]: unknown }
+export interface MasterDataUndoRequest { [key: string]: never }
 
 export interface MasterDataOperationPreview {
   /** @pattern ^[a-f0-9]{64}$ */

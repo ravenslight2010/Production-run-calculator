@@ -401,6 +401,26 @@ import type { ErrorType , BodyType } from '../custom-fetch';
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
+const getHeaders = (...sources: (RequestInit['headers'] | Record<string, string | undefined>)[]) => {
+  const seen = new Set<string>();
+  const layers: [string, string | readonly string[]][][] = [];
+  for (const source of sources.reverse()) {
+    if (!source) continue;
+    const entries = source instanceof Headers
+      ? source.entries()
+      : Symbol.iterator in source
+        ? Array.from(source as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string])
+        : Object.entries<string | readonly string[] | undefined>(source);
+    const layer: [string, string | readonly string[]][] = [];
+    for (const [name, value] of entries) {
+      if (value !== undefined && !seen.has(name.toLowerCase())) layer.push([name, value]);
+    }
+    for (const [name] of layer) seen.add(name.toLowerCase());
+    layers.push(layer);
+  }
+  return Object.fromEntries(layers.reverse().flat()) as Extract<RequestInit['headers'], Record<string, unknown>>;
+};
+
 
 const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKey: K } => {
   const result = { queryKey } as T & { queryKey: K };
@@ -472,6 +492,7 @@ export type GetFactorySettingsDataQueryResult = NonNullable<Awaited<ReturnType<t
 export type GetFactorySettingsDataQueryError = ErrorType<MasterDataUnauthorizedResponse | MasterDataForbiddenResponse>
 
 
+/** @summary Read manager-authorized factory settings */
 export function useGetFactorySettingsData<TData = Awaited<ReturnType<typeof getFactorySettingsData>>, TError = ErrorType<MasterDataUnauthorizedResponse | MasterDataForbiddenResponse>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFactorySettingsData>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -482,6 +503,7 @@ export function useGetFactorySettingsData<TData = Awaited<ReturnType<typeof getF
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read manager-authorized factory settings */
 export function useGetFactorySettingsData<TData = Awaited<ReturnType<typeof getFactorySettingsData>>, TError = ErrorType<MasterDataUnauthorizedResponse | MasterDataForbiddenResponse>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFactorySettingsData>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -492,14 +514,12 @@ export function useGetFactorySettingsData<TData = Awaited<ReturnType<typeof getF
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read manager-authorized factory settings */
 export function useGetFactorySettingsData<TData = Awaited<ReturnType<typeof getFactorySettingsData>>, TError = ErrorType<MasterDataUnauthorizedResponse | MasterDataForbiddenResponse>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFactorySettingsData>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read manager-authorized factory settings
- */
-
+/** @summary Read manager-authorized factory settings */
 export function useGetFactorySettingsData<TData = Awaited<ReturnType<typeof getFactorySettingsData>>, TError = ErrorType<MasterDataUnauthorizedResponse | MasterDataForbiddenResponse>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFactorySettingsData>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -532,25 +552,11 @@ export const getPutFactorySettingsDataUrl = () => {
  */
 export const putFactorySettingsData = async (factoryDirectoryWriteRequest: FactoryDirectoryWriteRequest, options?: Parameters<typeof customFetch>[1]): Promise<FactoryDirectoryValue> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FactoryDirectoryValue>(getPutFactorySettingsDataUrl(),
+  return customFetch<FactoryDirectoryValue>(getPutFactorySettingsDataUrl(),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(factoryDirectoryWriteRequest)
   }
 );}
@@ -594,6 +600,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PutFactorySettingsDataMutationVariables = {data: BodyType<FactoryDirectoryWriteRequest>}
 
     /**
+ * This existing settings protocol is not generic Undo evidence. After the first guarded operation, a missing or stale original epoch is rejected atomically.
  * @summary Write one authorized factory setting
  */
 export const usePutFactorySettingsData = <TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataConflictResponse | MasterDataUnavailableResponse>,
@@ -670,6 +677,10 @@ export type GetMasterDataOperationsQueryResult = NonNullable<Awaited<ReturnType<
 export type GetMasterDataOperationsQueryError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataUnavailableResponse>
 
 
+/**
+ * Metadata only; never browser snapshots. Import and profile-repair Undo remain owned by their domain protocols.
+ * @summary Bounded manager-only shared change history in the authenticated scope
+ */
 export function useGetMasterDataOperations<TData = Awaited<ReturnType<typeof getMasterDataOperations>>, TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataUnavailableResponse>>(
  params: undefined |  GetMasterDataOperationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMasterDataOperations>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -680,6 +691,10 @@ export function useGetMasterDataOperations<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Metadata only; never browser snapshots. Import and profile-repair Undo remain owned by their domain protocols.
+ * @summary Bounded manager-only shared change history in the authenticated scope
+ */
 export function useGetMasterDataOperations<TData = Awaited<ReturnType<typeof getMasterDataOperations>>, TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataUnavailableResponse>>(
  params?: GetMasterDataOperationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMasterDataOperations>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -690,14 +705,18 @@ export function useGetMasterDataOperations<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Metadata only; never browser snapshots. Import and profile-repair Undo remain owned by their domain protocols.
+ * @summary Bounded manager-only shared change history in the authenticated scope
+ */
 export function useGetMasterDataOperations<TData = Awaited<ReturnType<typeof getMasterDataOperations>>, TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataUnavailableResponse>>(
  params?: GetMasterDataOperationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMasterDataOperations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Metadata only; never browser snapshots. Import and profile-repair Undo remain owned by their domain protocols.
  * @summary Bounded manager-only shared change history in the authenticated scope
  */
-
 export function useGetMasterDataOperations<TData = Awaited<ReturnType<typeof getMasterDataOperations>>, TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataUnavailableResponse>>(
  params?: GetMasterDataOperationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMasterDataOperations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -730,25 +749,11 @@ export const getPreviewMasterDataOperationUrl = (operationId: string,) => {
 export const previewMasterDataOperation = async (operationId: string,
     masterDataCommand: MasterDataCommand, options?: Parameters<typeof customFetch>[1]): Promise<MasterDataOperationPreview> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MasterDataOperationPreview>(getPreviewMasterDataOperationUrl(operationId),
+  return customFetch<MasterDataOperationPreview>(getPreviewMasterDataOperationUrl(operationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(masterDataCommand)
   }
 );}
@@ -791,9 +796,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PreviewMasterDataOperationMutationError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataUnavailableResponse>
     export type PreviewMasterDataOperationMutationVariables = {operationId: string;data: BodyType<MasterDataCommand>}
 
-    /**
- * @summary Build a canonical typed command preview, without mutating records
- */
+    /** @summary Build a canonical typed command preview, without mutating records */
 export const usePreviewMasterDataOperation = <TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewMasterDataOperation>>, TError,PreviewMasterDataOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -820,25 +823,11 @@ export const getApplyMasterDataOperationUrl = (operationId: string,) => {
 export const applyMasterDataOperation = async (operationId: string,
     masterDataApplyRequest: MasterDataApplyRequest, options?: Parameters<typeof customFetch>[1]): Promise<MasterDataOperationReceipt> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MasterDataOperationReceipt>(getApplyMasterDataOperationUrl(operationId),
+  return customFetch<MasterDataOperationReceipt>(getApplyMasterDataOperationUrl(operationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(masterDataApplyRequest)
   }
 );}
@@ -882,6 +871,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ApplyMasterDataOperationMutationVariables = {operationId: string;data: BodyType<MasterDataApplyRequest>}
 
     /**
+ * Reusing the same operation ID and command by its actor returns the canonical result, including an already-undone result. No caller-supplied row evidence is accepted.
  * @summary Atomically commit typed canonical mutations and their bounded Undo evidence
  */
 export const useApplyMasterDataOperation = <TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataConflictResponse | MasterDataUnavailableResponse>,
@@ -910,25 +900,11 @@ export const getUndoMasterDataOperationUrl = (operationId: string,) => {
 export const undoMasterDataOperation = async (operationId: string,
     masterDataUndoRequest: MasterDataUndoRequest, options?: Parameters<typeof customFetch>[1]): Promise<MasterDataOperationReceipt> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MasterDataOperationReceipt>(getUndoMasterDataOperationUrl(operationId),
+  return customFetch<MasterDataOperationReceipt>(getUndoMasterDataOperationUrl(operationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(masterDataUndoRequest)
   }
 );}
@@ -972,6 +948,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UndoMasterDataOperationMutationVariables = {operationId: string;data: BodyType<MasterDataUndoRequest>}
 
     /**
+ * Rechecks live/sandbox scope, current role, every affected canonical fingerprint and dependency. Started/finished runs, history, inventory, auth and operational queues are never restored.
  * @summary Idempotent, manager-authorized, all-or-nothing guarded compensation
  */
 export const useUndoMasterDataOperation = <TError = ErrorType<MasterDataBadRequestResponse | MasterDataUnauthorizedResponse | MasterDataForbiddenResponse | MasterDataConflictResponse | MasterDataUnavailableResponse>,
@@ -1040,6 +1017,7 @@ export type GetQcImportReviewBadgesQueryResult = NonNullable<Awaited<ReturnType<
 export type GetQcImportReviewBadgesQueryError = ErrorType<void>
 
 
+/** @summary Minimal unverified and rejected counts within the authenticated scope */
 export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1050,6 +1028,7 @@ export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Minimal unverified and rejected counts within the authenticated scope */
 export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1060,14 +1039,12 @@ export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Minimal unverified and rejected counts within the authenticated scope */
 export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Minimal unverified and rejected counts within the authenticated scope
- */
-
+/** @summary Minimal unverified and rejected counts within the authenticated scope */
 export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1148,6 +1125,7 @@ export type ListQcImportReviewsQueryResult = NonNullable<Awaited<ReturnType<type
 export type ListQcImportReviewsQueryError = ErrorType<void>
 
 
+/** @summary Bounded manage-qc import review queue */
 export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
  params: undefined |  ListQcImportReviewsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1158,6 +1136,7 @@ export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcI
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Bounded manage-qc import review queue */
 export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
  params?: ListQcImportReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1168,14 +1147,12 @@ export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcI
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Bounded manage-qc import review queue */
 export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
  params?: ListQcImportReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Bounded manage-qc import review queue
- */
-
+/** @summary Bounded manage-qc import review queue */
 export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
  params?: ListQcImportReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1249,6 +1226,7 @@ export type GetQcImportReviewQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type GetQcImportReviewQueryError = ErrorType<void>
 
 
+/** @summary Bounded retained committed-result summary and decision history */
 export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
  operationId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1259,6 +1237,7 @@ export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImpo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Bounded retained committed-result summary and decision history */
 export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
  operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1269,14 +1248,12 @@ export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImpo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Bounded retained committed-result summary and decision history */
 export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
  operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Bounded retained committed-result summary and decision history
- */
-
+/** @summary Bounded retained committed-result summary and decision history */
 export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
  operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1310,25 +1287,11 @@ export const getDecideQcImportReviewUrl = (operationId: string,) => {
 export const decideQcImportReview = async (operationId: string,
     qcImportReviewDecisionInput: QcImportReviewDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcImportReviewDecisionResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcImportReviewDecisionResult>(getDecideQcImportReviewUrl(operationId),
+  return customFetch<QcImportReviewDecisionResult>(getDecideQcImportReviewUrl(operationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcImportReviewDecisionInput)
   }
 );}
@@ -1372,6 +1335,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DecideQcImportReviewMutationVariables = {operationId: string;data: BodyType<QcImportReviewDecisionInput>}
 
     /**
+ * Requires manage-qc. Never applies, replays or undoes an import. Exact retries return the original receipt; stale result or revision conflicts.
  * @summary Append an advisory decision for the exact committed result
  */
 export const useDecideQcImportReview = <TError = ErrorType<void | DecideQcImportReview409>,
@@ -1448,6 +1412,10 @@ export type ListQcRecipeReviewStatusesQueryResult = NonNullable<Awaited<ReturnTy
 export type ListQcRecipeReviewStatusesQueryError = ErrorType<void>
 
 
+/**
+ * Requires record-qc or manage-qc. Returns current facility recipes and only their advisory status. Legacy or unmatched revisions remain unreviewed; this read does not expose actors, rationale, summaries, or hashes.
+ * @summary Read current recipe review status without manager audit detail
+ */
 export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
  params: undefined |  ListQcRecipeReviewStatusesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1458,6 +1426,10 @@ export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires record-qc or manage-qc. Returns current facility recipes and only their advisory status. Legacy or unmatched revisions remain unreviewed; this read does not expose actors, rationale, summaries, or hashes.
+ * @summary Read current recipe review status without manager audit detail
+ */
 export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
  params?: ListQcRecipeReviewStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1468,14 +1440,18 @@ export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires record-qc or manage-qc. Returns current facility recipes and only their advisory status. Legacy or unmatched revisions remain unreviewed; this read does not expose actors, rationale, summaries, or hashes.
+ * @summary Read current recipe review status without manager audit detail
+ */
 export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
  params?: ListQcRecipeReviewStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Requires record-qc or manage-qc. Returns current facility recipes and only their advisory status. Legacy or unmatched revisions remain unreviewed; this read does not expose actors, rationale, summaries, or hashes.
  * @summary Read current recipe review status without manager audit detail
  */
-
 export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
  params?: ListQcRecipeReviewStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1557,6 +1533,10 @@ export type ListQcRecipeReviewsQueryResult = NonNullable<Awaited<ReturnType<type
 export type ListQcRecipeReviewsQueryError = ErrorType<void>
 
 
+/**
+ * Requires manage-qc. The review is advisory: recipe edits are already applied, and a decision never activates, reverts, or blocks a recipe.
+ * @summary List exact shared-recipe revisions for manager review
+ */
 export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
  params: undefined |  ListQcRecipeReviewsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1567,6 +1547,10 @@ export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcR
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires manage-qc. The review is advisory: recipe edits are already applied, and a decision never activates, reverts, or blocks a recipe.
+ * @summary List exact shared-recipe revisions for manager review
+ */
 export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
  params?: ListQcRecipeReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1577,14 +1561,18 @@ export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcR
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires manage-qc. The review is advisory: recipe edits are already applied, and a decision never activates, reverts, or blocks a recipe.
+ * @summary List exact shared-recipe revisions for manager review
+ */
 export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
  params?: ListQcRecipeReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Requires manage-qc. The review is advisory: recipe edits are already applied, and a decision never activates, reverts, or blocks a recipe.
  * @summary List exact shared-recipe revisions for manager review
  */
-
 export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
  params?: ListQcRecipeReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1658,6 +1646,7 @@ export type GetQcRecipeReviewQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type GetQcRecipeReviewQueryError = ErrorType<void>
 
 
+/** @summary Read a retained recipe revision and its append-only decisions */
 export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
  captureId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1668,6 +1657,7 @@ export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcReci
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read a retained recipe revision and its append-only decisions */
 export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
  captureId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1678,14 +1668,12 @@ export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcReci
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read a retained recipe revision and its append-only decisions */
 export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
  captureId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read a retained recipe revision and its append-only decisions
- */
-
+/** @summary Read a retained recipe revision and its append-only decisions */
 export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
  captureId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1719,25 +1707,11 @@ export const getDecideQcRecipeReviewUrl = (captureId: number,) => {
 export const decideQcRecipeReview = async (captureId: number,
     qcRecipeReviewDecisionInput: QcRecipeReviewDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcRecipeReviewDecisionResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcRecipeReviewDecisionResult>(getDecideQcRecipeReviewUrl(captureId),
+  return customFetch<QcRecipeReviewDecisionResult>(getDecideQcRecipeReviewUrl(captureId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcRecipeReviewDecisionInput)
   }
 );}
@@ -1781,6 +1755,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DecideQcRecipeReviewMutationVariables = {captureId: number;data: BodyType<QcRecipeReviewDecisionInput>}
 
     /**
+ * Requires manage-qc. Rejections never undo or modify an applied recipe. Stale revisions conflict.
  * @summary Append an advisory decision on an exact recipe hash
  */
 export const useDecideQcRecipeReview = <TError = ErrorType<void>,
@@ -1850,6 +1825,10 @@ export type GetBuildInfoQueryResult = NonNullable<Awaited<ReturnType<typeof getB
 export type GetBuildInfoQueryError = ErrorType<GetBuildInfo503>
 
 
+/**
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
+ * @summary Immutable application build version
+ */
 export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1860,6 +1839,10 @@ export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
+ * @summary Immutable application build version
+ */
 export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1870,14 +1853,18 @@ export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
+ * @summary Immutable application build version
+ */
 export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
  * @summary Immutable application build version
  */
-
 export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1952,6 +1939,10 @@ export type HealthCheckQueryResult = NonNullable<Awaited<ReturnType<typeof healt
 export type HealthCheckQueryError = ErrorType<PublicHealthStatus>
 
 
+/**
+ * Returns only coarse gate statuses, never operational diagnostics. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Public compatibility readiness probe
+ */
 export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1962,6 +1953,10 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns only coarse gate statuses, never operational diagnostics. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Public compatibility readiness probe
+ */
 export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1972,14 +1967,18 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns only coarse gate statuses, never operational diagnostics. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Public compatibility readiness probe
+ */
 export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns only coarse gate statuses, never operational diagnostics. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
  * @summary Public compatibility readiness probe
  */
-
 export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -2054,6 +2053,10 @@ export type ReadinessCheckQueryResult = NonNullable<Awaited<ReturnType<typeof re
 export type ReadinessCheckQueryError = ErrorType<PublicHealthStatus>
 
 
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Only coarse gate statuses are public. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Core API readiness
+ */
 export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -2064,6 +2067,10 @@ export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessChe
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Only coarse gate statuses are public. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Core API readiness
+ */
 export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -2074,14 +2081,18 @@ export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessChe
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Only coarse gate statuses are public. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Core API readiness
+ */
 export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Only coarse gate statuses are public. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
  * @summary Core API readiness
  */
-
 export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -2156,6 +2167,10 @@ export type GetHealthDiagnosticsQueryResult = NonNullable<Awaited<ReturnType<typ
 export type GetHealthDiagnosticsQueryError = ErrorType<void | HealthStatus>
 
 
+/**
+ * Requires an authenticated live-scope session with manage-staff. Available during startup. Returns bounded operational diagnostics, configuration signals (not provider reachability), and startup state. Optional diagnostic sampling failures are warnings, not core outages. A 200 response does not mean every optional worker is healthy. Queue samples and duplicate trends are read-only and never authorize cleanup.
+ * @summary Manager operational readiness diagnostics
+ */
 export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -2166,6 +2181,10 @@ export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHea
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires an authenticated live-scope session with manage-staff. Available during startup. Returns bounded operational diagnostics, configuration signals (not provider reachability), and startup state. Optional diagnostic sampling failures are warnings, not core outages. A 200 response does not mean every optional worker is healthy. Queue samples and duplicate trends are read-only and never authorize cleanup.
+ * @summary Manager operational readiness diagnostics
+ */
 export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -2176,14 +2195,18 @@ export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHea
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires an authenticated live-scope session with manage-staff. Available during startup. Returns bounded operational diagnostics, configuration signals (not provider reachability), and startup state. Optional diagnostic sampling failures are warnings, not core outages. A 200 response does not mean every optional worker is healthy. Queue samples and duplicate trends are read-only and never authorize cleanup.
+ * @summary Manager operational readiness diagnostics
+ */
 export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Requires an authenticated live-scope session with manage-staff. Available during startup. Returns bounded operational diagnostics, configuration signals (not provider reachability), and startup state. Optional diagnostic sampling failures are warnings, not core outages. A 200 response does not mean every optional worker is healthy. Queue samples and duplicate trends are read-only and never authorize cleanup.
  * @summary Manager operational readiness diagnostics
  */
-
 export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -2216,25 +2239,11 @@ export const getSignUpUrl = () => {
  */
 export const signUp = async (signUpCredentials: SignUpCredentials, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<AuthResponse>(getSignUpUrl(),
+  return customFetch<AuthResponse>(getSignUpUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(signUpCredentials)
   }
 );}
@@ -2278,6 +2287,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SignUpMutationVariables = {data: BodyType<SignUpCredentials>}
 
     /**
+ * Creates a new username + password account. Requires a facility access code (configured server-side out of band and shared only with legitimate staff) — sign-up is otherwise closed to the public internet. The very first account ever created becomes a manager; all later accounts default to operator.
  * @summary Create a staff account and start a session
  */
 export const useSignUp = <TError = ErrorType<void>,
@@ -2304,25 +2314,11 @@ export const getAcceptStaffInvitationUrl = () => {
  */
 export const acceptStaffInvitation = async (invitationAcceptance: InvitationAcceptance, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<AuthResponse>(getAcceptStaffInvitationUrl(),
+  return customFetch<AuthResponse>(getAcceptStaffInvitationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(invitationAcceptance)
   }
 );}
@@ -2365,9 +2361,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AcceptStaffInvitationMutationError = ErrorType<void>
     export type AcceptStaffInvitationMutationVariables = {data: BodyType<InvitationAcceptance>}
 
-    /**
- * @summary Accept a one-time staff invitation
- */
+    /** @summary Accept a one-time staff invitation */
 export const useAcceptStaffInvitation = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptStaffInvitation>>, TError,AcceptStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -2442,6 +2436,10 @@ export type CheckUsernameAvailableQueryResult = NonNullable<Awaited<ReturnType<t
 export type CheckUsernameAvailableQueryError = ErrorType<void>
 
 
+/**
+ * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
+ * @summary Check whether a username is available for sign-up
+ */
 export function useCheckUsernameAvailable<TData = Awaited<ReturnType<typeof checkUsernameAvailable>>, TError = ErrorType<void>>(
  params: CheckUsernameAvailableParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkUsernameAvailable>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -2452,6 +2450,10 @@ export function useCheckUsernameAvailable<TData = Awaited<ReturnType<typeof chec
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
+ * @summary Check whether a username is available for sign-up
+ */
 export function useCheckUsernameAvailable<TData = Awaited<ReturnType<typeof checkUsernameAvailable>>, TError = ErrorType<void>>(
  params: CheckUsernameAvailableParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkUsernameAvailable>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -2462,14 +2464,18 @@ export function useCheckUsernameAvailable<TData = Awaited<ReturnType<typeof chec
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
+ * @summary Check whether a username is available for sign-up
+ */
 export function useCheckUsernameAvailable<TData = Awaited<ReturnType<typeof checkUsernameAvailable>>, TError = ErrorType<void>>(
  params: CheckUsernameAvailableParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkUsernameAvailable>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
  * @summary Check whether a username is available for sign-up
  */
-
 export function useCheckUsernameAvailable<TData = Awaited<ReturnType<typeof checkUsernameAvailable>>, TError = ErrorType<void>>(
  params: CheckUsernameAvailableParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof checkUsernameAvailable>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -2501,25 +2507,11 @@ export const getSignInUrl = () => {
  */
 export const signIn = async (authCredentials: AuthCredentials, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<AuthResponse>(getSignInUrl(),
+  return customFetch<AuthResponse>(getSignInUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(authCredentials)
   }
 );}
@@ -2562,9 +2554,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SignInMutationError = ErrorType<void>
     export type SignInMutationVariables = {data: BodyType<AuthCredentials>}
 
-    /**
- * @summary Sign in with username and password
- */
+    /** @summary Sign in with username and password */
 export const useSignIn = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signIn>>, TError,SignInMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -2636,9 +2626,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SignOutMutationError = ErrorType<unknown>
 
 
-    /**
- * @summary Sign out (clears the session cookie)
- */
+    /** @summary Sign out (clears the session cookie) */
 export const useSignOut = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signOut>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -2664,25 +2652,11 @@ export const getChangePasswordUrl = () => {
  */
 export const changePassword = async (changePasswordCredentials: ChangePasswordCredentials, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<AuthResponse>(getChangePasswordUrl(),
+  return customFetch<AuthResponse>(getChangePasswordUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(changePasswordCredentials)
   }
 );}
@@ -2726,6 +2700,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ChangePasswordMutationVariables = {data: BodyType<ChangePasswordCredentials>}
 
     /**
+ * Updates the signed-in user's password. The current password must be provided and is verified before the stored scrypt hash is replaced. Changing the password invalidates every previously-issued session token (including the one used for this request), so a fresh token is returned and must replace the caller's stored session.
  * @summary Change the signed-in user's password
  */
 export const useChangePassword = <TError = ErrorType<void>,
@@ -2753,25 +2728,11 @@ export const getForgotPasswordUrl = () => {
  */
 export const forgotPassword = async (forgotPasswordRequest: ForgotPasswordRequest, options?: Parameters<typeof customFetch>[1]): Promise<OkResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<OkResponse>(getForgotPasswordUrl(),
+  return customFetch<OkResponse>(getForgotPasswordUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(forgotPasswordRequest)
   }
 );}
@@ -2815,6 +2776,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ForgotPasswordMutationVariables = {data: BodyType<ForgotPasswordRequest>}
 
     /**
+ * A signed-out user requests recovery for a forgotten password. Always responds 200 regardless of whether the username exists, so the endpoint never reveals which accounts are real. When the account exists a pending reset request is recorded for a manager to approve.
  * @summary Request a manager-approved password reset
  */
 export const useForgotPassword = <TError = ErrorType<void>,
@@ -2842,25 +2804,11 @@ export const getResetPasswordUrl = () => {
  */
 export const resetPassword = async (resetPasswordRequest: ResetPasswordRequest, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<void>(getResetPasswordUrl(),
+  return customFetch<void>(getResetPasswordUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(resetPasswordRequest)
   }
 );}
@@ -2904,6 +2852,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ResetPasswordMutationVariables = {data: BodyType<ResetPasswordRequest>}
 
     /**
+ * Verifies the single-use, short-lived code a manager issued for the account and, if valid and unexpired, replaces the password. The code is consumed on success so it can never be reused.
  * @summary Complete a password reset using a manager-issued code
  */
 export const useResetPassword = <TError = ErrorType<void>,
@@ -2973,6 +2922,10 @@ export type ListPasswordResetRequestsQueryResult = NonNullable<Awaited<ReturnTyp
 export type ListPasswordResetRequestsQueryError = ErrorType<void>
 
 
+/**
+ * Returns the staff members currently waiting for a manager to approve a forgotten-password reset.
+ * @summary List pending password reset requests (manager only)
+ */
 export function useListPasswordResetRequests<TData = Awaited<ReturnType<typeof listPasswordResetRequests>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPasswordResetRequests>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -2983,6 +2936,10 @@ export function useListPasswordResetRequests<TData = Awaited<ReturnType<typeof l
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the staff members currently waiting for a manager to approve a forgotten-password reset.
+ * @summary List pending password reset requests (manager only)
+ */
 export function useListPasswordResetRequests<TData = Awaited<ReturnType<typeof listPasswordResetRequests>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPasswordResetRequests>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -2993,14 +2950,18 @@ export function useListPasswordResetRequests<TData = Awaited<ReturnType<typeof l
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the staff members currently waiting for a manager to approve a forgotten-password reset.
+ * @summary List pending password reset requests (manager only)
+ */
 export function useListPasswordResetRequests<TData = Awaited<ReturnType<typeof listPasswordResetRequests>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPasswordResetRequests>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns the staff members currently waiting for a manager to approve a forgotten-password reset.
  * @summary List pending password reset requests (manager only)
  */
-
 export function useListPasswordResetRequests<TData = Awaited<ReturnType<typeof listPasswordResetRequests>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPasswordResetRequests>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -3081,6 +3042,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ApprovePasswordResetMutationVariables = {id: string}
 
     /**
+ * Approves a pending reset request and returns a short-lived single-use code shown to the manager exactly once. The manager relays it to the locked-out staff member, who uses it with /auth/reset-password.
  * @summary Approve a password reset and mint a relay code (manager only)
  */
 export const useApprovePasswordReset = <TError = ErrorType<void>,
@@ -3156,6 +3118,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeclinePasswordResetMutationVariables = {id: string}
 
     /**
+ * Declines a pending reset request, removing it from the pending list without issuing a code. Useful for rejecting a suspicious or mistaken request.
  * @summary Decline a pending password reset request (manager only)
  */
 export const useDeclinePasswordReset = <TError = ErrorType<void>,
@@ -3224,6 +3187,7 @@ export type ListRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listRuns
 export type ListRunsQueryError = ErrorType<unknown>
 
 
+/** @summary List saved production runs */
 export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRuns>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -3234,6 +3198,7 @@ export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List saved production runs */
 export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRuns>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -3244,14 +3209,12 @@ export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List saved production runs */
 export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRuns>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List saved production runs
- */
-
+/** @summary List saved production runs */
 export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRuns>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -3283,25 +3246,11 @@ export const getCreateRunUrl = () => {
  */
 export const createRun = async (productionRunInput: ProductionRunInput, options?: Parameters<typeof customFetch>[1]): Promise<ProductionRun> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ProductionRun>(getCreateRunUrl(),
+  return customFetch<ProductionRun>(getCreateRunUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(productionRunInput)
   }
 );}
@@ -3344,9 +3293,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateRunMutationError = ErrorType<void>
     export type CreateRunMutationVariables = {data: BodyType<ProductionRunInput>}
 
-    /**
- * @summary Save a production run
- */
+    /** @summary Save a production run */
 export const useCreateRun = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRun>>, TError,CreateRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -3418,9 +3365,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteRunMutationError = ErrorType<void>
     export type DeleteRunMutationVariables = {id: number}
 
-    /**
- * @summary Delete a saved run
- */
+    /** @summary Delete a saved run */
 export const useDeleteRun = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRun>>, TError,DeleteRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -3487,6 +3432,7 @@ export type ListInventoryQueryResult = NonNullable<Awaited<ReturnType<typeof lis
 export type ListInventoryQueryError = ErrorType<unknown>
 
 
+/** @summary List inventory items with lots and on-hand */
 export function useListInventory<TData = Awaited<ReturnType<typeof listInventory>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventory>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -3497,6 +3443,7 @@ export function useListInventory<TData = Awaited<ReturnType<typeof listInventory
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List inventory items with lots and on-hand */
 export function useListInventory<TData = Awaited<ReturnType<typeof listInventory>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventory>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -3507,14 +3454,12 @@ export function useListInventory<TData = Awaited<ReturnType<typeof listInventory
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List inventory items with lots and on-hand */
 export function useListInventory<TData = Awaited<ReturnType<typeof listInventory>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List inventory items with lots and on-hand
- */
-
+/** @summary List inventory items with lots and on-hand */
 export function useListInventory<TData = Awaited<ReturnType<typeof listInventory>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -3546,25 +3491,11 @@ export const getCreateInventoryItemUrl = () => {
  */
 export const createInventoryItem = async (createInventoryItemInput: CreateInventoryItemInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryItem> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryItem>(getCreateInventoryItemUrl(),
+  return customFetch<InventoryItem>(getCreateInventoryItemUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(createInventoryItemInput)
   }
 );}
@@ -3607,9 +3538,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateInventoryItemMutationError = ErrorType<void>
     export type CreateInventoryItemMutationVariables = {data: BodyType<CreateInventoryItemInput>}
 
-    /**
- * @summary Create an inventory item
- */
+    /** @summary Create an inventory item */
 export const useCreateInventoryItem = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInventoryItem>>, TError,CreateInventoryItemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -3635,25 +3564,11 @@ export const getUpdateInventoryItemUrl = (id: number,) => {
 export const updateInventoryItem = async (id: number,
     updateInventoryItemInput: UpdateInventoryItemInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryItem> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryItem>(getUpdateInventoryItemUrl(id),
+  return customFetch<InventoryItem>(getUpdateInventoryItemUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(updateInventoryItemInput)
   }
 );}
@@ -3696,9 +3611,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateInventoryItemMutationError = ErrorType<void>
     export type UpdateInventoryItemMutationVariables = {id: number;data: BodyType<UpdateInventoryItemInput>}
 
-    /**
- * @summary Update an inventory item (name, reorder threshold)
- */
+    /** @summary Update an inventory item (name, reorder threshold) */
 export const useUpdateInventoryItem = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateInventoryItem>>, TError,UpdateInventoryItemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -3770,9 +3683,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteInventoryItemMutationError = ErrorType<void>
     export type DeleteInventoryItemMutationVariables = {id: number}
 
-    /**
- * @summary Delete an inventory item
- */
+    /** @summary Delete an inventory item */
 export const useDeleteInventoryItem = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryItem>>, TError,DeleteInventoryItemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -3798,25 +3709,11 @@ export const getLinkInventoryProductUrl = (id: number,) => {
 export const linkInventoryProduct = async (id: number,
     inventoryProductLinkInput: InventoryProductLinkInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryItem> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryItem>(getLinkInventoryProductUrl(id),
+  return customFetch<InventoryItem>(getLinkInventoryProductUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(inventoryProductLinkInput)
   }
 );}
@@ -3859,9 +3756,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type LinkInventoryProductMutationError = ErrorType<void>
     export type LinkInventoryProductMutationVariables = {id: number;data: BodyType<InventoryProductLinkInput>}
 
-    /**
- * @summary Link a warehouse product to a production ingredient
- */
+    /** @summary Link a warehouse product to a production ingredient */
 export const useLinkInventoryProduct = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof linkInventoryProduct>>, TError,LinkInventoryProductMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -3886,25 +3781,11 @@ export const getRestockInventoryUrl = () => {
  */
 export const restockInventory = async (restockInput: RestockInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryItem> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryItem>(getRestockInventoryUrl(),
+  return customFetch<InventoryItem>(getRestockInventoryUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(restockInput)
   }
 );}
@@ -3947,9 +3828,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RestockInventoryMutationError = ErrorType<void>
     export type RestockInventoryMutationVariables = {data: BodyType<RestockInput>}
 
-    /**
- * @summary Add a received lot (creates the item if missing)
- */
+    /** @summary Add a received lot (creates the item if missing) */
 export const useRestockInventory = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restockInventory>>, TError,RestockInventoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -3974,25 +3853,11 @@ export const getAdjustInventoryUrl = () => {
  */
 export const adjustInventory = async (adjustInput: AdjustInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryItem> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryItem>(getAdjustInventoryUrl(),
+  return customFetch<InventoryItem>(getAdjustInventoryUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(adjustInput)
   }
 );}
@@ -4035,9 +3900,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AdjustInventoryMutationError = ErrorType<void>
     export type AdjustInventoryMutationVariables = {data: BodyType<AdjustInput>}
 
-    /**
- * @summary Manually adjust on-hand quantity (delta-based)
- */
+    /** @summary Manually adjust on-hand quantity (delta-based) */
 export const useAdjustInventory = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustInventory>>, TError,AdjustInventoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -4062,25 +3925,11 @@ export const getConsumeInventoryUrl = () => {
  */
 export const consumeInventory = async (consumeInput: ConsumeInput, options?: Parameters<typeof customFetch>[1]): Promise<ConsumeResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ConsumeResult>(getConsumeInventoryUrl(),
+  return customFetch<ConsumeResult>(getConsumeInventoryUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(consumeInput)
   }
 );}
@@ -4123,9 +3972,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConsumeInventoryMutationError = ErrorType<void>
     export type ConsumeInventoryMutationVariables = {data: BodyType<ConsumeInput>}
 
-    /**
- * @summary Deduct stock for a completed run (idempotent by runId)
- */
+    /** @summary Deduct stock for a completed run (idempotent by runId) */
 export const useConsumeInventory = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventory>>, TError,ConsumeInventoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -4151,25 +3998,11 @@ export const getConsumeInventoryDayStartUrl = () => {
  */
 export const consumeInventoryDayStart = async (consumeInventoryDayStartInput?: ConsumeInventoryDayStartInput, options?: Parameters<typeof customFetch>[1]): Promise<ConsumeInventoryDayStart200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ConsumeInventoryDayStart200>(getConsumeInventoryDayStartUrl(),
+  return customFetch<ConsumeInventoryDayStart200>(getConsumeInventoryDayStartUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(consumeInventoryDayStartInput)
   }
 );}
@@ -4213,6 +4046,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConsumeInventoryDayStartMutationVariables = {data?: BodyType<ConsumeInventoryDayStartInput>}
 
     /**
+ * Idempotent by production date; retries of the same date have no physical effect. Ambiguous prepared-mix source units reject the full transaction.
  * @summary Deduct the scheduled day's mix components and daily supplies
  */
 export const useConsumeInventoryDayStart = <TError = ErrorType<void | ConsumeInventoryDayStart409>,
@@ -4239,25 +4073,11 @@ export const getMergeInventoryUrl = () => {
  */
 export const mergeInventory = async (mergeInventoryInput: MergeInventoryInput, options?: Parameters<typeof customFetch>[1]): Promise<MergeInventoryResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MergeInventoryResult>(getMergeInventoryUrl(),
+  return customFetch<MergeInventoryResult>(getMergeInventoryUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(mergeInventoryInput)
   }
 );}
@@ -4300,9 +4120,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type MergeInventoryMutationError = ErrorType<void>
     export type MergeInventoryMutationVariables = {data: BodyType<MergeInventoryInput>}
 
-    /**
- * @summary Fold one or more source items' stock into a target item
- */
+    /** @summary Fold one or more source items' stock into a target item */
 export const useMergeInventory = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mergeInventory>>, TError,MergeInventoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -4369,6 +4187,7 @@ export type ListInventoryLocationsQueryResult = NonNullable<Awaited<ReturnType<t
 export type ListInventoryLocationsQueryError = ErrorType<unknown>
 
 
+/** @summary List stock locations (onsite first) */
 export function useListInventoryLocations<TData = Awaited<ReturnType<typeof listInventoryLocations>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLocations>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -4379,6 +4198,7 @@ export function useListInventoryLocations<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List stock locations (onsite first) */
 export function useListInventoryLocations<TData = Awaited<ReturnType<typeof listInventoryLocations>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLocations>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -4389,14 +4209,12 @@ export function useListInventoryLocations<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List stock locations (onsite first) */
 export function useListInventoryLocations<TData = Awaited<ReturnType<typeof listInventoryLocations>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLocations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List stock locations (onsite first)
- */
-
+/** @summary List stock locations (onsite first) */
 export function useListInventoryLocations<TData = Awaited<ReturnType<typeof listInventoryLocations>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLocations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -4428,25 +4246,11 @@ export const getCreateInventoryLocationUrl = () => {
  */
 export const createInventoryLocation = async (createInventoryLocationInput: CreateInventoryLocationInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryLocation> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryLocation>(getCreateInventoryLocationUrl(),
+  return customFetch<InventoryLocation>(getCreateInventoryLocationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(createInventoryLocationInput)
   }
 );}
@@ -4489,9 +4293,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateInventoryLocationMutationError = ErrorType<void>
     export type CreateInventoryLocationMutationVariables = {data: BodyType<CreateInventoryLocationInput>}
 
-    /**
- * @summary Create a stock location
- */
+    /** @summary Create a stock location */
 export const useCreateInventoryLocation = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInventoryLocation>>, TError,CreateInventoryLocationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -4517,25 +4319,11 @@ export const getUpdateInventoryLocationUrl = (id: number,) => {
 export const updateInventoryLocation = async (id: number,
     updateInventoryLocationInput: UpdateInventoryLocationInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryLocation> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryLocation>(getUpdateInventoryLocationUrl(id),
+  return customFetch<InventoryLocation>(getUpdateInventoryLocationUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(updateInventoryLocationInput)
   }
 );}
@@ -4578,9 +4366,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateInventoryLocationMutationError = ErrorType<void>
     export type UpdateInventoryLocationMutationVariables = {id: number;data: BodyType<UpdateInventoryLocationInput>}
 
-    /**
- * @summary Rename a location or set it as onsite
- */
+    /** @summary Rename a location or set it as onsite */
 export const useUpdateInventoryLocation = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateInventoryLocation>>, TError,UpdateInventoryLocationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -4652,9 +4438,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteInventoryLocationMutationError = ErrorType<void>
     export type DeleteInventoryLocationMutationVariables = {id: number}
 
-    /**
- * @summary Delete an empty, non-onsite location
- */
+    /** @summary Delete an empty, non-onsite location */
 export const useDeleteInventoryLocation = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryLocation>>, TError,DeleteInventoryLocationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -4679,25 +4463,11 @@ export const getTransferInventoryUrl = () => {
  */
 export const transferInventory = async (transferInput: TransferInput, options?: Parameters<typeof customFetch>[1]): Promise<InventoryItem> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventoryItem>(getTransferInventoryUrl(),
+  return customFetch<InventoryItem>(getTransferInventoryUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(transferInput)
   }
 );}
@@ -4740,9 +4510,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type TransferInventoryMutationError = ErrorType<void>
     export type TransferInventoryMutationVariables = {data: BodyType<TransferInput>}
 
-    /**
- * @summary Move stock from one location to another (preserves lots)
- */
+    /** @summary Move stock from one location to another (preserves lots) */
 export const useTransferInventory = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transferInventory>>, TError,TransferInventoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -4816,6 +4584,7 @@ export type ListInventoryLedgerQueryResult = NonNullable<Awaited<ReturnType<type
 export type ListInventoryLedgerQueryError = ErrorType<unknown>
 
 
+/** @summary List movement history (optionally filtered by item) */
 export function useListInventoryLedger<TData = Awaited<ReturnType<typeof listInventoryLedger>>, TError = ErrorType<unknown>>(
  params: undefined |  ListInventoryLedgerParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLedger>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -4826,6 +4595,7 @@ export function useListInventoryLedger<TData = Awaited<ReturnType<typeof listInv
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List movement history (optionally filtered by item) */
 export function useListInventoryLedger<TData = Awaited<ReturnType<typeof listInventoryLedger>>, TError = ErrorType<unknown>>(
  params?: ListInventoryLedgerParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLedger>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -4836,14 +4606,12 @@ export function useListInventoryLedger<TData = Awaited<ReturnType<typeof listInv
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List movement history (optionally filtered by item) */
 export function useListInventoryLedger<TData = Awaited<ReturnType<typeof listInventoryLedger>>, TError = ErrorType<unknown>>(
  params?: ListInventoryLedgerParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLedger>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List movement history (optionally filtered by item)
- */
-
+/** @summary List movement history (optionally filtered by item) */
 export function useListInventoryLedger<TData = Awaited<ReturnType<typeof listInventoryLedger>>, TError = ErrorType<unknown>>(
  params?: ListInventoryLedgerParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listInventoryLedger>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -4917,6 +4685,7 @@ export type GetInventorySettingsQueryResult = NonNullable<Awaited<ReturnType<typ
 export type GetInventorySettingsQueryError = ErrorType<unknown>
 
 
+/** @summary Get global inventory settings (expiry lead time) */
 export function useGetInventorySettings<TData = Awaited<ReturnType<typeof getInventorySettings>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInventorySettings>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -4927,6 +4696,7 @@ export function useGetInventorySettings<TData = Awaited<ReturnType<typeof getInv
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get global inventory settings (expiry lead time) */
 export function useGetInventorySettings<TData = Awaited<ReturnType<typeof getInventorySettings>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInventorySettings>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -4937,14 +4707,12 @@ export function useGetInventorySettings<TData = Awaited<ReturnType<typeof getInv
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get global inventory settings (expiry lead time) */
 export function useGetInventorySettings<TData = Awaited<ReturnType<typeof getInventorySettings>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInventorySettings>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Get global inventory settings (expiry lead time)
- */
-
+/** @summary Get global inventory settings (expiry lead time) */
 export function useGetInventorySettings<TData = Awaited<ReturnType<typeof getInventorySettings>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getInventorySettings>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -4976,25 +4744,11 @@ export const getUpdateInventorySettingsUrl = () => {
  */
 export const updateInventorySettings = async (updateInventorySettingsInput: UpdateInventorySettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<InventorySettings> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<InventorySettings>(getUpdateInventorySettingsUrl(),
+  return customFetch<InventorySettings>(getUpdateInventorySettingsUrl(),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(updateInventorySettingsInput)
   }
 );}
@@ -5037,9 +4791,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateInventorySettingsMutationError = ErrorType<void>
     export type UpdateInventorySettingsMutationVariables = {data: BodyType<UpdateInventorySettingsInput>}
 
-    /**
- * @summary Update global inventory settings
- */
+    /** @summary Update global inventory settings */
 export const useUpdateInventorySettings = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateInventorySettings>>, TError,UpdateInventorySettingsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -5064,25 +4816,11 @@ export const getIdentifyInventoryPhotoUrl = () => {
  */
 export const identifyInventoryPhoto = async (identifyPhotoInput: IdentifyPhotoInput, options?: Parameters<typeof customFetch>[1]): Promise<IdentifyPhotoResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<IdentifyPhotoResult>(getIdentifyInventoryPhotoUrl(),
+  return customFetch<IdentifyPhotoResult>(getIdentifyInventoryPhotoUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(identifyPhotoInput)
   }
 );}
@@ -5125,9 +4863,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type IdentifyInventoryPhotoMutationError = ErrorType<void>
     export type IdentifyInventoryPhotoMutationVariables = {data: BodyType<IdentifyPhotoInput>}
 
-    /**
- * @summary Identify incoming stock items from a photo (AI vision); read-only
- */
+    /** @summary Identify incoming stock items from a photo (AI vision); read-only */
 export const useIdentifyInventoryPhoto = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof identifyInventoryPhoto>>, TError,IdentifyInventoryPhotoMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -5153,25 +4889,11 @@ export const getQualityCheckPhotoUrl = () => {
  */
 export const qualityCheckPhoto = async (qualityCheckPhotoInput: QualityCheckPhotoInput, options?: Parameters<typeof customFetch>[1]): Promise<QualityCheckResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QualityCheckResult>(getQualityCheckPhotoUrl(),
+  return customFetch<QualityCheckResult>(getQualityCheckPhotoUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qualityCheckPhotoInput)
   }
 );}
@@ -5215,6 +4937,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type QualityCheckPhotoMutationVariables = {data: BodyType<QualityCheckPhotoInput>}
 
     /**
+ * Looks at a photo of a finished pizza or crust and returns a plain-language quality assessment (size, topping coverage, appearance defects) plus a confidence score. Read-only — never records anything; the manager reviews the assessment and decides whether to confirm it. A confirmed outcome is written back into the shared facility memory by the client through the existing facility-knowledge write path.
  * @summary Assess finished-product quality from a photo (AI vision); read-only
  */
 export const useQualityCheckPhoto = <TError = ErrorType<void>,
@@ -5242,25 +4965,11 @@ export const getProductionSheetPhotoUrl = () => {
  */
 export const productionSheetPhoto = async (productionSheetPhotoInput: ProductionSheetPhotoInput, options?: Parameters<typeof customFetch>[1]): Promise<ProductionSheetPhotoResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ProductionSheetPhotoResult>(getProductionSheetPhotoUrl(),
+  return customFetch<ProductionSheetPhotoResult>(getProductionSheetPhotoUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(productionSheetPhotoInput)
   }
 );}
@@ -5304,6 +5013,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ProductionSheetPhotoMutationVariables = {data: BodyType<ProductionSheetPhotoInput>}
 
     /**
+ * Looks at a photo of a paper production/run sheet and extracts the distinct run rows it can read (brand, flavor, die size, cases needed, and an optional date) so they can be reviewed and added to the schedule. Read-only — never writes anything; each extracted row requires explicit user confirmation before it is applied through the existing schedule path.
  * @summary Extract a production/run plan from a photo of a paper run sheet (AI vision); read-only
  */
 export const useProductionSheetPhoto = <TError = ErrorType<void>,
@@ -5331,25 +5041,11 @@ export const getParseSpecImagesUrl = () => {
  */
 export const parseSpecImages = async (parseSpecImagesInput: ParseSpecImagesInput, options?: Parameters<typeof customFetch>[1]): Promise<ParseSpecImagesResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ParseSpecImagesResult>(getParseSpecImagesUrl(),
+  return customFetch<ParseSpecImagesResult>(getParseSpecImagesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(parseSpecImagesInput)
   }
 );}
@@ -5393,6 +5089,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ParseSpecImagesMutationVariables = {data: BodyType<ParseSpecImagesInput>}
 
     /**
+ * Transcribes one or more photographed spec-sheet or recipe pages into bounded workbook-style text. The result is advisory and must be sent through the existing spec import review before anything is changed.
  * @summary Read photographed spec sheets into workbook text (AI vision); read-only
  */
 export const useParseSpecImages = <TError = ErrorType<void>,
@@ -5420,25 +5117,11 @@ export const getVerifyLabelPhotoUrl = () => {
  */
 export const verifyLabelPhoto = async (labelVerifyInput: LabelVerifyInput, options?: Parameters<typeof customFetch>[1]): Promise<LabelVerifyResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<LabelVerifyResult>(getVerifyLabelPhotoUrl(),
+  return customFetch<LabelVerifyResult>(getVerifyLabelPhotoUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(labelVerifyInput)
   }
 );}
@@ -5482,6 +5165,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type VerifyLabelPhotoMutationVariables = {data: BodyType<LabelVerifyInput>}
 
     /**
+ * Looks at a photo of a finished-product label or pallet placard, reads the visible fields, and compares them against the expected values the client provides (brand, flavor, die size, date, lot code, case count). Returns a per-field match/mismatch breakdown plus an overall verdict. Read-only — never writes anything; a person reviews the result and decides what to do.
  * @summary Verify a finished-product label or pallet placard against expected values (AI vision); read-only
  */
 export const useVerifyLabelPhoto = <TError = ErrorType<void>,
@@ -5509,25 +5193,11 @@ export const getRecordQualityCheckUrl = () => {
  */
 export const recordQualityCheck = async (qualityCheckRecordInput: QualityCheckRecordInput, options?: Parameters<typeof customFetch>[1]): Promise<QualityCheckRecord> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QualityCheckRecord>(getRecordQualityCheckUrl(),
+  return customFetch<QualityCheckRecord>(getRecordQualityCheckUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qualityCheckRecordInput)
   }
 );}
@@ -5571,6 +5241,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQualityCheckMutationVariables = {data: BodyType<QualityCheckRecordInput>}
 
     /**
+ * Persists a structured record of a quality check a manager reviewed and confirmed (product type, verdict, confidence, summary, specific issues, optional notes and a small photo thumbnail). This builds a browsable history managers can audit and use to spot trends over time. The advisory /inventory/quality-photo endpoint never writes — this is the deliberate, user-driven save.
  * @summary Record a reviewed-and-confirmed quality check (manager only)
  */
 export const useRecordQualityCheck = <TError = ErrorType<void>,
@@ -5647,6 +5318,10 @@ export type ListQualityChecksQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type ListQualityChecksQueryError = ErrorType<void>
 
 
+/**
+ * Returns recorded quality checks (newest first) for a manager to review, optionally filtered by product type and/or status.
+ * @summary List past quality checks (manager only)
+ */
 export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQualityChecks>>, TError = ErrorType<void>>(
  params: undefined |  ListQualityChecksParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQualityChecks>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -5657,6 +5332,10 @@ export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQuali
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns recorded quality checks (newest first) for a manager to review, optionally filtered by product type and/or status.
+ * @summary List past quality checks (manager only)
+ */
 export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQualityChecks>>, TError = ErrorType<void>>(
  params?: ListQualityChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQualityChecks>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -5667,14 +5346,18 @@ export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQuali
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns recorded quality checks (newest first) for a manager to review, optionally filtered by product type and/or status.
+ * @summary List past quality checks (manager only)
+ */
 export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQualityChecks>>, TError = ErrorType<void>>(
  params?: ListQualityChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQualityChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns recorded quality checks (newest first) for a manager to review, optionally filtered by product type and/or status.
  * @summary List past quality checks (manager only)
  */
-
 export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQualityChecks>>, TError = ErrorType<void>>(
  params?: ListQualityChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQualityChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -5756,6 +5439,10 @@ export type GetQcTargetsQueryResult = NonNullable<Awaited<ReturnType<typeof getQ
 export type GetQcTargetsQueryError = ErrorType<void>
 
 
+/**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value. Brix targets are returned separately and are manager-configured only; a missing target or tolerance is not-evaluated and never inherits weight settings.
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
+ */
 export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
  params: GetQcTargetsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -5766,6 +5453,10 @@ export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value. Brix targets are returned separately and are manager-configured only; a missing target or tolerance is not-evaluated and never inherits weight settings.
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
+ */
 export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
  params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -5776,14 +5467,18 @@ export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value. Brix targets are returned separately and are manager-configured only; a missing target or tolerance is not-evaluated and never inherits weight settings.
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
+ */
 export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
  params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value. Brix targets are returned separately and are manager-configured only; a missing target or tolerance is not-evaluated and never inherits weight settings.
  * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
  */
-
 export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
  params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -5816,25 +5511,11 @@ export const getSetQcTargetUrl = () => {
  */
 export const setQcTarget = async (qcTargetInput: QcTargetInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getSetQcTargetUrl(),
+  return customFetch<QcEventResponse>(getSetQcTargetUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcTargetInput)
   }
 );}
@@ -5878,6 +5559,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetQcTargetMutationVariables = {data: BodyType<QcTargetInput>}
 
     /**
+ * Manager-only, append-only target setting. A null target, unit, and tolerance together clear the override and restore spec-import resolution.
  * @summary Add a reviewed QC target override or clear an existing override
  */
 export const useSetQcTarget = <TError = ErrorType<void>,
@@ -5905,25 +5587,11 @@ export const getSetQcBrixTargetUrl = () => {
  */
 export const setQcBrixTarget = async (qcBrixTargetInput: QcBrixTargetInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getSetQcBrixTargetUrl(),
+  return customFetch<QcEventResponse>(getSetQcBrixTargetUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcBrixTargetInput)
   }
 );}
@@ -5967,6 +5635,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetQcBrixTargetMutationVariables = {data: BodyType<QcBrixTargetInput>}
 
     /**
+ * Manager-only, append-only configuration for the canonical Brix unit. Target and tolerance are both required to configure a target, and both must be null to clear it. No weight target or default tolerance is used.
  * @summary Add or clear an explicitly reviewed Brix target and tolerance
  */
 export const useSetQcBrixTarget = <TError = ErrorType<void>,
@@ -5994,25 +5663,11 @@ export const getRecordQcLotUrl = () => {
  */
 export const recordQcLot = async (qcLotInput: QcLotInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getRecordQcLotUrl(),
+  return customFetch<QcEventResponse>(getRecordQcLotUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcLotInput)
   }
 );}
@@ -6056,6 +5711,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcLotMutationVariables = {data: BodyType<QcLotInput>}
 
     /**
+ * Multiple lots for the same run and ingredient are retained as separate events.
  * @summary Record an ingredient lot for a production run
  */
 export const useRecordQcLot = <TError = ErrorType<void>,
@@ -6083,25 +5739,11 @@ export const getRecordQcWeightCheckUrl = () => {
  */
 export const recordQcWeightCheck = async (qcWeightCheckInput: QcWeightCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getRecordQcWeightCheckUrl(),
+  return customFetch<QcEventResponse>(getRecordQcWeightCheckUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcWeightCheckInput)
   }
 );}
@@ -6145,6 +5787,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcWeightCheckMutationVariables = {data: BodyType<QcWeightCheckInput>}
 
     /**
+ * The server resolves and snapshots the target. Missing, conflicting, or unit-mismatched targets produce not-evaluated, never an inferred result. Out-of-tolerance results require a note.
  * @summary Record a pre-run or 30-minute ingredient weight check
  */
 export const useRecordQcWeightCheck = <TError = ErrorType<void>,
@@ -6172,25 +5815,11 @@ export const getRecordQcBrixCheckUrl = () => {
  */
 export const recordQcBrixCheck = async (qcBrixCheckInput: QcBrixCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getRecordQcBrixCheckUrl(),
+  return customFetch<QcEventResponse>(getRecordQcBrixCheckUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcBrixCheckInput)
   }
 );}
@@ -6234,6 +5863,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcBrixCheckMutationVariables = {data: BodyType<QcBrixCheckInput>}
 
     /**
+ * The server binds the reading to the canonical run profile, snapshots the latest manager-reviewed Brix target and tolerance, and evaluates only in the canonical Brix unit. Missing configuration is not-evaluated. Target values and outcomes are not accepted from callers. A repeated operation ID with the same reading returns the original event.
  * @summary Record an advisory pre-run or interval Brix reading
  */
 export const useRecordQcBrixCheck = <TError = ErrorType<void>,
@@ -6261,25 +5891,11 @@ export const getRecordQcComponentCheckUrl = () => {
  */
 export const recordQcComponentCheck = async (qcComponentCheckInput: QcComponentCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcComponentCheckResponse>(getRecordQcComponentCheckUrl(),
+  return customFetch<QcComponentCheckResponse>(getRecordQcComponentCheckUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcComponentCheckInput)
   }
 );}
@@ -6323,6 +5939,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcComponentCheckMutationVariables = {data: BodyType<QcComponentCheckInput>}
 
     /**
+ * The server resolves expected components from canonical per-run settings and same-day substitutions (or the immutable completed-run snapshot). The caller submits observations only; expected values and outcomes are never accepted from the client. Incomplete or ambiguous expected data cannot pass. This record does not block production or shipping.
  * @summary Record an advisory run-component identity and presence checklist
  */
 export const useRecordQcComponentCheck = <TError = ErrorType<void>,
@@ -6392,6 +6009,10 @@ export type GetQcDateCodeReferencesQueryResult = NonNullable<Awaited<ReturnType<
 export type GetQcDateCodeReferencesQueryError = ErrorType<void>
 
 
+/**
+ * QC recording capability required. Only managers see drafts and withdrawn references or configuration/review ledger rows. Approved applied comparisons retain their historical snapshots. No date policy is inferred.
+ * @summary List scoped exact-text date-code references
+ */
 export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -6402,6 +6023,10 @@ export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * QC recording capability required. Only managers see drafts and withdrawn references or configuration/review ledger rows. Approved applied comparisons retain their historical snapshots. No date policy is inferred.
+ * @summary List scoped exact-text date-code references
+ */
 export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -6412,14 +6037,18 @@ export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof get
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * QC recording capability required. Only managers see drafts and withdrawn references or configuration/review ledger rows. Approved applied comparisons retain their historical snapshots. No date policy is inferred.
+ * @summary List scoped exact-text date-code references
+ */
 export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * QC recording capability required. Only managers see drafts and withdrawn references or configuration/review ledger rows. Approved applied comparisons retain their historical snapshots. No date policy is inferred.
  * @summary List scoped exact-text date-code references
  */
-
 export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -6452,25 +6081,11 @@ export const getSaveQcDateCodeReferenceUrl = () => {
  */
 export const saveQcDateCodeReference = async (qcDateCodeReferenceInput: QcDateCodeReferenceInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcComponentCheckResponse>(getSaveQcDateCodeReferenceUrl(),
+  return customFetch<QcComponentCheckResponse>(getSaveQcDateCodeReferenceUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcDateCodeReferenceInput)
   }
 );}
@@ -6514,6 +6129,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveQcDateCodeReferenceMutationVariables = {data: BodyType<QcDateCodeReferenceInput>}
 
     /**
+ * Applicability is the canonical run/product plus explicit batch and packaging context. Source version is required. This does not configure shelf life or a decoder.
  * @summary Manager creates a draft exact-text date-code reference version
  */
 export const useSaveQcDateCodeReference = <TError = ErrorType<void>,
@@ -6541,25 +6157,11 @@ export const getReviewQcDateCodeReferenceUrl = (eventId: number,) => {
 export const reviewQcDateCodeReference = async (eventId: number,
     qcLabelReferenceReviewInput: QcLabelReferenceReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcComponentCheckResponse>(getReviewQcDateCodeReferenceUrl(eventId),
+  return customFetch<QcComponentCheckResponse>(getReviewQcDateCodeReferenceUrl(eventId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcLabelReferenceReviewInput)
   }
 );}
@@ -6602,9 +6204,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReviewQcDateCodeReferenceMutationError = ErrorType<void>
     export type ReviewQcDateCodeReferenceMutationVariables = {eventId: number;data: BodyType<QcLabelReferenceReviewInput>}
 
-    /**
- * @summary Manager explicitly approves or withdraws the latest date-code reference version
- */
+    /** @summary Manager explicitly approves or withdraws the latest date-code reference version */
 export const useReviewQcDateCodeReference = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewQcDateCodeReference>>, TError,ReviewQcDateCodeReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -6630,25 +6230,11 @@ export const getRecordQcDateCodeCheckUrl = () => {
  */
 export const recordQcDateCodeCheck = async (qcDateCodeCheckInput: QcDateCodeCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcComponentCheckResponse>(getRecordQcDateCodeCheckUrl(),
+  return customFetch<QcComponentCheckResponse>(getRecordQcDateCodeCheckUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcDateCodeCheckInput)
   }
 );}
@@ -6692,6 +6278,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcDateCodeCheckMutationVariables = {data: BodyType<QcDateCodeCheckInput>}
 
     /**
+ * Advisory evidence only, not date validity, expiry, shelf-life or release approval. Missing, unreadable and ambiguous values stay not evaluated. Expected values and outcomes are not accepted from the client. Only an applicable approved reference is snapshotted; unavailable or inapplicable IDs return a generic reason without protected reference contents.
  * @summary Record date-code observations with server-owned exact-text comparison
  */
 export const useRecordQcDateCodeCheck = <TError = ErrorType<void>,
@@ -6761,6 +6348,10 @@ export type GetQcLabelReferencesQueryResult = NonNullable<Awaited<ReturnType<typ
 export type GetQcLabelReferencesQueryError = ErrorType<void>
 
 
+/**
+ * Uses the authenticated facility scope. QC recorders see approved current versions only. QC managers also see drafts and withdrawn references. Expected label text is entered from a source identity and requires a separate manager approval event. The list is bounded; an over-limit history fails explicitly rather than silently omitting references.
+ * @summary Read current approved label references, or all versions for QC managers
+ */
 export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -6771,6 +6362,10 @@ export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcL
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Uses the authenticated facility scope. QC recorders see approved current versions only. QC managers also see drafts and withdrawn references. Expected label text is entered from a source identity and requires a separate manager approval event. The list is bounded; an over-limit history fails explicitly rather than silently omitting references.
+ * @summary Read current approved label references, or all versions for QC managers
+ */
 export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -6781,14 +6376,18 @@ export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcL
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Uses the authenticated facility scope. QC recorders see approved current versions only. QC managers also see drafts and withdrawn references. Expected label text is entered from a source identity and requires a separate manager approval event. The list is bounded; an over-limit history fails explicitly rather than silently omitting references.
+ * @summary Read current approved label references, or all versions for QC managers
+ */
 export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Uses the authenticated facility scope. QC recorders see approved current versions only. QC managers also see drafts and withdrawn references. Expected label text is entered from a source identity and requires a separate manager approval event. The list is bounded; an over-limit history fails explicitly rather than silently omitting references.
  * @summary Read current approved label references, or all versions for QC managers
  */
-
 export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -6821,25 +6420,11 @@ export const getSaveQcLabelReferenceUrl = () => {
  */
 export const saveQcLabelReference = async (qcLabelReferenceInput: QcLabelReferenceInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getSaveQcLabelReferenceUrl(),
+  return customFetch<QcEventResponse>(getSaveQcLabelReferenceUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcLabelReferenceInput)
   }
 );}
@@ -6883,6 +6468,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveQcLabelReferenceMutationVariables = {data: BodyType<QcLabelReferenceInput>}
 
     /**
+ * Manager-only. Saving a new version never approves it; an explicit manager review is required before QC observations can compare against it. No recipe, shipping-guide, or AI data is used to populate expected text.
  * @summary Create a pending label reference version
  */
 export const useSaveQcLabelReference = <TError = ErrorType<void>,
@@ -6910,25 +6496,11 @@ export const getReviewQcLabelReferenceUrl = (eventId: number,) => {
 export const reviewQcLabelReference = async (eventId: number,
     qcLabelReferenceReviewInput: QcLabelReferenceReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getReviewQcLabelReferenceUrl(eventId),
+  return customFetch<QcEventResponse>(getReviewQcLabelReferenceUrl(eventId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcLabelReferenceReviewInput)
   }
 );}
@@ -6971,9 +6543,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReviewQcLabelReferenceMutationError = ErrorType<void>
     export type ReviewQcLabelReferenceMutationVariables = {eventId: number;data: BodyType<QcLabelReferenceReviewInput>}
 
-    /**
- * @summary Explicitly approve or withdraw one label reference version
- */
+    /** @summary Explicitly approve or withdraw one label reference version */
 export const useReviewQcLabelReference = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewQcLabelReference>>, TError,ReviewQcLabelReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -6999,25 +6569,11 @@ export const getRecordQcLabelCheckUrl = () => {
  */
 export const recordQcLabelCheck = async (qcLabelCheckInput: QcLabelCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getRecordQcLabelCheckUrl(),
+  return customFetch<QcEventResponse>(getRecordQcLabelCheckUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcLabelCheckInput)
   }
 );}
@@ -7061,6 +6617,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcLabelCheckMutationVariables = {data: BodyType<QcLabelCheckInput>}
 
     /**
+ * Advisory and text-only. The server resolves only an explicitly approved, facility-scoped reference version for the selected packaging context. Missing or unapproved references save as not-evaluated. The event snapshots the exact approved version and server-computed field outcomes; callers cannot submit expected text or outcomes. Printed dates are compared as text, not decoded. This does not imply a packaging hold, shipping clearance, product claim, or regulatory approval.
  * @summary Record observed shipper-label text for a run
  */
 export const useRecordQcLabelCheck = <TError = ErrorType<void>,
@@ -7130,6 +6687,10 @@ export type GetQcRunQueryResult = NonNullable<Awaited<ReturnType<typeof getQcRun
 export type GetQcRunQueryError = ErrorType<void>
 
 
+/**
+ * Staff see corrected/redacted markers but correction and redaction action rows omit actor IDs and payloads. Live-scope QC managers receive the actor and reason only, never replacement payloads or redacted source values.
+ * @summary Read QC records and review state for one run
+ */
 export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
  runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -7140,6 +6701,10 @@ export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Staff see corrected/redacted markers but correction and redaction action rows omit actor IDs and payloads. Live-scope QC managers receive the actor and reason only, never replacement payloads or redacted source values.
+ * @summary Read QC records and review state for one run
+ */
 export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
  runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -7150,14 +6715,18 @@ export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Staff see corrected/redacted markers but correction and redaction action rows omit actor IDs and payloads. Live-scope QC managers receive the actor and reason only, never replacement payloads or redacted source values.
+ * @summary Read QC records and review state for one run
+ */
 export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
  runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Staff see corrected/redacted markers but correction and redaction action rows omit actor IDs and payloads. Live-scope QC managers receive the actor and reason only, never replacement payloads or redacted source values.
  * @summary Read QC records and review state for one run
  */
-
 export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
  runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -7239,6 +6808,10 @@ export type GetQcPlanningQueryResult = NonNullable<Awaited<ReturnType<typeof get
 export type GetQcPlanningQueryError = ErrorType<void>
 
 
+/**
+ * Requires record-qc. Reads only date, run identity, brand, flavor, and case demand from canonical daily_sync schedule rows. The client-local production date is required; future bounds use that date, not server UTC. This endpoint is read-only and does not expose general day-state or schedule controls. Missing fields remain unknown. An empty days array means no persisted schedule rows matched; source failures return 503.
+ * @summary Read a bounded, scoped projection of upcoming production for QC
+ */
 export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
  params: GetQcPlanningParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -7249,6 +6822,10 @@ export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires record-qc. Reads only date, run identity, brand, flavor, and case demand from canonical daily_sync schedule rows. The client-local production date is required; future bounds use that date, not server UTC. This endpoint is read-only and does not expose general day-state or schedule controls. Missing fields remain unknown. An empty days array means no persisted schedule rows matched; source failures return 503.
+ * @summary Read a bounded, scoped projection of upcoming production for QC
+ */
 export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
  params: GetQcPlanningParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -7259,14 +6836,18 @@ export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires record-qc. Reads only date, run identity, brand, flavor, and case demand from canonical daily_sync schedule rows. The client-local production date is required; future bounds use that date, not server UTC. This endpoint is read-only and does not expose general day-state or schedule controls. Missing fields remain unknown. An empty days array means no persisted schedule rows matched; source failures return 503.
+ * @summary Read a bounded, scoped projection of upcoming production for QC
+ */
 export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
  params: GetQcPlanningParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Requires record-qc. Reads only date, run identity, brand, flavor, and case demand from canonical daily_sync schedule rows. The client-local production date is required; future bounds use that date, not server UTC. This endpoint is read-only and does not expose general day-state or schedule controls. Missing fields remain unknown. An empty days array means no persisted schedule rows matched; source failures return 503.
  * @summary Read a bounded, scoped projection of upcoming production for QC
  */
-
 export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
  params: GetQcPlanningParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -7348,6 +6929,10 @@ export type GetQcAllergenActivityQueryResult = NonNullable<Awaited<ReturnType<ty
 export type GetQcAllergenActivityQueryError = ErrorType<void>
 
 
+/**
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance. Correction and redaction reasons and actor IDs are included only for QC managers reading live-scope data; redacted source values are never included in those audit details.
+ * @summary Read recorded allergen activity for one facility production day
+ */
 export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
  params: undefined |  GetQcAllergenActivityParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -7358,6 +6943,10 @@ export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQc
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance. Correction and redaction reasons and actor IDs are included only for QC managers reading live-scope data; redacted source values are never included in those audit details.
+ * @summary Read recorded allergen activity for one facility production day
+ */
 export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
  params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -7368,14 +6957,18 @@ export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQc
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance. Correction and redaction reasons and actor IDs are included only for QC managers reading live-scope data; redacted source values are never included in those audit details.
+ * @summary Read recorded allergen activity for one facility production day
+ */
 export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
  params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance. Correction and redaction reasons and actor IDs are included only for QC managers reading live-scope data; redacted source values are never included in those audit details.
  * @summary Read recorded allergen activity for one facility production day
  */
-
 export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
  params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -7457,6 +7050,10 @@ export type GetQcIntelligenceQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type GetQcIntelligenceQueryError = ErrorType<void>
 
 
+/**
+ * Read-only advisory reports over recorded QC events in the authenticated facility scope. Date filters use event-created-at UTC, not a facility production date. Corrections and redactions are applied to source events before aggregation; correction and redaction action rows are never counted as checks. Missing checks are not inferred or counted as passes. Results include bounded coverage and explicit partial reasons. Lot tracing uses exact stored run IDs and available canonical snapshots. Canonical traversal is capped at 50 run sources, 1 MiB per source snapshot and 600 runs per snapshot. Oversized or unavailable snapshots do not produce inferred identities. Customer and shipment links are returned only when an explicit stored relation exists; this report does not infer one.
+ * @summary Read bounded manager-only QC intelligence reports
+ */
 export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
  params: GetQcIntelligenceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -7467,6 +7064,10 @@ export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcInte
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Read-only advisory reports over recorded QC events in the authenticated facility scope. Date filters use event-created-at UTC, not a facility production date. Corrections and redactions are applied to source events before aggregation; correction and redaction action rows are never counted as checks. Missing checks are not inferred or counted as passes. Results include bounded coverage and explicit partial reasons. Lot tracing uses exact stored run IDs and available canonical snapshots. Canonical traversal is capped at 50 run sources, 1 MiB per source snapshot and 600 runs per snapshot. Oversized or unavailable snapshots do not produce inferred identities. Customer and shipment links are returned only when an explicit stored relation exists; this report does not infer one.
+ * @summary Read bounded manager-only QC intelligence reports
+ */
 export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
  params: GetQcIntelligenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -7477,14 +7078,18 @@ export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcInte
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Read-only advisory reports over recorded QC events in the authenticated facility scope. Date filters use event-created-at UTC, not a facility production date. Corrections and redactions are applied to source events before aggregation; correction and redaction action rows are never counted as checks. Missing checks are not inferred or counted as passes. Results include bounded coverage and explicit partial reasons. Lot tracing uses exact stored run IDs and available canonical snapshots. Canonical traversal is capped at 50 run sources, 1 MiB per source snapshot and 600 runs per snapshot. Oversized or unavailable snapshots do not produce inferred identities. Customer and shipment links are returned only when an explicit stored relation exists; this report does not infer one.
+ * @summary Read bounded manager-only QC intelligence reports
+ */
 export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
  params: GetQcIntelligenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Read-only advisory reports over recorded QC events in the authenticated facility scope. Date filters use event-created-at UTC, not a facility production date. Corrections and redactions are applied to source events before aggregation; correction and redaction action rows are never counted as checks. Missing checks are not inferred or counted as passes. Results include bounded coverage and explicit partial reasons. Lot tracing uses exact stored run IDs and available canonical snapshots. Canonical traversal is capped at 50 run sources, 1 MiB per source snapshot and 600 runs per snapshot. Oversized or unavailable snapshots do not produce inferred identities. Customer and shipment links are returned only when an explicit stored relation exists; this report does not infer one.
  * @summary Read bounded manager-only QC intelligence reports
  */
-
 export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
  params: GetQcIntelligenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -7566,6 +7171,10 @@ export type ExportQcIntelligenceCsvQueryResult = NonNullable<Awaited<ReturnType<
 export type ExportQcIntelligenceCsvQueryError = ErrorType<void>
 
 
+/**
+ * Uses the same manager-only query, overlay projection, filters and event limit as the JSON report. The first rows state date basis and coverage; exports are not full-ledger downloads.
+ * @summary Export a filtered, bounded QC intelligence report as CSV
+ */
 export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
  params: ExportQcIntelligenceCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -7576,6 +7185,10 @@ export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exp
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Uses the same manager-only query, overlay projection, filters and event limit as the JSON report. The first rows state date basis and coverage; exports are not full-ledger downloads.
+ * @summary Export a filtered, bounded QC intelligence report as CSV
+ */
 export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
  params: ExportQcIntelligenceCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -7586,14 +7199,18 @@ export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exp
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Uses the same manager-only query, overlay projection, filters and event limit as the JSON report. The first rows state date basis and coverage; exports are not full-ledger downloads.
+ * @summary Export a filtered, bounded QC intelligence report as CSV
+ */
 export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
  params: ExportQcIntelligenceCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Uses the same manager-only query, overlay projection, filters and event limit as the JSON report. The first rows state date basis and coverage; exports are not full-ledger downloads.
  * @summary Export a filtered, bounded QC intelligence report as CSV
  */
-
 export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
  params: ExportQcIntelligenceCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -7626,25 +7243,11 @@ export const getRecordQcAllergenReviewUrl = () => {
  */
 export const recordQcAllergenReview = async (qcAllergenReviewInput: QcAllergenReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getRecordQcAllergenReviewUrl(),
+  return customFetch<QcEventResponse>(getRecordQcAllergenReviewUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcAllergenReviewInput)
   }
 );}
@@ -7688,6 +7291,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcAllergenReviewMutationVariables = {data: BodyType<QcAllergenReviewInput>}
 
     /**
+ * Snapshots the visible run footprint and its unknown/incomplete state. This does not change the manual run allergen field or block production.
  * @summary Record the non-blocking pre-run allergen and staged-ingredient review
  */
 export const useRecordQcAllergenReview = <TError = ErrorType<void>,
@@ -7715,25 +7319,11 @@ export const getRecordQcCleaningUrl = () => {
  */
 export const recordQcCleaning = async (qcCleaningInput: QcCleaningInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getRecordQcCleaningUrl(),
+  return customFetch<QcEventResponse>(getRecordQcCleaningUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcCleaningInput)
   }
 );}
@@ -7777,6 +7367,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordQcCleaningMutationVariables = {data: BodyType<QcCleaningInput>}
 
     /**
+ * Cleaning is recorded without creating a production or shipping hold.
  * @summary Record cleaning method and timing
  */
 export const useRecordQcCleaning = <TError = ErrorType<void>,
@@ -7804,25 +7395,11 @@ export const getVerifyQcCleaningUrl = (eventId: number,) => {
 export const verifyQcCleaning = async (eventId: number,
     qcNoteInput: QcNoteInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getVerifyQcCleaningUrl(eventId),
+  return customFetch<QcEventResponse>(getVerifyQcCleaningUrl(eventId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcNoteInput)
   }
 );}
@@ -7865,9 +7442,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type VerifyQcCleaningMutationError = ErrorType<void>
     export type VerifyQcCleaningMutationVariables = {eventId: number;data: BodyType<QcNoteInput>}
 
-    /**
- * @summary Independently verify a cleaning record
- */
+    /** @summary Independently verify a cleaning record */
 export const useVerifyQcCleaning = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyQcCleaning>>, TError,VerifyQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -7893,25 +7468,11 @@ export const getSignoffQcRunUrl = () => {
  */
 export const signoffQcRun = async (qcRunSignoffInput: QcRunSignoffInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getSignoffQcRunUrl(),
+  return customFetch<QcEventResponse>(getSignoffQcRunUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcRunSignoffInput)
   }
 );}
@@ -7955,6 +7516,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SignoffQcRunMutationVariables = {data: BodyType<QcRunSignoffInput>}
 
     /**
+ * A new QC record after sign-off reopens review for that run.
  * @summary Sign off the current QC record set for a run
  */
 export const useSignoffQcRun = <TError = ErrorType<void>,
@@ -8031,6 +7593,10 @@ export type GetQcHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getQ
 export type GetQcHistoryQueryError = ErrorType<void>
 
 
+/**
+ * QC staff see corrected/redacted record markers, but correction and redaction action rows omit their actor IDs and payloads. Live-scope QC managers may inspect the recorded actor and reason only; replacement values and redacted source values remain hidden.
+ * @summary Read bounded, facility-scoped QC history
+ */
 export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
  params: undefined |  GetQcHistoryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -8041,6 +7607,10 @@ export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * QC staff see corrected/redacted record markers, but correction and redaction action rows omit their actor IDs and payloads. Live-scope QC managers may inspect the recorded actor and reason only; replacement values and redacted source values remain hidden.
+ * @summary Read bounded, facility-scoped QC history
+ */
 export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
  params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -8051,14 +7621,18 @@ export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * QC staff see corrected/redacted record markers, but correction and redaction action rows omit their actor IDs and payloads. Live-scope QC managers may inspect the recorded actor and reason only; replacement values and redacted source values remain hidden.
+ * @summary Read bounded, facility-scoped QC history
+ */
 export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
  params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * QC staff see corrected/redacted record markers, but correction and redaction action rows omit their actor IDs and payloads. Live-scope QC managers may inspect the recorded actor and reason only; replacement values and redacted source values remain hidden.
  * @summary Read bounded, facility-scoped QC history
  */
-
 export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
  params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -8140,6 +7714,10 @@ export type ExportQcHistoryCsvQueryResult = NonNullable<Awaited<ReturnType<typeo
 export type ExportQcHistoryCsvQueryError = ErrorType<void>
 
 
+/**
+ * QC manager or app manager capability required. Live-scope exports include correction/redaction actors and reasons but omit replacement payloads and redacted source values. Sandbox exports omit overlay actors and payloads.
+ * @summary Export full filtered QC history as CSV
+ */
 export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
  params: undefined |  ExportQcHistoryCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -8150,6 +7728,10 @@ export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQc
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * QC manager or app manager capability required. Live-scope exports include correction/redaction actors and reasons but omit replacement payloads and redacted source values. Sandbox exports omit overlay actors and payloads.
+ * @summary Export full filtered QC history as CSV
+ */
 export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
  params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -8160,14 +7742,18 @@ export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQc
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * QC manager or app manager capability required. Live-scope exports include correction/redaction actors and reasons but omit replacement payloads and redacted source values. Sandbox exports omit overlay actors and payloads.
+ * @summary Export full filtered QC history as CSV
+ */
 export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
  params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * QC manager or app manager capability required. Live-scope exports include correction/redaction actors and reasons but omit replacement payloads and redacted source values. Sandbox exports omit overlay actors and payloads.
  * @summary Export full filtered QC history as CSV
  */
-
 export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
  params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -8200,25 +7786,11 @@ export const getCorrectQcEventUrl = (eventId: number,) => {
 export const correctQcEvent = async (eventId: number,
     qcCorrectionInput: QcCorrectionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getCorrectQcEventUrl(eventId),
+  return customFetch<QcEventResponse>(getCorrectQcEventUrl(eventId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcCorrectionInput)
   }
 );}
@@ -8261,9 +7833,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CorrectQcEventMutationError = ErrorType<void>
     export type CorrectQcEventMutationVariables = {eventId: number;data: BodyType<QcCorrectionInput>}
 
-    /**
- * @summary Append an audited correction to a QC record
- */
+    /** @summary Append an audited correction to a QC record */
 export const useCorrectQcEvent = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctQcEvent>>, TError,CorrectQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -8289,25 +7859,11 @@ export const getRedactQcEventUrl = (eventId: number,) => {
 export const redactQcEvent = async (eventId: number,
     qcRedactionInput: QcRedactionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<QcEventResponse>(getRedactQcEventUrl(eventId),
+  return customFetch<QcEventResponse>(getRedactQcEventUrl(eventId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(qcRedactionInput)
   }
 );}
@@ -8350,9 +7906,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RedactQcEventMutationError = ErrorType<void>
     export type RedactQcEventMutationVariables = {eventId: number;data: BodyType<QcRedactionInput>}
 
-    /**
- * @summary Append a privacy redaction event for selected QC fields
- */
+    /** @summary Append a privacy redaction event for selected QC fields */
 export const useRedactQcEvent = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redactQcEvent>>, TError,RedactQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -8378,25 +7932,11 @@ export const getWasteInsightUrl = () => {
  */
 export const wasteInsight = async (wasteInsightInput: WasteInsightInput, options?: Parameters<typeof customFetch>[1]): Promise<WasteInsightResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<WasteInsightResult>(getWasteInsightUrl(),
+  return customFetch<WasteInsightResult>(getWasteInsightUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(wasteInsightInput)
   }
 );}
@@ -8440,6 +7980,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type WasteInsightMutationVariables = {data: BodyType<WasteInsightInput>}
 
     /**
+ * Reads current inventory and the configured expiry lead time, flags lots that are expired or expiring soon, and (when anything is flagged) asks the AI for a plain-language run-order suggestion to consume the at-risk stock first. Grounded in the real inventory data and the shared facility memory. Read-only — never applies any change.
  * @summary Flag items trending toward expiry and suggest run-order to use them first
  */
 export const useWasteInsight = <TError = ErrorType<void>,
@@ -8467,25 +8008,11 @@ export const getOperationsSpecReconciliationUrl = () => {
  */
 export const operationsSpecReconciliation = async (specReconcileInput: SpecReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<SpecReconcileResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SpecReconcileResult>(getOperationsSpecReconciliationUrl(),
+  return customFetch<SpecReconcileResult>(getOperationsSpecReconciliationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(specReconcileInput)
   }
 );}
@@ -8529,6 +8056,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type OperationsSpecReconciliationMutationVariables = {data: BodyType<SpecReconcileInput>}
 
     /**
+ * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), and returns the authoritative deterministic discrepancy list. Available to any signed-in user.
  * @summary Cross-reference a saved spec sheet against the current recipes; read-only
  */
 export const useOperationsSpecReconciliation = <TError = ErrorType<void>,
@@ -8556,25 +8084,11 @@ export const getOperationsMixReconciliationUrl = () => {
  */
 export const operationsMixReconciliation = async (mixReconcileInput: MixReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<MixReconcileResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MixReconcileResult>(getOperationsMixReconciliationUrl(),
+  return customFetch<MixReconcileResult>(getOperationsMixReconciliationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(mixReconcileInput)
   }
 );}
@@ -8618,6 +8132,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type OperationsMixReconciliationMutationVariables = {data: BodyType<MixReconcileInput>}
 
     /**
+ * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint validates and returns that exact deterministic discrepancy list. It never invents or applies anything. Available to any signed-in user.
  * @summary Return already-computed mix discrepancies; read-only
  */
 export const useOperationsMixReconciliation = <TError = ErrorType<void>,
@@ -8645,25 +8160,11 @@ export const getOperationsRecapUrl = () => {
  */
 export const operationsRecap = async (summaryInput: SummaryInput, options?: Parameters<typeof customFetch>[1]): Promise<SummaryResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SummaryResult>(getOperationsRecapUrl(),
+  return customFetch<SummaryResult>(getOperationsRecapUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(summaryInput)
   }
 );}
@@ -8707,6 +8208,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type OperationsRecapMutationVariables = {data: BodyType<SummaryInput>}
 
     /**
+ * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, deterministic plain-language recap for floor staff and managers. Read-only — never writes or commits run data.
  * @summary Plain-language end-of-day / weekly production recap; read-only
  */
 export const useOperationsRecap = <TError = ErrorType<void>,
@@ -8734,25 +8236,11 @@ export const getExportOperationalReportUrl = () => {
  */
 export const exportOperationalReport = async (operationalReportInput: OperationalReportInput, options?: Parameters<typeof customFetch>[1]): Promise<OperationalReport> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<OperationalReport>(getExportOperationalReportUrl(),
+  return customFetch<OperationalReport>(getExportOperationalReportUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(operationalReportInput)
   }
 );}
@@ -8796,6 +8284,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ExportOperationalReportMutationVariables = {data: BodyType<OperationalReportInput>}
 
     /**
+ * Deterministically aggregates production facts derived from every canonical scoped daily-sync snapshot in the requested date range. The legacy runs field is accepted for compatibility but ignored; clients cannot supply report production facts. The report enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const useExportOperationalReport = <TError = ErrorType<void>,
@@ -8823,25 +8312,11 @@ export const getFinalizeOperationalReportUrl = () => {
  */
 export const finalizeOperationalReport = async (operationalReportInput: OperationalReportInput, options?: Parameters<typeof customFetch>[1]): Promise<FinalizedOperationalReport> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FinalizedOperationalReport>(getFinalizeOperationalReportUrl(),
+  return customFetch<FinalizedOperationalReport>(getFinalizeOperationalReportUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(operationalReportInput)
   }
 );}
@@ -8885,6 +8360,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type FinalizeOperationalReportMutationVariables = {data: BodyType<OperationalReportInput>}
 
     /**
+ * Re-derives the canonical report from server-side scoped records and appends it to the audit archive. Client report JSON is never accepted. Repeating a finalization for the same scope and reporting period returns the original immutable record and never replaces it.
  * @summary Finalize an immutable authoritative operational report
  */
 export const useFinalizeOperationalReport = <TError = ErrorType<void>,
@@ -8961,6 +8437,10 @@ export type ListFinalizedOperationalReportsQueryResult = NonNullable<Awaited<Ret
 export type ListFinalizedOperationalReportsQueryError = ErrorType<void>
 
 
+/**
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
+ * @summary Search finalized operational reports
+ */
 export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: ListFinalizedOperationalReportsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -8971,6 +8451,10 @@ export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<ty
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
+ * @summary Search finalized operational reports
+ */
 export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: ListFinalizedOperationalReportsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -8981,14 +8465,18 @@ export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<ty
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
+ * @summary Search finalized operational reports
+ */
 export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: ListFinalizedOperationalReportsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Retrieves immutable summaries for one exact reporting period in the authenticated facility.
  * @summary Search finalized operational reports
  */
-
 export function useListFinalizedOperationalReports<TData = Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: ListFinalizedOperationalReportsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFinalizedOperationalReports>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -9070,6 +8558,10 @@ export type SearchFinalizedOperationalReportsQueryResult = NonNullable<Awaited<R
 export type SearchFinalizedOperationalReportsQueryError = ErrorType<void>
 
 
+/**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
+ * @summary Search finalized operational reports across a date range
+ */
 export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: SearchFinalizedOperationalReportsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -9080,6 +8572,10 @@ export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
+ * @summary Search finalized operational reports across a date range
+ */
 export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: SearchFinalizedOperationalReportsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -9090,14 +8586,18 @@ export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
+ * @summary Search finalized operational reports across a date range
+ */
 export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: SearchFinalizedOperationalReportsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
  * @summary Search finalized operational reports across a date range
  */
-
 export function useSearchFinalizedOperationalReports<TData = Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError = ErrorType<void>>(
  params: SearchFinalizedOperationalReportsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof searchFinalizedOperationalReports>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -9171,6 +8671,7 @@ export type GetFinalizedOperationalReportQueryResult = NonNullable<Awaited<Retur
 export type GetFinalizedOperationalReportQueryError = ErrorType<void>
 
 
+/** @summary Retrieve one immutable finalized operational report */
 export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -9181,6 +8682,7 @@ export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Retrieve one immutable finalized operational report */
 export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -9191,14 +8693,12 @@ export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Retrieve one immutable finalized operational report */
 export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Retrieve one immutable finalized operational report
- */
-
+/** @summary Retrieve one immutable finalized operational report */
 export function useGetFinalizedOperationalReport<TData = Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFinalizedOperationalReport>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -9284,6 +8784,10 @@ export type DownloadCanonicalOperationalReportQueryResult = NonNullable<Awaited<
 export type DownloadCanonicalOperationalReportQueryError = ErrorType<void>
 
 
+/**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
 export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(
  id: string,
     params: DownloadCanonicalOperationalReportParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>> & Pick<
@@ -9295,6 +8799,10 @@ export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
 export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(
  id: string,
     params: DownloadCanonicalOperationalReportParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>> & Pick<
@@ -9306,15 +8814,19 @@ export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
+ * @summary Download an export from one identified canonical finalized snapshot
+ */
 export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(
  id: string,
     params: DownloadCanonicalOperationalReportParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Produces CSV, XLSX, or print-ready HTML solely from the immutable finalized report in the authenticated facility. Responses include X-Canonical-Snapshot-Id and X-Canonical-Content-Hash so a downloaded artifact remains attributable to the canonical audit snapshot. This endpoint never accepts browser report data.
  * @summary Download an export from one identified canonical finalized snapshot
  */
-
 export function useDownloadCanonicalOperationalReport<TData = Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError = ErrorType<void>>(
  id: string,
     params: DownloadCanonicalOperationalReportParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadCanonicalOperationalReport>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
@@ -9397,6 +8909,10 @@ export type GetOperationalRunViewQueryResult = NonNullable<Awaited<ReturnType<ty
 export type GetOperationalRunViewQueryError = ErrorType<void>
 
 
+/**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
+ * @summary Read one manager-only server-derived operational run view
+ */
 export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(
  params: GetOperationalRunViewParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -9407,6 +8923,10 @@ export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOp
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
+ * @summary Read one manager-only server-derived operational run view
+ */
 export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(
  params: GetOperationalRunViewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -9417,14 +8937,18 @@ export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOp
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
+ * @summary Read one manager-only server-derived operational run view
+ */
 export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(
  params: GetOperationalRunViewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Reads exactly one canonical scoped daily-sync snapshot and derives the requested run using the server clock. The payload is never accepted from the client. Missing snapshots or runs are reported distinctly; duplicate runs and reset-generation ambiguity return conflict responses.
  * @summary Read one manager-only server-derived operational run view
  */
-
 export function useGetOperationalRunView<TData = Awaited<ReturnType<typeof getOperationalRunView>>, TError = ErrorType<void>>(
  params: GetOperationalRunViewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalRunView>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -9506,6 +9030,10 @@ export type GetShiftHandoffDigestQueryResult = NonNullable<Awaited<ReturnType<ty
 export type GetShiftHandoffDigestQueryError = ErrorType<void>
 
 
+/**
+ * Collects unresolved incidents, quality exceptions, inventory risk and historical adjustments, sync conflicts, and pending data-health findings for one facility and production date. Source history that cannot be read is reported as unavailable rather than as zero.
+ * @summary Read a manager-facing daily shift handoff digest
+ */
 export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError = ErrorType<void>>(
  params: GetShiftHandoffDigestParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -9516,6 +9044,10 @@ export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getSh
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Collects unresolved incidents, quality exceptions, inventory risk and historical adjustments, sync conflicts, and pending data-health findings for one facility and production date. Source history that cannot be read is reported as unavailable rather than as zero.
+ * @summary Read a manager-facing daily shift handoff digest
+ */
 export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError = ErrorType<void>>(
  params: GetShiftHandoffDigestParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -9526,14 +9058,18 @@ export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getSh
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Collects unresolved incidents, quality exceptions, inventory risk and historical adjustments, sync conflicts, and pending data-health findings for one facility and production date. Source history that cannot be read is reported as unavailable rather than as zero.
+ * @summary Read a manager-facing daily shift handoff digest
+ */
 export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError = ErrorType<void>>(
  params: GetShiftHandoffDigestParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Collects unresolved incidents, quality exceptions, inventory risk and historical adjustments, sync conflicts, and pending data-health findings for one facility and production date. Source history that cannot be read is reported as unavailable rather than as zero.
  * @summary Read a manager-facing daily shift handoff digest
  */
-
 export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError = ErrorType<void>>(
  params: GetShiftHandoffDigestParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -9566,25 +9102,11 @@ export const getOperationsIncidentPatternsUrl = () => {
  */
 export const operationsIncidentPatterns = async (incidentClustersInput?: IncidentClustersInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentClustersResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<IncidentClustersResult>(getOperationsIncidentPatternsUrl(),
+  return customFetch<IncidentClustersResult>(getOperationsIncidentPatternsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(incidentClustersInput)
   }
 );}
@@ -9628,6 +9150,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type OperationsIncidentPatternsMutationVariables = {data?: BodyType<IncidentClustersInput>}
 
     /**
+ * Reads the recorded incident log and deterministically groups recurring reports and crashes by screen and platform. Counts and descriptions come only from recorded incidents; the endpoint never invents incidents or edits anything. Read-only and advisory.
  * @summary Group recurring reported issues and crashes; manager-only, read-only
  */
 export const useOperationsIncidentPatterns = <TError = ErrorType<void>,
@@ -9655,25 +9178,11 @@ export const getOperationsAnomalyDetectionUrl = () => {
  */
 export const operationsAnomalyDetection = async (anomalyInput: AnomalyInput, options?: Parameters<typeof customFetch>[1]): Promise<AnomalyResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<AnomalyResult>(getOperationsAnomalyDetectionUrl(),
+  return customFetch<AnomalyResult>(getOperationsAnomalyDetectionUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(anomalyInput)
   }
 );}
@@ -9717,6 +9226,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type OperationsAnomalyDetectionMutationVariables = {data: BodyType<AnomalyInput>}
 
     /**
+ * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. Detection and descriptions are fully deterministic. Read-only — never edits or commits run data.
  * @summary Flag production runs that drifted from their historical norm; read-only
  */
 export const useOperationsAnomalyDetection = <TError = ErrorType<void>,
@@ -9744,25 +9254,11 @@ export const getOperationsScheduleOrderingUrl = () => {
  */
 export const operationsScheduleOrdering = async (scheduleOptimizeInput: ScheduleOptimizeInput, options?: Parameters<typeof customFetch>[1]): Promise<ScheduleOptimizeResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ScheduleOptimizeResponse>(getOperationsScheduleOrderingUrl(),
+  return customFetch<ScheduleOptimizeResponse>(getOperationsScheduleOrderingUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(scheduleOptimizeInput)
   }
 );}
@@ -9806,6 +9302,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type OperationsScheduleOrderingMutationVariables = {data: BodyType<ScheduleOptimizeInput>}
 
     /**
+ * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side by the shared @workspace/schedule-optimize library. Read-only — never edits or commits the schedule.
  * @summary Suggest a deterministic run order for the day; read-only
  */
 export const useOperationsScheduleOrdering = <TError = ErrorType<void>,
@@ -9833,25 +9330,11 @@ export const getAiMatchImportUrl = () => {
  */
 export const aiMatchImport = async (matchImportInput: MatchImportInput, options?: Parameters<typeof customFetch>[1]): Promise<MatchImportResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MatchImportResult>(getAiMatchImportUrl(),
+  return customFetch<MatchImportResult>(getAiMatchImportUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(matchImportInput)
   }
 );}
@@ -9895,6 +9378,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AiMatchImportMutationVariables = {data: BodyType<MatchImportInput>}
 
     /**
+ * Given the saved brands and their flavors plus a list of imported brand/flavor names that did NOT exactly match, returns the best saved match for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the Excel import dialog and the user can still override. Falls back silently to the client's fuzzy matching when unavailable.
  * @summary Match imported brand/flavor names to saved ones (AI); read-only
  */
 export const useAiMatchImport = <TError = ErrorType<void>,
@@ -9922,25 +9406,11 @@ export const getAiMatchPremixUrl = () => {
  */
 export const aiMatchPremix = async (matchPremixInput: MatchPremixInput, options?: Parameters<typeof customFetch>[1]): Promise<MatchPremixResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MatchPremixResult>(getAiMatchPremixUrl(),
+  return customFetch<MatchPremixResult>(getAiMatchPremixUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(matchPremixInput)
   }
 );}
@@ -9984,6 +9454,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AiMatchPremixMutationVariables = {data: BodyType<MatchPremixInput>}
 
     /**
+ * Given the saved brands and their flavors plus a list of imported premix PRODUCT names that did NOT ground to a saved product locally, returns the best saved brand (and flavor when clear) for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the premix import dialog and the user can still override. Falls back silently to the client's local grounding when unavailable.
  * @summary Match imported premix product names to saved brand+flavor (AI); read-only
  */
 export const useAiMatchPremix = <TError = ErrorType<void>,
@@ -10011,25 +9482,11 @@ export const getAiParseSpecSheetUrl = () => {
  */
 export const aiParseSpecSheet = async (parseSpecSheetInput: ParseSpecSheetInput, options?: Parameters<typeof customFetch>[1]): Promise<ParseSpecSheetResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ParseSpecSheetResult>(getAiParseSpecSheetUrl(),
+  return customFetch<ParseSpecSheetResult>(getAiParseSpecSheetUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(parseSpecSheetInput)
   }
 );}
@@ -10073,6 +9530,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AiParseSpecSheetMutationVariables = {data: BodyType<ParseSpecSheetInput>}
 
     /**
+ * Given the flattened text of an uploaded .xlsx workbook plus the app's known canonical lists (brands, flavors, applicator/pepperoni types, recipe ingredients) and learned aliases, returns structured spec profiles and dough/sauce/cheese recipes. Read-only — never writes anything; the client canonicalizes names and applies the import.
  * @summary Interpret an uploaded Excel spec sheet / recipe workbook (AI)
  */
 export const useAiParseSpecSheet = <TError = ErrorType<void>,
@@ -10149,6 +9607,10 @@ export type ListMergeAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListMergeAliasesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
+ * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
+ */
 export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>(
  params: undefined |  ListMergeAliasesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -10159,6 +9621,10 @@ export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeA
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
+ * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
+ */
 export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>(
  params?: ListMergeAliasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -10169,14 +9635,18 @@ export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeA
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
+ * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
+ */
 export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>(
  params?: ListMergeAliasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
  * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
  */
-
 export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>(
  params?: ListMergeAliasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -10209,25 +9679,11 @@ export const getSaveMergeAliasesUrl = () => {
  */
 export const saveMergeAliases = async (saveMergeAliasesInput: SaveMergeAliasesInput, options?: Parameters<typeof customFetch>[1]): Promise<MergeAliasList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MergeAliasList>(getSaveMergeAliasesUrl(),
+  return customFetch<MergeAliasList>(getSaveMergeAliasesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveMergeAliasesInput)
   }
 );}
@@ -10271,6 +9727,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveMergeAliasesMutationVariables = {data: BodyType<SaveMergeAliasesInput>}
 
     /**
+ * Persists a batch of merged-away -> kept name mappings recorded when a merge is confirmed. Existing aliases (matched case-insensitively on externalName, within the same category/brand) are updated; new ones are inserted. Available to any signed-in user.
  * @summary Save learned ingredient-merge aliases (case-insensitive upsert)
  */
 export const useSaveMergeAliases = <TError = ErrorType<void>,
@@ -10347,6 +9804,10 @@ export type ListDeniedMergesQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListDeniedMergesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
+ * @summary List denied (ignored) ingredient-merge pairs
+ */
 export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>(
  params: undefined |  ListDeniedMergesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -10357,6 +9818,10 @@ export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDenied
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
+ * @summary List denied (ignored) ingredient-merge pairs
+ */
 export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>(
  params?: ListDeniedMergesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -10367,14 +9832,18 @@ export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDenied
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
+ * @summary List denied (ignored) ingredient-merge pairs
+ */
 export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>(
  params?: ListDeniedMergesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
  * @summary List denied (ignored) ingredient-merge pairs
  */
-
 export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>(
  params?: ListDeniedMergesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -10407,25 +9876,11 @@ export const getSaveDeniedMergesUrl = () => {
  */
 export const saveDeniedMerges = async (saveDeniedMergesInput: SaveDeniedMergesInput, options?: Parameters<typeof customFetch>[1]): Promise<DeniedMergeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DeniedMergeList>(getSaveDeniedMergesUrl(),
+  return customFetch<DeniedMergeList>(getSaveDeniedMergesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveDeniedMergesInput)
   }
 );}
@@ -10469,6 +9924,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveDeniedMergesMutationVariables = {data: BodyType<SaveDeniedMergesInput>}
 
     /**
+ * Persists a batch of unordered name pairs the user denied, scoped to a category (and brand, for flavors). Pairs are normalized (trimmed, lowercased, sorted) and deduped; a pair that already exists is left as-is. Available to any signed-in user.
  * @summary Save denied (ignored) ingredient-merge pairs
  */
 export const useSaveDeniedMerges = <TError = ErrorType<void>,
@@ -10496,25 +9952,11 @@ export const getDeleteDeniedMergesUrl = () => {
  */
 export const deleteDeniedMerges = async (saveDeniedMergesInput: SaveDeniedMergesInput, options?: Parameters<typeof customFetch>[1]): Promise<DeniedMergeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DeniedMergeList>(getDeleteDeniedMergesUrl(),
+  return customFetch<DeniedMergeList>(getDeleteDeniedMergesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveDeniedMergesInput)
   }
 );}
@@ -10558,6 +10000,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteDeniedMergesMutationVariables = {data: BodyType<SaveDeniedMergesInput>}
 
     /**
+ * Removes a batch of denied pairs so they may be suggested again. Pairs are matched case-insensitively regardless of order. Available to any signed-in user.
  * @summary Un-deny (remove) ingredient-merge pairs
  */
 export const useDeleteDeniedMerges = <TError = ErrorType<void>,
@@ -10627,6 +10070,10 @@ export type ListDuplicateReviewsQueryResult = NonNullable<Awaited<ReturnType<typ
 export type ListDuplicateReviewsQueryError = ErrorType<void>
 
 
+/**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
+ * @summary List outstanding duplicate-review groups
+ */
 export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -10637,6 +10084,10 @@ export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDu
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
+ * @summary List outstanding duplicate-review groups
+ */
 export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -10647,14 +10098,18 @@ export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDu
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
+ * @summary List outstanding duplicate-review groups
+ */
 export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
  * @summary List outstanding duplicate-review groups
  */
-
 export function useListDuplicateReviews<TData = Awaited<ReturnType<typeof listDuplicateReviews>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDuplicateReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -10687,25 +10142,11 @@ export const getSaveDuplicateReviewsUrl = () => {
  */
 export const saveDuplicateReviews = async (saveDuplicateReviewsInput: SaveDuplicateReviewsInput, options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DuplicateReviewList>(getSaveDuplicateReviewsUrl(),
+  return customFetch<DuplicateReviewList>(getSaveDuplicateReviewsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveDuplicateReviewsInput)
   }
 );}
@@ -10749,6 +10190,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveDuplicateReviewsMutationVariables = {data: BodyType<SaveDuplicateReviewsInput>}
 
     /**
+ * Adds newly observed duplicate groups to the current facility's pending review ledger. Existing groups are left unchanged, including groups already resolved or ignored, so stale scans cannot reopen work.
  * @summary Record duplicate groups for manager review
  */
 export const useSaveDuplicateReviews = <TError = ErrorType<void>,
@@ -10776,25 +10218,11 @@ export const getResolveDuplicateReviewUrl = () => {
  */
 export const resolveDuplicateReview = async (resolveDuplicateReviewInput: ResolveDuplicateReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<DuplicateReviewList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DuplicateReviewList>(getResolveDuplicateReviewUrl(),
+  return customFetch<DuplicateReviewList>(getResolveDuplicateReviewUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(resolveDuplicateReviewInput)
   }
 );}
@@ -10838,6 +10266,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ResolveDuplicateReviewMutationVariables = {data: BodyType<ResolveDuplicateReviewInput>}
 
     /**
+ * Explicitly closes one pending group after a manager reviewed it. This endpoint does not merge or delete master data.
  * @summary Resolve or ignore one duplicate-review group
  */
 export const useResolveDuplicateReview = <TError = ErrorType<void>,
@@ -10907,6 +10336,10 @@ export type ListMergedAwayQueryResult = NonNullable<Awaited<ReturnType<typeof li
 export type ListMergedAwayQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns the factory-wide tombstone of names that were merged away. The list never silently shrinks (only an explicit re-add removes a name), so every device can fetch it on load and strip these names from its master lists regardless of which device seeded the current day. Available to any signed-in user.
+ * @summary List durable merged-away ingredient/die names
+ */
 export function useListMergedAway<TData = Awaited<ReturnType<typeof listMergedAway>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergedAway>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -10917,6 +10350,10 @@ export function useListMergedAway<TData = Awaited<ReturnType<typeof listMergedAw
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the factory-wide tombstone of names that were merged away. The list never silently shrinks (only an explicit re-add removes a name), so every device can fetch it on load and strip these names from its master lists regardless of which device seeded the current day. Available to any signed-in user.
+ * @summary List durable merged-away ingredient/die names
+ */
 export function useListMergedAway<TData = Awaited<ReturnType<typeof listMergedAway>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergedAway>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -10927,14 +10364,18 @@ export function useListMergedAway<TData = Awaited<ReturnType<typeof listMergedAw
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the factory-wide tombstone of names that were merged away. The list never silently shrinks (only an explicit re-add removes a name), so every device can fetch it on load and strip these names from its master lists regardless of which device seeded the current day. Available to any signed-in user.
+ * @summary List durable merged-away ingredient/die names
+ */
 export function useListMergedAway<TData = Awaited<ReturnType<typeof listMergedAway>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergedAway>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns the factory-wide tombstone of names that were merged away. The list never silently shrinks (only an explicit re-add removes a name), so every device can fetch it on load and strip these names from its master lists regardless of which device seeded the current day. Available to any signed-in user.
  * @summary List durable merged-away ingredient/die names
  */
-
 export function useListMergedAway<TData = Awaited<ReturnType<typeof listMergedAway>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMergedAway>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -10967,25 +10408,11 @@ export const getSaveMergedAwayUrl = () => {
  */
 export const saveMergedAway = async (saveMergedAwayInput: SaveMergedAwayInput, options?: Parameters<typeof customFetch>[1]): Promise<MergedAwayList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MergedAwayList>(getSaveMergedAwayUrl(),
+  return customFetch<MergedAwayList>(getSaveMergedAwayUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveMergedAwayInput)
   }
 );}
@@ -11029,6 +10456,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveMergedAwayMutationVariables = {data: BodyType<SaveMergedAwayInput>}
 
     /**
+ * Persists a batch of names that were merged away. Names are normalized (trimmed, lowercased) and deduped; a name that already exists is left as is. Available to any signed-in user.
  * @summary Record merged-away ingredient/die names
  */
 export const useSaveMergedAway = <TError = ErrorType<void>,
@@ -11056,25 +10484,11 @@ export const getDeleteMergedAwayUrl = () => {
  */
 export const deleteMergedAway = async (saveMergedAwayInput: SaveMergedAwayInput, options?: Parameters<typeof customFetch>[1]): Promise<MergedAwayList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MergedAwayList>(getDeleteMergedAwayUrl(),
+  return customFetch<MergedAwayList>(getDeleteMergedAwayUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveMergedAwayInput)
   }
 );}
@@ -11118,6 +10532,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteMergedAwayMutationVariables = {data: BodyType<SaveMergedAwayInput>}
 
     /**
+ * Removes a batch of names from the tombstone so they may be used again — called when the user explicitly re-adds a previously merged-away name. Matched case-insensitively. Available to any signed-in user.
  * @summary Un-tombstone (remove) merged-away names
  */
 export const useDeleteMergedAway = <TError = ErrorType<void>,
@@ -11187,6 +10602,10 @@ export type ListProductionRulesQueryResult = NonNullable<Awaited<ReturnType<type
 export type ListProductionRulesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide production rule. Rules are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can evaluate them; editing is manager-only.
+ * @summary List manager-defined production rules
+ */
 export function useListProductionRules<TData = Awaited<ReturnType<typeof listProductionRules>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProductionRules>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -11197,6 +10616,10 @@ export function useListProductionRules<TData = Awaited<ReturnType<typeof listPro
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide production rule. Rules are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can evaluate them; editing is manager-only.
+ * @summary List manager-defined production rules
+ */
 export function useListProductionRules<TData = Awaited<ReturnType<typeof listProductionRules>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProductionRules>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -11207,14 +10630,18 @@ export function useListProductionRules<TData = Awaited<ReturnType<typeof listPro
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide production rule. Rules are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can evaluate them; editing is manager-only.
+ * @summary List manager-defined production rules
+ */
 export function useListProductionRules<TData = Awaited<ReturnType<typeof listProductionRules>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProductionRules>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide production rule. Rules are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can evaluate them; editing is manager-only.
  * @summary List manager-defined production rules
  */
-
 export function useListProductionRules<TData = Awaited<ReturnType<typeof listProductionRules>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProductionRules>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -11247,25 +10674,11 @@ export const getSaveProductionRulesUrl = () => {
  */
 export const saveProductionRules = async (saveProductionRulesInput: SaveProductionRulesInput, options?: Parameters<typeof customFetch>[1]): Promise<ProductionRuleList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ProductionRuleList>(getSaveProductionRulesUrl(),
+  return customFetch<ProductionRuleList>(getSaveProductionRulesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveProductionRulesInput)
   }
 );}
@@ -11309,6 +10722,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveProductionRulesMutationVariables = {data: BodyType<SaveProductionRulesInput>}
 
     /**
+ * Upserts a batch of production rules by id. Each rule is normalized and validated server-side; malformed rules are dropped. Manager role required.
  * @summary Create or update production rules (manager only)
  */
 export const useSaveProductionRules = <TError = ErrorType<void>,
@@ -11336,25 +10750,11 @@ export const getDeleteProductionRulesUrl = () => {
  */
 export const deleteProductionRules = async (deleteProductionRulesInput: DeleteProductionRulesInput, options?: Parameters<typeof customFetch>[1]): Promise<ProductionRuleList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ProductionRuleList>(getDeleteProductionRulesUrl(),
+  return customFetch<ProductionRuleList>(getDeleteProductionRulesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteProductionRulesInput)
   }
 );}
@@ -11398,6 +10798,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteProductionRulesMutationVariables = {data: BodyType<DeleteProductionRulesInput>}
 
     /**
+ * Removes a batch of production rules by id. Manager role required.
  * @summary Delete production rules by id (manager only)
  */
 export const useDeleteProductionRules = <TError = ErrorType<void>,
@@ -11467,6 +10868,10 @@ export type ListFreezerPullItemsQueryResult = NonNullable<Awaited<ReturnType<typ
 export type ListFreezerPullItemsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide freezer-pull item (ingredients that must be pulled from the freezer a set number of days before the run that uses them). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse pull notices; editing is manager-only.
+ * @summary List manager-defined freezer-pull items
+ */
 export function useListFreezerPullItems<TData = Awaited<ReturnType<typeof listFreezerPullItems>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerPullItems>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -11477,6 +10882,10 @@ export function useListFreezerPullItems<TData = Awaited<ReturnType<typeof listFr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide freezer-pull item (ingredients that must be pulled from the freezer a set number of days before the run that uses them). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse pull notices; editing is manager-only.
+ * @summary List manager-defined freezer-pull items
+ */
 export function useListFreezerPullItems<TData = Awaited<ReturnType<typeof listFreezerPullItems>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerPullItems>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -11487,14 +10896,18 @@ export function useListFreezerPullItems<TData = Awaited<ReturnType<typeof listFr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide freezer-pull item (ingredients that must be pulled from the freezer a set number of days before the run that uses them). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse pull notices; editing is manager-only.
+ * @summary List manager-defined freezer-pull items
+ */
 export function useListFreezerPullItems<TData = Awaited<ReturnType<typeof listFreezerPullItems>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerPullItems>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide freezer-pull item (ingredients that must be pulled from the freezer a set number of days before the run that uses them). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse pull notices; editing is manager-only.
  * @summary List manager-defined freezer-pull items
  */
-
 export function useListFreezerPullItems<TData = Awaited<ReturnType<typeof listFreezerPullItems>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerPullItems>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -11527,25 +10940,11 @@ export const getSaveFreezerPullItemsUrl = () => {
  */
 export const saveFreezerPullItems = async (saveFreezerPullItemsInput: SaveFreezerPullItemsInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerPullItemList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FreezerPullItemList>(getSaveFreezerPullItemsUrl(),
+  return customFetch<FreezerPullItemList>(getSaveFreezerPullItemsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveFreezerPullItemsInput)
   }
 );}
@@ -11589,6 +10988,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveFreezerPullItemsMutationVariables = {data: BodyType<SaveFreezerPullItemsInput>}
 
     /**
+ * Upserts a batch of freezer-pull items by id. Each item is normalized and validated server-side; malformed items are dropped. Manager role required.
  * @summary Create or update freezer-pull items (manager only)
  */
 export const useSaveFreezerPullItems = <TError = ErrorType<void>,
@@ -11616,25 +11016,11 @@ export const getDeleteFreezerPullItemsUrl = () => {
  */
 export const deleteFreezerPullItems = async (deleteFreezerPullItemsInput: DeleteFreezerPullItemsInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerPullItemList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FreezerPullItemList>(getDeleteFreezerPullItemsUrl(),
+  return customFetch<FreezerPullItemList>(getDeleteFreezerPullItemsUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteFreezerPullItemsInput)
   }
 );}
@@ -11678,6 +11064,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteFreezerPullItemsMutationVariables = {data: BodyType<DeleteFreezerPullItemsInput>}
 
     /**
+ * Removes a batch of freezer-pull items by id. Manager role required.
  * @summary Delete freezer-pull items by id (manager only)
  */
 export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
@@ -11747,6 +11134,10 @@ export type ListFreezerSurplusQueryResult = NonNullable<Awaited<ReturnType<typeo
 export type ListFreezerSurplusQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns scoped finished-case freezer lots and explicit run allocations. Lots remain separately dated and only their remaining balance can be allocated.
+ * @summary List dated finished-case freezer surplus
+ */
 export function useListFreezerSurplus<TData = Awaited<ReturnType<typeof listFreezerSurplus>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplus>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -11757,6 +11148,10 @@ export function useListFreezerSurplus<TData = Awaited<ReturnType<typeof listFree
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns scoped finished-case freezer lots and explicit run allocations. Lots remain separately dated and only their remaining balance can be allocated.
+ * @summary List dated finished-case freezer surplus
+ */
 export function useListFreezerSurplus<TData = Awaited<ReturnType<typeof listFreezerSurplus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplus>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -11767,14 +11162,18 @@ export function useListFreezerSurplus<TData = Awaited<ReturnType<typeof listFree
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns scoped finished-case freezer lots and explicit run allocations. Lots remain separately dated and only their remaining balance can be allocated.
+ * @summary List dated finished-case freezer surplus
+ */
 export function useListFreezerSurplus<TData = Awaited<ReturnType<typeof listFreezerSurplus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns scoped finished-case freezer lots and explicit run allocations. Lots remain separately dated and only their remaining balance can be allocated.
  * @summary List dated finished-case freezer surplus
  */
-
 export function useListFreezerSurplus<TData = Awaited<ReturnType<typeof listFreezerSurplus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -11806,25 +11205,11 @@ export const getConfirmFreezerSurplusUrl = () => {
  */
 export const confirmFreezerSurplus = async (confirmFreezerSurplusInput: ConfirmFreezerSurplusInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusMutationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FreezerSurplusMutationResponse>(getConfirmFreezerSurplusUrl(),
+  return customFetch<FreezerSurplusMutationResponse>(getConfirmFreezerSurplusUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(confirmFreezerSurplusInput)
   }
 );}
@@ -11867,9 +11252,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConfirmFreezerSurplusMutationError = ErrorType<void>
     export type ConfirmFreezerSurplusMutationVariables = {data: BodyType<ConfirmFreezerSurplusInput>}
 
-    /**
- * @summary Confirm a new dated finished-case surplus lot
- */
+    /** @summary Confirm a new dated finished-case surplus lot */
 export const useConfirmFreezerSurplus = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmFreezerSurplus>>, TError,ConfirmFreezerSurplusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -11937,6 +11320,10 @@ export type ListFreezerSurplusAdjustmentsQueryResult = NonNullable<Awaited<Retur
 export type ListFreezerSurplusAdjustmentsQueryError = ErrorType<void>
 
 
+/**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
 export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -11947,6 +11334,10 @@ export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
 export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -11957,14 +11348,18 @@ export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
 export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
  * @summary List the scoped finished-case freezer adjustment audit
  */
-
 export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -12039,6 +11434,10 @@ export type ListFreezerSurplusConfirmationsQueryResult = NonNullable<Awaited<Ret
 export type ListFreezerSurplusConfirmationsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns up to 500 recent run-bound outcomes in the authenticated live or sandbox scope. A zero-case outcome records that the run was checked and created no freezer stock.
+ * @summary List confirmed completed-run surplus outcomes
+ */
 export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -12049,6 +11448,10 @@ export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<ty
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns up to 500 recent run-bound outcomes in the authenticated live or sandbox scope. A zero-case outcome records that the run was checked and created no freezer stock.
+ * @summary List confirmed completed-run surplus outcomes
+ */
 export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -12059,14 +11462,18 @@ export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<ty
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns up to 500 recent run-bound outcomes in the authenticated live or sandbox scope. A zero-case outcome records that the run was checked and created no freezer stock.
+ * @summary List confirmed completed-run surplus outcomes
+ */
 export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns up to 500 recent run-bound outcomes in the authenticated live or sandbox scope. A zero-case outcome records that the run was checked and created no freezer stock.
  * @summary List confirmed completed-run surplus outcomes
  */
-
 export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -12099,25 +11506,11 @@ export const getRecordFreezerSurplusConfirmationUrl = () => {
  */
 export const recordFreezerSurplusConfirmation = async (confirmFreezerSurplusOutcomeInput: ConfirmFreezerSurplusOutcomeInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusConfirmationMutation> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FreezerSurplusConfirmationMutation>(getRecordFreezerSurplusConfirmationUrl(),
+  return customFetch<FreezerSurplusConfirmationMutation>(getRecordFreezerSurplusConfirmationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(confirmFreezerSurplusOutcomeInput)
   }
 );}
@@ -12161,6 +11554,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordFreezerSurplusConfirmationMutationVariables = {data: BodyType<ConfirmFreezerSurplusOutcomeInput>}
 
     /**
+ * Requires manage-inventory. The server verifies the run is completed and still within its configured Freeze tunnel window. One immutable outcome is allowed per scoped run; exact retries return the saved receipt and conflicting submissions do not change stock.
  * @summary Confirm the finished-case surplus outcome for a completed run
  */
 export const useRecordFreezerSurplusConfirmation = <TError = ErrorType<void>,
@@ -12230,6 +11624,10 @@ export type GetFreezerSurplusDecisionQueryResult = NonNullable<Awaited<ReturnTyp
 export type GetFreezerSurplusDecisionQueryError = ErrorType<void>
 
 
+/**
+ * Requires manage-inventory. Returns append-only correction history in the current scope.
+ * @summary Read the original and current manager-corrected surplus decision
+ */
 export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
  runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -12240,6 +11638,10 @@ export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof g
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires manage-inventory. Returns append-only correction history in the current scope.
+ * @summary Read the original and current manager-corrected surplus decision
+ */
 export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
  runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -12250,14 +11652,18 @@ export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof g
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Requires manage-inventory. Returns append-only correction history in the current scope.
+ * @summary Read the original and current manager-corrected surplus decision
+ */
 export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
  runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Requires manage-inventory. Returns append-only correction history in the current scope.
  * @summary Read the original and current manager-corrected surplus decision
  */
-
 export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
  runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -12291,25 +11697,11 @@ export const getCorrectFreezerSurplusDecisionUrl = (runId: string,) => {
 export const correctFreezerSurplusDecision = async (runId: string,
     correctFreezerSurplusDecisionInput: CorrectFreezerSurplusDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusDecision> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FreezerSurplusDecision>(getCorrectFreezerSurplusDecisionUrl(runId),
+  return customFetch<FreezerSurplusDecision>(getCorrectFreezerSurplusDecisionUrl(runId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(correctFreezerSurplusDecisionInput)
   }
 );}
@@ -12353,6 +11745,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CorrectFreezerSurplusDecisionMutationVariables = {runId: string;data: BodyType<CorrectFreezerSurplusDecisionInput>}
 
     /**
+ * Requires manage-inventory and a reason. Preserves the original decision, uses a revision fence and stable event ID, and applies stock changes transactionally through inventory accounting. A reduction cannot remove allocated or unavailable cases. A date change is rejected if the lot has allocation or adjustment history, or its history is unknown.
  * @summary Append a stock-safe correction to a saved surplus decision
  */
 export const useCorrectFreezerSurplusDecision = <TError = ErrorType<void>,
@@ -12380,25 +11773,11 @@ export const getReplaceFreezerSurplusAllocationUrl = (runId: string,) => {
 export const replaceFreezerSurplusAllocation = async (runId: string,
     replaceFreezerSurplusAllocationInput: ReplaceFreezerSurplusAllocationInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusMutationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FreezerSurplusMutationResponse>(getReplaceFreezerSurplusAllocationUrl(runId),
+  return customFetch<FreezerSurplusMutationResponse>(getReplaceFreezerSurplusAllocationUrl(runId),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(replaceFreezerSurplusAllocationInput)
   }
 );}
@@ -12441,9 +11820,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReplaceFreezerSurplusAllocationMutationError = ErrorType<void>
     export type ReplaceFreezerSurplusAllocationMutationVariables = {runId: string;data: BodyType<ReplaceFreezerSurplusAllocationInput>}
 
-    /**
- * @summary Apply or revise dated surplus for an unstarted run
- */
+    /** @summary Apply or revise dated surplus for an unstarted run */
 export const useReplaceFreezerSurplusAllocation = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceFreezerSurplusAllocation>>, TError,ReplaceFreezerSurplusAllocationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -12470,25 +11847,11 @@ export const getRecordFreezerSurplusAdjustmentUrl = (lotId: string,) => {
 export const recordFreezerSurplusAdjustment = async (lotId: string,
     recordFreezerSurplusAdjustmentInput: RecordFreezerSurplusAdjustmentInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusMutationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FreezerSurplusMutationResponse>(getRecordFreezerSurplusAdjustmentUrl(lotId),
+  return customFetch<FreezerSurplusMutationResponse>(getRecordFreezerSurplusAdjustmentUrl(lotId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(recordFreezerSurplusAdjustmentInput)
   }
 );}
@@ -12532,6 +11895,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordFreezerSurplusAdjustmentMutationVariables = {lotId: string;data: BodyType<RecordFreezerSurplusAdjustmentInput>}
 
     /**
+ * Manager-only physical event. Damage reduces currently available cases. A return must name a started or completed run with an allocation from this dated lot and cannot exceed the allocation less prior returns. Corrections append a compensating event linked to an earlier damage or return; the original event is never edited or deleted. Every event uses a stable eventId for retry safety and updates the dated lot and freezer inventory in the same transaction without deducting ingredients.
  * @summary Record freezer damage, a run return, or a correction
  */
 export const useRecordFreezerSurplusAdjustment = <TError = ErrorType<void>,
@@ -12601,6 +11965,10 @@ export type ListMixSurplusQueryResult = NonNullable<Awaited<ReturnType<typeof li
 export type ListMixSurplusQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
+ * @summary List dated prep-mix surplus ledger and freezer balances
+ */
 export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -12611,6 +11979,10 @@ export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurpl
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
+ * @summary List dated prep-mix surplus ledger and freezer balances
+ */
 export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -12621,14 +11993,18 @@ export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurpl
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
+ * @summary List dated prep-mix surplus ledger and freezer balances
+ */
 export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
  * @summary List dated prep-mix surplus ledger and freezer balances
  */
-
 export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -12661,25 +12037,11 @@ export const getRecordMixSurplusUrl = () => {
  */
 export const recordMixSurplus = async (recordMixSurplusInput: RecordMixSurplusInput, options?: Parameters<typeof customFetch>[1]): Promise<MixSurplusMutationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MixSurplusMutationResponse>(getRecordMixSurplusUrl(),
+  return customFetch<MixSurplusMutationResponse>(getRecordMixSurplusUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(recordMixSurplusInput)
   }
 );}
@@ -12723,6 +12085,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordMixSurplusMutationVariables = {data: BodyType<RecordMixSurplusInput>}
 
     /**
+ * Manager-confirmed record of surplus mix (pounds already made beyond a day's fresh need) as freezer stock. Creates a dated lot with remaining equal to the entered amount. Ledger action only — no inventory writes.
  * @summary Record a confirmed prep-mix surplus lot
  */
 export const useRecordMixSurplus = <TError = ErrorType<void>,
@@ -12751,25 +12114,11 @@ export const getReplaceMixSurplusAllocationsUrl = (runDate: string,) => {
 export const replaceMixSurplusAllocations = async (runDate: string,
     replaceMixSurplusAllocationInput: ReplaceMixSurplusAllocationInput, options?: Parameters<typeof customFetch>[1]): Promise<MixSurplusMutationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MixSurplusMutationResponse>(getReplaceMixSurplusAllocationsUrl(runDate),
+  return customFetch<MixSurplusMutationResponse>(getReplaceMixSurplusAllocationsUrl(runDate),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(replaceMixSurplusAllocationInput)
   }
 );}
@@ -12813,6 +12162,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReplaceMixSurplusAllocationsMutationVariables = {runDate: string;data: BodyType<ReplaceMixSurplusAllocationInput>}
 
     /**
+ * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; reducing/omitting an allocation returns that amount to the lot (un-reserved, still in the freezer). Voiding a lot entirely is DELETE /mix-surplus/lots/{id}. Ledger action only — never writes inventory.
  * @summary Apply or release mix surplus for a make-day
  */
 export const useReplaceMixSurplusAllocations = <TError = ErrorType<void>,
@@ -12888,6 +12238,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type VoidMixSurplusLotMutationVariables = {id: string}
 
     /**
+ * Manager override: voids a surplus lot entirely — its remaining balance is set to 0, its allocation rows are removed, and the mix row's amountAlreadyMade is decremented by the voided amount so the plan reducer stops counting disposed surplus (ledger == scalar invariant). Ledger action only — never writes inventory.
  * @summary Void a mix surplus lot (release it from use)
  */
 export const useVoidMixSurplusLot = <TError = ErrorType<void>,
@@ -12957,6 +12308,10 @@ export type ListDieLineDefaultsQueryResult = NonNullable<Awaited<ReturnType<type
 export type ListDieLineDefaultsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
+ * @summary List manager-set per-die line-setting defaults
+ */
 export function useListDieLineDefaults<TData = Awaited<ReturnType<typeof listDieLineDefaults>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieLineDefaults>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -12967,6 +12322,10 @@ export function useListDieLineDefaults<TData = Awaited<ReturnType<typeof listDie
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
+ * @summary List manager-set per-die line-setting defaults
+ */
 export function useListDieLineDefaults<TData = Awaited<ReturnType<typeof listDieLineDefaults>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieLineDefaults>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -12977,14 +12336,18 @@ export function useListDieLineDefaults<TData = Awaited<ReturnType<typeof listDie
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
+ * @summary List manager-set per-die line-setting defaults
+ */
 export function useListDieLineDefaults<TData = Awaited<ReturnType<typeof listDieLineDefaults>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieLineDefaults>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
  * @summary List manager-set per-die line-setting defaults
  */
-
 export function useListDieLineDefaults<TData = Awaited<ReturnType<typeof listDieLineDefaults>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieLineDefaults>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -13017,25 +12380,11 @@ export const getSaveDieLineDefaultsUrl = () => {
  */
 export const saveDieLineDefaults = async (saveDieLineDefaultsInput: SaveDieLineDefaultsInput, options?: Parameters<typeof customFetch>[1]): Promise<DieLineDefaultsList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DieLineDefaultsList>(getSaveDieLineDefaultsUrl(),
+  return customFetch<DieLineDefaultsList>(getSaveDieLineDefaultsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveDieLineDefaultsInput)
   }
 );}
@@ -13079,6 +12428,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveDieLineDefaultsMutationVariables = {data: BodyType<SaveDieLineDefaultsInput>}
 
     /**
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Existing rows require a current or newer updatedAt revision; stale or revision-less updates are rejected atomically. Revision-less entries remain compatible for first-time creation. Malformed entries are dropped. Manager role required.
  * @summary Create or update per-die line-setting defaults (manager only)
  */
 export const useSaveDieLineDefaults = <TError = ErrorType<void>,
@@ -13106,25 +12456,11 @@ export const getDeleteDieLineDefaultsUrl = () => {
  */
 export const deleteDieLineDefaults = async (deleteDieLineDefaultsInput: DeleteDieLineDefaultsInput, options?: Parameters<typeof customFetch>[1]): Promise<DieLineDefaultsList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DieLineDefaultsList>(getDeleteDieLineDefaultsUrl(),
+  return customFetch<DieLineDefaultsList>(getDeleteDieLineDefaultsUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteDieLineDefaultsInput)
   }
 );}
@@ -13168,6 +12504,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteDieLineDefaultsMutationVariables = {data: BodyType<DeleteDieLineDefaultsInput>}
 
     /**
+ * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Existing rows require a current or newer revision in the revisions map; stale or revision-less resets are rejected atomically. Revision-less names remain compatible when no stored row exists. Manager role required.
  * @summary Delete per-die line-setting defaults by die name (manager only)
  */
 export const useDeleteDieLineDefaults = <TError = ErrorType<void>,
@@ -13237,6 +12574,10 @@ export type ListRunSuggestionsQueryResult = NonNullable<Awaited<ReturnType<typeo
 export type ListRunSuggestionsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns stored run-coaching suggestions (pending, accepted, dismissed). These are deterministic, math-driven recommendations to adjust a setting (cycle speed or tunnel time) generated after runs complete; nothing is ever auto-applied. Reading is open to any signed-in user; acting on them is manager-only.
+ * @summary List run-coaching suggestions (Run Insights)
+ */
 export function useListRunSuggestions<TData = Awaited<ReturnType<typeof listRunSuggestions>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunSuggestions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -13247,6 +12588,10 @@ export function useListRunSuggestions<TData = Awaited<ReturnType<typeof listRunS
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns stored run-coaching suggestions (pending, accepted, dismissed). These are deterministic, math-driven recommendations to adjust a setting (cycle speed or tunnel time) generated after runs complete; nothing is ever auto-applied. Reading is open to any signed-in user; acting on them is manager-only.
+ * @summary List run-coaching suggestions (Run Insights)
+ */
 export function useListRunSuggestions<TData = Awaited<ReturnType<typeof listRunSuggestions>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunSuggestions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -13257,14 +12602,18 @@ export function useListRunSuggestions<TData = Awaited<ReturnType<typeof listRunS
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns stored run-coaching suggestions (pending, accepted, dismissed). These are deterministic, math-driven recommendations to adjust a setting (cycle speed or tunnel time) generated after runs complete; nothing is ever auto-applied. Reading is open to any signed-in user; acting on them is manager-only.
+ * @summary List run-coaching suggestions (Run Insights)
+ */
 export function useListRunSuggestions<TData = Awaited<ReturnType<typeof listRunSuggestions>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunSuggestions>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns stored run-coaching suggestions (pending, accepted, dismissed). These are deterministic, math-driven recommendations to adjust a setting (cycle speed or tunnel time) generated after runs complete; nothing is ever auto-applied. Reading is open to any signed-in user; acting on them is manager-only.
  * @summary List run-coaching suggestions (Run Insights)
  */
-
 export function useListRunSuggestions<TData = Awaited<ReturnType<typeof listRunSuggestions>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunSuggestions>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -13297,25 +12646,11 @@ export const getObserveRunSuggestionUrl = () => {
  */
 export const observeRunSuggestion = async (observeRunSuggestionInput: ObserveRunSuggestionInput, options?: Parameters<typeof customFetch>[1]): Promise<ObserveRunSuggestion200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ObserveRunSuggestion200>(getObserveRunSuggestionUrl(),
+  return customFetch<ObserveRunSuggestion200>(getObserveRunSuggestionUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(observeRunSuggestionInput)
   }
 );}
@@ -13359,6 +12694,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ObserveRunSuggestionMutationVariables = {data: BodyType<ObserveRunSuggestionInput>}
 
     /**
+ * Called after a run finalizes when the client's deterministic analysis found a significant, consistent deviation between observed and configured values. Upserts one row per pattern (type + product + die). A dismissed pattern is only reopened when the drift has worsened or the configured value changed. Best-effort AI narration is attached server-side; on provider failure a deterministic explanation is kept.
  * @summary Report a run-coaching suggestion candidate
  */
 export const useObserveRunSuggestion = <TError = ErrorType<void>,
@@ -13386,25 +12722,11 @@ export const getUpdateRunSuggestionUrl = () => {
  */
 export const updateRunSuggestion = async (updateRunSuggestionInput: UpdateRunSuggestionInput, options?: Parameters<typeof customFetch>[1]): Promise<RunSuggestionsList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<RunSuggestionsList>(getUpdateRunSuggestionUrl(),
+  return customFetch<RunSuggestionsList>(getUpdateRunSuggestionUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(updateRunSuggestionInput)
   }
 );}
@@ -13448,6 +12770,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateRunSuggestionMutationVariables = {data: BodyType<UpdateRunSuggestionInput>}
 
     /**
+ * Manager decision on a pending suggestion — accept (the client applies the setting change) or dismiss (pattern suppressed until it recurs). Can also clear a delivered follow-up note.
  * @summary Accept or dismiss a run suggestion (manager only)
  */
 export const useUpdateRunSuggestion = <TError = ErrorType<void>,
@@ -13475,25 +12798,11 @@ export const getFollowUpRunSuggestionUrl = () => {
  */
 export const followUpRunSuggestion = async (runSuggestionFollowUpInput: RunSuggestionFollowUpInput, options?: Parameters<typeof customFetch>[1]): Promise<FollowUpRunSuggestion200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FollowUpRunSuggestion200>(getFollowUpRunSuggestionUrl(),
+  return customFetch<FollowUpRunSuggestion200>(getFollowUpRunSuggestionUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(runSuggestionFollowUpInput)
   }
 );}
@@ -13537,6 +12846,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type FollowUpRunSuggestionMutationVariables = {data: BodyType<RunSuggestionFollowUpInput>}
 
     /**
+ * After a suggestion was accepted, the next finished run of the same product/die reports whether the adjusted setting tracked reality. Only writes onto an accepted suggestion that has no note yet.
  * @summary Record a post-accept follow-up note for a suggestion
  */
 export const useFollowUpRunSuggestion = <TError = ErrorType<void>,
@@ -13606,6 +12916,10 @@ export type ListDieTypesQueryResult = NonNullable<Awaited<ReturnType<typeof list
 export type ListDieTypesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
+ * @summary List factory-wide die types
+ */
 export function useListDieTypes<TData = Awaited<ReturnType<typeof listDieTypes>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieTypes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -13616,6 +12930,10 @@ export function useListDieTypes<TData = Awaited<ReturnType<typeof listDieTypes>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
+ * @summary List factory-wide die types
+ */
 export function useListDieTypes<TData = Awaited<ReturnType<typeof listDieTypes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieTypes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -13626,14 +12944,18 @@ export function useListDieTypes<TData = Awaited<ReturnType<typeof listDieTypes>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
+ * @summary List factory-wide die types
+ */
 export function useListDieTypes<TData = Awaited<ReturnType<typeof listDieTypes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieTypes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
  * @summary List factory-wide die types
  */
-
 export function useListDieTypes<TData = Awaited<ReturnType<typeof listDieTypes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDieTypes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -13666,25 +12988,11 @@ export const getSaveDieTypesUrl = () => {
  */
 export const saveDieTypes = async (saveDieTypesInput: SaveDieTypesInput, options?: Parameters<typeof customFetch>[1]): Promise<DieTypeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DieTypeList>(getSaveDieTypesUrl(),
+  return customFetch<DieTypeList>(getSaveDieTypesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveDieTypesInput)
   }
 );}
@@ -13728,6 +13036,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveDieTypesMutationVariables = {data: BodyType<SaveDieTypesInput>}
 
     /**
+ * Upserts a batch of die types by name. Names are trimmed and folded to their canonical id case-insensitively; malformed/empty names are dropped.
  * @summary Create or update die types
  */
 export const useSaveDieTypes = <TError = ErrorType<void>,
@@ -13755,25 +13064,11 @@ export const getDeleteDieTypesUrl = () => {
  */
 export const deleteDieTypes = async (deleteDieTypesInput: DeleteDieTypesInput, options?: Parameters<typeof customFetch>[1]): Promise<DieTypeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<DieTypeList>(getDeleteDieTypesUrl(),
+  return customFetch<DieTypeList>(getDeleteDieTypesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteDieTypesInput)
   }
 );}
@@ -13817,6 +13112,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteDieTypesMutationVariables = {data: BodyType<DeleteDieTypesInput>}
 
     /**
+ * Removes a batch of die types by name (case-insensitive). Deletions are deliberate user actions and are honored factory-wide — clients keep their own deletion tombstones so a removed die is never resurrected.
  * @summary Delete die types by name
  */
 export const useDeleteDieTypes = <TError = ErrorType<void>,
@@ -13886,6 +13182,10 @@ export type ListRunTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListRunTemplatesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
+ * @summary List facility-wide run templates
+ */
 export function useListRunTemplates<TData = Awaited<ReturnType<typeof listRunTemplates>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunTemplates>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -13896,6 +13196,10 @@ export function useListRunTemplates<TData = Awaited<ReturnType<typeof listRunTem
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
+ * @summary List facility-wide run templates
+ */
 export function useListRunTemplates<TData = Awaited<ReturnType<typeof listRunTemplates>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunTemplates>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -13906,14 +13210,18 @@ export function useListRunTemplates<TData = Awaited<ReturnType<typeof listRunTem
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
+ * @summary List facility-wide run templates
+ */
 export function useListRunTemplates<TData = Awaited<ReturnType<typeof listRunTemplates>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunTemplates>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
  * @summary List facility-wide run templates
  */
-
 export function useListRunTemplates<TData = Awaited<ReturnType<typeof listRunTemplates>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRunTemplates>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -13946,25 +13254,11 @@ export const getSaveRunTemplatesUrl = () => {
  */
 export const saveRunTemplates = async (saveRunTemplatesInput: SaveRunTemplatesInput, options?: Parameters<typeof customFetch>[1]): Promise<RunTemplateList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<RunTemplateList>(getSaveRunTemplatesUrl(),
+  return customFetch<RunTemplateList>(getSaveRunTemplatesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveRunTemplatesInput)
   }
 );}
@@ -14008,6 +13302,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveRunTemplatesMutationVariables = {data: BodyType<SaveRunTemplatesInput>}
 
     /**
+ * Upserts a batch of run templates by id and revision. A write applies only when its revision is strictly newer than the stored revision; equal revisions are idempotent. Any signed-in user may save.
  * @summary Create or update run templates
  */
 export const useSaveRunTemplates = <TError = ErrorType<void>,
@@ -14035,25 +13330,11 @@ export const getDeleteRunTemplatesUrl = () => {
  */
 export const deleteRunTemplates = async (deleteRunTemplatesInput: DeleteRunTemplatesInput, options?: Parameters<typeof customFetch>[1]): Promise<RunTemplateList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<RunTemplateList>(getDeleteRunTemplatesUrl(),
+  return customFetch<RunTemplateList>(getDeleteRunTemplatesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteRunTemplatesInput)
   }
 );}
@@ -14097,6 +13378,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteRunTemplatesMutationVariables = {data: BodyType<DeleteRunTemplatesInput>}
 
     /**
+ * Persists a deletion tombstone for each item when its revision is strictly newer than the stored revision. Any signed-in user may delete.
  * @summary Tombstone run templates by id and revision
  */
 export const useDeleteRunTemplates = <TError = ErrorType<void>,
@@ -14166,6 +13448,10 @@ export type GetOperationalFactoryDirectoryQueryResult = NonNullable<Awaited<Retu
 export type GetOperationalFactoryDirectoryQueryError = ErrorType<void>
 
 
+/**
+ * Authenticated scope-isolated read of directories, presets, stoppage reasons, packaging options and shift/production start times. Excludes administrative data. No write permission is granted.
+ * @summary Read allowlisted operational lists, recipe presets and settings
+ */
 export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -14176,6 +13462,10 @@ export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Authenticated scope-isolated read of directories, presets, stoppage reasons, packaging options and shift/production start times. Excludes administrative data. No write permission is granted.
+ * @summary Read allowlisted operational lists, recipe presets and settings
+ */
 export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -14186,14 +13476,18 @@ export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Authenticated scope-isolated read of directories, presets, stoppage reasons, packaging options and shift/production start times. Excludes administrative data. No write permission is granted.
+ * @summary Read allowlisted operational lists, recipe presets and settings
+ */
 export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Authenticated scope-isolated read of directories, presets, stoppage reasons, packaging options and shift/production start times. Excludes administrative data. No write permission is granted.
  * @summary Read allowlisted operational lists, recipe presets and settings
  */
-
 export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -14225,25 +13519,11 @@ export const getVerifySupervisorPinUrl = () => {
  */
 export const verifySupervisorPin = async (supervisorPinVerificationInput: SupervisorPinVerificationInput, options?: Parameters<typeof customFetch>[1]): Promise<VerifySupervisorPin200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<VerifySupervisorPin200>(getVerifySupervisorPinUrl(),
+  return customFetch<VerifySupervisorPin200>(getVerifySupervisorPinUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(supervisorPinVerificationInput)
   }
 );}
@@ -14286,9 +13566,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type VerifySupervisorPinMutationError = ErrorType<void>
     export type VerifySupervisorPinMutationVariables = {data: BodyType<SupervisorPinVerificationInput>}
 
-    /**
- * @summary Verify an entered PIN online without returning the facility PIN
- */
+    /** @summary Verify an entered PIN online without returning the facility PIN */
 export const useVerifySupervisorPin = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifySupervisorPin>>, TError,VerifySupervisorPinMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -14356,6 +13634,10 @@ export type GetSupervisorPinQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type GetSupervisorPinQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns only whether a PIN is configured. Older clients must update; no compatibility endpoint returns the PIN.
+ * @summary Get nonsecret configured status
+ */
 export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervisorPin>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSupervisorPin>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -14366,6 +13648,10 @@ export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns only whether a PIN is configured. Older clients must update; no compatibility endpoint returns the PIN.
+ * @summary Get nonsecret configured status
+ */
 export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervisorPin>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSupervisorPin>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -14376,14 +13662,18 @@ export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns only whether a PIN is configured. Older clients must update; no compatibility endpoint returns the PIN.
+ * @summary Get nonsecret configured status
+ */
 export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervisorPin>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSupervisorPin>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns only whether a PIN is configured. Older clients must update; no compatibility endpoint returns the PIN.
  * @summary Get nonsecret configured status
  */
-
 export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervisorPin>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSupervisorPin>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -14416,25 +13706,11 @@ export const getUpdateSupervisorPinUrl = () => {
  */
 export const updateSupervisorPin = async (supervisorPin: SupervisorPin, options?: Parameters<typeof customFetch>[1]): Promise<SupervisorPinStatus> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SupervisorPinStatus>(getUpdateSupervisorPinUrl(),
+  return customFetch<SupervisorPinStatus>(getUpdateSupervisorPinUrl(),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(supervisorPin)
   }
 );}
@@ -14478,6 +13754,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateSupervisorPinMutationVariables = {data: BodyType<SupervisorPin>}
 
     /**
+ * Sets the facility supervisor PIN. Manager capability required so the facility-wide gate isn't changed out from under everyone by any user.
  * @summary Update the facility-wide supervisor PIN (manager only)
  */
 export const useUpdateSupervisorPin = <TError = ErrorType<void>,
@@ -14547,6 +13824,10 @@ export type ListMixesQueryResult = NonNullable<Awaited<ReturnType<typeof listMix
 export type ListMixesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
+ * @summary List manager-defined mixes
+ */
 export function useListMixes<TData = Awaited<ReturnType<typeof listMixes>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -14557,6 +13838,10 @@ export function useListMixes<TData = Awaited<ReturnType<typeof listMixes>>, TErr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
+ * @summary List manager-defined mixes
+ */
 export function useListMixes<TData = Awaited<ReturnType<typeof listMixes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -14567,14 +13852,18 @@ export function useListMixes<TData = Awaited<ReturnType<typeof listMixes>>, TErr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
+ * @summary List manager-defined mixes
+ */
 export function useListMixes<TData = Awaited<ReturnType<typeof listMixes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
  * @summary List manager-defined mixes
  */
-
 export function useListMixes<TData = Awaited<ReturnType<typeof listMixes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -14607,25 +13896,11 @@ export const getSaveMixesUrl = () => {
  */
 export const saveMixes = async (saveMixesInput: SaveMixesInput, options?: Parameters<typeof customFetch>[1]): Promise<MixList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MixList>(getSaveMixesUrl(),
+  return customFetch<MixList>(getSaveMixesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveMixesInput)
   }
 );}
@@ -14669,6 +13944,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveMixesMutationVariables = {data: BodyType<SaveMixesInput>}
 
     /**
+ * Upserts a batch of mixes by id. Each mix is normalized and validated server-side; malformed mixes are dropped. Manager role required.
  * @summary Create or update mixes (manager only)
  */
 export const useSaveMixes = <TError = ErrorType<void>,
@@ -14696,25 +13972,11 @@ export const getDeleteMixesUrl = () => {
  */
 export const deleteMixes = async (deleteMixesInput: DeleteMixesInput, options?: Parameters<typeof customFetch>[1]): Promise<MixList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MixList>(getDeleteMixesUrl(),
+  return customFetch<MixList>(getDeleteMixesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteMixesInput)
   }
 );}
@@ -14758,6 +14020,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteMixesMutationVariables = {data: BodyType<DeleteMixesInput>}
 
     /**
+ * Removes a batch of mixes by id. Manager role required.
  * @summary Delete mixes by id (manager only)
  */
 export const useDeleteMixes = <TError = ErrorType<void>,
@@ -14827,6 +14090,10 @@ export type ListIngredientsQueryResult = NonNullable<Awaited<ReturnType<typeof l
 export type ListIngredientsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every ingredient in the factory-wide catalog (Task #102). This is global master-data (not part of the per-day sync payload); reading is available to any signed-in user so both apps can resolve recipe rows and build category-scoped pickers, while editing is manager-only.
+ * @summary List the factory-wide ingredient catalog
+ */
 export function useListIngredients<TData = Awaited<ReturnType<typeof listIngredients>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredients>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -14837,6 +14104,10 @@ export function useListIngredients<TData = Awaited<ReturnType<typeof listIngredi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every ingredient in the factory-wide catalog (Task #102). This is global master-data (not part of the per-day sync payload); reading is available to any signed-in user so both apps can resolve recipe rows and build category-scoped pickers, while editing is manager-only.
+ * @summary List the factory-wide ingredient catalog
+ */
 export function useListIngredients<TData = Awaited<ReturnType<typeof listIngredients>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredients>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -14847,14 +14118,18 @@ export function useListIngredients<TData = Awaited<ReturnType<typeof listIngredi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every ingredient in the factory-wide catalog (Task #102). This is global master-data (not part of the per-day sync payload); reading is available to any signed-in user so both apps can resolve recipe rows and build category-scoped pickers, while editing is manager-only.
+ * @summary List the factory-wide ingredient catalog
+ */
 export function useListIngredients<TData = Awaited<ReturnType<typeof listIngredients>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredients>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every ingredient in the factory-wide catalog (Task #102). This is global master-data (not part of the per-day sync payload); reading is available to any signed-in user so both apps can resolve recipe rows and build category-scoped pickers, while editing is manager-only.
  * @summary List the factory-wide ingredient catalog
  */
-
 export function useListIngredients<TData = Awaited<ReturnType<typeof listIngredients>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredients>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -14887,25 +14162,11 @@ export const getSaveIngredientsUrl = () => {
  */
 export const saveIngredients = async (saveIngredientsInput: SaveIngredientsInput, options?: Parameters<typeof customFetch>[1]): Promise<IngredientList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<IngredientList>(getSaveIngredientsUrl(),
+  return customFetch<IngredientList>(getSaveIngredientsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveIngredientsInput)
   }
 );}
@@ -14949,6 +14210,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveIngredientsMutationVariables = {data: BodyType<SaveIngredientsInput>}
 
     /**
+ * Upserts a batch of ingredients by id. Each ingredient is normalized and validated server-side; malformed entries are dropped. Renaming is just an upsert of an existing id with a new name — since recipe rows reference the id, the new name is picked up everywhere with no client-side rewrite. Manager role required.
  * @summary Create or rename ingredients (manager only)
  */
 export const useSaveIngredients = <TError = ErrorType<void>,
@@ -14976,25 +14238,11 @@ export const getDeleteIngredientsUrl = () => {
  */
 export const deleteIngredients = async (deleteIngredientsInput: DeleteIngredientsInput, options?: Parameters<typeof customFetch>[1]): Promise<IngredientList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<IngredientList>(getDeleteIngredientsUrl(),
+  return customFetch<IngredientList>(getDeleteIngredientsUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteIngredientsInput)
   }
 );}
@@ -15038,6 +14286,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteIngredientsMutationVariables = {data: BodyType<DeleteIngredientsInput>}
 
     /**
+ * Marks a batch of ingredients disabled by id (soft delete — the id may still be referenced by historical recipe rows, which keep resolving to its last known name). Manager role required.
  * @summary Soft-delete ingredients by id (manager only)
  */
 export const useDeleteIngredients = <TError = ErrorType<void>,
@@ -15066,25 +14315,11 @@ export const getUpdateIngredientAllergenMappingUrl = (id: string,) => {
 export const updateIngredientAllergenMapping = async (id: string,
     updateIngredientAllergenMappingInput: UpdateIngredientAllergenMappingInput, options?: Parameters<typeof customFetch>[1]): Promise<Ingredient> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<Ingredient>(getUpdateIngredientAllergenMappingUrl(id),
+  return customFetch<Ingredient>(getUpdateIngredientAllergenMappingUrl(id),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(updateIngredientAllergenMappingInput)
   }
 );}
@@ -15128,6 +14363,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateIngredientAllergenMappingMutationVariables = {id: string;data: BodyType<UpdateIngredientAllergenMappingInput>}
 
     /**
+ * Sets the reviewed mapping for one existing ingredient within the authenticated facility scope. Only callers with manage-allergens may write this mapping. This is a mapping record, not a food-label claim or cleaning clearance.
  * @summary Review an ingredient's mapped allergens
  */
 export const useUpdateIngredientAllergenMapping = <TError = ErrorType<void>,
@@ -15155,25 +14391,11 @@ export const getMergeIngredientsUrl = () => {
  */
 export const mergeIngredients = async (mergeIngredientsInput: MergeIngredientsInput, options?: Parameters<typeof customFetch>[1]): Promise<IngredientList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<IngredientList>(getMergeIngredientsUrl(),
+  return customFetch<IngredientList>(getMergeIngredientsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(mergeIngredientsInput)
   }
 );}
@@ -15217,6 +14439,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type MergeIngredientsMutationVariables = {data: BodyType<MergeIngredientsInput>}
 
     /**
+ * Collapses each source ingredient into the target: sets the source's `mergedInto` pointer to the target id and disables the source. Any recipe row still referencing a merged-away id resolves to the target's current name via the pointer. Manager role required.
  * @summary Merge one or more ingredients into a target ingredient (manager only)
  */
 export const useMergeIngredients = <TError = ErrorType<void>,
@@ -15286,6 +14509,10 @@ export type ListCheeseRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type ListCheeseRecipesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined cheese recipes
+ */
 export function useListCheeseRecipes<TData = Awaited<ReturnType<typeof listCheeseRecipes>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseRecipes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -15296,6 +14523,10 @@ export function useListCheeseRecipes<TData = Awaited<ReturnType<typeof listChees
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined cheese recipes
+ */
 export function useListCheeseRecipes<TData = Awaited<ReturnType<typeof listCheeseRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseRecipes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -15306,14 +14537,18 @@ export function useListCheeseRecipes<TData = Awaited<ReturnType<typeof listChees
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined cheese recipes
+ */
 export function useListCheeseRecipes<TData = Awaited<ReturnType<typeof listCheeseRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseRecipes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
  * @summary List manager-defined cheese recipes
  */
-
 export function useListCheeseRecipes<TData = Awaited<ReturnType<typeof listCheeseRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseRecipes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -15346,25 +14581,11 @@ export const getSaveCheeseRecipesUrl = () => {
  */
 export const saveCheeseRecipes = async (saveCheeseRecipesInput: SaveCheeseRecipesInput, options?: Parameters<typeof customFetch>[1]): Promise<CheeseRecipeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<CheeseRecipeList>(getSaveCheeseRecipesUrl(),
+  return customFetch<CheeseRecipeList>(getSaveCheeseRecipesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveCheeseRecipesInput)
   }
 );}
@@ -15408,6 +14629,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveCheeseRecipesMutationVariables = {data: BodyType<SaveCheeseRecipesInput>}
 
     /**
+ * Upserts a batch of cheese recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
  * @summary Create or update cheese recipes (manager only)
  */
 export const useSaveCheeseRecipes = <TError = ErrorType<void>,
@@ -15435,25 +14657,11 @@ export const getDeleteCheeseRecipesUrl = () => {
  */
 export const deleteCheeseRecipes = async (deleteCheeseRecipesInput: DeleteCheeseRecipesInput, options?: Parameters<typeof customFetch>[1]): Promise<CheeseRecipeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<CheeseRecipeList>(getDeleteCheeseRecipesUrl(),
+  return customFetch<CheeseRecipeList>(getDeleteCheeseRecipesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteCheeseRecipesInput)
   }
 );}
@@ -15497,6 +14705,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteCheeseRecipesMutationVariables = {data: BodyType<DeleteCheeseRecipesInput>}
 
     /**
+ * Removes a batch of cheese recipes by id. Manager role required.
  * @summary Delete cheese recipes by id (manager only)
  */
 export const useDeleteCheeseRecipes = <TError = ErrorType<void>,
@@ -15566,6 +14775,10 @@ export type ListDoughRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListDoughRecipesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide dough recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Dough card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined dough recipes
+ */
 export function useListDoughRecipes<TData = Awaited<ReturnType<typeof listDoughRecipes>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDoughRecipes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -15576,6 +14789,10 @@ export function useListDoughRecipes<TData = Awaited<ReturnType<typeof listDoughR
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide dough recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Dough card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined dough recipes
+ */
 export function useListDoughRecipes<TData = Awaited<ReturnType<typeof listDoughRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDoughRecipes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -15586,14 +14803,18 @@ export function useListDoughRecipes<TData = Awaited<ReturnType<typeof listDoughR
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide dough recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Dough card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined dough recipes
+ */
 export function useListDoughRecipes<TData = Awaited<ReturnType<typeof listDoughRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDoughRecipes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide dough recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Dough card can hydrate its rows from a chosen recipe; editing is manager-only.
  * @summary List manager-defined dough recipes
  */
-
 export function useListDoughRecipes<TData = Awaited<ReturnType<typeof listDoughRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDoughRecipes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -15626,25 +14847,11 @@ export const getSaveDoughRecipesUrl = () => {
  */
 export const saveDoughRecipes = async (saveNamedRecipesInput: SaveNamedRecipesInput, options?: Parameters<typeof customFetch>[1]): Promise<NamedRecipeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<NamedRecipeList>(getSaveDoughRecipesUrl(),
+  return customFetch<NamedRecipeList>(getSaveDoughRecipesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveNamedRecipesInput)
   }
 );}
@@ -15688,6 +14895,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveDoughRecipesMutationVariables = {data: BodyType<SaveNamedRecipesInput>}
 
     /**
+ * Upserts a batch of dough recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
  * @summary Create or update dough recipes (manager only)
  */
 export const useSaveDoughRecipes = <TError = ErrorType<void>,
@@ -15715,25 +14923,11 @@ export const getDeleteDoughRecipesUrl = () => {
  */
 export const deleteDoughRecipes = async (deleteNamedRecipesInput: DeleteNamedRecipesInput, options?: Parameters<typeof customFetch>[1]): Promise<NamedRecipeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<NamedRecipeList>(getDeleteDoughRecipesUrl(),
+  return customFetch<NamedRecipeList>(getDeleteDoughRecipesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteNamedRecipesInput)
   }
 );}
@@ -15777,6 +14971,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteDoughRecipesMutationVariables = {data: BodyType<DeleteNamedRecipesInput>}
 
     /**
+ * Removes a batch of dough recipes by id. Manager role required.
  * @summary Delete dough recipes by id (manager only)
  */
 export const useDeleteDoughRecipes = <TError = ErrorType<void>,
@@ -15846,6 +15041,10 @@ export type ListSauceRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListSauceRecipesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide sauce (frontline) recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Sauce card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined sauce recipes
+ */
 export function useListSauceRecipes<TData = Awaited<ReturnType<typeof listSauceRecipes>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSauceRecipes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -15856,6 +15055,10 @@ export function useListSauceRecipes<TData = Awaited<ReturnType<typeof listSauceR
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide sauce (frontline) recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Sauce card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined sauce recipes
+ */
 export function useListSauceRecipes<TData = Awaited<ReturnType<typeof listSauceRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSauceRecipes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -15866,14 +15069,18 @@ export function useListSauceRecipes<TData = Awaited<ReturnType<typeof listSauceR
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide sauce (frontline) recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Sauce card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined sauce recipes
+ */
 export function useListSauceRecipes<TData = Awaited<ReturnType<typeof listSauceRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSauceRecipes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide sauce (frontline) recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Sauce card can hydrate its rows from a chosen recipe; editing is manager-only.
  * @summary List manager-defined sauce recipes
  */
-
 export function useListSauceRecipes<TData = Awaited<ReturnType<typeof listSauceRecipes>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSauceRecipes>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -15906,25 +15113,11 @@ export const getSaveSauceRecipesUrl = () => {
  */
 export const saveSauceRecipes = async (saveNamedRecipesInput: SaveNamedRecipesInput, options?: Parameters<typeof customFetch>[1]): Promise<NamedRecipeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<NamedRecipeList>(getSaveSauceRecipesUrl(),
+  return customFetch<NamedRecipeList>(getSaveSauceRecipesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveNamedRecipesInput)
   }
 );}
@@ -15968,6 +15161,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveSauceRecipesMutationVariables = {data: BodyType<SaveNamedRecipesInput>}
 
     /**
+ * Upserts a batch of sauce recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
  * @summary Create or update sauce recipes (manager only)
  */
 export const useSaveSauceRecipes = <TError = ErrorType<void>,
@@ -15995,25 +15189,11 @@ export const getDeleteSauceRecipesUrl = () => {
  */
 export const deleteSauceRecipes = async (deleteNamedRecipesInput: DeleteNamedRecipesInput, options?: Parameters<typeof customFetch>[1]): Promise<NamedRecipeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<NamedRecipeList>(getDeleteSauceRecipesUrl(),
+  return customFetch<NamedRecipeList>(getDeleteSauceRecipesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteNamedRecipesInput)
   }
 );}
@@ -16057,6 +15237,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteSauceRecipesMutationVariables = {data: BodyType<DeleteNamedRecipesInput>}
 
     /**
+ * Removes a batch of sauce recipes by id. Manager role required.
  * @summary Delete sauce recipes by id (manager only)
  */
 export const useDeleteSauceRecipes = <TError = ErrorType<void>,
@@ -16126,6 +15307,10 @@ export type ListBrandProfilesQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type ListBrandProfilesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide brand+flavor setup profile (the saved run form for a product: applicators, pep types, die type, recipes, packaging, crust settings). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form and Setup Profiles editor can hydrate from them.
+ * @summary List factory-wide brand+flavor setup profiles
+ */
 export function useListBrandProfiles<TData = Awaited<ReturnType<typeof listBrandProfiles>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listBrandProfiles>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -16136,6 +15321,10 @@ export function useListBrandProfiles<TData = Awaited<ReturnType<typeof listBrand
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide brand+flavor setup profile (the saved run form for a product: applicators, pep types, die type, recipes, packaging, crust settings). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form and Setup Profiles editor can hydrate from them.
+ * @summary List factory-wide brand+flavor setup profiles
+ */
 export function useListBrandProfiles<TData = Awaited<ReturnType<typeof listBrandProfiles>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listBrandProfiles>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -16146,14 +15335,18 @@ export function useListBrandProfiles<TData = Awaited<ReturnType<typeof listBrand
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide brand+flavor setup profile (the saved run form for a product: applicators, pep types, die type, recipes, packaging, crust settings). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form and Setup Profiles editor can hydrate from them.
+ * @summary List factory-wide brand+flavor setup profiles
+ */
 export function useListBrandProfiles<TData = Awaited<ReturnType<typeof listBrandProfiles>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listBrandProfiles>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide brand+flavor setup profile (the saved run form for a product: applicators, pep types, die type, recipes, packaging, crust settings). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form and Setup Profiles editor can hydrate from them.
  * @summary List factory-wide brand+flavor setup profiles
  */
-
 export function useListBrandProfiles<TData = Awaited<ReturnType<typeof listBrandProfiles>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listBrandProfiles>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -16186,25 +15379,11 @@ export const getSaveBrandProfilesUrl = () => {
  */
 export const saveBrandProfiles = async (saveBrandProfilesInput: SaveBrandProfilesInput, options?: Parameters<typeof customFetch>[1]): Promise<BrandProfileList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<BrandProfileList>(getSaveBrandProfilesUrl(),
+  return customFetch<BrandProfileList>(getSaveBrandProfilesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveBrandProfilesInput)
   }
 );}
@@ -16248,6 +15427,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveBrandProfilesMutationVariables = {data: BodyType<SaveBrandProfilesInput>}
 
     /**
+ * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. ALL profile writes require the `manage-profiles` capability (rejected with 403 otherwise): profiles are manager-configured setup data, and the only allowed write paths are explicit manager actions (Setup Profile editor, AI recommendation acceptance) and spec imports/reimports. Requests containing forced items are also restricted to the `manage-profiles` capability and are rejected with 403 otherwise, before any write.
  * @summary Create or update brand+flavor setup profiles (stamp-guarded)
  */
 export const useSaveBrandProfiles = <TError = ErrorType<void>,
@@ -16275,25 +15455,11 @@ export const getDeleteBrandProfilesUrl = () => {
  */
 export const deleteBrandProfiles = async (deleteBrandProfilesInput: DeleteBrandProfilesInput, options?: Parameters<typeof customFetch>[1]): Promise<BrandProfileList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<BrandProfileList>(getDeleteBrandProfilesUrl(),
+  return customFetch<BrandProfileList>(getDeleteBrandProfilesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteBrandProfilesInput)
   }
 );}
@@ -16337,6 +15503,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteBrandProfilesMutationVariables = {data: BodyType<DeleteBrandProfilesInput>}
 
     /**
+ * Removes a batch of setup profiles by key. Requires the `manage-profiles` capability (403 otherwise) — profile deletion is a manager action, like every other profile write.
  * @summary Delete brand+flavor setup profiles by key
  */
 export const useDeleteBrandProfiles = <TError = ErrorType<void>,
@@ -16406,6 +15573,10 @@ export type ListCycleCountSchedulesQueryResult = NonNullable<Awaited<ReturnType<
 export type ListCycleCountSchedulesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
+ * @summary List manager-defined cycle-count schedules
+ */
 export function useListCycleCountSchedules<TData = Awaited<ReturnType<typeof listCycleCountSchedules>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCycleCountSchedules>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -16416,6 +15587,10 @@ export function useListCycleCountSchedules<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
+ * @summary List manager-defined cycle-count schedules
+ */
 export function useListCycleCountSchedules<TData = Awaited<ReturnType<typeof listCycleCountSchedules>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCycleCountSchedules>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -16426,14 +15601,18 @@ export function useListCycleCountSchedules<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
+ * @summary List manager-defined cycle-count schedules
+ */
 export function useListCycleCountSchedules<TData = Awaited<ReturnType<typeof listCycleCountSchedules>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCycleCountSchedules>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
  * @summary List manager-defined cycle-count schedules
  */
-
 export function useListCycleCountSchedules<TData = Awaited<ReturnType<typeof listCycleCountSchedules>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCycleCountSchedules>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -16466,25 +15645,11 @@ export const getSaveCycleCountSchedulesUrl = () => {
  */
 export const saveCycleCountSchedules = async (saveCycleCountSchedulesInput: SaveCycleCountSchedulesInput, options?: Parameters<typeof customFetch>[1]): Promise<CycleCountScheduleList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<CycleCountScheduleList>(getSaveCycleCountSchedulesUrl(),
+  return customFetch<CycleCountScheduleList>(getSaveCycleCountSchedulesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveCycleCountSchedulesInput)
   }
 );}
@@ -16528,6 +15693,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveCycleCountSchedulesMutationVariables = {data: BodyType<SaveCycleCountSchedulesInput>}
 
     /**
+ * Upserts a batch of cycle-count schedules by id. Each schedule is normalized and validated server-side; malformed schedules are dropped. The `lastCountedAt` field is preserved from the existing row on update (only the mark-counted endpoint changes it). Manager role required.
  * @summary Create or update cycle-count schedules (manager only)
  */
 export const useSaveCycleCountSchedules = <TError = ErrorType<void>,
@@ -16555,25 +15721,11 @@ export const getDeleteCycleCountSchedulesUrl = () => {
  */
 export const deleteCycleCountSchedules = async (deleteCycleCountSchedulesInput: DeleteCycleCountSchedulesInput, options?: Parameters<typeof customFetch>[1]): Promise<CycleCountScheduleList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<CycleCountScheduleList>(getDeleteCycleCountSchedulesUrl(),
+  return customFetch<CycleCountScheduleList>(getDeleteCycleCountSchedulesUrl(),
   {
     ...options,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteCycleCountSchedulesInput)
   }
 );}
@@ -16617,6 +15769,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteCycleCountSchedulesMutationVariables = {data: BodyType<DeleteCycleCountSchedulesInput>}
 
     /**
+ * Removes a batch of cycle-count schedules by id. Manager role required.
  * @summary Delete cycle-count schedules by id (manager only)
  */
 export const useDeleteCycleCountSchedules = <TError = ErrorType<void>,
@@ -16645,25 +15798,11 @@ export const getMarkCycleCountCountedUrl = (id: string,) => {
 export const markCycleCountCounted = async (id: string,
     markCycleCountCountedInput?: MarkCycleCountCountedInput, options?: Parameters<typeof customFetch>[1]): Promise<CycleCountScheduleList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<CycleCountScheduleList>(getMarkCycleCountCountedUrl(id),
+  return customFetch<CycleCountScheduleList>(getMarkCycleCountCountedUrl(id),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(markCycleCountCountedInput)
   }
 );}
@@ -16707,6 +15846,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type MarkCycleCountCountedMutationVariables = {id: string;data?: BodyType<MarkCycleCountCountedInput>}
 
     /**
+ * Stamps the schedule's `lastCountedAt` to the current date, clearing it from the "Time to Count" due list until its cadence elapses again. Available to any signed-in user (floor staff perform the counts), unlike the manager-only schedule edits.
  * @summary Mark a cycle-count section counted
  */
 export const useMarkCycleCountCounted = <TError = ErrorType<void>,
@@ -16776,6 +15916,10 @@ export type ListAiCorrectionsQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type ListAiCorrectionsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
+ * @summary List the shared factory-wide AI name corrections
+ */
 export function useListAiCorrections<TData = Awaited<ReturnType<typeof listAiCorrections>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAiCorrections>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -16786,6 +15930,10 @@ export function useListAiCorrections<TData = Awaited<ReturnType<typeof listAiCor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
+ * @summary List the shared factory-wide AI name corrections
+ */
 export function useListAiCorrections<TData = Awaited<ReturnType<typeof listAiCorrections>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAiCorrections>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -16796,14 +15944,18 @@ export function useListAiCorrections<TData = Awaited<ReturnType<typeof listAiCor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
+ * @summary List the shared factory-wide AI name corrections
+ */
 export function useListAiCorrections<TData = Awaited<ReturnType<typeof listAiCorrections>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAiCorrections>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
  * @summary List the shared factory-wide AI name corrections
  */
-
 export function useListAiCorrections<TData = Awaited<ReturnType<typeof listAiCorrections>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAiCorrections>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -16836,25 +15988,11 @@ export const getSaveAiCorrectionsUrl = () => {
  */
 export const saveAiCorrections = async (saveAiCorrectionsInput: SaveAiCorrectionsInput, options?: Parameters<typeof customFetch>[1]): Promise<AiCorrectionList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<AiCorrectionList>(getSaveAiCorrectionsUrl(),
+  return customFetch<AiCorrectionList>(getSaveAiCorrectionsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveAiCorrectionsInput)
   }
 );}
@@ -16898,6 +16036,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveAiCorrectionsMutationVariables = {data: BodyType<SaveAiCorrectionsInput>}
 
     /**
+ * Persists a batch of confirmed name corrections recorded when staff apply a suggestion in any AI helper. Existing entries (matched case-insensitively on domain + fromText) are updated; new ones inserted. Additive — each helper keeps its own alias table too. Available to any signed-in user.
  * @summary Save confirmed AI name corrections (case-insensitive upsert)
  */
 export const useSaveAiCorrections = <TError = ErrorType<void>,
@@ -16967,6 +16106,10 @@ export type AuditAiMemoryHealthQueryResult = NonNullable<Awaited<ReturnType<type
 export type AuditAiMemoryHealthQueryError = ErrorType<void>
 
 
+/**
+ * Manager-only, read-only audit of factory-wide correction memory and facility knowledge. It compares corrections to confirmed merge aliases, merged-away names, and active master-data names. Per-user conversation history is explicitly excluded from the audit and cleanup.
+ * @summary Preview AI memory health and deterministic safe repairs
+ */
 export function useAuditAiMemoryHealth<TData = Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -16977,6 +16120,10 @@ export function useAuditAiMemoryHealth<TData = Awaited<ReturnType<typeof auditAi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, read-only audit of factory-wide correction memory and facility knowledge. It compares corrections to confirmed merge aliases, merged-away names, and active master-data names. Per-user conversation history is explicitly excluded from the audit and cleanup.
+ * @summary Preview AI memory health and deterministic safe repairs
+ */
 export function useAuditAiMemoryHealth<TData = Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -16987,14 +16134,18 @@ export function useAuditAiMemoryHealth<TData = Awaited<ReturnType<typeof auditAi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, read-only audit of factory-wide correction memory and facility knowledge. It compares corrections to confirmed merge aliases, merged-away names, and active master-data names. Per-user conversation history is explicitly excluded from the audit and cleanup.
+ * @summary Preview AI memory health and deterministic safe repairs
+ */
 export function useAuditAiMemoryHealth<TData = Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Manager-only, read-only audit of factory-wide correction memory and facility knowledge. It compares corrections to confirmed merge aliases, merged-away names, and active master-data names. Per-user conversation history is explicitly excluded from the audit and cleanup.
  * @summary Preview AI memory health and deterministic safe repairs
  */
-
 export function useAuditAiMemoryHealth<TData = Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -17075,6 +16226,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
     /**
+ * Manager-only atomic repair. The server re-runs the health audit inside the transaction and applies only its listed duplicate, chain, cycle, or canonical-target correction repairs. It never changes facility facts or per-user conversation history.
  * @summary Apply only the current deterministic AI correction repairs
  */
 export const useApplyAiMemorySafeFixes = <TError = ErrorType<void>,
@@ -17144,6 +16296,10 @@ export type AuditProfileDataHealthQueryResult = NonNullable<Awaited<ReturnType<t
 export type AuditProfileDataHealthQueryError = ErrorType<void>
 
 
+/**
+ * Manager-only, read-only audit of saved brand profiles against the current dough and sauce recipe pools and the latest saved spec-sheet profile for each product. Only exact missing links and empty recipe rows are listed as safe repairs.
+ * @summary Preview production profile and recipe data health
+ */
 export function useAuditProfileDataHealth<TData = Awaited<ReturnType<typeof auditProfileDataHealth>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditProfileDataHealth>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -17154,6 +16310,10 @@ export function useAuditProfileDataHealth<TData = Awaited<ReturnType<typeof audi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, read-only audit of saved brand profiles against the current dough and sauce recipe pools and the latest saved spec-sheet profile for each product. Only exact missing links and empty recipe rows are listed as safe repairs.
+ * @summary Preview production profile and recipe data health
+ */
 export function useAuditProfileDataHealth<TData = Awaited<ReturnType<typeof auditProfileDataHealth>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditProfileDataHealth>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -17164,14 +16324,18 @@ export function useAuditProfileDataHealth<TData = Awaited<ReturnType<typeof audi
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, read-only audit of saved brand profiles against the current dough and sauce recipe pools and the latest saved spec-sheet profile for each product. Only exact missing links and empty recipe rows are listed as safe repairs.
+ * @summary Preview production profile and recipe data health
+ */
 export function useAuditProfileDataHealth<TData = Awaited<ReturnType<typeof auditProfileDataHealth>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditProfileDataHealth>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Manager-only, read-only audit of saved brand profiles against the current dough and sauce recipe pools and the latest saved spec-sheet profile for each product. Only exact missing links and empty recipe rows are listed as safe repairs.
  * @summary Preview production profile and recipe data health
  */
-
 export function useAuditProfileDataHealth<TData = Awaited<ReturnType<typeof auditProfileDataHealth>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof auditProfileDataHealth>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -17252,6 +16416,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
     /**
+ * Manager-only atomic repair. The server re-runs and revalidates each candidate inside the transaction, updates profile LWW stamps, and copies changed fields only to future unstarted run snapshots. Started and ended runs are never changed.
  * @summary Apply deterministic production profile repairs
  */
 export const useApplyProfileDataHealthRepairs = <TError = ErrorType<void>,
@@ -17321,6 +16486,10 @@ export type GetPublishedSourceLibraryReconciliationCaptureQueryResult = NonNulla
 export type GetPublishedSourceLibraryReconciliationCaptureQueryError = ErrorType<SourceLibraryCaptureError>
 
 
+/**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns raw, approved, and unresolved pool mismatch counts with the pinned exception ID and digest, plus aggregate counts and hashes. Any unresolved pool difference keeps the verification result false. It never returns source rows or credentials. Rate limited and unavailable outside production.
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
 export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -17331,6 +16500,10 @@ export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaite
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns raw, approved, and unresolved pool mismatch counts with the pinned exception ID and digest, plus aggregate counts and hashes. Any unresolved pool difference keeps the verification result false. It never returns source rows or credentials. Rate limited and unavailable outside production.
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
 export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -17341,14 +16514,18 @@ export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaite
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns raw, approved, and unresolved pool mismatch counts with the pinned exception ID and digest, plus aggregate counts and hashes. Any unresolved pool difference keeps the verification result false. It never returns source rows or credentials. Rate limited and unavailable outside production.
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
 export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns raw, approved, and unresolved pool mismatch counts with the pinned exception ID and digest, plus aggregate counts and hashes. Any unresolved pool difference keeps the verification result false. It never returns source rows or credentials. Rate limited and unavailable outside production.
  * @summary Capture a bounded reconciliation summary from the published app
  */
-
 export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -17381,25 +16558,11 @@ export const getCaptureSourceLibraryReconciliationUrl = () => {
  */
 export const captureSourceLibraryReconciliation = async (sourceLibraryReconciliationCaptureRequest: SourceLibraryReconciliationCaptureRequest, options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationEvidence> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SourceLibraryReconciliationEvidence>(getCaptureSourceLibraryReconciliationUrl(),
+  return customFetch<SourceLibraryReconciliationEvidence>(getCaptureSourceLibraryReconciliationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(sourceLibraryReconciliationCaptureRequest)
   }
 );}
@@ -17443,6 +16606,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CaptureSourceLibraryReconciliationMutationVariables = {data: BodyType<SourceLibraryReconciliationCaptureRequest>}
 
     /**
+ * Manager-only and live-scope only. Validates a fresh schema-v2 published source handoff against the immutable identity of this running API build, then runs the reviewed verifier in one read-only production transaction. Returns only its bounded summary; no source rows or report payloads are persisted or logged. A 200 response may have ok=false and remains a valid capture result.
  * @summary Capture bounded production source-library reconciliation evidence
  */
 export const useCaptureSourceLibraryReconciliation = <TError = ErrorType<SourceLibraryCaptureError | void>,
@@ -17512,6 +16676,10 @@ export type GetPublishedSourceLibraryReconciliationDiagnosticsQueryResult = NonN
 export type GetPublishedSourceLibraryReconciliationDiagnosticsQueryError = ErrorType<SourceLibraryCaptureError>
 
 
+/**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns raw, approved, and unresolved mismatch counts using the same pinned exception set as the release verifier, plus at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
 export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -17522,6 +16690,10 @@ export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Aw
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns raw, approved, and unresolved mismatch counts using the same pinned exception set as the release verifier, plus at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
 export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -17532,14 +16704,18 @@ export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Aw
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns raw, approved, and unresolved mismatch counts using the same pinned exception set as the release verifier, plus at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
 export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns raw, approved, and unresolved mismatch counts using the same pinned exception set as the release verifier, plus at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
  * @summary Inspect bounded pool mismatch descriptors from the published app
  */
-
 export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -17613,6 +16789,7 @@ export type GetProfileDataHealthWorkspaceQueryResult = NonNullable<Awaited<Retur
 export type GetProfileDataHealthWorkspaceQueryError = ErrorType<void>
 
 
+/** @summary Read the manager data-health workspace */
 export function useGetProfileDataHealthWorkspace<TData = Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -17623,6 +16800,7 @@ export function useGetProfileDataHealthWorkspace<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read the manager data-health workspace */
 export function useGetProfileDataHealthWorkspace<TData = Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -17633,14 +16811,12 @@ export function useGetProfileDataHealthWorkspace<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read the manager data-health workspace */
 export function useGetProfileDataHealthWorkspace<TData = Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read the manager data-health workspace
- */
-
+/** @summary Read the manager data-health workspace */
 export function useGetProfileDataHealthWorkspace<TData = Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -17719,9 +16895,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UndoProfileDataHealthRepairBatchMutationError = ErrorType<void>
     export type UndoProfileDataHealthRepairBatchMutationVariables = {batchId: string}
 
-    /**
- * @summary Undo an unchanged profile data repair batch
- */
+    /** @summary Undo an unchanged profile data repair batch */
 export const useUndoProfileDataHealthRepairBatch = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoProfileDataHealthRepairBatch>>, TError,UndoProfileDataHealthRepairBatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -17796,6 +16970,10 @@ export type ListAuditLogsQueryResult = NonNullable<Awaited<ReturnType<typeof lis
 export type ListAuditLogsQueryError = ErrorType<void>
 
 
+/**
+ * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
+ * @summary List private facility-scoped operational audit records
+ */
 export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
  params: undefined |  ListAuditLogsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -17806,6 +16984,10 @@ export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
+ * @summary List private facility-scoped operational audit records
+ */
 export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
  params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -17816,14 +16998,18 @@ export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
+ * @summary List private facility-scoped operational audit records
+ */
 export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
  params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
  * @summary List private facility-scoped operational audit records
  */
-
 export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
  params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -17905,6 +17091,10 @@ export type ExportAuditLogsCsvQueryResult = NonNullable<Awaited<ReturnType<typeo
 export type ExportAuditLogsCsvQueryError = ErrorType<void>
 
 
+/**
+ * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as CSV
+ */
 export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
  params: undefined |  ExportAuditLogsCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -17915,6 +17105,10 @@ export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAu
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as CSV
+ */
 export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
  params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -17925,14 +17119,18 @@ export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAu
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as CSV
+ */
 export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
  params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
  * @summary Export private facility-scoped audit records as CSV
  */
-
 export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
  params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -18014,6 +17212,10 @@ export type ExportAuditLogsPdfQueryResult = NonNullable<Awaited<ReturnType<typeo
 export type ExportAuditLogsPdfQueryError = ErrorType<void>
 
 
+/**
+ * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as PDF
+ */
 export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
  params: undefined |  ExportAuditLogsPdfParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -18024,6 +17226,10 @@ export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAu
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as PDF
+ */
 export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
  params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -18034,14 +17240,18 @@ export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAu
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as PDF
+ */
 export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
  params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
  * @summary Export private facility-scoped audit records as PDF
  */
-
 export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
  params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -18116,6 +17326,10 @@ export type GetProfileNameLinkCleanupAuditQueryResult = NonNullable<Awaited<Retu
 export type GetProfileNameLinkCleanupAuditQueryError = ErrorType<void>
 
 
+/**
+ * Manager-only, read-only view of the one-time cleanup that aligned saved profile dough and sauce names to verified spec-sheet links and deleted unreferenced empty recipe stubs. Older historical markers return zero for result fields that were not recorded at the time.
+ * @summary View the completed name-link cleanup result
+ */
 export function useGetProfileNameLinkCleanupAudit<TData = Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -18126,6 +17340,10 @@ export function useGetProfileNameLinkCleanupAudit<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, read-only view of the one-time cleanup that aligned saved profile dough and sauce names to verified spec-sheet links and deleted unreferenced empty recipe stubs. Older historical markers return zero for result fields that were not recorded at the time.
+ * @summary View the completed name-link cleanup result
+ */
 export function useGetProfileNameLinkCleanupAudit<TData = Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -18136,14 +17354,18 @@ export function useGetProfileNameLinkCleanupAudit<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Manager-only, read-only view of the one-time cleanup that aligned saved profile dough and sauce names to verified spec-sheet links and deleted unreferenced empty recipe stubs. Older historical markers return zero for result fields that were not recorded at the time.
+ * @summary View the completed name-link cleanup result
+ */
 export function useGetProfileNameLinkCleanupAudit<TData = Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Manager-only, read-only view of the one-time cleanup that aligned saved profile dough and sauce names to verified spec-sheet links and deleted unreferenced empty recipe stubs. Older historical markers return zero for result fields that were not recorded at the time.
  * @summary View the completed name-link cleanup result
  */
-
 export function useGetProfileNameLinkCleanupAudit<TData = Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -18218,6 +17440,10 @@ export type ListFacilityKnowledgeQueryResult = NonNullable<Awaited<ReturnType<ty
 export type ListFacilityKnowledgeQueryError = ErrorType<void>
 
 
+/**
+ * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
+ * @summary List the shared facility-wide AI knowledge pool
+ */
 export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -18228,6 +17454,10 @@ export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listF
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
+ * @summary List the shared facility-wide AI knowledge pool
+ */
 export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -18238,14 +17468,18 @@ export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listF
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
+ * @summary List the shared facility-wide AI knowledge pool
+ */
 export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
  * @summary List the shared facility-wide AI knowledge pool
  */
-
 export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -18278,25 +17512,11 @@ export const getSaveFacilityKnowledgeUrl = () => {
  */
 export const saveFacilityKnowledge = async (saveFacilityKnowledgeInput: SaveFacilityKnowledgeInput, options?: Parameters<typeof customFetch>[1]): Promise<FacilityKnowledgeList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FacilityKnowledgeList>(getSaveFacilityKnowledgeUrl(),
+  return customFetch<FacilityKnowledgeList>(getSaveFacilityKnowledgeUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveFacilityKnowledgeInput)
   }
 );}
@@ -18340,6 +17560,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveFacilityKnowledgeMutationVariables = {data: BodyType<SaveFacilityKnowledgeInput>}
 
     /**
+ * Persists a batch of durable operational facts into the shared facility-knowledge pool. Existing entries (matched case-insensitively on domain + key) are updated in place; new ones are inserted. Available to any signed-in user, but every entry must match the exact domain + key shape AND the fixed fact template one of the handful of real client features produces (e.g. proactive-alert dismissals, quality-check confirmations), with only a short bounded substring left free — anything else, including a well-formed domain/key with an out-of-template fact, is rejected. Some domains additionally require the same capability their own UI already gates the feature behind. This keeps the route from being usable as an open-ended facility-wide prompt-injection primitive.
  * @summary Record facility knowledge (case-insensitive upsert by domain + key)
  */
 export const useSaveFacilityKnowledge = <TError = ErrorType<void>,
@@ -18409,6 +17630,10 @@ export type ListSpecImportAliasesQueryResult = NonNullable<Awaited<ReturnType<ty
 export type ListSpecImportAliasesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
+ * @summary List learned spec-import aliases (messy label -> canonical name)
+ */
 export function useListSpecImportAliases<TData = Awaited<ReturnType<typeof listSpecImportAliases>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecImportAliases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -18419,6 +17644,10 @@ export function useListSpecImportAliases<TData = Awaited<ReturnType<typeof listS
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
+ * @summary List learned spec-import aliases (messy label -> canonical name)
+ */
 export function useListSpecImportAliases<TData = Awaited<ReturnType<typeof listSpecImportAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecImportAliases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -18429,14 +17658,18 @@ export function useListSpecImportAliases<TData = Awaited<ReturnType<typeof listS
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
+ * @summary List learned spec-import aliases (messy label -> canonical name)
+ */
 export function useListSpecImportAliases<TData = Awaited<ReturnType<typeof listSpecImportAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecImportAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
  * @summary List learned spec-import aliases (messy label -> canonical name)
  */
-
 export function useListSpecImportAliases<TData = Awaited<ReturnType<typeof listSpecImportAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecImportAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -18469,25 +17702,11 @@ export const getSaveSpecImportAliasesUrl = () => {
  */
 export const saveSpecImportAliases = async (saveSpecImportAliasesInput: SaveSpecImportAliasesInput, options?: Parameters<typeof customFetch>[1]): Promise<SpecImportAliasList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SpecImportAliasList>(getSaveSpecImportAliasesUrl(),
+  return customFetch<SpecImportAliasList>(getSaveSpecImportAliasesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveSpecImportAliasesInput)
   }
 );}
@@ -18531,6 +17750,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveSpecImportAliasesMutationVariables = {data: BodyType<SaveSpecImportAliasesInput>}
 
     /**
+ * Persists a batch of label mappings resolved during a spec-sheet import. Existing aliases (matched case-insensitively on kind + externalName + context) are updated; new ones are inserted. Available to any signed-in user (operators included).
  * @summary Save learned spec-import aliases (case-insensitive upsert)
  */
 export const useSaveSpecImportAliases = <TError = ErrorType<void>,
@@ -18558,25 +17778,11 @@ export const getDeleteSpecImportAliasesUrl = () => {
  */
 export const deleteSpecImportAliases = async (deleteSpecImportAliasesInput: DeleteSpecImportAliasesInput, options?: Parameters<typeof customFetch>[1]): Promise<SpecImportAliasList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SpecImportAliasList>(getDeleteSpecImportAliasesUrl(),
+  return customFetch<SpecImportAliasList>(getDeleteSpecImportAliasesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(deleteSpecImportAliasesInput)
   }
 );}
@@ -18620,6 +17826,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteSpecImportAliasesMutationVariables = {data: BodyType<DeleteSpecImportAliasesInput>}
 
     /**
+ * Deletes alias rows that exactly match the given kind + externalName + canonicalName (case-insensitive). Used after a correcting re-import to remove a bad alias that mapped a sheet label onto a wrong stored name, so the next import doesn't re-apply the mistake. By default, an entry's null/omitted context matches rows with ANY context; set exactContext to true to match null contexts exactly. A provided context always matches only that context (case-insensitive). Available to any signed-in user (operators included).
  * @summary Delete specific learned spec-import aliases (bad-mapping cleanup)
  */
 export const useDeleteSpecImportAliases = <TError = ErrorType<void>,
@@ -18689,6 +17896,10 @@ export type ListSpecSheetsQueryResult = NonNullable<Awaited<ReturnType<typeof li
 export type ListSpecSheetsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport captured when a spec sheet was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved spec sheets (most recent first, up to two)
+ */
 export function useListSpecSheets<TData = Awaited<ReturnType<typeof listSpecSheets>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecSheets>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -18699,6 +17910,10 @@ export function useListSpecSheets<TData = Awaited<ReturnType<typeof listSpecShee
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport captured when a spec sheet was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved spec sheets (most recent first, up to two)
+ */
 export function useListSpecSheets<TData = Awaited<ReturnType<typeof listSpecSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecSheets>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -18709,14 +17924,18 @@ export function useListSpecSheets<TData = Awaited<ReturnType<typeof listSpecShee
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport captured when a spec sheet was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved spec sheets (most recent first, up to two)
+ */
 export function useListSpecSheets<TData = Awaited<ReturnType<typeof listSpecSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecSheets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport captured when a spec sheet was imported), most recent first. At most two are kept. Available to any signed-in user.
  * @summary List saved spec sheets (most recent first, up to two)
  */
-
 export function useListSpecSheets<TData = Awaited<ReturnType<typeof listSpecSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSpecSheets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -18749,25 +17968,11 @@ export const getSaveSpecSheetUrl = () => {
  */
 export const saveSpecSheet = async (saveSpecSheetInput: SaveSpecSheetInput, options?: Parameters<typeof customFetch>[1]): Promise<SavedSpecSheetList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SavedSpecSheetList>(getSaveSpecSheetUrl(),
+  return customFetch<SavedSpecSheetList>(getSaveSpecSheetUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveSpecSheetInput)
   }
 );}
@@ -18811,6 +18016,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveSpecSheetMutationVariables = {data: BodyType<SaveSpecSheetInput>}
 
     /**
+ * Persists a snapshot of an imported spec sheet so it can later be cross-referenced against the current recipes. After insert, older snapshots beyond the two most recent are pruned. Available to any signed-in user.
  * @summary Save a spec-sheet snapshot (keeps only the two most recent)
  */
 export const useSaveSpecSheet = <TError = ErrorType<void>,
@@ -18884,9 +18090,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteSpecSheetMutationError = ErrorType<unknown>
     export type DeleteSpecSheetMutationVariables = {id: number}
 
-    /**
- * @summary Delete a saved spec sheet by id
- */
+    /** @summary Delete a saved spec sheet by id */
 export const useDeleteSpecSheet = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSpecSheet>>, TError,DeleteSpecSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -18954,6 +18158,10 @@ export type ListShippingGuidesQueryResult = NonNullable<Awaited<ReturnType<typeo
 export type ListShippingGuidesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns the saved shipping/palletizing-guide snapshots (the reviewed brand + flavor + packaging rows captured when a guide was imported), most recent first. At most two are kept per distinct file. Available to any signed-in user.
+ * @summary List saved shipping & palletizing guides (most recent first, up to two per file)
+ */
 export function useListShippingGuides<TData = Awaited<ReturnType<typeof listShippingGuides>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listShippingGuides>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -18964,6 +18172,10 @@ export function useListShippingGuides<TData = Awaited<ReturnType<typeof listShip
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the saved shipping/palletizing-guide snapshots (the reviewed brand + flavor + packaging rows captured when a guide was imported), most recent first. At most two are kept per distinct file. Available to any signed-in user.
+ * @summary List saved shipping & palletizing guides (most recent first, up to two per file)
+ */
 export function useListShippingGuides<TData = Awaited<ReturnType<typeof listShippingGuides>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listShippingGuides>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -18974,14 +18186,18 @@ export function useListShippingGuides<TData = Awaited<ReturnType<typeof listShip
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the saved shipping/palletizing-guide snapshots (the reviewed brand + flavor + packaging rows captured when a guide was imported), most recent first. At most two are kept per distinct file. Available to any signed-in user.
+ * @summary List saved shipping & palletizing guides (most recent first, up to two per file)
+ */
 export function useListShippingGuides<TData = Awaited<ReturnType<typeof listShippingGuides>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listShippingGuides>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns the saved shipping/palletizing-guide snapshots (the reviewed brand + flavor + packaging rows captured when a guide was imported), most recent first. At most two are kept per distinct file. Available to any signed-in user.
  * @summary List saved shipping & palletizing guides (most recent first, up to two per file)
  */
-
 export function useListShippingGuides<TData = Awaited<ReturnType<typeof listShippingGuides>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listShippingGuides>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -19014,25 +18230,11 @@ export const getSaveShippingGuideUrl = () => {
  */
 export const saveShippingGuide = async (saveShippingGuideInput: SaveShippingGuideInput, options?: Parameters<typeof customFetch>[1]): Promise<SavedShippingGuideList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SavedShippingGuideList>(getSaveShippingGuideUrl(),
+  return customFetch<SavedShippingGuideList>(getSaveShippingGuideUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveShippingGuideInput)
   }
 );}
@@ -19076,6 +18278,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveShippingGuideMutationVariables = {data: BodyType<SaveShippingGuideInput>}
 
     /**
+ * Persists a snapshot of an imported shipping/palletizing guide so its stated packaging values can later be cross-referenced against the current recipes and spec sheets in the Setup Profiles auto-fill panel. After insert, older snapshots beyond the two most recent per distinct file are pruned. Available to any signed-in user.
  * @summary Save a shipping-guide snapshot (keeps only the two most recent per file)
  */
 export const useSaveShippingGuide = <TError = ErrorType<void>,
@@ -19149,9 +18352,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteShippingGuideMutationError = ErrorType<unknown>
     export type DeleteShippingGuideMutationVariables = {id: number}
 
-    /**
- * @summary Delete a saved shipping guide by id
- */
+    /** @summary Delete a saved shipping guide by id */
 export const useDeleteShippingGuide = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteShippingGuide>>, TError,DeleteShippingGuideMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -19219,6 +18420,10 @@ export type ListPremixSheetsQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListPremixSheetsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns the saved premix-sheet snapshots (the Mix[] captured when a premix workbook was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved premix sheets (most recent first, up to two)
+ */
 export function useListPremixSheets<TData = Awaited<ReturnType<typeof listPremixSheets>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPremixSheets>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -19229,6 +18434,10 @@ export function useListPremixSheets<TData = Awaited<ReturnType<typeof listPremix
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the saved premix-sheet snapshots (the Mix[] captured when a premix workbook was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved premix sheets (most recent first, up to two)
+ */
 export function useListPremixSheets<TData = Awaited<ReturnType<typeof listPremixSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPremixSheets>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -19239,14 +18448,18 @@ export function useListPremixSheets<TData = Awaited<ReturnType<typeof listPremix
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the saved premix-sheet snapshots (the Mix[] captured when a premix workbook was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved premix sheets (most recent first, up to two)
+ */
 export function useListPremixSheets<TData = Awaited<ReturnType<typeof listPremixSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPremixSheets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns the saved premix-sheet snapshots (the Mix[] captured when a premix workbook was imported), most recent first. At most two are kept. Available to any signed-in user.
  * @summary List saved premix sheets (most recent first, up to two)
  */
-
 export function useListPremixSheets<TData = Awaited<ReturnType<typeof listPremixSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPremixSheets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -19279,25 +18492,11 @@ export const getSavePremixSheetUrl = () => {
  */
 export const savePremixSheet = async (savePremixSheetInput: SavePremixSheetInput, options?: Parameters<typeof customFetch>[1]): Promise<SavePremixSheet200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SavePremixSheet200>(getSavePremixSheetUrl(),
+  return customFetch<SavePremixSheet200>(getSavePremixSheetUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(savePremixSheetInput)
   }
 );}
@@ -19341,6 +18540,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SavePremixSheetMutationVariables = {data: BodyType<SavePremixSheetInput>}
 
     /**
+ * Persists a snapshot of an imported premix workbook (its Mix[]) so the current mixes can later be reconciled against it. After insert, older snapshots beyond the two most recent are pruned. Available to any signed-in user.
  * @summary Save a premix-sheet snapshot (keeps only the two most recent)
  */
 export const useSavePremixSheet = <TError = ErrorType<void>,
@@ -19410,6 +18610,10 @@ export type ListCheeseSheetsQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListCheeseSheetsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns parsed Cheese Mix Recipe Specs retained after reviewed imports, newest first, with at most two versions per distinct source filename. Original workbook bytes are never stored.
+ * @summary List retained cheese recipe workbook snapshots
+ */
 export function useListCheeseSheets<TData = Awaited<ReturnType<typeof listCheeseSheets>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseSheets>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -19420,6 +18624,10 @@ export function useListCheeseSheets<TData = Awaited<ReturnType<typeof listCheese
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns parsed Cheese Mix Recipe Specs retained after reviewed imports, newest first, with at most two versions per distinct source filename. Original workbook bytes are never stored.
+ * @summary List retained cheese recipe workbook snapshots
+ */
 export function useListCheeseSheets<TData = Awaited<ReturnType<typeof listCheeseSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseSheets>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -19430,14 +18638,18 @@ export function useListCheeseSheets<TData = Awaited<ReturnType<typeof listCheese
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns parsed Cheese Mix Recipe Specs retained after reviewed imports, newest first, with at most two versions per distinct source filename. Original workbook bytes are never stored.
+ * @summary List retained cheese recipe workbook snapshots
+ */
 export function useListCheeseSheets<TData = Awaited<ReturnType<typeof listCheeseSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseSheets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns parsed Cheese Mix Recipe Specs retained after reviewed imports, newest first, with at most two versions per distinct source filename. Original workbook bytes are never stored.
  * @summary List retained cheese recipe workbook snapshots
  */
-
 export function useListCheeseSheets<TData = Awaited<ReturnType<typeof listCheeseSheets>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCheeseSheets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -19469,25 +18681,11 @@ export const getSaveCheeseSheetUrl = () => {
  */
 export const saveCheeseSheet = async (saveCheeseSheetInput: SaveCheeseSheetInput, options?: Parameters<typeof customFetch>[1]): Promise<SavedCheeseSheetSaveResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SavedCheeseSheetSaveResponse>(getSaveCheeseSheetUrl(),
+  return customFetch<SavedCheeseSheetSaveResponse>(getSaveCheeseSheetUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveCheeseSheetInput)
   }
 );}
@@ -19530,9 +18728,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveCheeseSheetMutationError = ErrorType<void>
     export type SaveCheeseSheetMutationVariables = {data: BodyType<SaveCheeseSheetInput>}
 
-    /**
- * @summary Retain a parsed cheese recipe workbook snapshot
- */
+    /** @summary Retain a parsed cheese recipe workbook snapshot */
 export const useSaveCheeseSheet = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCheeseSheet>>, TError,SaveCheeseSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -19604,9 +18800,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteCheeseSheetMutationError = ErrorType<unknown>
     export type DeleteCheeseSheetMutationVariables = {id: number}
 
-    /**
- * @summary Delete a retained cheese recipe workbook snapshot
- */
+    /** @summary Delete a retained cheese recipe workbook snapshot */
 export const useDeleteCheeseSheet = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCheeseSheet>>, TError,DeleteCheeseSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -19678,9 +18872,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeletePremixSheetMutationError = ErrorType<unknown>
     export type DeletePremixSheetMutationVariables = {id: number}
 
-    /**
- * @summary Delete a saved premix sheet by id
- */
+    /** @summary Delete a saved premix sheet by id */
 export const useDeletePremixSheet = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePremixSheet>>, TError,DeletePremixSheetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -19747,6 +18939,7 @@ export type ListServerJobsQueryResult = NonNullable<Awaited<ReturnType<typeof li
 export type ListServerJobsQueryError = ErrorType<unknown>
 
 
+/** @summary List the authenticated user's retained server jobs */
 export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -19757,6 +18950,7 @@ export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List the authenticated user's retained server jobs */
 export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -19767,14 +18961,12 @@ export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List the authenticated user's retained server jobs */
 export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List the authenticated user's retained server jobs
- */
-
+/** @summary List the authenticated user's retained server jobs */
 export function useListServerJobs<TData = Awaited<ReturnType<typeof listServerJobs>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServerJobs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -19806,25 +18998,11 @@ export const getCreateServerJobUrl = () => {
  */
 export const createServerJob = async (createServerJobInput: CreateServerJobInput, options?: Parameters<typeof customFetch>[1]): Promise<ServerJob> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ServerJob>(getCreateServerJobUrl(),
+  return customFetch<ServerJob>(getCreateServerJobUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(createServerJobInput)
   }
 );}
@@ -19867,9 +19045,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateServerJobMutationError = ErrorType<void>
     export type CreateServerJobMutationVariables = {data: BodyType<CreateServerJobInput>}
 
-    /**
- * @summary Enqueue a bounded, idempotent server job
- */
+    /** @summary Enqueue a bounded, idempotent server job */
 export const useCreateServerJob = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServerJob>>, TError,CreateServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -19936,6 +19112,7 @@ export type GetServerJobQueryResult = NonNullable<Awaited<ReturnType<typeof getS
 export type GetServerJobQueryError = ErrorType<void>
 
 
+/** @summary Read an owned server job */
 export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -19946,6 +19123,7 @@ export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read an owned server job */
 export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -19956,14 +19134,12 @@ export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read an owned server job */
 export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read an owned server job
- */
-
+/** @summary Read an owned server job */
 export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServerJob>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -20044,6 +19220,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
     /**
+ * Manager-only and live-scope only. Creating a plan does not alter server jobs. The returned digest must be explicitly approved by a manager before any deletion.
  * @summary Create a bounded, read-only manifest for exact duplicate scheduled jobs
  */
 export const useCreateScheduledJobCleanupPlan = <TError = ErrorType<void>,
@@ -20072,25 +19249,11 @@ export const getApplyScheduledJobCleanupPlanUrl = (planId: string,) => {
 export const applyScheduledJobCleanupPlan = async (planId: string,
     applyScheduledJobCleanupPlanBody: ApplyScheduledJobCleanupPlan, options?: Parameters<typeof customFetch>[1]): Promise<ApplyScheduledJobCleanupResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ApplyScheduledJobCleanupResult>(getApplyScheduledJobCleanupPlanUrl(planId),
+  return customFetch<ApplyScheduledJobCleanupResult>(getApplyScheduledJobCleanupPlanUrl(planId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(applyScheduledJobCleanupPlanBody)
   }
 );}
@@ -20134,6 +19297,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ApplyScheduledJobCleanupPlanMutationVariables = {planId: string;data: BodyType<ApplyScheduledJobCleanupPlan>}
 
     /**
+ * Manager-only and live-scope only. The server rechecks every manifest row and lease under serializable transaction locks. Changed plans fail closed.
  * @summary Approve and apply one exact scheduled-job cleanup manifest
  */
 export const useApplyScheduledJobCleanupPlan = <TError = ErrorType<void>,
@@ -20207,9 +19371,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CancelServerJobMutationError = ErrorType<void>
     export type CancelServerJobMutationVariables = {id: string}
 
-    /**
- * @summary Request cancellation of an owned running or queued server job
- */
+    /** @summary Request cancellation of an owned running or queued server job */
 export const useCancelServerJob = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelServerJob>>, TError,CancelServerJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -20283,6 +19445,7 @@ export type ListImportHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type ListImportHistoryQueryError = ErrorType<unknown>
 
 
+/** @summary List recent workbook import review records */
 export function useListImportHistory<TData = Awaited<ReturnType<typeof listImportHistory>>, TError = ErrorType<unknown>>(
  params: undefined |  ListImportHistoryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportHistory>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -20293,6 +19456,7 @@ export function useListImportHistory<TData = Awaited<ReturnType<typeof listImpor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List recent workbook import review records */
 export function useListImportHistory<TData = Awaited<ReturnType<typeof listImportHistory>>, TError = ErrorType<unknown>>(
  params?: ListImportHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportHistory>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -20303,14 +19467,12 @@ export function useListImportHistory<TData = Awaited<ReturnType<typeof listImpor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List recent workbook import review records */
 export function useListImportHistory<TData = Awaited<ReturnType<typeof listImportHistory>>, TError = ErrorType<unknown>>(
  params?: ListImportHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List recent workbook import review records
- */
-
+/** @summary List recent workbook import review records */
 export function useListImportHistory<TData = Awaited<ReturnType<typeof listImportHistory>>, TError = ErrorType<unknown>>(
  params?: ListImportHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -20342,25 +19504,11 @@ export const getRecordImportHistoryUrl = () => {
  */
 export const recordImportHistory = async (importHistoryInput: ImportHistoryInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportHistoryResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportHistoryResponse>(getRecordImportHistoryUrl(),
+  return customFetch<ImportHistoryResponse>(getRecordImportHistoryUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importHistoryInput)
   }
 );}
@@ -20403,9 +19551,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordImportHistoryMutationError = ErrorType<void>
     export type RecordImportHistoryMutationVariables = {data: BodyType<ImportHistoryInput>}
 
-    /**
- * @summary Record a sanitized workbook import outcome
- */
+    /** @summary Record a sanitized workbook import outcome */
 export const useRecordImportHistory = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordImportHistory>>, TError,RecordImportHistoryMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -20473,6 +19619,10 @@ export type ListImportAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof
 export type ListImportAliasesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
+ * @summary List learned import aliases (brand/flavor name mappings)
+ */
 export function useListImportAliases<TData = Awaited<ReturnType<typeof listImportAliases>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportAliases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -20483,6 +19633,10 @@ export function useListImportAliases<TData = Awaited<ReturnType<typeof listImpor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
+ * @summary List learned import aliases (brand/flavor name mappings)
+ */
 export function useListImportAliases<TData = Awaited<ReturnType<typeof listImportAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportAliases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -20493,14 +19647,18 @@ export function useListImportAliases<TData = Awaited<ReturnType<typeof listImpor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
+ * @summary List learned import aliases (brand/flavor name mappings)
+ */
 export function useListImportAliases<TData = Awaited<ReturnType<typeof listImportAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
  * @summary List learned import aliases (brand/flavor name mappings)
  */
-
 export function useListImportAliases<TData = Awaited<ReturnType<typeof listImportAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -20533,25 +19691,11 @@ export const getSaveImportAliasesUrl = () => {
  */
 export const saveImportAliases = async (saveImportAliasesInput: SaveImportAliasesInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportAliasList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportAliasList>(getSaveImportAliasesUrl(),
+  return customFetch<ImportAliasList>(getSaveImportAliasesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveImportAliasesInput)
   }
 );}
@@ -20595,6 +19739,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveImportAliasesMutationVariables = {data: BodyType<SaveImportAliasesInput>}
 
     /**
+ * Persists a batch of brand/flavor name mappings confirmed by the user during an Excel import. Existing aliases (matched case-insensitively on type + externalName + brandContext) are updated; new ones are inserted. Available to any signed-in user (operators included).
  * @summary Save learned import aliases (case-insensitive upsert)
  */
 export const useSaveImportAliases = <TError = ErrorType<void>,
@@ -20664,6 +19809,10 @@ export type ListFillMissingValuesQueryResult = NonNullable<Awaited<ReturnType<ty
 export type ListFillMissingValuesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every learned "fill in missing data" value — a value a user previously confirmed for a blank run-setup field, keyed by the run's product (brand + flavor) and the field. Clients use these to propose the remembered value as a top-priority source before falling back to profile/spec/default/AI. Available to any signed-in user.
+ * @summary List learned fill-missing values (per product + field)
+ */
 export function useListFillMissingValues<TData = Awaited<ReturnType<typeof listFillMissingValues>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFillMissingValues>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -20674,6 +19823,10 @@ export function useListFillMissingValues<TData = Awaited<ReturnType<typeof listF
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned "fill in missing data" value — a value a user previously confirmed for a blank run-setup field, keyed by the run's product (brand + flavor) and the field. Clients use these to propose the remembered value as a top-priority source before falling back to profile/spec/default/AI. Available to any signed-in user.
+ * @summary List learned fill-missing values (per product + field)
+ */
 export function useListFillMissingValues<TData = Awaited<ReturnType<typeof listFillMissingValues>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFillMissingValues>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -20684,14 +19837,18 @@ export function useListFillMissingValues<TData = Awaited<ReturnType<typeof listF
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned "fill in missing data" value — a value a user previously confirmed for a blank run-setup field, keyed by the run's product (brand + flavor) and the field. Clients use these to propose the remembered value as a top-priority source before falling back to profile/spec/default/AI. Available to any signed-in user.
+ * @summary List learned fill-missing values (per product + field)
+ */
 export function useListFillMissingValues<TData = Awaited<ReturnType<typeof listFillMissingValues>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFillMissingValues>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every learned "fill in missing data" value — a value a user previously confirmed for a blank run-setup field, keyed by the run's product (brand + flavor) and the field. Clients use these to propose the remembered value as a top-priority source before falling back to profile/spec/default/AI. Available to any signed-in user.
  * @summary List learned fill-missing values (per product + field)
  */
-
 export function useListFillMissingValues<TData = Awaited<ReturnType<typeof listFillMissingValues>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFillMissingValues>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -20724,25 +19881,11 @@ export const getSaveFillMissingValuesUrl = () => {
  */
 export const saveFillMissingValues = async (saveFillMissingValuesInput: SaveFillMissingValuesInput, options?: Parameters<typeof customFetch>[1]): Promise<FillMissingValueList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FillMissingValueList>(getSaveFillMissingValuesUrl(),
+  return customFetch<FillMissingValueList>(getSaveFillMissingValuesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveFillMissingValuesInput)
   }
 );}
@@ -20786,6 +19929,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveFillMissingValuesMutationVariables = {data: BodyType<SaveFillMissingValuesInput>}
 
     /**
+ * Persists a batch of confirmed field values, keyed case-insensitively on brand + flavor + fieldKey. Existing entries are updated; new ones are inserted. Available to any signed-in user.
  * @summary Save learned fill-missing values (case-insensitive upsert)
  */
 export const useSaveFillMissingValues = <TError = ErrorType<void>,
@@ -20855,6 +19999,10 @@ export type ListIngredientBatchWeightsQueryResult = NonNullable<Awaited<ReturnTy
 export type ListIngredientBatchWeightsQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every learned ingredient batch weight — the "Batch Weight (lbs)" a user previously entered for a plain ingredient (applicator topping, non-default pep type, or ready-made sauce barrel), keyed by ingredient name. Clients auto-fill the remembered weight when that ingredient is picked again, the same way mixes and cheese recipes carry their own batch weight. Available to any signed-in user.
+ * @summary List learned per-ingredient batch weights
+ */
 export function useListIngredientBatchWeights<TData = Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -20865,6 +20013,10 @@ export function useListIngredientBatchWeights<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned ingredient batch weight — the "Batch Weight (lbs)" a user previously entered for a plain ingredient (applicator topping, non-default pep type, or ready-made sauce barrel), keyed by ingredient name. Clients auto-fill the remembered weight when that ingredient is picked again, the same way mixes and cheese recipes carry their own batch weight. Available to any signed-in user.
+ * @summary List learned per-ingredient batch weights
+ */
 export function useListIngredientBatchWeights<TData = Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -20875,14 +20027,18 @@ export function useListIngredientBatchWeights<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned ingredient batch weight — the "Batch Weight (lbs)" a user previously entered for a plain ingredient (applicator topping, non-default pep type, or ready-made sauce barrel), keyed by ingredient name. Clients auto-fill the remembered weight when that ingredient is picked again, the same way mixes and cheese recipes carry their own batch weight. Available to any signed-in user.
+ * @summary List learned per-ingredient batch weights
+ */
 export function useListIngredientBatchWeights<TData = Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every learned ingredient batch weight — the "Batch Weight (lbs)" a user previously entered for a plain ingredient (applicator topping, non-default pep type, or ready-made sauce barrel), keyed by ingredient name. Clients auto-fill the remembered weight when that ingredient is picked again, the same way mixes and cheese recipes carry their own batch weight. Available to any signed-in user.
  * @summary List learned per-ingredient batch weights
  */
-
 export function useListIngredientBatchWeights<TData = Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -20915,25 +20071,11 @@ export const getSaveIngredientBatchWeightsUrl = () => {
  */
 export const saveIngredientBatchWeights = async (saveIngredientBatchWeightsInput: SaveIngredientBatchWeightsInput, options?: Parameters<typeof customFetch>[1]): Promise<IngredientBatchWeightList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<IngredientBatchWeightList>(getSaveIngredientBatchWeightsUrl(),
+  return customFetch<IngredientBatchWeightList>(getSaveIngredientBatchWeightsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(saveIngredientBatchWeightsInput)
   }
 );}
@@ -20977,6 +20119,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveIngredientBatchWeightsMutationVariables = {data: BodyType<SaveIngredientBatchWeightsInput>}
 
     /**
+ * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing positive entries are updated; new positive entries are inserted. An entry with lbs set to zero removes the learned value and stops future auto-fill. Available to any signed-in user.
  * @summary Save or clear learned ingredient batch weights (case-insensitive)
  */
 export const useSaveIngredientBatchWeights = <TError = ErrorType<void>,
@@ -21046,6 +20189,10 @@ export type ListPhotoAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type ListPhotoAliasesQueryError = ErrorType<unknown>
 
 
+/**
+ * Returns every learned photo-intake alias — a saved mapping from a vision model's guessed item name to the inventory item key a user confirmed it matches. Clients use these to auto-apply remembered matches when identifying inventory from a photo. Available to any signed-in user.
+ * @summary List learned photo-intake aliases (guessName -> itemKey)
+ */
 export function useListPhotoAliases<TData = Awaited<ReturnType<typeof listPhotoAliases>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPhotoAliases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -21056,6 +20203,10 @@ export function useListPhotoAliases<TData = Awaited<ReturnType<typeof listPhotoA
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned photo-intake alias — a saved mapping from a vision model's guessed item name to the inventory item key a user confirmed it matches. Clients use these to auto-apply remembered matches when identifying inventory from a photo. Available to any signed-in user.
+ * @summary List learned photo-intake aliases (guessName -> itemKey)
+ */
 export function useListPhotoAliases<TData = Awaited<ReturnType<typeof listPhotoAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPhotoAliases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -21066,14 +20217,18 @@ export function useListPhotoAliases<TData = Awaited<ReturnType<typeof listPhotoA
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns every learned photo-intake alias — a saved mapping from a vision model's guessed item name to the inventory item key a user confirmed it matches. Clients use these to auto-apply remembered matches when identifying inventory from a photo. Available to any signed-in user.
+ * @summary List learned photo-intake aliases (guessName -> itemKey)
+ */
 export function useListPhotoAliases<TData = Awaited<ReturnType<typeof listPhotoAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPhotoAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns every learned photo-intake alias — a saved mapping from a vision model's guessed item name to the inventory item key a user confirmed it matches. Clients use these to auto-apply remembered matches when identifying inventory from a photo. Available to any signed-in user.
  * @summary List learned photo-intake aliases (guessName -> itemKey)
  */
-
 export function useListPhotoAliases<TData = Awaited<ReturnType<typeof listPhotoAliases>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPhotoAliases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -21106,25 +20261,11 @@ export const getSavePhotoAliasesUrl = () => {
  */
 export const savePhotoAliases = async (savePhotoAliasesInput: SavePhotoAliasesInput, options?: Parameters<typeof customFetch>[1]): Promise<PhotoAliasList> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<PhotoAliasList>(getSavePhotoAliasesUrl(),
+  return customFetch<PhotoAliasList>(getSavePhotoAliasesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(savePhotoAliasesInput)
   }
 );}
@@ -21168,6 +20309,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SavePhotoAliasesMutationVariables = {data: BodyType<SavePhotoAliasesInput>}
 
     /**
+ * Persists a batch of guessName -> itemKey mappings confirmed by the user during photo intake. Existing entries (matched case-insensitively on guessName) are updated; new ones are inserted. Available to any signed-in user.
  * @summary Save learned photo-intake aliases (case-insensitive upsert)
  */
 export const useSavePhotoAliases = <TError = ErrorType<void>,
@@ -21195,25 +20337,11 @@ export const getSubmitFieldCheckObservationsUrl = () => {
  */
 export const submitFieldCheckObservations = async (fieldCheckObservationBatch: FieldCheckObservationBatch, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FieldCheckIngestResult>(getSubmitFieldCheckObservationsUrl(),
+  return customFetch<FieldCheckIngestResult>(getSubmitFieldCheckObservationsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(fieldCheckObservationBatch)
   }
 );}
@@ -21257,6 +20385,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SubmitFieldCheckObservationsMutationVariables = {data: BodyType<FieldCheckObservationBatch>}
 
     /**
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence. Version 3 sync-acknowledgment failures require only failureCode (integer 1 login/permission rejection, 2 stale/reset write, 3 exhausted retries); version 4 also allows 4 for a permanent sync request rejection. Successful sync observations have empty metrics. Version 3 performance observations require only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API network failure). Stale-deployment-recovery accepts no metrics; an incomplete outcome is an attempt without confirmation, and success is emitted only after authenticated startup on a different build. Versions 1 and 2 remain accepted for queued evidence; unsupported diagnostic versions are rejected.
  * @summary Submit passive browser field-check observations
  */
 export const useSubmitFieldCheckObservations = <TError = ErrorType<void>,
@@ -21333,6 +20462,10 @@ export type GetFieldChecksQueryResult = NonNullable<Awaited<ReturnType<typeof ge
 export type GetFieldChecksQueryError = ErrorType<void>
 
 
+/**
+ * Returns deterministic health rollups separately from evidence coverage for passive browser evidence and explicit unsupported states for hardware-only checks. Receipt delay is an estimate from the browser's observation timestamp to server receipt; missing or future timestamps remain unknown. Optional filters are combined with AND and applied to all observations received within the last 30 days in the authorized facility/sandbox scope, before counts, recovery and recent-row limits are calculated. appBuild is an exact, case-sensitive match; local means an unknown build, not an environment. Filtered recovery requires a success strictly later than the latest non-success in that population. No matches return collecting/unsupported checks and zero counts, not facility-wide issue state. Unfiltered reports preserve lifetime issue counts/status. Advisory only, never release proof.
+ * @summary Get manager field-check health
+ */
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
  params: undefined |  GetFieldChecksParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -21343,6 +20476,10 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns deterministic health rollups separately from evidence coverage for passive browser evidence and explicit unsupported states for hardware-only checks. Receipt delay is an estimate from the browser's observation timestamp to server receipt; missing or future timestamps remain unknown. Optional filters are combined with AND and applied to all observations received within the last 30 days in the authorized facility/sandbox scope, before counts, recovery and recent-row limits are calculated. appBuild is an exact, case-sensitive match; local means an unknown build, not an environment. Filtered recovery requires a success strictly later than the latest non-success in that population. No matches return collecting/unsupported checks and zero counts, not facility-wide issue state. Unfiltered reports preserve lifetime issue counts/status. Advisory only, never release proof.
+ * @summary Get manager field-check health
+ */
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
  params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -21353,14 +20490,18 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns deterministic health rollups separately from evidence coverage for passive browser evidence and explicit unsupported states for hardware-only checks. Receipt delay is an estimate from the browser's observation timestamp to server receipt; missing or future timestamps remain unknown. Optional filters are combined with AND and applied to all observations received within the last 30 days in the authorized facility/sandbox scope, before counts, recovery and recent-row limits are calculated. appBuild is an exact, case-sensitive match; local means an unknown build, not an environment. Filtered recovery requires a success strictly later than the latest non-success in that population. No matches return collecting/unsupported checks and zero counts, not facility-wide issue state. Unfiltered reports preserve lifetime issue counts/status. Advisory only, never release proof.
+ * @summary Get manager field-check health
+ */
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
  params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns deterministic health rollups separately from evidence coverage for passive browser evidence and explicit unsupported states for hardware-only checks. Receipt delay is an estimate from the browser's observation timestamp to server receipt; missing or future timestamps remain unknown. Optional filters are combined with AND and applied to all observations received within the last 30 days in the authorized facility/sandbox scope, before counts, recovery and recent-row limits are calculated. appBuild is an exact, case-sensitive match; local means an unknown build, not an environment. Filtered recovery requires a success strictly later than the latest non-success in that population. No matches return collecting/unsupported checks and zero counts, not facility-wide issue state. Unfiltered reports preserve lifetime issue counts/status. Advisory only, never release proof.
  * @summary Get manager field-check health
  */
-
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
  params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -21393,25 +20534,11 @@ export const getConfirmHardwareFieldCheckUrl = () => {
  */
 export const confirmHardwareFieldCheck = async (hardwareFieldCheckConfirmation: HardwareFieldCheckConfirmation, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<FieldCheckIngestResult>(getConfirmHardwareFieldCheckUrl(),
+  return customFetch<FieldCheckIngestResult>(getConfirmHardwareFieldCheckUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(hardwareFieldCheckConfirmation)
   }
 );}
@@ -21455,6 +20582,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConfirmHardwareFieldCheckMutationVariables = {data: BodyType<HardwareFieldCheckConfirmation>}
 
     /**
+ * Records a manager-confirmed hardware observation separately from passive browser evidence. The request accepts only the bounded device category, protocol version, outcome, timestamp, and hardware check name. The API captures its validated build identity at receipt time; client-supplied revision or environment values are not accepted.
  * @summary Record a guided physical-device check
  */
 export const useConfirmHardwareFieldCheck = <TError = ErrorType<void>,
@@ -21530,6 +20658,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
     /**
+ * Manager-only, scope-aware cleanup. Returns the dry-run-compatible report, records a bounded per-run audit marker, and can be repeated as retained operational records age into the policy cutoffs.
  * @summary Apply the bounded retired-AI retention cleanup
  */
 export const useApplyAiRetentionCleanup = <TError = ErrorType<void>,
@@ -21557,25 +20686,11 @@ export const getReportIncidentUrl = () => {
  */
 export const reportIncident = async (reportIncidentInput: ReportIncidentInput, options?: Parameters<typeof customFetch>[1]): Promise<IncidentDiagnosis> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<IncidentDiagnosis>(getReportIncidentUrl(),
+  return customFetch<IncidentDiagnosis>(getReportIncidentUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(reportIncidentInput)
   }
 );}
@@ -21619,6 +20734,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReportIncidentMutationVariables = {data: BodyType<ReportIncidentInput>}
 
     /**
+ * Records an incident (a user-reported problem or an auto-captured crash) for manager review. Retired automated diagnosis fields are returned as null. Allowed for any signed-in user. Rate-limited per user.
  * @summary Report an issue or a crash for manager review
  */
 export const useReportIncident = <TError = ErrorType<void>,
@@ -21688,6 +20804,10 @@ export type ListIncidentsQueryResult = NonNullable<Awaited<ReturnType<typeof lis
 export type ListIncidentsQueryError = ErrorType<void>
 
 
+/**
+ * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
+ * @summary List incidents (manager only)
+ */
 export function useListIncidents<TData = Awaited<ReturnType<typeof listIncidents>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -21698,6 +20818,10 @@ export function useListIncidents<TData = Awaited<ReturnType<typeof listIncidents
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
+ * @summary List incidents (manager only)
+ */
 export function useListIncidents<TData = Awaited<ReturnType<typeof listIncidents>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -21708,14 +20832,18 @@ export function useListIncidents<TData = Awaited<ReturnType<typeof listIncidents
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
+ * @summary List incidents (manager only)
+ */
 export function useListIncidents<TData = Awaited<ReturnType<typeof listIncidents>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidents>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
  * @summary List incidents (manager only)
  */
-
 export function useListIncidents<TData = Awaited<ReturnType<typeof listIncidents>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidents>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -21790,6 +20918,10 @@ export type GetUnreviewedIncidentCountQueryResult = NonNullable<Awaited<ReturnTy
 export type GetUnreviewedIncidentCountQueryError = ErrorType<void>
 
 
+/**
+ * Returns the number of incidents still marked new/unreviewed, used to drive the manager nav badge.
+ * @summary Count of unreviewed incidents (manager only)
+ */
 export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -21800,6 +20932,10 @@ export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the number of incidents still marked new/unreviewed, used to drive the manager nav badge.
+ * @summary Count of unreviewed incidents (manager only)
+ */
 export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -21810,14 +20946,18 @@ export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns the number of incidents still marked new/unreviewed, used to drive the manager nav badge.
+ * @summary Count of unreviewed incidents (manager only)
+ */
 export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns the number of incidents still marked new/unreviewed, used to drive the manager nav badge.
  * @summary Count of unreviewed incidents (manager only)
  */
-
 export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -21891,6 +21031,7 @@ export type GetActionableIncidentCountQueryResult = NonNullable<Awaited<ReturnTy
 export type GetActionableIncidentCountQueryError = ErrorType<void>
 
 
+/** @summary Count unresolved actionable incident work */
 export function useGetActionableIncidentCount<TData = Awaited<ReturnType<typeof getActionableIncidentCount>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getActionableIncidentCount>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -21901,6 +21042,7 @@ export function useGetActionableIncidentCount<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Count unresolved actionable incident work */
 export function useGetActionableIncidentCount<TData = Awaited<ReturnType<typeof getActionableIncidentCount>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getActionableIncidentCount>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -21911,14 +21053,12 @@ export function useGetActionableIncidentCount<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Count unresolved actionable incident work */
 export function useGetActionableIncidentCount<TData = Awaited<ReturnType<typeof getActionableIncidentCount>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getActionableIncidentCount>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Count unresolved actionable incident work
- */
-
+/** @summary Count unresolved actionable incident work */
 export function useGetActionableIncidentCount<TData = Awaited<ReturnType<typeof getActionableIncidentCount>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getActionableIncidentCount>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -21992,6 +21132,7 @@ export type ListIncidentAssigneesQueryResult = NonNullable<Awaited<ReturnType<ty
 export type ListIncidentAssigneesQueryError = ErrorType<void>
 
 
+/** @summary List eligible incident owners */
 export function useListIncidentAssignees<TData = Awaited<ReturnType<typeof listIncidentAssignees>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidentAssignees>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -22002,6 +21143,7 @@ export function useListIncidentAssignees<TData = Awaited<ReturnType<typeof listI
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List eligible incident owners */
 export function useListIncidentAssignees<TData = Awaited<ReturnType<typeof listIncidentAssignees>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidentAssignees>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -22012,14 +21154,12 @@ export function useListIncidentAssignees<TData = Awaited<ReturnType<typeof listI
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List eligible incident owners */
 export function useListIncidentAssignees<TData = Awaited<ReturnType<typeof listIncidentAssignees>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidentAssignees>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List eligible incident owners
- */
-
+/** @summary List eligible incident owners */
 export function useListIncidentAssignees<TData = Awaited<ReturnType<typeof listIncidentAssignees>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIncidentAssignees>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -22093,6 +21233,7 @@ export type GetIncidentQueryResult = NonNullable<Awaited<ReturnType<typeof getIn
 export type GetIncidentQueryError = ErrorType<void>
 
 
+/** @summary Get one incident (manager only) */
 export function useGetIncident<TData = Awaited<ReturnType<typeof getIncident>>, TError = ErrorType<void>>(
  id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncident>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -22103,6 +21244,7 @@ export function useGetIncident<TData = Awaited<ReturnType<typeof getIncident>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get one incident (manager only) */
 export function useGetIncident<TData = Awaited<ReturnType<typeof getIncident>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncident>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -22113,14 +21255,12 @@ export function useGetIncident<TData = Awaited<ReturnType<typeof getIncident>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get one incident (manager only) */
 export function useGetIncident<TData = Awaited<ReturnType<typeof getIncident>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncident>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Get one incident (manager only)
- */
-
+/** @summary Get one incident (manager only) */
 export function useGetIncident<TData = Awaited<ReturnType<typeof getIncident>>, TError = ErrorType<void>>(
  id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncident>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -22199,9 +21339,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReviewIncidentMutationError = ErrorType<void>
     export type ReviewIncidentMutationVariables = {id: string}
 
-    /**
- * @summary Mark an incident reviewed (manager only)
- */
+    /** @summary Mark an incident reviewed (manager only) */
 export const useReviewIncident = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewIncident>>, TError,ReviewIncidentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -22275,6 +21413,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ResolveIncidentMutationVariables = {id: string}
 
     /**
+ * Marks an incident resolved (its underlying problem is considered fixed/handled). "resolved" implies "reviewed".
  * @summary Mark an incident resolved (manager only)
  */
 export const useResolveIncident = <TError = ErrorType<void>,
@@ -22350,6 +21489,7 @@ export type ListManagerActionQueueQueryResult = NonNullable<Awaited<ReturnType<t
 export type ListManagerActionQueueQueryError = ErrorType<void>
 
 
+/** @summary List the facility-scoped manager action queue */
 export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>(
  params: undefined |  ListManagerActionQueueParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -22360,6 +21500,7 @@ export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List the facility-scoped manager action queue */
 export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>(
  params?: ListManagerActionQueueParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -22370,14 +21511,12 @@ export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof list
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List the facility-scoped manager action queue */
 export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>(
  params?: ListManagerActionQueueParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List the facility-scoped manager action queue
- */
-
+/** @summary List the facility-scoped manager action queue */
 export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>(
  params?: ListManagerActionQueueParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -22451,6 +21590,7 @@ export type GetBackgroundOperationDiagnosticsQueryResult = NonNullable<Awaited<R
 export type GetBackgroundOperationDiagnosticsQueryError = ErrorType<void>
 
 
+/** @summary List background failures and automatic-tracking retry status for managers */
 export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -22461,6 +21601,7 @@ export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List background failures and automatic-tracking retry status for managers */
 export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -22471,14 +21612,12 @@ export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List background failures and automatic-tracking retry status for managers */
 export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List background failures and automatic-tracking retry status for managers
- */
-
+/** @summary List background failures and automatic-tracking retry status for managers */
 export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -22511,25 +21650,11 @@ export const getUpdateManagerActionItemUrl = (id: number,) => {
 export const updateManagerActionItem = async (id: number,
     managerActionItemUpdate: ManagerActionItemUpdate, options?: Parameters<typeof customFetch>[1]): Promise<UpdateManagerActionItem200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<UpdateManagerActionItem200>(getUpdateManagerActionItemUrl(id),
+  return customFetch<UpdateManagerActionItem200>(getUpdateManagerActionItemUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(managerActionItemUpdate)
   }
 );}
@@ -22572,9 +21697,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateManagerActionItemMutationError = ErrorType<void>
     export type UpdateManagerActionItemMutationVariables = {id: number;data: BodyType<ManagerActionItemUpdate>}
 
-    /**
- * @summary Update a manager action item with optimistic version checking
- */
+    /** @summary Update a manager action item with optimistic version checking */
 export const useUpdateManagerActionItem = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateManagerActionItem>>, TError,UpdateManagerActionItemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -22600,25 +21723,11 @@ export const getUpdateIncidentWorkflowUrl = (id: string,) => {
 export const updateIncidentWorkflow = async (id: string,
     incidentWorkflowUpdate: IncidentWorkflowUpdate, options?: Parameters<typeof customFetch>[1]): Promise<Incident> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<Incident>(getUpdateIncidentWorkflowUrl(id),
+  return customFetch<Incident>(getUpdateIncidentWorkflowUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(incidentWorkflowUpdate)
   }
 );}
@@ -22661,9 +21770,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateIncidentWorkflowMutationError = ErrorType<void>
     export type UpdateIncidentWorkflowMutationVariables = {id: string;data: BodyType<IncidentWorkflowUpdate>}
 
-    /**
- * @summary Update incident ownership, priority, state, or add a note
- */
+    /** @summary Update incident ownership, priority, state, or add a note */
 export const useUpdateIncidentWorkflow = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIncidentWorkflow>>, TError,UpdateIncidentWorkflowMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -22730,6 +21837,7 @@ export type GetMeQueryResult = NonNullable<Awaited<ReturnType<typeof getMe>>>
 export type GetMeQueryError = ErrorType<unknown>
 
 
+/** @summary Current signed-in user's identity and role */
 export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -22740,6 +21848,7 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Err
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Current signed-in user's identity and role */
 export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -22750,14 +21859,12 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Err
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Current signed-in user's identity and role */
 export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Current signed-in user's identity and role
- */
-
+/** @summary Current signed-in user's identity and role */
 export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -22838,6 +21945,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
     /**
+ * Sets the current user's onboardingSeen flag so the "Get Started" overview never auto-opens again on any of their devices. Idempotent.
  * @summary Mark the first-login "Get Started" overview as seen
  */
 export const useMarkOnboardingSeen = <TError = ErrorType<unknown>,
@@ -22913,6 +22021,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
     /**
+ * Sets the current user's tourCompleted flag once they reach the guided tour's final step, so the app can tell a brand-new user from one who has already finished the tour. Idempotent.
  * @summary Mark the guided tour as completed
  */
 export const useMarkTourCompleted = <TError = ErrorType<unknown>,
@@ -22940,25 +22049,11 @@ export const getSetNotificationPrefsUrl = () => {
  */
 export const setNotificationPrefs = async (setNotificationPrefsBody: SetNotificationPrefs, options?: Parameters<typeof customFetch>[1]): Promise<StaffMember> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<StaffMember>(getSetNotificationPrefsUrl(),
+  return customFetch<StaffMember>(getSetNotificationPrefsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(setNotificationPrefsBody)
   }
 );}
@@ -23002,6 +22097,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetNotificationPrefsMutationVariables = {data: BodyType<SetNotificationPrefs>}
 
     /**
+ * Merges the supplied alert-kind → enabled toggles into the current user's notification preferences so they follow them across devices. Unknown alert kinds are ignored; keys not supplied are left unchanged.
  * @summary Set the current user's per-alert notification preferences
  */
 export const useSetNotificationPrefs = <TError = ErrorType<unknown>,
@@ -23029,25 +22125,11 @@ export const getSetFloorModeUrl = () => {
  */
 export const setFloorMode = async (setFloorModeBody: SetFloorMode, options?: Parameters<typeof customFetch>[1]): Promise<StaffMember> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<StaffMember>(getSetFloorModeUrl(),
+  return customFetch<StaffMember>(getSetFloorModeUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(setFloorModeBody)
   }
 );}
@@ -23091,6 +22173,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetFloorModeMutationVariables = {data: BodyType<SetFloorMode>}
 
     /**
+ * Stores whether Floor Mode (the idle big-numbers monitor) is enabled for the current user, so the preference follows them across devices.
  * @summary Set the current user's Floor Mode on/off preference
  */
 export const useSetFloorMode = <TError = ErrorType<unknown>,
@@ -23159,6 +22242,7 @@ export type ListRolesQueryResult = NonNullable<Awaited<ReturnType<typeof listRol
 export type ListRolesQueryError = ErrorType<void>
 
 
+/** @summary List all defined roles and their capabilities (manage-staff) */
 export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -23169,6 +22253,7 @@ export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TErr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List all defined roles and their capabilities (manage-staff) */
 export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -23179,14 +22264,12 @@ export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TErr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List all defined roles and their capabilities (manage-staff) */
 export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List all defined roles and their capabilities (manage-staff)
- */
-
+/** @summary List all defined roles and their capabilities (manage-staff) */
 export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -23218,25 +22301,11 @@ export const getCreateRoleUrl = () => {
  */
 export const createRole = async (createRoleBody: CreateRole, options?: Parameters<typeof customFetch>[1]): Promise<RoleDefinition> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<RoleDefinition>(getCreateRoleUrl(),
+  return customFetch<RoleDefinition>(getCreateRoleUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(createRoleBody)
   }
 );}
@@ -23279,9 +22348,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateRoleMutationError = ErrorType<void>
     export type CreateRoleMutationVariables = {data: BodyType<CreateRole>}
 
-    /**
- * @summary Create a new role (manage-staff)
- */
+    /** @summary Create a new role (manage-staff) */
 export const useCreateRole = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRole>>, TError,CreateRoleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -23307,25 +22374,11 @@ export const getUpdateRoleUrl = (name: string,) => {
 export const updateRole = async (name: string,
     roleCapabilitiesUpdate: RoleCapabilitiesUpdate, options?: Parameters<typeof customFetch>[1]): Promise<RoleDefinition> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<RoleDefinition>(getUpdateRoleUrl(name),
+  return customFetch<RoleDefinition>(getUpdateRoleUrl(name),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(roleCapabilitiesUpdate)
   }
 );}
@@ -23368,9 +22421,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateRoleMutationError = ErrorType<void>
     export type UpdateRoleMutationVariables = {name: string;data: BodyType<RoleCapabilitiesUpdate>}
 
-    /**
- * @summary Update a role's capabilities (manage-staff)
- */
+    /** @summary Update a role's capabilities (manage-staff) */
 export const useUpdateRole = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRole>>, TError,UpdateRoleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -23442,9 +22493,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteRoleMutationError = ErrorType<void>
     export type DeleteRoleMutationVariables = {name: string}
 
-    /**
- * @summary Delete a role (manage-staff)
- */
+    /** @summary Delete a role (manage-staff) */
 export const useDeleteRole = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRole>>, TError,DeleteRoleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -23511,6 +22560,7 @@ export type ListStaffQueryResult = NonNullable<Awaited<ReturnType<typeof listSta
 export type ListStaffQueryError = ErrorType<void>
 
 
+/** @summary List staff members and their roles (manager only) */
 export function useListStaff<TData = Awaited<ReturnType<typeof listStaff>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaff>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -23521,6 +22571,7 @@ export function useListStaff<TData = Awaited<ReturnType<typeof listStaff>>, TErr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List staff members and their roles (manager only) */
 export function useListStaff<TData = Awaited<ReturnType<typeof listStaff>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaff>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -23531,14 +22582,12 @@ export function useListStaff<TData = Awaited<ReturnType<typeof listStaff>>, TErr
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List staff members and their roles (manager only) */
 export function useListStaff<TData = Awaited<ReturnType<typeof listStaff>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaff>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List staff members and their roles (manager only)
- */
-
+/** @summary List staff members and their roles (manager only) */
 export function useListStaff<TData = Awaited<ReturnType<typeof listStaff>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaff>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -23571,25 +22620,11 @@ export const getSetStaffRoleUrl = (userId: string,) => {
 export const setStaffRole = async (userId: string,
     staffRoleUpdate: StaffRoleUpdate, options?: Parameters<typeof customFetch>[1]): Promise<StaffMember> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<StaffMember>(getSetStaffRoleUrl(userId),
+  return customFetch<StaffMember>(getSetStaffRoleUrl(userId),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(staffRoleUpdate)
   }
 );}
@@ -23632,9 +22667,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetStaffRoleMutationError = ErrorType<void>
     export type SetStaffRoleMutationVariables = {userId: string;data: BodyType<StaffRoleUpdate>}
 
-    /**
- * @summary Change a staff member's role (manager only)
- */
+    /** @summary Change a staff member's role (manager only) */
 export const useSetStaffRole = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStaffRole>>, TError,SetStaffRoleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -23660,25 +22693,11 @@ export const getResetStaffPasswordUrl = (userId: string,) => {
 export const resetStaffPassword = async (userId: string,
     resetStaffPasswordBody: ResetStaffPassword, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<void>(getResetStaffPasswordUrl(userId),
+  return customFetch<void>(getResetStaffPasswordUrl(userId),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(resetStaffPasswordBody)
   }
 );}
@@ -23721,9 +22740,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ResetStaffPasswordMutationError = ErrorType<void>
     export type ResetStaffPasswordMutationVariables = {userId: string;data: BodyType<ResetStaffPassword>}
 
-    /**
- * @summary Reset a staff member's password (manager only)
- */
+    /** @summary Reset a staff member's password (manager only) */
 export const useResetStaffPassword = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetStaffPassword>>, TError,ResetStaffPasswordMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -23790,6 +22807,7 @@ export type GetSignupCodeStatusQueryResult = NonNullable<Awaited<ReturnType<type
 export type GetSignupCodeStatusQueryError = ErrorType<unknown>
 
 
+/** @summary Read bounded transitional sign-up code counters */
 export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -23800,6 +22818,7 @@ export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSign
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read bounded transitional sign-up code counters */
 export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -23810,14 +22829,12 @@ export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSign
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read bounded transitional sign-up code counters */
 export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read bounded transitional sign-up code counters
- */
-
+/** @summary Read bounded transitional sign-up code counters */
 export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -23846,25 +22863,11 @@ export const getSetSignupCodeStatusUrl = () => {
 
 export const setSignupCodeStatus = async (signupCodeStatusUpdate: SignupCodeStatusUpdate, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<void>(getSetSignupCodeStatusUrl(),
+  return customFetch<void>(getSetSignupCodeStatusUrl(),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(signupCodeStatusUpdate)
   }
 );}
@@ -23978,9 +22981,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RotateSignupCodeMutationError = ErrorType<unknown>
 
 
-    /**
- * @summary Rotate transitional sign-up code (secret returned once)
- */
+    /** @summary Rotate transitional sign-up code (secret returned once) */
 export const useRotateSignupCode = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateSignupCode>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -24052,9 +23053,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteStaffMemberMutationError = ErrorType<void>
     export type DeleteStaffMemberMutationVariables = {userId: string}
 
-    /**
- * @summary Remove a staff member (manager only)
- */
+    /** @summary Remove a staff member (manager only) */
 export const useDeleteStaffMember = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteStaffMember>>, TError,DeleteStaffMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -24128,6 +23127,7 @@ export type ListCompletedHistoryQueryResult = NonNullable<Awaited<ReturnType<typ
 export type ListCompletedHistoryQueryError = ErrorType<unknown>
 
 
+/** @summary List immutable completed-run history for the authenticated scope */
 export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(
  params: undefined |  ListCompletedHistoryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -24138,6 +23138,7 @@ export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List immutable completed-run history for the authenticated scope */
 export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(
  params?: ListCompletedHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -24148,14 +23149,12 @@ export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List immutable completed-run history for the authenticated scope */
 export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(
  params?: ListCompletedHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List immutable completed-run history for the authenticated scope
- */
-
+/** @summary List immutable completed-run history for the authenticated scope */
 export function useListCompletedHistory<TData = Awaited<ReturnType<typeof listCompletedHistory>>, TError = ErrorType<unknown>>(
  params?: ListCompletedHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompletedHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -24187,25 +23186,11 @@ export const getFinalizeCompletedRunUrl = () => {
  */
 export const finalizeCompletedRun = async (completedRunFinalization: CompletedRunFinalization, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<void>(getFinalizeCompletedRunUrl(),
+  return customFetch<void>(getFinalizeCompletedRunUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(completedRunFinalization)
   }
 );}
@@ -24248,9 +23233,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type FinalizeCompletedRunMutationError = ErrorType<void>
     export type FinalizeCompletedRunMutationVariables = {data: BodyType<CompletedRunFinalization>}
 
-    /**
- * @summary Append an immutable completed-run snapshot idempotently
- */
+    /** @summary Append an immutable completed-run snapshot idempotently */
 export const useFinalizeCompletedRun = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeCompletedRun>>, TError,FinalizeCompletedRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -24324,6 +23307,7 @@ export type ListApplicatorBatchEvidenceQueryResult = NonNullable<Awaited<ReturnT
 export type ListApplicatorBatchEvidenceQueryError = ErrorType<unknown>
 
 
+/** @summary List append-only applicator batch observations and manager attestations */
 export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
  params: undefined |  ListApplicatorBatchEvidenceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -24334,6 +23318,7 @@ export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List append-only applicator batch observations and manager attestations */
 export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
  params?: ListApplicatorBatchEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -24344,14 +23329,12 @@ export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List append-only applicator batch observations and manager attestations */
 export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
  params?: ListApplicatorBatchEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List append-only applicator batch observations and manager attestations
- */
-
+/** @summary List append-only applicator batch observations and manager attestations */
 export function useListApplicatorBatchEvidence<TData = Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError = ErrorType<unknown>>(
  params?: ListApplicatorBatchEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApplicatorBatchEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -24384,25 +23367,11 @@ export const getFinalizeApplicatorBatchTotalUrl = () => {
  */
 export const finalizeApplicatorBatchTotal = async (applicatorBatchFinalization: ApplicatorBatchFinalization, options?: Parameters<typeof customFetch>[1]): Promise<ApplicatorBatchEvidenceMutationResult> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ApplicatorBatchEvidenceMutationResult>(getFinalizeApplicatorBatchTotalUrl(),
+  return customFetch<ApplicatorBatchEvidenceMutationResult>(getFinalizeApplicatorBatchTotalUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(applicatorBatchFinalization)
   }
 );}
@@ -24446,6 +23415,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type FinalizeApplicatorBatchTotalMutationVariables = {data: BodyType<ApplicatorBatchFinalization>}
 
     /**
+ * Attests a slot only for an existing immutable completed run in this authenticated scope. Corrections append a new manager record and reference the latest finalization.
  * @summary Append an immutable manager-confirmed physical applicator total
  */
 export const useFinalizeApplicatorBatchTotal = <TError = ErrorType<void | ApplicatorBatchEvidenceConflict>,
@@ -24473,25 +23443,11 @@ export const getMoveSyncScheduledRunsUrl = () => {
  */
 export const moveSyncScheduledRuns = async (scheduledRunMoveRequest: ScheduledRunMoveRequest, options?: Parameters<typeof customFetch>[1]): Promise<MoveSyncScheduledRuns200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<MoveSyncScheduledRuns200>(getMoveSyncScheduledRunsUrl(),
+  return customFetch<MoveSyncScheduledRuns200>(getMoveSyncScheduledRunsUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(scheduledRunMoveRequest)
   }
 );}
@@ -24535,6 +23491,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type MoveSyncScheduledRunsMutationVariables = {data: BodyType<ScheduledRunMoveRequest>}
 
     /**
+ * Moves one, several or all unstarted runs in one scoped transaction. The source and destination revisions and reset epoch are checked before either date changes. Setup values, run-value stamps, packaging progress, timers, automatic-tracking state and staged run items follow the moved runs. A rejected or stale request leaves both dates unchanged.
  * @summary Atomically move selected runs between dates
  */
 export const useMoveSyncScheduledRuns = <TError = ErrorType<void>,
@@ -24611,6 +23568,10 @@ export type GetSyncScheduleSwapEligibilityQueryResult = NonNullable<Awaited<Retu
 export type GetSyncScheduleSwapEligibilityQueryError = ErrorType<void>
 
 
+/**
+ * Returns scoped schedule presence and server facility-local eligibility. A swap involving today is allowed only when no run has started or the facility-local time is before 7:00 a.m. This read is manager-only; the swap endpoint rechecks all conditions transactionally.
+ * @summary Check whether a whole-day schedule swap is available
+ */
 export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
  params: GetSyncScheduleSwapEligibilityParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -24621,6 +23582,10 @@ export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns scoped schedule presence and server facility-local eligibility. A swap involving today is allowed only when no run has started or the facility-local time is before 7:00 a.m. This read is manager-only; the swap endpoint rechecks all conditions transactionally.
+ * @summary Check whether a whole-day schedule swap is available
+ */
 export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
  params: GetSyncScheduleSwapEligibilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -24631,14 +23596,18 @@ export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typ
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Returns scoped schedule presence and server facility-local eligibility. A swap involving today is allowed only when no run has started or the facility-local time is before 7:00 a.m. This read is manager-only; the swap endpoint rechecks all conditions transactionally.
+ * @summary Check whether a whole-day schedule swap is available
+ */
 export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
  params: GetSyncScheduleSwapEligibilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Returns scoped schedule presence and server facility-local eligibility. A swap involving today is allowed only when no run has started or the facility-local time is before 7:00 a.m. This read is manager-only; the swap endpoint rechecks all conditions transactionally.
  * @summary Check whether a whole-day schedule swap is available
  */
-
 export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
  params: GetSyncScheduleSwapEligibilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -24671,25 +23640,11 @@ export const getSwapSyncScheduleDaysUrl = () => {
  */
 export const swapSyncScheduleDays = async (scheduledDaySwapRequest: ScheduledDaySwapRequest, options?: Parameters<typeof customFetch>[1]): Promise<SwapSyncScheduleDays200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<SwapSyncScheduleDays200>(getSwapSyncScheduleDaysUrl(),
+  return customFetch<SwapSyncScheduleDays200>(getSwapSyncScheduleDaysUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(scheduledDaySwapRequest)
   }
 );}
@@ -24733,6 +23688,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SwapSyncScheduleDaysMutationVariables = {data: BodyType<ScheduledDaySwapRequest>}
 
     /**
+ * Exchanges run metadata, values, per-run stamps, packaging progress, timers, automatic-tracking state and date-specific settings. Factory-wide data remains attached to its original date. Both canonical revisions, scope, reset epoch and the today eligibility rule are checked under transaction locks before either date is written. Rejected or stale requests leave both dates unchanged.
  * @summary Atomically exchange two date-scoped schedules
  */
 export const useSwapSyncScheduleDays = <TError = ErrorType<void>,
@@ -24808,6 +23764,7 @@ export type GetSyncTodayQueryResult = NonNullable<Awaited<ReturnType<typeof getS
 export type GetSyncTodayQueryError = ErrorType<unknown>
 
 
+/** @summary Read the client-local current-day sync snapshot */
 export function useGetSyncToday<TData = Awaited<ReturnType<typeof getSyncToday>>, TError = ErrorType<unknown>>(
  params: undefined |  GetSyncTodayParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncToday>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -24818,6 +23775,7 @@ export function useGetSyncToday<TData = Awaited<ReturnType<typeof getSyncToday>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read the client-local current-day sync snapshot */
 export function useGetSyncToday<TData = Awaited<ReturnType<typeof getSyncToday>>, TError = ErrorType<unknown>>(
  params?: GetSyncTodayParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncToday>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -24828,14 +23786,12 @@ export function useGetSyncToday<TData = Awaited<ReturnType<typeof getSyncToday>>
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read the client-local current-day sync snapshot */
 export function useGetSyncToday<TData = Awaited<ReturnType<typeof getSyncToday>>, TError = ErrorType<unknown>>(
  params?: GetSyncTodayParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncToday>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read the client-local current-day sync snapshot
- */
-
+/** @summary Read the client-local current-day sync snapshot */
 export function useGetSyncToday<TData = Awaited<ReturnType<typeof getSyncToday>>, TError = ErrorType<unknown>>(
  params?: GetSyncTodayParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncToday>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -24875,25 +23831,11 @@ export const getPutSyncTodayUrl = (params?: PutSyncTodayParams,) => {
 export const putSyncToday = async (syncWriteRequest: SyncWriteRequest,
     params?: PutSyncTodayParams, options?: Parameters<typeof customFetch>[1]): Promise<PutSyncToday200> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<PutSyncToday200>(getPutSyncTodayUrl(params),
+  return customFetch<PutSyncToday200>(getPutSyncTodayUrl(params),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(syncWriteRequest)
   }
 );}
@@ -24936,9 +23878,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PutSyncTodayMutationError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse | SyncOperationalConflictResponse>
     export type PutSyncTodayMutationVariables = {data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}
 
-    /**
- * @summary Merge the client-local current-day sync snapshot
- */
+    /** @summary Merge the client-local current-day sync snapshot */
 export const usePutSyncToday = <TError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse | SyncOperationalConflictResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -25013,6 +23953,10 @@ export type StreamSyncEventsQueryResult = NonNullable<Awaited<ReturnType<typeof 
 export type StreamSyncEventsQueryError = ErrorType<unknown>
 
 
+/**
+ * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
+ * @summary Stream date-scoped canonical sync updates
+ */
 export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
  params: StreamSyncEventsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -25023,6 +23967,10 @@ export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSync
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
+ * @summary Stream date-scoped canonical sync updates
+ */
 export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
  params: StreamSyncEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -25033,14 +23981,18 @@ export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSync
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
+ * @summary Stream date-scoped canonical sync updates
+ */
 export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
  params: StreamSyncEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
+ * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
  * @summary Stream date-scoped canonical sync updates
  */
-
 export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
  params: StreamSyncEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -25080,25 +24032,11 @@ export const getClaimAutoTrackEventUrl = (params?: ClaimAutoTrackEventParams,) =
 export const claimAutoTrackEvent = async (autoTrackClaimRequest: AutoTrackClaimRequest,
     params?: ClaimAutoTrackEventParams, options?: Parameters<typeof customFetch>[1]): Promise<AutoTrackClaimResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<AutoTrackClaimResponse>(getClaimAutoTrackEventUrl(params),
+  return customFetch<AutoTrackClaimResponse>(getClaimAutoTrackEventUrl(params),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(autoTrackClaimRequest)
   }
 );}
@@ -25141,9 +24079,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ClaimAutoTrackEventMutationError = ErrorType<void>
     export type ClaimAutoTrackEventMutationVariables = {data: BodyType<AutoTrackClaimRequest>;params?: ClaimAutoTrackEventParams}
 
-    /**
- * @summary Atomically claim one due automatic production event
- */
+    /** @summary Atomically claim one due automatic production event */
 export const useClaimAutoTrackEvent = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimAutoTrackEvent>>, TError,ClaimAutoTrackEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -25176,25 +24112,11 @@ export const getConfirmStationActivityUrl = (params?: ConfirmStationActivityPara
 export const confirmStationActivity = async (stationActivityConfirmationRequest: StationActivityConfirmationRequest,
     params?: ConfirmStationActivityParams, options?: Parameters<typeof customFetch>[1]): Promise<StationActivityConfirmationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<StationActivityConfirmationResponse>(getConfirmStationActivityUrl(params),
+  return customFetch<StationActivityConfirmationResponse>(getConfirmStationActivityUrl(params),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(stationActivityConfirmationRequest)
   }
 );}
@@ -25237,9 +24159,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConfirmStationActivityMutationError = ErrorType<void>
     export type ConfirmStationActivityMutationVariables = {data: BodyType<StationActivityConfirmationRequest>;params?: ConfirmStationActivityParams}
 
-    /**
- * @summary Confirm activity at the Freeze Tunnel or Warehouse for the active run
- */
+    /** @summary Confirm activity at the Freeze Tunnel or Warehouse for the active run */
 export const useConfirmStationActivity = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmStationActivity>>, TError,ConfirmStationActivityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -25272,25 +24192,11 @@ export const getSubmitManualSectionEditUrl = (params?: SubmitManualSectionEditPa
 export const submitManualSectionEdit = async (manualSectionEditRequest: ManualSectionEditRequest,
     params?: SubmitManualSectionEditParams, options?: Parameters<typeof customFetch>[1]): Promise<ManualSectionEditResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ManualSectionEditResponse>(getSubmitManualSectionEditUrl(params),
+  return customFetch<ManualSectionEditResponse>(getSubmitManualSectionEditUrl(params),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(manualSectionEditRequest)
   }
 );}
@@ -25333,9 +24239,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SubmitManualSectionEditMutationError = ErrorType<ManualSectionEditError>
     export type SubmitManualSectionEditMutationVariables = {data: BodyType<ManualSectionEditRequest>;params?: SubmitManualSectionEditParams}
 
-    /**
- * @summary Apply one atomic run-and-section correction
- */
+    /** @summary Apply one atomic run-and-section correction */
 export const useSubmitManualSectionEdit = <TError = ErrorType<ManualSectionEditError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -25368,25 +24272,11 @@ export const getSubmitOperationalIntentUrl = (params?: SubmitOperationalIntentPa
 export const submitOperationalIntent = async (operationalIntentRequest: OperationalIntentRequest,
     params?: SubmitOperationalIntentParams, options?: Parameters<typeof customFetch>[1]): Promise<OperationalIntentResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<OperationalIntentResponse>(getSubmitOperationalIntentUrl(params),
+  return customFetch<OperationalIntentResponse>(getSubmitOperationalIntentUrl(params),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(operationalIntentRequest)
   }
 );}
@@ -25429,9 +24319,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SubmitOperationalIntentMutationError = ErrorType<void>
     export type SubmitOperationalIntentMutationVariables = {data: BodyType<OperationalIntentRequest>;params?: SubmitOperationalIntentParams}
 
-    /**
- * @summary Apply one server-authoritative production command
- */
+    /** @summary Apply one server-authoritative production command */
 export const useSubmitOperationalIntent = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitOperationalIntent>>, TError,SubmitOperationalIntentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -25505,6 +24393,7 @@ export type ListOperationalIntentReceiptsQueryResult = NonNullable<Awaited<Retur
 export type ListOperationalIntentReceiptsQueryError = ErrorType<void>
 
 
+/** @summary Read durable command receipts after a scoped cursor */
 export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError = ErrorType<void>>(
  params: undefined |  ListOperationalIntentReceiptsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -25515,6 +24404,7 @@ export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read durable command receipts after a scoped cursor */
 export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError = ErrorType<void>>(
  params?: ListOperationalIntentReceiptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -25525,14 +24415,12 @@ export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read durable command receipts after a scoped cursor */
 export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError = ErrorType<void>>(
  params?: ListOperationalIntentReceiptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read durable command receipts after a scoped cursor
- */
-
+/** @summary Read durable command receipts after a scoped cursor */
 export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError = ErrorType<void>>(
  params?: ListOperationalIntentReceiptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOperationalIntentReceipts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -25613,6 +24501,7 @@ export type ListImportGoldApprovalsQueryResult = NonNullable<Awaited<ReturnType<
 export type ListImportGoldApprovalsQueryError = ErrorType<void>
 
 
+/** Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture. */
 export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
  params: undefined |  ListImportGoldApprovalsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -25623,6 +24512,7 @@ export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture. */
 export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
  params?: ListImportGoldApprovalsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -25633,11 +24523,12 @@ export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture. */
 export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
  params?: ListImportGoldApprovalsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-
+/** Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture. */
 export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
  params?: ListImportGoldApprovalsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -25669,25 +24560,11 @@ export const getCreateImportGoldApprovalUrl = () => {
  */
 export const createImportGoldApproval = async (importGoldApprovalInput: ImportGoldApprovalInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldApprovalResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportGoldApprovalResponse>(getCreateImportGoldApprovalUrl(),
+  return customFetch<ImportGoldApprovalResponse>(getCreateImportGoldApprovalUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importGoldApprovalInput)
   }
 );}
@@ -25730,7 +24607,8 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateImportGoldApprovalMutationError = ErrorType<void>
     export type CreateImportGoldApprovalMutationVariables = {data: BodyType<ImportGoldApprovalInput>}
 
-    export const useCreateImportGoldApproval = <TError = ErrorType<void>,
+    /** Create immutable pending metadata only. Never submit workbook data, names, locations, or approval documents. References identify evidence retained in a separate restricted system. Creation is not verification or enablement. */
+export const useCreateImportGoldApproval = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createImportGoldApproval>>, TError,CreateImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createImportGoldApproval>>,
@@ -25755,25 +24633,11 @@ export const getVerifyImportGoldApprovalUrl = (id: number,) => {
 export const verifyImportGoldApproval = async (id: number,
     importGoldApprovalReview: ImportGoldApprovalReview, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldApprovalResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportGoldApprovalResponse>(getVerifyImportGoldApprovalUrl(id),
+  return customFetch<ImportGoldApprovalResponse>(getVerifyImportGoldApprovalUrl(id),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importGoldApprovalReview)
   }
 );}
@@ -25816,7 +24680,8 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type VerifyImportGoldApprovalMutationError = ErrorType<void>
     export type VerifyImportGoldApprovalMutationVariables = {id: number;data: BodyType<ImportGoldApprovalReview>}
 
-    export const useVerifyImportGoldApproval = <TError = ErrorType<void>,
+    /** Explicit authorized human attestation that referenced private evidence was reviewed. Records current actor and server time, not an independent automated privacy review. Does not enable capture. */
+export const useVerifyImportGoldApproval = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyImportGoldApproval>>, TError,VerifyImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof verifyImportGoldApproval>>,
@@ -25841,25 +24706,11 @@ export const getRevokeImportGoldApprovalUrl = (id: number,) => {
 export const revokeImportGoldApproval = async (id: number,
     importGoldApprovalReview: ImportGoldApprovalReview, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldApprovalResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportGoldApprovalResponse>(getRevokeImportGoldApprovalUrl(id),
+  return customFetch<ImportGoldApprovalResponse>(getRevokeImportGoldApprovalUrl(id),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importGoldApprovalReview)
   }
 );}
@@ -25902,7 +24753,8 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RevokeImportGoldApprovalMutationError = ErrorType<void>
     export type RevokeImportGoldApprovalMutationVariables = {id: number;data: BodyType<ImportGoldApprovalReview>}
 
-    export const useRevokeImportGoldApproval = <TError = ErrorType<void>,
+    /** Permanently revoke an approval. Audit and metadata are retained; future captures cannot use it. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. */
+export const useRevokeImportGoldApproval = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeImportGoldApproval>>, TError,RevokeImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeImportGoldApproval>>,
@@ -25968,6 +24820,7 @@ export type GetImportGoldConfigQueryResult = NonNullable<Awaited<ReturnType<type
 export type GetImportGoldConfigQueryError = ErrorType<void>
 
 
+/** @summary Read manager-only import-gold feature and provider configuration */
 export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -25978,6 +24831,7 @@ export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImpo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read manager-only import-gold feature and provider configuration */
 export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -25988,14 +24842,12 @@ export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImpo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read manager-only import-gold feature and provider configuration */
 export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read manager-only import-gold feature and provider configuration
- */
-
+/** @summary Read manager-only import-gold feature and provider configuration */
 export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -26028,25 +24880,11 @@ export const getSetImportGoldLocalScoringUrl = () => {
  */
 export const setImportGoldLocalScoring = async (importGoldLocalScoringRequest: ImportGoldLocalScoringRequest, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldLocalScoringResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportGoldLocalScoringResponse>(getSetImportGoldLocalScoringUrl(),
+  return customFetch<ImportGoldLocalScoringResponse>(getSetImportGoldLocalScoringUrl(),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importGoldLocalScoringRequest)
   }
 );}
@@ -26090,6 +24928,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetImportGoldLocalScoringMutationVariables = {data: BodyType<ImportGoldLocalScoringRequest>}
 
     /**
+ * This setting does not enable real-source capture approvals, Gemini, or the private evaluator workflow.
  * @summary Enable or disable app-side local scoring in a development workspace
  */
 export const useSetImportGoldLocalScoring = <TError = ErrorType<void>,
@@ -26158,6 +24997,7 @@ export type GetImportGoldSyntheticReviewQueryResult = NonNullable<Awaited<Return
 export type GetImportGoldSyntheticReviewQueryError = ErrorType<void>
 
 
+/** @summary Read the fixed development-only synthetic evaluation sample */
 export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -26168,6 +25008,7 @@ export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read the fixed development-only synthetic evaluation sample */
 export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -26178,14 +25019,12 @@ export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeo
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read the fixed development-only synthetic evaluation sample */
 export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read the fixed development-only synthetic evaluation sample
- */
-
+/** @summary Read the fixed development-only synthetic evaluation sample */
 export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -26218,25 +25057,11 @@ export const getApplyImportGoldSyntheticReviewUrl = () => {
  */
 export const applyImportGoldSyntheticReview = async (importGoldSyntheticApplyRequest: ImportGoldSyntheticApplyRequest, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldSyntheticApplyResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportGoldSyntheticApplyResponse>(getApplyImportGoldSyntheticReviewUrl(),
+  return customFetch<ImportGoldSyntheticApplyResponse>(getApplyImportGoldSyntheticReviewUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importGoldSyntheticApplyRequest)
   }
 );}
@@ -26280,6 +25105,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ApplyImportGoldSyntheticReviewMutationVariables = {data: BodyType<ImportGoldSyntheticApplyRequest>}
 
     /**
+ * Creates an idempotent synthetic evaluation case only and does not change recipes, inventory, or real-source approval settings.
  * @summary Apply the reviewed fixed synthetic sample to the development evaluation lab
  */
 export const useApplyImportGoldSyntheticReview = <TError = ErrorType<void>,
@@ -26355,6 +25181,7 @@ export type ListImportGoldCasesQueryResult = NonNullable<Awaited<ReturnType<type
 export type ListImportGoldCasesQueryError = ErrorType<void>
 
 
+/** @summary List bounded, scoped import-gold cases and recent scores */
 export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
  params: undefined |  ListImportGoldCasesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -26365,6 +25192,7 @@ export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImp
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List bounded, scoped import-gold cases and recent scores */
 export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
  params?: ListImportGoldCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -26375,14 +25203,12 @@ export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImp
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List bounded, scoped import-gold cases and recent scores */
 export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
  params?: ListImportGoldCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List bounded, scoped import-gold cases and recent scores
- */
-
+/** @summary List bounded, scoped import-gold cases and recent scores */
 export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
  params?: ListImportGoldCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -26463,6 +25289,7 @@ export type ListImportGoldCleanupCasesQueryResult = NonNullable<Awaited<ReturnTy
 export type ListImportGoldCleanupCasesQueryError = ErrorType<void>
 
 
+/** @summary List minimal scoped case metadata when cleanup-only mode is enabled */
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
  params: undefined |  ListImportGoldCleanupCasesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -26473,6 +25300,7 @@ export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List minimal scoped case metadata when cleanup-only mode is enabled */
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
  params?: ListImportGoldCleanupCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -26483,14 +25311,12 @@ export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List minimal scoped case metadata when cleanup-only mode is enabled */
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
  params?: ListImportGoldCleanupCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List minimal scoped case metadata when cleanup-only mode is enabled
- */
-
+/** @summary List minimal scoped case metadata when cleanup-only mode is enabled */
 export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
  params?: ListImportGoldCleanupCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -26569,9 +25395,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteImportGoldCleanupCaseMutationError = ErrorType<void>
     export type DeleteImportGoldCleanupCaseMutationVariables = {id: number}
 
-    /**
- * @summary Delete one scoped case and its score history in cleanup-only mode
- */
+    /** @summary Delete one scoped case and its score history in cleanup-only mode */
 export const useDeleteImportGoldCleanupCase = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCleanupCase>>, TError,DeleteImportGoldCleanupCaseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -26645,6 +25469,7 @@ export type ListImportGoldRetentionQueryResult = NonNullable<Awaited<ReturnType<
 export type ListImportGoldRetentionQueryError = ErrorType<void | ListImportGoldRetention409>
 
 
+/** @summary List scoped Gold Lab deadlines for Managers and QC Managers */
 export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params: undefined |  ListImportGoldRetentionParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -26655,6 +25480,7 @@ export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List scoped Gold Lab deadlines for Managers and QC Managers */
 export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -26665,14 +25491,12 @@ export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof lis
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary List scoped Gold Lab deadlines for Managers and QC Managers */
 export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List scoped Gold Lab deadlines for Managers and QC Managers
- */
-
+/** @summary List scoped Gold Lab deadlines for Managers and QC Managers */
 export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void | ListImportGoldRetention409>>(
  params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -26751,9 +25575,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RecordImportGoldDeletionVerificationMutationError = ErrorType<void>
     export type RecordImportGoldDeletionVerificationMutationVariables = {caseId: number}
 
-    /**
- * @summary Record manual verification for Managers and QC Managers
- */
+    /** @summary Record manual verification for Managers and QC Managers */
 export const useRecordImportGoldDeletionVerification = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordImportGoldDeletionVerification>>, TError,RecordImportGoldDeletionVerificationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -26779,25 +25601,11 @@ export const getSetImportGoldCaseExclusionUrl = (id: number,) => {
 export const setImportGoldCaseExclusion = async (id: number,
     importGoldExclusionRequest: ImportGoldExclusionRequest, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<void>(getSetImportGoldCaseExclusionUrl(id),
+  return customFetch<void>(getSetImportGoldCaseExclusionUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importGoldExclusionRequest)
   }
 );}
@@ -26840,9 +25648,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetImportGoldCaseExclusionMutationError = ErrorType<void>
     export type SetImportGoldCaseExclusionMutationVariables = {id: number;data: BodyType<ImportGoldExclusionRequest>}
 
-    /**
- * @summary Exclude or restore a case for scoring and export
- */
+    /** @summary Exclude or restore a case for scoring and export */
 export const useSetImportGoldCaseExclusion = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setImportGoldCaseExclusion>>, TError,SetImportGoldCaseExclusionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -26914,9 +25720,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteImportGoldCaseMutationError = ErrorType<void>
     export type DeleteImportGoldCaseMutationVariables = {id: number}
 
-    /**
- * @summary Permanently delete a case and its score history for retention purposes
- */
+    /** @summary Permanently delete a case and its score history for retention purposes */
 export const useDeleteImportGoldCase = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCase>>, TError,DeleteImportGoldCaseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -26983,6 +25787,7 @@ export type ExportImportGoldCasesQueryResult = NonNullable<Awaited<ReturnType<ty
 export type ExportImportGoldCasesQueryError = ErrorType<void>
 
 
+/** @summary Export up to 100 active scoped evaluation cases as JSONL */
 export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -26993,6 +25798,7 @@ export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof expor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Export up to 100 active scoped evaluation cases as JSONL */
 export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -27003,14 +25809,12 @@ export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof expor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Export up to 100 active scoped evaluation cases as JSONL */
 export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Export up to 100 active scoped evaluation cases as JSONL
- */
-
+/** @summary Export up to 100 active scoped evaluation cases as JSONL */
 export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -27042,25 +25846,11 @@ export const getScoreImportGoldCasesUrl = () => {
  */
 export const scoreImportGoldCases = async (importGoldScoreRequest: ImportGoldScoreRequest, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldScoreResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportGoldScoreResponse>(getScoreImportGoldCasesUrl(),
+  return customFetch<ImportGoldScoreResponse>(getScoreImportGoldCasesUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importGoldScoreRequest)
   }
 );}
@@ -27103,9 +25893,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ScoreImportGoldCasesMutationError = ErrorType<void>
     export type ScoreImportGoldCasesMutationVariables = {data: BodyType<ImportGoldScoreRequest>}
 
-    /**
- * @summary Score up to three active scoped cases with one configured provider
- */
+    /** @summary Score up to three active scoped cases with one configured provider */
 export const useScoreImportGoldCases = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scoreImportGoldCases>>, TError,ScoreImportGoldCasesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -27131,25 +25919,11 @@ export const getPreviewImportOperationUrl = () => {
  */
 export const previewImportOperation = async (importOperationApplyInput: ImportOperationApplyInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationPreview> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportOperationPreview>(getPreviewImportOperationUrl(),
+  return customFetch<ImportOperationPreview>(getPreviewImportOperationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importOperationApplyInput)
   }
 );}
@@ -27193,6 +25967,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PreviewImportOperationMutationVariables = {data: BodyType<ImportOperationApplyInput>}
 
     /**
+ * Read-only review of an explicit atomic import write set. Does not learn aliases, repair data, or change stock. Pass expectedStateHash to Apply to reject stale reviews.
  * @summary Read affected current values and the last successful scoped source Apply
  */
 export const usePreviewImportOperation = <TError = ErrorType<void>,
@@ -27220,25 +25995,11 @@ export const getApplyImportOperationUrl = (operationId: string,) => {
 export const applyImportOperation = async (operationId: string,
     importOperationApplyInput: ImportOperationApplyInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportOperationResponse>(getApplyImportOperationUrl(operationId),
+  return customFetch<ImportOperationResponse>(getApplyImportOperationUrl(operationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importOperationApplyInput)
   }
 );}
@@ -27281,9 +26042,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ApplyImportOperationMutationError = ErrorType<void>
     export type ApplyImportOperationMutationVariables = {operationId: string;data: BodyType<ImportOperationApplyInput>}
 
-    /**
- * @summary Atomically apply a reviewed import
- */
+    /** @summary Atomically apply a reviewed import */
 export const useApplyImportOperation = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyImportOperation>>, TError,ApplyImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -27357,6 +26116,7 @@ export type ListDistillationApplyEvidenceQueryResult = NonNullable<Awaited<Retur
 export type ListDistillationApplyEvidenceQueryError = ErrorType<void>
 
 
+/** @summary Read eligible live spec Apply evidence for private export */
 export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
  params: undefined |  ListDistillationApplyEvidenceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -27367,6 +26127,7 @@ export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read eligible live spec Apply evidence for private export */
 export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
  params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -27377,14 +26138,12 @@ export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<type
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read eligible live spec Apply evidence for private export */
 export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
  params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read eligible live spec Apply evidence for private export
- */
-
+/** @summary Read eligible live spec Apply evidence for private export */
 export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
  params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -27458,6 +26217,7 @@ export type GetImportOperationQueryResult = NonNullable<Awaited<ReturnType<typeo
 export type GetImportOperationQueryError = ErrorType<void>
 
 
+/** @summary Read an import operation */
 export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
  operationId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -27468,6 +26228,7 @@ export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImpor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read an import operation */
 export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
  operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -27478,14 +26239,12 @@ export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImpor
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Read an import operation */
 export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
  operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Read an import operation
- */
-
+/** @summary Read an import operation */
 export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
  operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -27518,25 +26277,11 @@ export const getUndoImportOperationUrl = (operationId: string,) => {
 export const undoImportOperation = async (operationId: string,
     importOperationUndoInput: ImportOperationUndoInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationResponse> => {
 
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-return customFetch<ImportOperationResponse>(getUndoImportOperationUrl(operationId),
+  return customFetch<ImportOperationResponse>(getUndoImportOperationUrl(operationId),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: getHeaders({ 'Content-Type': 'application/json' }, options?.headers),
     body: JSON.stringify(importOperationUndoInput)
   }
 );}
@@ -27579,9 +26324,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UndoImportOperationMutationError = ErrorType<void>
     export type UndoImportOperationMutationVariables = {operationId: string;data: BodyType<ImportOperationUndoInput>}
 
-    /**
- * @summary Guardedly undo an import operation
- */
+    /** @summary Guardedly undo an import operation */
 export const useUndoImportOperation = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoImportOperation>>, TError,UndoImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<

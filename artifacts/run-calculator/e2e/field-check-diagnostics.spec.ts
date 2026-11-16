@@ -348,7 +348,7 @@ test("manager sees safe sync categories and performance sources from isolated AP
   const downloadEvent = page.waitForEvent("download");
   await downloadButton.click();
   const download = await downloadEvent;
-  expect(download.suggestedFilename()).toMatch(/^field-check-report-v1-\d{4}-[\dTZ-]+\.json$/);
+  expect(download.suggestedFilename()).toMatch(/^field-check-report-v2-\d{4}-[\dTZ-]+\.json$/);
   expect(await download.failure()).toBeNull();
   const stream = await download.createReadStream();
   const chunks = [];
@@ -357,8 +357,8 @@ test("manager sees safe sync categories and performance sources from isolated AP
   expect(Buffer.byteLength(text)).toBeLessThan(64_000);
   expect(text).not.toMatch(/Bearer|field_view|field_diagnostics|\/api\/|observationId|userId|clientId|runId/);
   const exported = JSON.parse(text);
-  expect(exported).toMatchObject({ schemaVersion: 1, facilityScope: "current facility",
-    provenance: { kind: "advisory-field-evidence", environment: "unknown", buildIdentity: "unknown" } });
+  expect(exported).toMatchObject({ schemaVersion: 2, facilityScope: "current facility",
+    provenance: { kind: "advisory-field-evidence", environment: "development", buildIdentity: "server-reported" } });
   expect(exported.checks.find((check: { name: string }) => check.name === "performance").recentFailures)
     .toEqual(expect.arrayContaining([expect.objectContaining({
       buildCategory: "unknown-local", deviceCategory: "mobile-chrome",

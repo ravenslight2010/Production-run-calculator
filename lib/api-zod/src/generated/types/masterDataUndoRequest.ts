@@ -6,4 +6,4 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface MasterDataUndoRequest { [key: string]: unknown }
+export interface MasterDataUndoRequest { [key: string]: never }

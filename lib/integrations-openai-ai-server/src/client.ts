@@ -216,9 +216,11 @@ function client(): GoogleGenAI {
     );
   }
   const apiKey = replitKey || directKey!;
+  const usingReplitProxy = Boolean(replitKey && replitBase);
   _client = new GoogleGenAI({
     apiKey,
-    ...(replitKey && replitBase
+    ...(!usingReplitProxy ? { apiVersion: "v1beta" } : {}),
+    ...(usingReplitProxy
       ? { httpOptions: { apiVersion: "", baseUrl: replitBase } }
       : {}),
   });

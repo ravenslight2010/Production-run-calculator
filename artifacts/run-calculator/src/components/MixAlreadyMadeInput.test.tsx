@@ -56,7 +56,7 @@ describe("MixAlreadyMadeInput", () => {
 
     expect(saveMixes).toHaveBeenCalledWith([{ ...mix, amountAlreadyMade: 7.5 }]);
     expect(onSaved).toHaveBeenCalledWith({ ...mix, amountAlreadyMade: 7.5 });
-    expect(input).toHaveProperty("value", "7.5");
+    expect(Number(input.value)).toBe(7.5);
     expect(toast).toHaveBeenCalledWith({
       variant: "destructive",
       title: "Couldn't save already made amount",
@@ -90,14 +90,14 @@ describe("MixAlreadyMadeInput", () => {
 
     const optimistic = { ...mix, amountAlreadyMade: 4 };
     expect(onOptimisticSave).toHaveBeenCalledWith(optimistic);
-    expect(input).toHaveProperty("value", "4");
+    expect(Number(input.value)).toBe(4);
 
     resolveSave([mix, otherMix]);
     await vi.waitFor(() => expect(saveMixes).toHaveBeenCalledTimes(1));
     expect(onSaveAcknowledged).toHaveBeenCalledWith(optimistic, [mix, otherMix]);
     // A complete, delayed server response must not replace the optimistic
     // one-item update in the mounted input.
-    expect(input).toHaveProperty("value", "4");
+    expect(Number(input.value)).toBe(4);
     expect(toast).not.toHaveBeenCalled();
   });
 

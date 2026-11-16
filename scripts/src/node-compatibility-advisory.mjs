@@ -20,7 +20,7 @@ import { performance } from "node:perf_hooks";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const GNU_TIME = "/usr/bin/time";
-const EXPECTED_PACKAGE_MANAGER = "12.8.1";
+const EXPECTED_PACKAGE_MANAGER = "12.21.0";
 const RUNTIMES = [
   { key: "node24", expectedVersion: "v24.22.2", label: "Node 24 baseline" },
   { key: "node26", expectedVersion: "v26.10.0", label: "Node 26 candidate" },

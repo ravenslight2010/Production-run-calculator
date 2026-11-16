@@ -12,7 +12,7 @@ export const FULL_BROWSER_EXPECTED_CASE_IDENTITIES: readonly string[] = [
   "artifacts/run-calculator/e2e/accessibility-smoke.spec.ts :: accessibility smoke › sign-in remains operable at 200% zoom",
   "artifacts/run-calculator/e2e/accessibility-smoke.spec.ts :: accessibility smoke › stoppage and surplus labels pass contrast on operational backgrounds",
   "artifacts/run-calculator/e2e/accessibility-smoke.spec.ts :: accessibility smoke › supervisors can review field checks without physical-device attestation controls",
-  "artifacts/run-calculator/e2e/accessibility-smoke.spec.ts :: accessibility smoke › touch break planning opens above Schedule and retains the saved draft",
+  "artifacts/run-calculator/e2e/accessibility-smoke.spec.ts :: accessibility smoke › touch break planning retains its saved estimate, report, and manager notifications",
   "artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts :: keeps deterministic management workflows reviewable when enrichment is unavailable",
   "artifacts/run-calculator/e2e/audit-log-export.spec.ts :: exports the filtered audit PDF and safely retries rejected downloads",
   "artifacts/run-calculator/e2e/compact-run-strip.spec.ts :: CompactRunStrip — ended-run round-trip › strip stays visible with Ended status after Run-tab round-trip, no pause/resume buttons",

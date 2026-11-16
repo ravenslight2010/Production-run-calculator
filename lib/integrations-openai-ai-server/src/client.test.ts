@@ -64,6 +64,35 @@ describe("Gemini-backed chat completions", () => {
     vi.unstubAllEnvs();
   });
 
+  it("keeps the direct Gemini API on v1beta after upgrading the SDK", async () => {
+    vi.stubEnv("AI_INTEGRATIONS_GEMINI_API_KEY", "");
+    vi.stubEnv("AI_INTEGRATIONS_GEMINI_BASE_URL", "");
+    vi.stubEnv("GOOGLE_API_KEY", "direct-test-placeholder");
+    sdk.generateContent.mockResolvedValueOnce({ text: "ok" });
+
+    await openai.chat.completions.create(baseParams);
+
+    expect(sdk.constructor).toHaveBeenCalledWith(
+      expect.objectContaining({ apiVersion: "v1beta" }),
+    );
+  });
+
+  it("preserves the proxy's explicitly blank API version", async () => {
+    vi.stubEnv("AI_INTEGRATIONS_GEMINI_BASE_URL", "https://proxy.example.invalid");
+    sdk.generateContent.mockResolvedValueOnce({ text: "ok" });
+
+    await openai.chat.completions.create(baseParams);
+
+    expect(sdk.constructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        httpOptions: {
+          apiVersion: "",
+          baseUrl: "https://proxy.example.invalid",
+        },
+      }),
+    );
+  });
+
   it("maps chat roles and JSON response options to a non-streaming Gemini request", async () => {
     sdk.generateContent.mockResolvedValueOnce({ text: '{"answer":"42"}' });
 

@@ -135,7 +135,7 @@
     "xlsx": "npm:@e965/xlsx@^0.20.3"
   },
   "devDependencies": {
-    "@types/node": "26.6.6",
+    "@types/node": "catalog:",
     "fast-check": "^4.10.2",
     "github-actionlint": "1.7.12",
     "tsx": "catalog:",

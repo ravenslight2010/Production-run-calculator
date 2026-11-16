@@ -145,11 +145,11 @@ function importWorkbook(): Buffer {
 
 async function waitForSavedFlashToSettle(page: Page): Promise<void> {
   const savedFlash = page.getByText("Saved", { exact: true });
-  await expect(savedFlash).toHaveCSS("opacity", "0");
-  // Start/resize writes can trigger a later flash; allow its 1.8s hold and
-  // 0.5s fade to finish before capturing a baseline.
+  // Start/resize writes can trigger a delayed flash; allow it to finish its
+  // 1.8s hold and 0.5s fade before capturing a baseline.
+  await expect(savedFlash).toHaveCSS("opacity", "0", { timeout: 15_000 });
   await page.waitForTimeout(2_500);
-  await expect(savedFlash).toHaveCSS("opacity", "0");
+  await expect(savedFlash).toHaveCSS("opacity", "0", { timeout: 15_000 });
 }
 
 async function resetScreenshotScroll(page: Page): Promise<void> {

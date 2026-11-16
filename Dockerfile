@@ -4,10 +4,11 @@ ARG NODE_IMAGE=node:24.22.2-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a
 
 ########## builder: install deps, build web + api ##########
 FROM ${NODE_IMAGE} AS builder
-# Match the Debian package index to the snapshot date used by this pinned Node
-# image. Change the timestamp only as part of a reviewed image refresh.
-RUN snapshot=20260824T000000Z \
+# Keep the builder's Debian archive aligned with packages already present in the
+# pinned Node image. This snapshot includes its installed perl-base revision.
+RUN snapshot=20261015T000000Z \
   && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
+  && rm -rf /var/lib/apt/lists/* \
   && printf '%s\n' \
     "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm main" \
     "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm-updates main" \
@@ -181,7 +182,7 @@ USER node
 CMD ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
 ########## web: static files served by Caddy (also gives HTTPS) ##########
-FROM caddy:2-alpine AS web
+FROM caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0 AS web
 USER root
 RUN chown 1001:1001 /data /config
 COPY docker/Caddyfile /etc/caddy/Caddyfile

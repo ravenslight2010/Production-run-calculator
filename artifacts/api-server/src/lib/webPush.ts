@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import webpush from "web-push";
+import * as webpush from "web-push";
 import {
   boundedDurationMs,
   classifyBackgroundFailure,

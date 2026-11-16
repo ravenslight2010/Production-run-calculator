@@ -53,7 +53,10 @@ vi.mock("@workspace/live-calc", async (importOriginal) => ({
   computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed,
 }));
 vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() } }));
-vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() } }));
+vi.mock("web-push", () => ({
+  setVapidDetails: vi.fn(),
+  sendNotification: vi.fn(),
+}));
 vi.mock("./serverJobs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./serverJobs")>();
   return { ...actual, enqueueServerJob: mocks.enqueueServerJob };
@@ -211,15 +214,15 @@ describe("web-push endpoint validation", () => {
   });
 
   it("never sends to an endpoint that is not in the supported service set", async () => {
-    const { default: webpushMock } = await import("web-push");
-    vi.mocked(webpushMock.sendNotification).mockClear();
+    const { sendNotification } = await import("web-push");
+    vi.mocked(sendNotification).mockClear();
 
     await expect(sendPushNotification({
       endpoint: "https://fcm.googleapis.com.attacker.example/push/token",
       keys: { p256dh: "a".repeat(32), auth: "b".repeat(16) },
     }, "payload")).rejects.toThrow("Invalid push endpoint");
 
-    expect(webpushMock.sendNotification).not.toHaveBeenCalled();
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 });
 

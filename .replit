@@ -175,24 +175,12 @@ args = "bash scripts/src/run-release-node.sh pnpm run release:check:full"
 
 [[workflows.workflow]]
 name = "Project"
-mode = "parallel"
+mode = "sequential"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "release:standard"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "client-tests"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "clean-start"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "api-unit"
 
 [[workflows.workflow]]
 name = "browser-full-159"

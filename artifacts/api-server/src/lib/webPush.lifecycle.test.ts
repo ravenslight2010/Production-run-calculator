@@ -16,7 +16,8 @@ vi.mock("./serverJobs", () => ({ registerServerJob: vi.fn() }));
 vi.mock("./roles", () => ({ getUserCapabilities: vi.fn(async () => []) }));
 vi.mock("./logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 vi.mock("web-push", () => ({
-  default: { setVapidDetails: vi.fn(), sendNotification: mocks.send },
+  setVapidDetails: vi.fn(),
+  sendNotification: mocks.send,
 }));
 
 import {

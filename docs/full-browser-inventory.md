@@ -54,6 +54,12 @@ The existing reporter regression collects from that actual config and rejects
 additions, removals, same-count substitutions, duplicates, and other projects.
 No browser cases were deleted or skipped to meet a numeric target.
 
+On 2026-11-16, the full-suite preflight found one stale title: the already
+selected touch break-planning case had been renamed in the test on 2026-11-05,
+while the reviewed identity still used its previous title. The contract now
+matches the current test name. The 241-case selection and assertions were not
+changed by this metadata correction; this is not runtime-pass evidence.
+
 ### Reconciliation
 
 | Inventory observation | Cases | Meaning |

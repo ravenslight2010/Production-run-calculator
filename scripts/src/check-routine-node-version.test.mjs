@@ -491,21 +491,21 @@ test("checks exact pnpm identity against the lockfile bootstrap", () => {
     "    configDependencies: {}",
     "    packageManagerDependencies:",
     "      pnpm:",
-    "        specifier: 12.8.1",
-    "        version: 12.8.1",
+    "        specifier: 12.21.0",
+    "        version: 12.21.0",
     "",
   ].join("\n");
   assert.equal(
     checkWorkspacePackageManagerContract({
-      packageManager: "pnpm@12.8.1",
+      packageManager: "pnpm@12.21.0",
       lockfileContents,
     }),
-    "12.8.1",
+    "12.21.0",
   );
   assert.throws(
     () =>
       checkWorkspacePackageManagerContract({
-        packageManager: "pnpm@12.8.2",
+        packageManager: "pnpm@12.21.1",
         lockfileContents,
       }),
     /package manager version contract is out of sync/,
