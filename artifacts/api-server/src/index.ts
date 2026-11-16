@@ -196,7 +196,14 @@ async function initializeStartup(startedAt: number): Promise<void> {
     if (startupTestMode && process.env.STARTUP_TEST_FAILURE_STAGE === "seed_roles") {
       throw new Error("forced startup test failure");
     }
-    await seedRoles();
+    // STARTUP_TEST_DATABASE_READY skips live DB work so later failpoint stages
+    // (e.g. data_heals) can be proven without a reachable Postgres.
+    if (
+      !startupTestMode ||
+      process.env.STARTUP_TEST_DATABASE_READY !== "true"
+    ) {
+      await seedRoles();
+    }
   } catch {
     const errorCode = "seed_roles_failed";
     markStartupFailed("seed_roles", errorCode);
@@ -215,7 +222,12 @@ async function initializeStartup(startedAt: number): Promise<void> {
     if (startupTestMode && process.env.STARTUP_TEST_FAILURE_STAGE === "data_heals") {
       throw new Error("forced startup test failure");
     }
-    await runDataHeals();
+    if (
+      !startupTestMode ||
+      process.env.STARTUP_TEST_DATABASE_READY !== "true"
+    ) {
+      await runDataHeals();
+    }
   } catch (err) {
     const { repairId, errorCode } = classifyStartupRepairFailure(err);
     markStartupFailed("data_heals", errorCode);

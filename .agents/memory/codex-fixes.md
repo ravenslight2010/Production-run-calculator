@@ -3,6 +3,23 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-11-16 — Startup-failure smoke + nightly secrets `if` + sync incident age fixture
+
+**File(s):** `scripts/src/verify-startup-failures.mts`, `.github/workflows/nightly-large-spec.yml`, `artifacts/api-server/src/routes/incidentsAi.test.ts`
+
+**Problem:**
+- `pnpm run check:startup-failures` spawned the guarded API `dev` launcher, which always runs `apply-audit-log-protection` against `DATABASE_URL` before failpoints. With the smoke's intentional unreachable URL (`127.0.0.1:1`), the process exited before `/api/readyz` could report degraded startup stages.
+- Tip commit `eef44b26` gated the Gemini benchmark with a step-level `if: secrets.*`, which actionlint rejects (`secrets` is not available in step `if`). Artifact upload also failed when the step was skipped.
+- Sync incident diagnostics test used a fixed `requestObservedAt` of 2026-10-16; after 30 days that falls outside `buildIncidentContext`'s acceptance window and drops the field.
+
+**Fix:**
+- Startup smoke now launches `dev:without-schema-push` with `CI_PUBLIC_SOURCE=1` so failpoints can mark readiness degraded without a live Postgres or private build assets.
+- `initializeStartup` skips live `seedRoles`/`runDataHeals` when `STARTUP_TEST_DATABASE_READY=true`, matching the existing schema-stage skip, so the `data_heals` failpoint is reachable.
+- Nightly workflow compares mapped `env.*` Gemini credentials and uploads artifacts only when the benchmark step was not skipped.
+- Incident test uses a relative recent `Date.now() - 60_000` observation time.
+
+**Why it was needed:** Restores the DB-free startup-failure contract (including later stages), unblocks workflow lint on `main`'s tip, and keeps sync API-failure incident evidence coverage from aging out.
+
 ## 2026-10-20 — Redact tracked operational details
 
 **File(s):** `.agents/memory/codex-fixes.md`
