@@ -3363,8 +3363,10 @@ test_release_node_fallback_interrupt_stops_process_group() {
   cat >"${workspace}/bin/npx" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# Publish the private cache path before the started marker so the parent cannot
+# observe "started" while the cache path file is still empty (CI race).
+printf '%s\n' "${npm_config_cache:?}" >"$NPX_CACHE_PATH"
 touch "$NPX_STARTED"
-printf '%s\n' "$npm_config_cache" >"$NPX_CACHE_PATH"
 trap 'touch "$NPX_STOPPED"; exit 143' TERM
 while :; do
   sleep 1
@@ -3383,7 +3385,7 @@ EOF
   launcher_pid=$!
 
   for ((attempt = 0; attempt < 200; attempt++)); do
-    [[ -f "$started_path" ]] && break
+    [[ -f "$started_path" && -s "$cache_path_file" ]] && break
     sleep 0.1
   done
   if [[ ! -f "$started_path" ]]; then
