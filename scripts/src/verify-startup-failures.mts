@@ -76,7 +76,11 @@ function appendOutput(scenario: Scenario, chunk: Buffer | string): void {
 function startScenario(stage: FailureStage, port: number): Scenario {
   const child = spawn(
     "pnpm",
-    ["--filter", "@workspace/api-server", "run", "dev"],
+    // Use the no-audit development entry. The guarded `dev` launcher always
+    // runs apply-audit-log-protection first, which requires a live Postgres
+    // connection and exits before the intentional startup failpoints can mark
+    // /api/readyz degraded. This smoke is intentionally DB-free.
+    ["--filter", "@workspace/api-server", "run", "dev:without-schema-push"],
     {
       cwd: rootDir,
       detached: true,
@@ -93,6 +97,9 @@ function startScenario(stage: FailureStage, port: number): Scenario {
         STARTUP_TEST_MODE: "true",
         STARTUP_TEST_FAILURE_STAGE: stage,
         STARTUP_TEST_DATABASE_READY: "true",
+        // Public checkouts omit private source-library audits; without this
+        // the API build aborts before the failpoint process can listen.
+        CI_PUBLIC_SOURCE: process.env.CI_PUBLIC_SOURCE ?? "1",
       },
     },
   );
