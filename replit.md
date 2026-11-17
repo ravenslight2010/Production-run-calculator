@@ -2,7 +2,7 @@
 
 - **V2 conversion boundary:** V1 is archived and no longer live. The owner approved converting this workspace to V2, using its managed PostgreSQL database with V2 objects confined to schema `v2`, and configuring a Reserved VM with separately supervised API and worker processes. The V2 preview is running; production publication has not been started.
 
-- **Do not publish without the production database gate:** Replit Publish migrates supported schema objects, but SQL functions, triggers, and grants require a separately reviewed production-database step. Before any V2 publication, confirm those objects and the least-privilege production runtime access are ready. Publishing remains an owner-controlled action.
+- **Do not publish without the production database gate:** Replit Publish migrates supported schema objects, but SQL functions, triggers, and grants require a separately reviewed production-database step. The V2 API and worker also use a superuser connection in the development preview, contrary to Replit's general database guidance; production access must be verified or moved to a restricted database. The deployment command intentionally refuses to publish until these conditions are resolved.
 
 - V1's API and web workflows have been removed. Their source and artifact manifests are preserved under `_archived/v1/artifacts/`.
 - V2 focused checks are listed in [v2/README.md](v2/README.md). They use disposable local PostgreSQL for database verification. The Replit V2 launcher maps the project-managed `DATABASE_URL` to `V2_DATABASE_URL` only when `V2_USE_PROJECT_DATABASE=true`; application SQL and migrations must stay within schema `v2`.

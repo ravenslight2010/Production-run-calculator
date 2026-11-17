@@ -16,9 +16,10 @@ Captured 2026-11-17, America/Chicago.
   six V2 migrations target objects explicitly in schema `v2`.
 - The V2 development schema is installed. It contains 21 tables; the run,
   staff-account, and inventory-balance tables each contain zero rows.
-- The production database was not queried or changed. Deployment settings now
-  target a Reserved VM on the next publish, but the project is not deployed and
-  no publish was started.
+- The production database was not queried or changed. The project is not
+  deployed and no publish was started. The deployment run command now refuses
+  publication until the production database gates are resolved; the Project
+  workflow continues to launch the private development preview.
 
 ## Application and worker topology
 
@@ -70,7 +71,7 @@ they do not prove production or physical-device behavior.
 
 | Check | Result |
 | --- | --- |
-| V2 unit and API suite | PASS — 128 tests |
+| V2 unit and API suite | PASS — 129 tests |
 | V2 browser suite | PASS — 7 tests using emulated Chromium sessions |
 | V2 PostgreSQL suite | PASS — disposable local PostgreSQL cluster |
 | V2 build/syntax checks | PASS |
@@ -79,7 +80,7 @@ they do not prove production or physical-device behavior.
 | Worker process restart | PASS — killed worker was restarted under supervision; API health recovered |
 | Runtime | PASS — API and worker use Node 24.22.2 |
 | Development DB connection setting | OBSERVED — 112 max, 4 reserved, 2 V2 app connections at check |
-| Production deployment | NOT RUN — owner publication and production database preparation remain |
+| Production deployment | BLOCKED — deployment guard refuses publication pending role and SQL-object review |
 | Physical Android/iOS device checks | NOT RUN |
 
 ## Compatibility coverage
@@ -98,6 +99,10 @@ they do not prove production or physical-device behavior.
 - Replit's workflow editor refused changes because the project already has 16
   workflows against its 10-workflow limit. No test workflows were removed; the
   existing `Project` workflow was reused through the validated `.replit` path.
+- The workflow-list/status callbacks do not currently expose `Project`, although
+  `.replit` defines it and the supervised processes, direct restart, dev-domain
+  health check, and preview all confirm it is running. Do not create a duplicate
+  workflow; retain the existing config until the workflow registry exposes it.
 - The existing `release:standard` workflow has a V1-only inventory check that
   fails with `ENOENT` for `artifacts/api-server/package.json`, whose source is
   now archived under `_archived/v1/`. This was not used as a V2 pass; the V2
@@ -120,6 +125,10 @@ they do not prove production or physical-device behavior.
   string. Replit's [database guidance](https://docs.replit.com/features/data-and-storage/sql-database)
   says custom roles are not supported; if the published role is privileged,
   keep V2 unpublished or use an approved external database.
+- The configured deployment run script deliberately exits with status 78 and a
+  clear message. Restore the production V2 run command only after the database
+  role and SQL-object gates are resolved; do not remove this guard to bypass
+  them.
 - After production database preparation, the owner must initiate publication.
   Then verify the serving revision, worker health, synthetic run start/pause/
   resume/auto-track/complete, app and worker restarts, and connection use. No

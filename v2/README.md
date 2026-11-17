@@ -58,7 +58,9 @@ V2 remains incomplete as a production replacement: the full manager inventory
 journey has not yet been verified in an authenticated browser, production
 database functions/triggers/grants still need owner-reviewed application, no
 production publish has been initiated, and physical-device verification remains
-open.
+open. The deployment run command intentionally blocks publication until these
+database gates are resolved; the Project workflow still launches the private
+development preview.
 
 Database functions are backend-only. The API must derive facility and actor
 identity from verified V2 authorization, compute request hashes itself, and

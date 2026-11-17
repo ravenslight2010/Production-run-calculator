@@ -161,7 +161,8 @@ target, but is not published.
   preview, production publish, full manager inventory browser verification,
   tablet/WebKit, and physical-device verification remain future work. Do not
   publish until the least-privilege runtime access and V2 production database
-  objects are reviewed.
+  objects are reviewed. The deployment run command currently refuses to
+  publish; the `Project` workflow remains available for the private preview.
 - The latest in-workspace pilot status, evidence, and remaining actions are recorded
   in [PILOT-DEPLOYMENT-RECORD.md](PILOT-DEPLOYMENT-RECORD.md).
 

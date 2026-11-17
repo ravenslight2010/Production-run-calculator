@@ -4,7 +4,7 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 router = "application"
 deploymentTarget = "vm"
 build = ["bash", "scripts/src/run-release-node.sh", "pnpm", "--filter", "@workspace/lucia-v2", "run", "build"]
-run = ["bash", "scripts/start-v2.sh"]
+run = ["bash", "scripts/deny-v2-publish.sh"]
 
 [workflows]
 runButton = "Project"
