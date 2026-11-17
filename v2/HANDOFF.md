@@ -69,12 +69,28 @@ been created.
   one-facility/multiple-warehouse stock, an append-only movement ledger, and
   reviewed opening counts. Stock changes are blocked until each warehouse has
   an applied physical opening count; no V1 stock or movement history is copied.
+- `db/0006-run-inventory-linkage.sql` adds the manager-designated production
+  warehouse, validates inventory units in standard recipe/setup imports, and
+  freezes the selected product, setup, linked recipes, packaging quantities,
+  and warehouse on each newly created run. Run completion calculates actual
+  server-recorded batch and packed-case use, appends the movements and receipt
+  atomically, and records shortages without blocking completion or allowing
+  negative stock.
 - `core/import-csv.mjs` accepts bounded V2 CSV templates for products, recipes,
   production setup, and opening counts. Imports are staged with server-computed
   idempotency, reopenable for manager review, and guarded for safe undo.
 - `server/inventory-api.mjs` exposes manager-only, facility-scoped inventory
   functions. It derives actor/scope from the V2 session, enforces CSRF on writes,
-  rate-limits CSV staging, and returns safe errors.
+  rate-limits CSV staging, and returns safe errors. Managers can designate only
+  an active warehouse with an applied opening count for new production runs.
+- `core/run-service.mjs` returns the product catalog with compatible imported
+  production setups and the designated production warehouse. Run creation
+  requires both selections and rejects a server response without the frozen
+  recipe/warehouse plan.
+- `core/run-command-service.mjs` sends run completion through the database
+  wrapper that atomically records exact-once inventory use with the lifecycle
+  transition. The completed run exposes a validated inventory receipt,
+  including any unfulfilled quantities.
 - The manager workspace in `web/` reviews import history and rows, manages
   warehouse stock/transfers, reopens physical counts, and shows the actor,
   reason, and timestamp for paginated ledger entries.
@@ -105,15 +121,20 @@ been created.
   automatic progress use server revisions and canonical responses. The browser
   retains a cached read-only run view offline, refreshes on wake/reconnect, and
   keeps uncertain manual station actions bound to their original staff account.
-  Manager tools add reviewed setup imports and multi-warehouse inventory; their
-  writes require manager authorization, a confirmed server state, and CSRF.
+  Safe timer intents retry a bounded number of times against the latest server
+  revision when automatic progress wins a race; manual edits remain visible for
+  explicit review. Manager
+  tools add reviewed setup imports and multi-warehouse inventory; their writes
+  require manager authorization, a confirmed server state, and CSRF.
 - Disposable PostgreSQL checks cover guarded first-manager setup and staff
   changes, separate-session run/station conflicts, manager and non-manager
   inventory access, import retries and reopening, review/application,
   warehouse scoping,
   physical-count gating, concurrent stock changes, and balance-to-ledger
   reconciliation. The same check exercises separate staff sessions on run
-  revisions and stale-command conflicts.
+  revisions and stale-command conflicts. Migration `0006` is tested for frozen
+  recipe/warehouse snapshots, per-batch and per-packed-case demand, exactly-once
+  completion, stock shortages, and nonnegative on-hand balances.
 - V2 now has one-time, secret-guarded first-manager setup plus manager-only
   staff creation, disablement, role changes, and account-session revocation.
   The setup path never imports V1 credentials or sessions.
@@ -122,19 +143,24 @@ been created.
   progress across desktop and phone-sized Chromium contexts. This is emulated
   browser evidence, not physical-device coverage. Manager inventory screens
   have not been exercised in a real browser.
-- Automatic station progress does not run without a browser worker. Production
-  deployment, a separate V2 project, and physical-device verification remain
-  future work.
+- The current source includes a database-leased station worker in the V2 server;
+  browsers only refresh canonical state and never submit automatic-progress
+  ticks. This keeps server-worker timing separate from user timer/manual actions.
+  The separate-project pilot must still verify process supervision,
+  aggregate connection limits, and whole-deployment restart behavior.
+- Production deployment, a separate V2 project, full manager inventory browser
+  verification, and physical-device verification remain future work.
 - There is no production data connection, V1 data migration, or separate V2
   Replit project.
 
 ## Remaining V2 validation
 
-1. Verify the manager inventory UI in an authenticated browser using a disposable
-   V2 database, including imports, reviewed opening counts, stock movements,
-   warehouse transfers, pagination, and mobile/tablet layouts.
+1. Verify the complete manager inventory UI in an authenticated browser using a
+   disposable V2 database, including product/recipe/setup imports, opening
+   counts, production warehouse selection, movements, transfers, run completion,
+   shortages, and mobile/tablet layouts.
 2. Verify station calculations against approved floor examples and test station
-   workflows on real phones and tablets.
+   workflows, wake/reconnect, and multi-device operation on real phones/tablets.
 3. Keep a separate-project VM/database/restart/capacity pilot as a pre-release
    gate.
 

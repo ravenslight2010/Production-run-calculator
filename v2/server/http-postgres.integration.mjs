@@ -130,8 +130,10 @@ async function main() {
     });
     assert.equal(createStaff.status, 201);
     const directory = await jsonResponse(createStaff);
-    assert.equal(directory.staff.length, 2);
-    assert.equal(directory.roles.length, 2);
+    assert.ok(directory.staff.some((staff) => staff.username.toLowerCase() === "v2integrationmanager"));
+    assert.ok(directory.staff.some((staff) => staff.username.toLowerCase() === "v2integrationoperator"));
+    assert.ok(directory.roles.some((role) => role.name === "manager"));
+    assert.ok(directory.roles.some((role) => role.name === "operator"));
     assert.doesNotMatch(JSON.stringify(directory), /v2-test-operator-password|argon2id|v2_session/);
 
     const operatorDeniedRead = await fetch(`${baseUrl}/api/v2/auth/staff`);
@@ -142,7 +144,8 @@ async function main() {
       headers: { Cookie: manager.cookieHeader },
     });
     assert.equal(managerRoster.status, 200);
-    assert.equal((await jsonResponse(managerRoster)).staff.length, 2);
+    const managerRosterBody = await jsonResponse(managerRoster);
+    assert.ok(managerRosterBody.staff.some((staff) => staff.username.toLowerCase() === "v2integrationoperator"));
     const operatorRoster = await fetch(`${baseUrl}/api/v2/auth/staff`, {
       headers: { Cookie: operator.cookieHeader },
     });
@@ -167,6 +170,11 @@ async function main() {
         body: JSON.stringify(body),
       });
     }
+    const initialWarehouseResponse = await fetch(`${baseUrl}/api/v2/inventory/warehouses`, {
+      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(initialWarehouseResponse.status, 200);
+    const initialWarehouseCount = (await jsonResponse(initialWarehouseResponse)).warehouses.length;
 
     const mainWarehouseResponse = await managerPost("/api/v2/inventory/warehouses", {
       requestId: "73000000-0000-4000-8000-000000000201",
@@ -191,7 +199,7 @@ async function main() {
     const productImportRequest = {
       requestId: "73000000-0000-4000-8000-000000000204",
       kind: "products",
-      csv: "code,name,unit\nCORN,Test Flour,lb\nDOUGH-A,North Shop,case\n",
+      csv: "code,name,unit\nCORN,Test Flour,lb\nDOUGH-A,North Shop,case\nCARTON,Shipping Carton,each\n",
     };
     const stagedImportResponse = await managerPost("/api/v2/imports", productImportRequest);
     assert.equal(stagedImportResponse.status, 201, await stagedImportResponse.clone().text());
@@ -246,18 +254,52 @@ async function main() {
     const appliedShipping = await managerPost(`/api/v2/imports/${stagedShipping.importId}/apply`, {});
     assert.equal(appliedShipping.status, 200);
 
+    const recipeImport = await managerPost("/api/v2/imports", {
+      requestId: "73000000-0000-4000-8000-000000000212",
+      kind: "recipes",
+      csv: `code,name,product_code,definition_json
+DOUGH-A-RECIPE,North Shop dough,DOUGH-A,"{""station_key"":""dough"",""ingredients"":[{""product_code"":""CORN"",""quantity"":10,""unit"":""lb""}]}"
+`,
+    });
+    assert.equal(recipeImport.status, 201, await recipeImport.clone().text());
+    const stagedRecipe = await jsonResponse(recipeImport);
+    const appliedRecipe = await managerPost(`/api/v2/imports/${stagedRecipe.importId}/apply`, {});
+    assert.equal(appliedRecipe.status, 200, await appliedRecipe.clone().text());
+    const setupImport = await managerPost("/api/v2/imports", {
+      requestId: "73000000-0000-4000-8000-000000000213",
+      kind: "production-setups",
+      csv: `code,name,product_code,config_json
+LINE-A,North Shop line,DOUGH-A,"{""recipe_codes"":[""DOUGH-A-RECIPE""],""packaging_per_case"":[{""product_code"":""CARTON"",""quantity"":1,""unit"":""each""}]}"
+`,
+    });
+    assert.equal(setupImport.status, 201, await setupImport.clone().text());
+    const stagedSetup = await jsonResponse(setupImport);
+    const appliedSetup = await managerPost(`/api/v2/imports/${stagedSetup.importId}/apply`, {});
+    assert.equal(appliedSetup.status, 200, await appliedSetup.clone().text());
+
     const runProductsResponse = await fetch(`${baseUrl}/api/v2/runs/products`, {
       headers: { Cookie: operator.cookieHeader, Accept: "application/json" },
     });
     assert.equal(runProductsResponse.status, 200);
     const runProducts = await jsonResponse(runProductsResponse);
     assert.equal(runProducts.products.find((product) => product.code === "DOUGH-A").doughCapacity.status, "available");
+    assert.equal(runProducts.productionWarehouse, null);
+    assert.equal(runProducts.products.find((product) => product.code === "DOUGH-A").productionSetups[0].code, "LINE-A");
 
     async function establishOpeningCount(warehouse, requestId, quantity) {
+      const productsResponse = await fetch(`${baseUrl}/api/v2/inventory/products`, {
+        headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+      });
+      assert.equal(productsResponse.status, 200);
+      const products = (await jsonResponse(productsResponse)).products;
+      const csv = [
+        "product_code,quantity",
+        ...products.map((product) => `${product.code},${product.code === "CORN" ? quantity : "0"}`),
+      ].join("\n") + "\n";
       const staged = await managerPost("/api/v2/inventory/opening-counts", {
         requestId,
         warehouseId: warehouse.id,
-        csv: `product_code,quantity\nCORN,${quantity}\nDOUGH-A,0\n`,
+        csv,
       });
       assert.equal(staged.status, 201, await staged.clone().text());
       const count = await jsonResponse(staged);
@@ -273,7 +315,8 @@ async function main() {
         headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
       });
       assert.equal(detailResponse.status, 200);
-      assert.equal((await jsonResponse(detailResponse)).count.rows[0].quantity, quantity);
+      const detail = await jsonResponse(detailResponse);
+      assert.equal(detail.count.rows.find((row) => row.productCode === "CORN")?.quantity, quantity);
       const reviewed = await sessionPost(manager, `/api/v2/inventory/opening-counts/${count.countId}/review`, {});
       assert.equal(reviewed.status, 200);
       const applied = await sessionPost(manager, `/api/v2/inventory/opening-counts/${count.countId}/apply`, {});
@@ -283,6 +326,17 @@ async function main() {
     }
     await establishOpeningCount(mainWarehouse, "73000000-0000-4000-8000-000000000208", "0");
     await establishOpeningCount(targetWarehouse, "73000000-0000-4000-8000-000000000209", "0");
+    const productionWarehouseResponse = await managerPost("/api/v2/inventory/production-warehouse", {
+      requestId: "73000000-0000-4000-8000-000000000214",
+      warehouseId: mainWarehouse.id,
+    });
+    assert.equal(productionWarehouseResponse.status, 201, await productionWarehouseResponse.clone().text());
+    assert.equal((await jsonResponse(productionWarehouseResponse)).warehouse.isProduction, true);
+    const productionCatalogResponse = await fetch(`${baseUrl}/api/v2/runs/products`, {
+      headers: { Cookie: operator.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(productionCatalogResponse.status, 200);
+    assert.equal((await jsonResponse(productionCatalogResponse)).productionWarehouse.id, mainWarehouse.id);
 
     const receiptRequest = {
       commandId: "73000000-0000-4000-8000-000000000205",
@@ -329,10 +383,19 @@ async function main() {
     assert.equal(secondPage.movements[0].id === firstPage.movements[0].id, false);
     assert.equal(secondPage.nextCursor, null);
 
+    const openingProductsResponse = await fetch(`${baseUrl}/api/v2/inventory/products`, {
+      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(openingProductsResponse.status, 200);
+    const openingProducts = (await jsonResponse(openingProductsResponse)).products;
+    const openingCsv = [
+      "product_code,quantity",
+      ...openingProducts.map((product) => `${product.code},${product.code === "CORN" ? "2" : "0"}`),
+    ].join("\n") + "\n";
     const stagedCountResponse = await managerPost("/api/v2/inventory/opening-counts", {
       requestId: "73000000-0000-4000-8000-000000000207",
       warehouseId: openingWarehouse.id,
-      csv: "product_code,quantity\nCORN,2\nDOUGH-A,0\n",
+      csv: openingCsv,
     });
     assert.equal(stagedCountResponse.status, 201, await stagedCountResponse.clone().text());
     const stagedCount = await jsonResponse(stagedCountResponse);
@@ -351,7 +414,7 @@ async function main() {
       headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
     });
     assert.equal(managerWarehouses.status, 200);
-    assert.equal((await jsonResponse(managerWarehouses)).warehouses.length, 3);
+    assert.equal((await jsonResponse(managerWarehouses)).warehouses.length, initialWarehouseCount + 3);
     const appliedImportHistory = await fetch(`${baseUrl}/api/v2/imports?limit=50`, {
       headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
     });
@@ -368,7 +431,9 @@ async function main() {
       },
       body: JSON.stringify({
         requestId: "73000000-0000-4000-8000-000000000101",
-        setupSnapshot: { label: "Two-session check", targetCases: 5, productCode: "DOUGH-A" },
+        setupSnapshot: {
+          label: "Two-session check", targetCases: 5, productCode: "DOUGH-A", productionSetupCode: "LINE-A",
+        },
       }),
     });
     if (createdResponse.status !== 201) {
@@ -385,8 +450,7 @@ async function main() {
     });
     assert.equal(operatorList.status, 200);
     const listed = await jsonResponse(operatorList);
-    assert.equal(listed.runs.length, 1);
-    assert.equal(listed.runs[0].id, created.run.id);
+    assert.ok(listed.runs.some((run) => run.id === created.run.id));
 
     const startResponse = await fetch(`${baseUrl}/api/v2/runs/${created.run.id}/commands`, {
       method: "POST",
@@ -466,19 +530,45 @@ async function main() {
     const conflictedStation = stationBodies.find((body) => body.outcome === "conflict");
     assert.ok(acceptedStation);
     assert.ok(conflictedStation);
-    assert.equal(acceptedStation.run.revision, 2);
-    assert.equal(conflictedStation.currentRun.revision, 2);
+    assert.equal(acceptedStation.run.revision, 2, "one concurrent station write should advance the run once");
+    assert.equal(conflictedStation.currentRun.revision, 2, "the stale station writer should receive the new revision");
     assert.equal(
       conflictedStation.currentRun.stationProgress.line.progress.casesProduced,
       acceptedStation.run.stationProgress.line.progress.casesProduced,
     );
+
+    const completeResponse = await fetch(`${baseUrl}/api/v2/runs/${created.run.id}/commands`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: manager.cookieHeader,
+        "X-CSRF-Token": manager.csrfToken,
+      },
+      body: JSON.stringify({
+        commandId: "73000000-0000-4000-8000-000000000215",
+        commandType: "complete",
+        expectedRevision: 2,
+      }),
+    });
+    assert.equal(completeResponse.status, 200, await completeResponse.clone().text());
+    const completed = await jsonResponse(completeResponse);
+    assert.equal(completed.run.status, "completed");
+    assert.equal(completed.run.inventoryConsumption.status, "completed");
+    assert.equal(completed.run.inventoryConsumption.lines.length, 0);
+    const completeRetry = await sessionPost(manager, `/api/v2/runs/${created.run.id}/commands`, {
+      commandId: "73000000-0000-4000-8000-000000000215",
+      commandType: "complete",
+      expectedRevision: 2,
+    });
+    assert.equal(completeRetry.status, 200);
+    assert.equal((await jsonResponse(completeRetry)).replayed, true);
 
     const operatorStationRead = await fetch(`${baseUrl}/api/v2/runs/${created.run.id}`, {
       headers: { Cookie: operator.cookieHeader, Accept: "application/json" },
     });
     assert.equal(operatorStationRead.status, 200);
     const sharedStationRun = (await jsonResponse(operatorStationRead)).run;
-    assert.equal(sharedStationRun.revision, 2);
+    assert.equal(sharedStationRun.revision, completed.run.revision, "the completed revision should persist across sessions");
     assert.equal(sharedStationRun.stationProgress.line.progress.casesProduced, acceptedStation.run.stationProgress.line.progress.casesProduced);
 
     const roleChange = await fetch(`${baseUrl}/api/v2/auth/staff/${directory.staff.find((staff) => staff.username === "v2integrationoperator").userId}`, {

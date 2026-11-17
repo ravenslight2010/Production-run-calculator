@@ -178,11 +178,17 @@
                     <option value="">Loading products…</option>
                   </select>
                 </label>
+                <label class="field field-product" for="run-production-setup">
+                  <span>Production setup</span>
+                  <select id="run-production-setup" name="productionSetupCode" required data-testid="select-run-production-setup">
+                    <option value="">Choose a product first</option>
+                  </select>
+                </label>
                 <button class="button button-create" id="create-button" type="submit" data-testid="button-create-run">
                   <span>Prepare run</span><span class="button-arrow" aria-hidden="true">↗</span>
                 </button>
               </form>
-              <p class="form-note" id="create-note">The server creates the run in planned status. No run starts until an operator starts it.</p>
+              <p class="form-note" id="create-note">The server snapshots the imported recipe and production warehouse. Completing the run deducts tracked batch and packaging quantities once; short stock is recorded rather than blocking the run.</p>
             </section>
           </div>
 
@@ -322,6 +328,13 @@
                 <span>Selected warehouse</span>
                 <select id="warehouse-select" name="warehouse" required></select>
               </label>
+              <label class="field" for="production-warehouse-select">
+                <span>Production warehouse</span>
+                <select id="production-warehouse-select" name="productionWarehouse" required></select>
+              </label>
+              <p class="manager-help">Only warehouses with an applied physical opening count can be assigned. New runs keep a fixed snapshot of this warehouse and their selected recipe.</p>
+              <p class="manager-help" id="production-warehouse-status" role="status" aria-live="polite"></p>
+              <button class="button button-secondary" id="production-warehouse-set" type="button">Set production warehouse</button>
               <div class="inventory-table-wrap">
                 <table class="inventory-table">
                   <caption>Current product stock in the selected warehouse</caption>

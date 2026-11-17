@@ -7,7 +7,36 @@ const ACTOR_ID = "00000000-0000-4000-8000-000000000002";
 const REQUEST_ID = "00000000-0000-4000-8000-000000000003";
 const RUN_ID = "00000000-0000-4000-8000-000000000004";
 const AUTH = { verified: true, facilityId: FACILITY_ID, actorId: ACTOR_ID };
-const SETUP = { label: "Line A / five cheese", targetCases: 105 };
+const SETUP = {
+  label: "Line A / five cheese",
+  targetCases: 105,
+  productCode: "FIVE-CHEESE",
+  productionSetupCode: "LINE-A",
+};
+const PRODUCTION_PLAN = {
+  code: "LINE-A",
+  name: "Main line",
+  warehouse: { id: "00000000-0000-4000-8000-000000000005", name: "Main warehouse" },
+  recipes: [{
+    code: "DOUGH-RECIPE",
+    name: "Dough recipe",
+    stationKey: "dough",
+    ingredients: [{
+      productId: "00000000-0000-4000-8000-000000000006",
+      productCode: "FLOUR",
+      productName: "Flour",
+      quantity: "10",
+      unit: "lb",
+    }],
+  }],
+  packagingPerCase: [{
+    productId: "00000000-0000-4000-8000-000000000007",
+    productCode: "CARTON",
+    productName: "Carton",
+    quantity: "1",
+    unit: "each",
+  }],
+};
 const RUN = {
   id: RUN_ID,
   status: "planned",
@@ -18,7 +47,7 @@ const RUN = {
   pausedAt: null,
   resumedAt: null,
   completedAt: null,
-  setupSnapshot: SETUP,
+  setupSnapshot: { ...SETUP, productionPlan: PRODUCTION_PLAN },
   pauseIntervals: [],
 };
 
@@ -58,7 +87,7 @@ test("trims a run label before hashing and persistence", async () => {
           result: {
             outcome: "created",
             replayed: false,
-            run: { ...RUN, setupSnapshot: storedSetup },
+            run: { ...RUN, setupSnapshot: { ...storedSetup, productionPlan: PRODUCTION_PLAN } },
           },
         }],
       };
@@ -68,10 +97,12 @@ test("trims a run label before hashing and persistence", async () => {
   const result = await service.create({
     auth: AUTH,
     requestId: REQUEST_ID,
-    setupSnapshot: { label: "  Morning run  ", targetCases: 12 },
+    setupSnapshot: { label: "  Morning run  ", targetCases: 12, productCode: "PIZZA", productionSetupCode: "LINE" },
   });
 
-  assert.deepEqual(storedSetup, { label: "Morning run", targetCases: 12 });
+  assert.deepEqual(storedSetup, {
+    label: "Morning run", targetCases: 12, productCode: "PIZZA", productionSetupCode: "LINE",
+  });
   assert.equal(result.run.setupSnapshot.label, "Morning run");
 });
 

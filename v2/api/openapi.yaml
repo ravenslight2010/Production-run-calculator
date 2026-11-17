@@ -378,20 +378,24 @@ paths:
   /api/v2/runs/products:
     get:
       operationId: listRunProducts
-      summary: List active products with current dough capacity source status
+      summary: List active products and the production warehouse
       responses:
         "200":
-          description: Active products and their current dough source availability
+          description: Active products, compatible production setups, and the current production warehouse
           content:
             application/json:
               schema:
                 type: object
-                required: [products]
+                required: [products, productionWarehouse]
                 properties:
                   products:
                     type: array
                     items:
                       $ref: "#/components/schemas/RunProduct"
+                  productionWarehouse:
+                    oneOf:
+                      - $ref: "#/components/schemas/ProductionWarehouse"
+                      - type: "null"
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -832,6 +836,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WarehouseCreated"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/inventory/production-warehouse:
+    post:
+      operationId: setProductionWarehouse
+      summary: Select the production warehouse for new runs
+      description: Manager-only. The warehouse must be active and have an applied physical opening count. Existing runs keep their frozen warehouse.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetProductionWarehouseRequest"
+      responses:
+        "201":
+          description: Production warehouse selected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductionWarehouseSelection"
+        "200":
+          description: Previous selection confirmed by idempotent retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductionWarehouseSelection"
         "400":
           $ref: "#/components/responses/Error"
         "401":
@@ -1358,10 +1399,16 @@ components:
           type: string
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
           description: Stable link to the active V2 product selected when the run is created.
+        productionSetupCode:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          description: Stable link to the compatible imported production setup.
+        productionPlan:
+          $ref: "#/components/schemas/ProductionPlanSnapshot"
     RunCreateSetup:
       type: object
       additionalProperties: false
-      required: [label, targetCases, productCode]
+      required: [label, targetCases, productCode, productionSetupCode]
       properties:
         label:
           type: string
@@ -1372,6 +1419,9 @@ components:
           minimum: 1
           maximum: 9007199254740991
         productCode:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+        productionSetupCode:
           type: string
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
     DoughCapacity:
@@ -1394,7 +1444,7 @@ components:
           maximum: 100
     RunProduct:
       type: object
-      required: [code, name, doughCapacity]
+      required: [code, name, doughCapacity, productionSetups]
       properties:
         code:
           type: string
@@ -1402,6 +1452,120 @@ components:
           type: string
         doughCapacity:
           $ref: "#/components/schemas/DoughCapacity"
+        productionSetups:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductionSetupOption"
+    ProductionSetupOption:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+    ProductionWarehouse:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    ProductionPlanLine:
+      type: object
+      required: [productId, productCode, productName, unit, quantity]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        productName:
+          type: string
+        unit:
+          type: string
+        quantity:
+          type: string
+          pattern: "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,6})?$"
+    ProductionRecipeSnapshot:
+      type: object
+      required: [code, name, stationKey, ingredients]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        stationKey:
+          type: string
+          enum: [dough, cheese, pepperoni, sauce, frontline]
+        ingredients:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ProductionPlanLine"
+    ProductionPlanSnapshot:
+      type: object
+      required: [code, name, warehouse, recipes, packagingPerCase]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        warehouse:
+          $ref: "#/components/schemas/ProductionWarehouse"
+        recipes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ProductionRecipeSnapshot"
+        packagingPerCase:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ProductionPlanLine"
+    InventoryConsumptionLine:
+      type: object
+      required: [productId, productCode, productName, unit, required, deducted, shortfall]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        productCode:
+          type: string
+        productName:
+          type: string
+        unit:
+          type: string
+        required:
+          type: string
+        deducted:
+          type: string
+        shortfall:
+          type: string
+    RunInventoryConsumption:
+      type: object
+      required: [status, runId, warehouseId, warehouseName, lines, occurredAt]
+      properties:
+        status:
+          type: string
+          enum: [completed]
+        runId:
+          type: string
+          format: uuid
+        warehouseId:
+          type: string
+          format: uuid
+        warehouseName:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryConsumptionLine"
+        occurredAt:
+          type: string
+          format: date-time
     PauseInterval:
       type: object
       required: [startedAt, endedAt]
@@ -1427,6 +1591,7 @@ components:
         - serverNow
         - setupSnapshot
         - doughCapacity
+        - inventoryConsumption
         - pauseIntervals
         - stationProgress
       properties:
@@ -1465,6 +1630,10 @@ components:
           $ref: "#/components/schemas/RunSetup"
         doughCapacity:
           $ref: "#/components/schemas/DoughCapacity"
+        inventoryConsumption:
+          oneOf:
+            - $ref: "#/components/schemas/RunInventoryConsumption"
+            - type: "null"
         pauseIntervals:
           type: array
           items:
@@ -1941,7 +2110,7 @@ components:
           maxLength: 120
     Warehouse:
       type: object
-      required: [id, name, active, createdAt, openingCountApplied]
+      required: [id, name, active, isProduction, createdAt, openingCountApplied]
       properties:
         id:
           type: string
@@ -1949,6 +2118,8 @@ components:
         name:
           type: string
         active:
+          type: boolean
+        isProduction:
           type: boolean
         createdAt:
           type: string
@@ -1961,6 +2132,27 @@ components:
       properties:
         outcome:
           const: created
+        replayed:
+          type: boolean
+        warehouse:
+          $ref: "#/components/schemas/Warehouse"
+    SetProductionWarehouseRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, warehouseId]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        warehouseId:
+          type: string
+          format: uuid
+    ProductionWarehouseSelection:
+      type: object
+      required: [outcome, replayed, warehouse]
+      properties:
+        outcome:
+          const: accepted
         replayed:
           type: boolean
         warehouse:

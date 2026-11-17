@@ -454,18 +454,6 @@ assert_no_direct_table_access "v2.inventory_balances"
 assert_no_direct_table_access "v2.inventory_movements"
 assert_no_direct_table_access "v2.opening_counts"
 
-ENCODED_DB_USER="$(python3 - "$DB_USER" <<'PY'
-import sys
-import urllib.parse
-
-print(urllib.parse.quote(sys.argv[1], safe=""))
-PY
-)"
-V2_TEST_ADMIN_URL="postgresql://$ENCODED_DB_USER@127.0.0.1:$PORT/v2_test"
-V2_API_URL="postgresql://v2_api_login@127.0.0.1:$PORT/v2_test"
-V2_TEST_ADMIN_URL="$V2_TEST_ADMIN_URL" V2_DATABASE_URL="$V2_API_URL" \
-  NODE_ENV=development PORT=0 node "$ROOT/v2/server/http-postgres.integration.mjs"
-
 SAME_COMMAND_SQL="
   SELECT (result->>'outcome') || '|' || (result->>'replayed') || '|' ||
          (result->'run'->>'revision')
@@ -705,6 +693,38 @@ if [[ "$STOCK_RACE_STATE" != "3.000000|3" ]]; then
   exit 1
 fi
 
+"${PSQL[@]}" -f "$ROOT/v2/db/0006-run-inventory-linkage.sql" >/dev/null
+"${PSQL[@]}" -c "
+  GRANT EXECUTE ON FUNCTION v2.set_production_warehouse(uuid, uuid, text, text, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.complete_run_with_inventory(uuid, uuid, uuid, text, text, text, bigint) TO v2_api_test;
+" >/dev/null
+assert_no_direct_table_access "v2.run_inventory_consumptions"
+assert_no_direct_table_access "v2.inventory_movements"
+INVENTORY_COMPLETION_PRIVILEGES="$("${PSQL[@]}" -c "
+  SET ROLE v2_api_test;
+  SELECT has_function_privilege(current_user,
+    'v2.set_production_warehouse(uuid,uuid,text,text,uuid)', 'EXECUTE')
+    AND has_function_privilege(current_user,
+    'v2.complete_run_with_inventory(uuid,uuid,uuid,text,text,text,bigint)', 'EXECUTE');
+  RESET ROLE;
+")"
+if [[ "$INVENTORY_COMPLETION_PRIVILEGES" != "t" ]]; then
+  echo "Restricted API role lacks the intended inventory/run command access." >&2
+  exit 1
+fi
+ENCODED_DB_USER="$(python3 - "$DB_USER" <<'PY'
+import sys
+import urllib.parse
+
+print(urllib.parse.quote(sys.argv[1], safe=""))
+PY
+)"
+V2_TEST_ADMIN_URL="postgresql://$ENCODED_DB_USER@127.0.0.1:$PORT/v2_test"
+V2_API_URL="postgresql://v2_api_login@127.0.0.1:$PORT/v2_test"
+V2_TEST_ADMIN_URL="$V2_TEST_ADMIN_URL" V2_DATABASE_URL="$V2_API_URL" \
+  NODE_ENV=development PORT=0 node "$ROOT/v2/server/http-postgres.integration.mjs"
+"${PSQL[@]}" -f "$ROOT/v2/db/0006-run-inventory-linkage.test.sql"
+
 printf 'Run schema and lifecycle checks passed.\n'
 printf 'Concurrent first-manager bootstrap passed: exactly one manager was created.\n'
 printf 'Restricted API role check passed: %s\n' "$API_ROLE_RESULT"
@@ -721,3 +741,5 @@ printf 'Concurrent station revision race passed: %s (%s)\n' "$STATION_CONFLICT_R
 printf 'Competing station worker lease claim passed: %s\n' "$LEASE_RACE_RESULTS"
 printf 'Stored state and event counts passed: %s\n' "$FINAL_STATE"
 printf 'Concurrent stock adjustment and ledger reconciliation passed: %s\n' "$STOCK_RACE_STATE"
+printf 'V2 run-to-inventory snapshot, shortage, and retry checks passed.\n'
+printf 'Restricted API run/inventory command grants passed: %s\n' "$INVENTORY_COMPLETION_PRIVILEGES"

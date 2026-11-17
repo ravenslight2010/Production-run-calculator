@@ -160,8 +160,8 @@ export function createRunApi({
 
       if (url.pathname === `${API_PREFIX}/products` && request.method === "GET") {
         if (url.search) throw new RunApiError(400, "Product-list query parameters are not supported.");
-        const products = await runs.listProducts({ auth });
-        sendJson(response, 200, { products });
+        const catalog = await runs.listProducts({ auth });
+        sendJson(response, 200, catalog);
         return;
       }
 

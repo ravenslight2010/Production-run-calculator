@@ -17,7 +17,9 @@ The V2 source includes server-owned run lifecycle and production-station
 routes, plus controlled manager setup. Line, Dough, Cheese, Pepperoni, Sauce,
 Frontline, and Packaging have station-specific inputs and progress, validated
 calculations, shared timers, manual correction, and server-clock automatic
-progress. Run and station updates use revisions, idempotency receipts, events,
+progress. A database-backed worker advances due progress without an open
+browser; clients only refresh canonical state and never submit auto-track
+ticks. Run and station updates use revisions, idempotency receipts, events,
 and outbox records.
 
 A secret-guarded first-manager setup is available only when
@@ -29,24 +31,27 @@ after bootstrap. Never place it in source, chat, or browser storage.
 
 The browser provides a read-only cached view while disconnected and refreshes
 from the server before writes resume. Disposable PostgreSQL checks cover
-bootstrap, manager account changes, station updates, setup import retries, and
-warehouse inventory reconciliation. Browser tests cover desktop and phone-sized
-station views, manual conflicts, offline reload/recovery, automatic progress,
-and timers across sessions.
+bootstrap, manager account changes, station updates, setup import retries,
+warehouse inventory reconciliation, and run-completion consumption. Browser
+tests cover desktop and phone-sized station views, manual conflicts, offline
+reload/recovery, automatic progress, timer conflicts, and manager import
+workflows.
 
 Manager-only setup imports and inventory also run against the V2 database. The
 first import format is V2 CSV for products, recipes, production setup, and
 reviewed physical opening counts. Managers can reopen staged imports, apply or
 safely undo them, manage multiple warehouses in the one facility, and review a
-paginated append-only movement history. A warehouse cannot receive stock
-changes until its physical opening count is reviewed and applied. No V1
+paginated append-only movement history. Runs require an imported product and
+linked production setup, and a manager-designated warehouse with an applied
+opening count. Each run freezes its recipe and warehouse. Completion deducts
+actual server-recorded station batches and packed cases once; it records any
+shortage without blocking run completion or allowing negative stock. No V1
 balances, stock history, credentials, or sessions are copied.
 
-V2 remains incomplete as a production replacement: manager inventory screens
-have not been verified in a real browser, automatic progress does not run
-without an active browser, and production deployment and physical-device
-verification remain separate. No separate V2 Replit project or deployment
-exists.
+V2 remains incomplete as a production replacement: the full manager inventory
+journey has not yet been verified in a real browser, and production deployment,
+separate-project isolation, and physical-device verification remain separate
+gates. No separate V2 Replit project or deployment exists.
 
 Database functions are backend-only. The API must derive facility and actor
 identity from verified V2 authorization, compute request hashes itself, and
@@ -74,10 +79,10 @@ node --check v2/web/app.js
 ```
 
 The database script creates a temporary PostgreSQL cluster under the system temp
-directory, binds it to loopback only, runs schema, lifecycle, import, opening
-count, inventory-ledger, reconciliation, and concurrent stock checks; it also
-exercises manager-authenticated imports and warehouse operations over HTTP
-through a restricted V2 API role. It then stops and removes the cluster. It
-does not read or write either V1 database.
+directory, binds it to loopback only, applies the V2 schema through `0006`, runs
+lifecycle, import, opening count, run-consumption, ledger, reconciliation, and
+concurrency checks, and exercises manager-authenticated imports and warehouse
+operations over HTTP through a restricted V2 API role. It then stops and removes
+the cluster. It does not read or write either V1 database.
 `pg@8.23.1` is the V2 package's pinned PostgreSQL driver (MIT); the production
 dependency audit reported no known vulnerabilities when checked.

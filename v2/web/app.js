@@ -5,7 +5,6 @@ import { initializeInventory, updateInventoryContext } from "./inventory.js";
 const API = "/api/v2/runs";
 const AUTH_API = "/api/v2/auth";
 const POLL_INTERVAL_MS = 3000;
-const AUTO_TRACK_INTERVAL_MS = 1000;
 const STATION_STATUSES = new Set(["not_started", "running", "paused", "completed"]);
 const TIMER_STATUSES = new Set(["idle", "running", "paused"]);
 const TIMER_FIELDS = new Set(["timerStatus", "timerStartedAt", "timerPausedAt", "timerElapsedMs"]);
@@ -66,6 +65,7 @@ const el = {
   label: document.querySelector("#setup-label"),
   target: document.querySelector("#target-cases"),
   product: document.querySelector("#run-product"),
+  productionSetup: document.querySelector("#run-production-setup"),
   announcer: document.querySelector("#live-announcer"),
   stationPanel: document.querySelector("#station-panel"),
   stationTabs: document.querySelector("#station-tabs"),
@@ -91,6 +91,7 @@ let authInFlight = false;
 let signOutInFlight = false;
 let currentStaff = null;
 let runProducts = [];
+let productionWarehouse = null;
 let authGeneration = 0;
 let bootstrapAvailable = false;
 let bootstrapStatusInFlight = false;
@@ -129,6 +130,33 @@ function isTimestamp(value, nullable = false) {
   return !Number.isNaN(date.getTime()) && date.toISOString() === value;
 }
 
+function isInventoryPlanLine(line) {
+  return isObject(line) && typeof line.productId === "string" && UUID.test(line.productId)
+    && typeof line.productCode === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(line.productCode)
+    && typeof line.productName === "string" && line.productName.length >= 1 && line.productName.length <= 120
+    && typeof line.unit === "string" && /^[A-Za-z][A-Za-z0-9._/-]{0,15}$/u.test(line.unit)
+    && typeof line.quantity === "string"
+    && /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,6})?$/u.test(line.quantity)
+    && Number(line.quantity) > 0;
+}
+
+function isProductionPlan(value) {
+  return isObject(value)
+    && typeof value.code === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.code)
+    && typeof value.name === "string" && value.name.length >= 1 && value.name.length <= 120
+    && isObject(value.warehouse) && typeof value.warehouse.id === "string" && UUID.test(value.warehouse.id)
+    && typeof value.warehouse.name === "string" && value.warehouse.name.length >= 1 && value.warehouse.name.length <= 120
+    && Array.isArray(value.recipes) && value.recipes.length >= 1 && value.recipes.length <= 20
+    && value.recipes.every((recipe) => isObject(recipe)
+      && typeof recipe.code === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(recipe.code)
+      && typeof recipe.name === "string" && recipe.name.length >= 1 && recipe.name.length <= 120
+      && ["dough", "cheese", "pepperoni", "sauce", "frontline"].includes(recipe.stationKey)
+      && Array.isArray(recipe.ingredients) && recipe.ingredients.length >= 1 && recipe.ingredients.length <= 200
+      && recipe.ingredients.every(isInventoryPlanLine))
+    && Array.isArray(value.packagingPerCase) && value.packagingPerCase.length >= 1 && value.packagingPerCase.length <= 200
+    && value.packagingPerCase.every(isInventoryPlanLine);
+}
+
 function validateRun(run) {
   if (!isObject(run) || typeof run.id !== "string" || !UUID.test(run.id)
     || !RUN_STATUSES.has(run.status) || !Number.isSafeInteger(run.revision) || run.revision < 0
@@ -145,6 +173,16 @@ function validateRun(run) {
       || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(run.setupSnapshot.productCode))) {
     throw new Error("The server returned a run with an invalid product link. Refresh to load the current state.");
   }
+  if (run.setupSnapshot.productionSetupCode !== undefined
+    && (typeof run.setupSnapshot.productionSetupCode !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(run.setupSnapshot.productionSetupCode))) {
+    throw new Error("The server returned a run with an invalid production setup link. Refresh to load the current state.");
+  }
+  if (run.setupSnapshot.productionPlan !== undefined
+    && (!run.setupSnapshot.productCode || !run.setupSnapshot.productionSetupCode
+      || !isProductionPlan(run.setupSnapshot.productionPlan))) {
+    throw new Error("The server returned an invalid frozen production plan. Refresh to load the current state.");
+  }
   if (run.doughCapacity !== undefined
     && (!isObject(run.doughCapacity)
       || !["available", "unavailable"].includes(run.doughCapacity.status)
@@ -159,6 +197,19 @@ function validateRun(run) {
   }
   if (run.serverNow !== undefined && !isTimestamp(run.serverNow)) {
     throw new Error("The server returned an invalid server clock. Refresh to load the current state.");
+  }
+  if (run.inventoryConsumption !== undefined && run.inventoryConsumption !== null) {
+    const receipt = run.inventoryConsumption;
+    if (!isObject(receipt) || receipt.status !== "completed" || receipt.runId !== run.id
+      || !UUID.test(receipt.warehouseId) || typeof receipt.warehouseName !== "string"
+      || !isTimestamp(receipt.occurredAt) || !Array.isArray(receipt.lines)
+      || receipt.lines.some((line) => !isObject(line) || !UUID.test(line.productId)
+        || typeof line.productCode !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(line.productCode)
+        || typeof line.productName !== "string" || typeof line.unit !== "string"
+        || ["required", "deducted", "shortfall"].some((key) =>
+          typeof line[key] !== "string" || !/^(0|[1-9][0-9]{0,13})(\.[0-9]{1,6})?$/u.test(line[key])))) {
+      throw new Error("The server returned invalid inventory usage details. Refresh to load the current state.");
+    }
   }
   if (typeof run.serverNow === "string") {
     cachedServerClock = { serverMs: Date.parse(run.serverNow), receivedAt: performance.now() };
@@ -378,20 +429,33 @@ function requireWritableState() {
 
 function updateCreateFormForAuth() {
   const writable = canWriteNow();
+  const selectedProduct = runProducts.find((product) => product.code === el.product.value);
+  const hasSetups = Array.isArray(selectedProduct?.productionSetups) && selectedProduct.productionSetups.length > 0;
+  const hasProductionWarehouse = productionWarehouse !== null;
+  const setupSelected = hasSetups && selectedProduct.productionSetups.some((setup) => setup.code === el.productionSetup.value);
   if (!pendingCreate) {
     el.label.disabled = createInFlight || !writable;
     el.target.disabled = createInFlight || !writable;
     el.product.disabled = createInFlight || !writable || runProducts.length === 0;
-    el.createButton.disabled = createInFlight || !writable || runProducts.length === 0;
+    el.productionSetup.disabled = createInFlight || !writable || !hasSetups;
+    el.createButton.disabled = createInFlight || !writable || runProducts.length === 0
+      || !hasProductionWarehouse || !setupSelected;
     el.createButton.textContent = "Prepare run";
-    el.createNote.textContent = runProducts.length === 0 && writable
-      ? "Import products before preparing a run."
-      : "The server creates the run in planned status. No run starts until an operator starts it.";
+    el.createNote.textContent = !writable
+      ? "The server creates the run in planned status. No run starts until an operator starts it."
+      : runProducts.length === 0
+        ? "Import products before preparing a run."
+        : !hasProductionWarehouse
+          ? "A manager must designate an active warehouse with an applied opening count before preparing runs."
+          : !hasSetups
+            ? "Import a production setup with linked station recipes and packaging for this product."
+            : "The server freezes this recipe and warehouse on the run. Completion deducts actual tracked batches and packed cases once, and records any shortage.";
     return;
   }
   el.label.disabled = true;
   el.target.disabled = true;
   el.product.disabled = true;
+  el.productionSetup.disabled = true;
   const belongsToCurrentStaff = currentStaff?.userId === pendingCreate.actorId;
   el.createButton.disabled = !belongsToCurrentStaff || createInFlight || !writable;
   el.createButton.textContent = belongsToCurrentStaff ? "Retry same request" : "Another account's request";
@@ -871,7 +935,10 @@ function loadPendingCreate() {
        || !Number.isSafeInteger(pending.setupSnapshot.targetCases) || pending.setupSnapshot.targetCases < 1
        || (pending.setupSnapshot.productCode !== undefined
          && (typeof pending.setupSnapshot.productCode !== "string"
-           || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(pending.setupSnapshot.productCode)))) return null;
+           || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(pending.setupSnapshot.productCode)))
+       || (pending.setupSnapshot.productionSetupCode !== undefined
+         && (typeof pending.setupSnapshot.productionSetupCode !== "string"
+           || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(pending.setupSnapshot.productionSetupCode)))) return null;
     return pending;
   } catch {
     return null;
@@ -885,6 +952,7 @@ function savePendingCreate(pending) {
     el.label.value = pending.setupSnapshot.label;
     el.target.value = String(pending.setupSnapshot.targetCases);
     if (pending.setupSnapshot.productCode) el.product.value = pending.setupSnapshot.productCode;
+    if (pending.setupSnapshot.productionSetupCode) el.productionSetup.value = pending.setupSnapshot.productionSetupCode;
     updateCreateFormForAuth();
   } catch {
     pendingCreate = null;
@@ -959,16 +1027,40 @@ function renderRun(run) {
   const pendingMarkup = pending
     ? `<div class="pending-box" role="status"><p><strong>${pendingOwnedByCurrentStaff ? `${escapeHtml(commandTitle(pending.commandType))} needs confirmation.` : "This saved action belongs to another staff account."}</strong> ${pendingOwnedByCurrentStaff ? "The request may have reached the server. Retry sends the same command identity." : "Sign in as the original operator to confirm it. It will not be resent under this account."}</p>${pendingOwnedByCurrentStaff ? `<button type="button" data-retry-command="true" data-testid="button-retry-command" ${commandInFlight || !canWriteNow() ? "disabled" : ""}>Retry same action</button>` : ""}</div>`
     : "";
+  const inventoryMarkup = run.inventoryConsumption
+    ? renderInventoryReceipt(run.inventoryConsumption)
+    : "";
   el.runContent.innerHTML = `<div class="status-row"><span class="status-pill ${run.status}" data-testid="status-run">${statusLabel(run.status)}</span></div>
     <h2 class="run-label" id="run-label" data-testid="text-run-label">${escapeHtml(run.setupSnapshot.label)}</h2>
-    <div class="run-meta"><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.targetCases.toLocaleString()} target cases</span><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.productCode ? escapeHtml(productName(run.setupSnapshot.productCode)) : "Product not linked"}</span><span><i class="meta-marker" aria-hidden="true"></i>${run.startedAt ? `Started ${escapeHtml(formatDate(run.startedAt))}` : `Created ${escapeHtml(formatDate(run.createdAt))}`}</span></div>
+    <div class="run-meta"><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.targetCases.toLocaleString()} target cases</span><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.productCode ? escapeHtml(productName(run.setupSnapshot.productCode)) : "Product not linked"}</span><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.productionPlan ? `Setup ${escapeHtml(run.setupSnapshot.productionPlan.name)}` : "Production setup not linked"}</span><span><i class="meta-marker" aria-hidden="true"></i>${run.startedAt ? `Started ${escapeHtml(formatDate(run.startedAt))}` : `Created ${escapeHtml(formatDate(run.createdAt))}`}</span></div>
     <div class="run-divider"></div><p class="control-label">RUN CONTROLS</p>
-    <div class="controls">${actionMarkup}</div>${pendingMarkup}`;
+    <div class="controls">${actionMarkup}</div>${pendingMarkup}${inventoryMarkup}`;
   el.runContent.querySelectorAll("[data-command]").forEach((button) => {
     button.addEventListener("click", () => beginCommand(run, button.dataset.command));
   });
   const retry = el.runContent.querySelector("[data-retry-command]");
   if (retry) retry.addEventListener("click", () => retryCommand(run.id));
+}
+
+function renderInventoryReceipt(receipt) {
+  const shortages = receipt.lines.filter((line) => Number(line.shortfall) > 0);
+  const lines = receipt.lines.slice(0, 20).map((line) => {
+    const shortage = Number(line.shortfall) > 0
+      ? ` · short by ${escapeHtml(line.shortfall)} ${escapeHtml(line.unit)}`
+      : "";
+    return `<li><span>${escapeHtml(line.productName)} · ${escapeHtml(line.productCode)}</span><span>${escapeHtml(line.deducted)} ${escapeHtml(line.unit)} deducted${shortage}</span></li>`;
+  }).join("");
+  const extra = receipt.lines.length > 20
+    ? `<p class="manager-help">${receipt.lines.length - 20} additional inventory lines are included in the receipt.</p>`
+    : "";
+  return `<section class="inventory-receipt${shortages.length ? " has-shortage" : ""}" aria-label="Completed run inventory receipt">
+    <h3>Inventory receipt</h3>
+    <p>Stock deducted from ${escapeHtml(receipt.warehouseName)} at ${escapeHtml(formatDate(receipt.occurredAt))}.</p>
+    ${shortages.length
+      ? `<p role="status">${shortages.length} product${shortages.length === 1 ? "" : "s"} had less stock than required. The run still completed; review the shortage.</p>`
+      : ""}
+    ${lines ? `<ul>${lines}</ul>` : "<p>No tracked recipe or packaging quantities were consumed.</p>"}${extra}
+  </section>`;
 }
 
 function escapeHtml(value) {
@@ -1020,6 +1112,10 @@ function validateRunProduct(product) {
   return isObject(product)
     && typeof product.code === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(product.code)
     && typeof product.name === "string" && product.name.length >= 1 && product.name.length <= 120
+    && Array.isArray(product.productionSetups)
+    && product.productionSetups.every((setup) => isObject(setup)
+      && typeof setup.code === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(setup.code)
+      && typeof setup.name === "string" && setup.name.length >= 1 && setup.name.length <= 120)
     && isObject(product.doughCapacity)
     && ["available", "unavailable"].includes(product.doughCapacity.status)
     && Array.isArray(product.doughCapacity.reasons)
@@ -1060,6 +1156,31 @@ function renderRunProducts() {
   if (runProducts.some((product) => product.code === preferred)) el.product.value = preferred;
   else if (!pendingCreate) el.product.value = runProducts[0].code;
   el.product.disabled = !canWriteNow() || createInFlight || Boolean(pendingCreate);
+  renderRunProductionSetups();
+}
+
+function renderRunProductionSetups() {
+  const product = runProducts.find((item) => item.code === el.product.value);
+  const setups = product?.productionSetups || [];
+  const preferred = pendingCreate?.setupSnapshot.productionSetupCode || el.productionSetup.value;
+  el.productionSetup.replaceChildren();
+  if (setups.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No linked setup available";
+    el.productionSetup.append(option);
+  } else {
+    for (const setup of setups) {
+      const option = document.createElement("option");
+      option.value = setup.code;
+      option.textContent = `${setup.name} · ${setup.code}`;
+      el.productionSetup.append(option);
+    }
+    if (setups.some((setup) => setup.code === preferred)) el.productionSetup.value = preferred;
+    else if (!pendingCreate) el.productionSetup.value = setups[0].code;
+  }
+  el.productionSetup.disabled = !canWriteNow() || createInFlight || Boolean(pendingCreate) || setups.length === 0;
+  updateCreateFormForAuth();
 }
 
 function render() {
@@ -1332,6 +1453,7 @@ function renderStationTimerControls(run, state, canMutate) {
   if (timerStatus !== "idle") actions.push(["timer_reset", "Reset"]);
   el.stationTimerControls.innerHTML = actions.map(([mode, label]) => `
     <button type="button" data-timer-mode="${mode}" ${!canMutate
+      || stationActionInFlight
       || ((mode === "timer_start" || mode === "timer_resume") && (duration <= 0 || run.status !== "running"))
       ? "disabled" : ""}>${label}</button>
   `).join("");
@@ -1437,7 +1559,25 @@ async function retryStationCommand(pending) {
   await sendStationCommand(pending);
 }
 
-async function sendStationCommand(pending) {
+function timerConflictResolution(mode, run, stationKey) {
+  if (!mode.startsWith("timer_")) return "show-latest";
+  const timerStatus = run.stationProgress?.[stationKey]?.progress?.timerStatus || "idle";
+  if (mode === "timer_start") {
+    if (timerStatus === "running") return "already-applied";
+    if (timerStatus === "idle" && run.status === "running") return "retry";
+  }
+  if (mode === "timer_pause") {
+    if (timerStatus === "paused") return "already-applied";
+    if (timerStatus === "running" && run.status === "running") return "retry";
+  }
+  if (mode === "timer_resume") {
+    if (timerStatus === "running") return "already-applied";
+    if (timerStatus === "paused" && run.status === "running") return "retry";
+  }
+  return "show-latest";
+}
+
+async function sendStationCommand(pending, timerRebaseAttempt = 0) {
   if (!currentStaff || pending.actorId !== currentStaff.userId) {
     setStationSaveNote("Sign in as the staff member who created this update before retrying.", "error");
     return;
@@ -1493,13 +1633,29 @@ async function sendStationCommand(pending) {
       serverStateConfirmed = true;
       setConnection(true);
       setLastCheck();
+      saveOfflineCache();
+      const timerResolution = timerConflictResolution(pending.mode, canonical, pending.stationKey);
+      if (timerResolution === "retry" && timerRebaseAttempt < 3) {
+        const rebased = {
+          ...pending,
+          commandId: crypto.randomUUID(),
+          expectedRevision: canonical.revision,
+        };
+        if (!savePendingStation(rebased)) return;
+        setStationSaveNote("The run advanced during auto-tracking. Reapplying this timer action to the latest shared state.", "warning");
+        await sendStationCommand(rebased, timerRebaseAttempt + 1);
+        return;
+      }
       setStationSaveNote(
         pending.mode === "manual"
           ? "Another device changed the run. Your entries are kept below; review and save them again."
-          : "Another device advanced the run. The current server state is shown.",
+          : timerResolution === "already-applied"
+            ? "The shared timer already reflects that action."
+            : pending.mode.startsWith("timer_")
+              ? "Another device changed the timer. The latest shared state is shown; choose its next action."
+              : "Another device advanced the run. The current server state is shown.",
         "warning",
       );
-      saveOfflineCache();
     } else {
       const canonical = validateRun(body.currentRun || body.run);
       upsertRun(canonical);
@@ -1543,26 +1699,6 @@ async function sendStationCommand(pending) {
   }
 }
 
-async function advanceDueStations() {
-  const run = selectedRun();
-  if (!run || run.status !== "running" || !canWriteNow() || stationActionInFlight) return;
-  const now = currentServerNowMs(run);
-  for (const stationKey of Object.keys(STATIONS)) {
-    const state = stationStateFor(selectedRun(), stationKey);
-    const rate = Number(state.inputs?.autoTrackRatePerMinute) || 0;
-    const current = Number(state.progress?.[STATIONS[stationKey].autoTrackField]) || 0;
-    const due = Date.parse(state.nextDueAt || "");
-    if (rate <= 0 || current >= run.setupSnapshot.targetCases || !Number.isFinite(due) || due > now) continue;
-    await submitStationCommand({
-      runId: run.id,
-      stationKey,
-      mode: "auto_track",
-      changes: {},
-    });
-    if (!canWriteNow() || !currentStaff) return;
-  }
-}
-
 async function fetchRuns({ quiet = false } = {}) {
   if (!currentStaff) return false;
   if (navigator.onLine === false) {
@@ -1589,10 +1725,16 @@ async function fetchRuns({ quiet = false } = {}) {
       return false;
     }
     if (!Array.isArray(body.runs)) throw new Error("The server returned an unexpected run list. Refresh again to retry.");
-    if (!Array.isArray(productBody.products) || !productBody.products.every(validateRunProduct)) {
-      throw new Error("The server returned an unexpected product list. Refresh again to retry.");
+    if (!isObject(productBody) || !Array.isArray(productBody.products)
+      || !productBody.products.every(validateRunProduct)
+      || (productBody.productionWarehouse !== null
+        && (!isObject(productBody.productionWarehouse) || !UUID.test(productBody.productionWarehouse.id)
+          || typeof productBody.productionWarehouse.name !== "string"
+          || productBody.productionWarehouse.name.length < 1 || productBody.productionWarehouse.name.length > 120))) {
+      throw new Error("The server returned an unexpected run setup list. Refresh again to retry.");
     }
     runProducts = productBody.products;
+    productionWarehouse = productBody.productionWarehouse;
     const nextRuns = body.runs.map(validateRun);
     runs = mergeServerRuns(nextRuns, runs);
     if (!runs.some((run) => run.id === selectedRunId)) {
@@ -1785,15 +1927,18 @@ async function createRun(event) {
   const label = pendingCreate?.setupSnapshot.label ?? el.label.value.trim();
   const targetCases = pendingCreate?.setupSnapshot.targetCases ?? Number(el.target.value);
   const productCode = pendingCreate?.setupSnapshot.productCode ?? el.product.value;
+  const productionSetupCode = pendingCreate?.setupSnapshot.productionSetupCode ?? el.productionSetup.value;
+  const selectedProduct = runProducts.find((product) => product.code === productCode);
   if (!label || !Number.isSafeInteger(targetCases) || targetCases < 1
-    || (!pendingCreate && !runProducts.some((product) => product.code === productCode))) {
-    showError("Enter a run label, target, and active imported product.", "Check run details");
+    || !selectedProduct?.productionSetups?.some((setup) => setup.code === productionSetupCode)
+    || !productionWarehouse) {
+    showError("Choose a product and linked production setup, and confirm a production warehouse is available.", "Check run details");
     return;
   }
   const request = pendingCreate || {
     requestId: crypto.randomUUID(),
     actorId: currentStaff.userId,
-    setupSnapshot: { label, targetCases, productCode },
+    setupSnapshot: { label, targetCases, productCode, productionSetupCode },
   };
   if (!pendingCreate) {
     savePendingCreate(request);
@@ -1815,7 +1960,8 @@ async function createRun(event) {
     const run = validateRun(body.run);
     if (run.status !== "planned" || run.setupSnapshot.label !== request.setupSnapshot.label
       || run.setupSnapshot.targetCases !== request.setupSnapshot.targetCases
-      || run.setupSnapshot.productCode !== request.setupSnapshot.productCode) {
+      || run.setupSnapshot.productCode !== request.setupSnapshot.productCode
+      || run.setupSnapshot.productionSetupCode !== request.setupSnapshot.productionSetupCode) {
       throw new Error("The server returned a run that does not match this request. Retry the same request to confirm it.");
     }
     upsertRun(run);
@@ -1852,6 +1998,7 @@ if (pendingCreate) {
   el.label.value = pendingCreate.setupSnapshot.label;
   el.target.value = String(pendingCreate.setupSnapshot.targetCases);
   if (pendingCreate.setupSnapshot.productCode) el.product.value = pendingCreate.setupSnapshot.productCode;
+  if (pendingCreate.setupSnapshot.productionSetupCode) el.productionSetup.value = pendingCreate.setupSnapshot.productionSetupCode;
   el.label.disabled = true;
   el.target.disabled = true;
   el.createButton.textContent = "Retry same request";
@@ -1861,6 +2008,7 @@ if (pendingCreate) {
 initializeInventory();
 el.refresh.addEventListener("click", () => fetchRuns());
 el.createForm.addEventListener("submit", createRun);
+el.product.addEventListener("change", renderRunProductionSetups);
 el.stationForm.addEventListener("submit", submitStationForm);
 el.authForm.addEventListener("submit", submitSignIn);
 el.bootstrapForm.addEventListener("submit", submitBootstrap);
@@ -1887,9 +2035,6 @@ window.addEventListener("focus", () => {
 window.setInterval(() => {
   if (!document.hidden && currentStaff && navigator.onLine !== false) fetchRuns({ quiet: true });
 }, POLL_INTERVAL_MS);
-window.setInterval(() => {
-  if (!document.hidden && currentStaff && navigator.onLine !== false) void advanceDueStations();
-}, AUTO_TRACK_INTERVAL_MS);
 window.setInterval(updateStationTimer, 500);
 if ("serviceWorker" in navigator) {
   void navigator.serviceWorker.register("/service-worker.js", { scope: "/" }).catch(() => {

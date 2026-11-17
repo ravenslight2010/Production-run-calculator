@@ -27,6 +27,8 @@ const dom = {
   importPreview: byId("import-preview"), importActions: byId("import-actions"),
   importApply: byId("import-apply-button"), importRetry: byId("import-retry-button"), importHistory: byId("import-history"),
   warehouseForm: byId("warehouse-create-form"), warehouseName: byId("warehouse-name"), warehouseSelect: byId("warehouse-select"),
+  productionWarehouse: byId("production-warehouse-select"), productionWarehouseSet: byId("production-warehouse-set"),
+  productionWarehouseStatus: byId("production-warehouse-status"),
   stockRows: byId("stock-rows"), stockEmpty: byId("stock-empty"), movementHistory: byId("movement-history"),
   movementMore: byId("movement-load-more"),
   movementForm: byId("movement-form"), movementType: byId("movement-type"), movementProduct: byId("movement-product"),
@@ -119,6 +121,7 @@ function validPendingRoute(kind, endpoint) {
   if (kind === "setup-import") return endpoint === IMPORTS;
   if (kind === "workbook-import") return endpoint === `${IMPORTS}/workbooks`;
   if (kind === "warehouse-create") return endpoint === `${INVENTORY}/warehouses`;
+  if (kind === "production-warehouse") return endpoint === `${INVENTORY}/production-warehouse`;
   if (kind === "movement") return endpoint === `${INVENTORY}/movements`;
   if (kind === "transfer") return endpoint === `${INVENTORY}/transfers`;
   if (kind === "opening-count") return endpoint === `${INVENTORY}/opening-counts`;
@@ -200,7 +203,8 @@ function validateImport(item) {
 }
 function validateWarehouse(item) {
   return object(item) && uuid(item.id) && text(item.name, 120) && typeof item.active === "boolean"
-    && typeof item.openingCountApplied === "boolean";
+    && typeof item.openingCountApplied === "boolean"
+    && (item.isProduction === undefined || typeof item.isProduction === "boolean");
 }
 function validateProduct(item) {
   return object(item) && CODE.test(item.code) && text(item.name, 120) && text(item.unit, 16);
@@ -343,6 +347,22 @@ function renderWarehouses() {
   fill(dom.warehouseSelect, selected);
   fill(dom.transferFrom, selected);
   fill(dom.transferTo, active.find((item) => item.id !== dom.transferFrom.value)?.id || "");
+  const counted = active.filter((item) => item.openingCountApplied);
+  const productionPreferred = counted.some((item) => item.id === dom.productionWarehouse.value)
+    ? dom.productionWarehouse.value
+    : counted.find((item) => item.isProduction)?.id || counted[0]?.id || "";
+  dom.productionWarehouse.replaceChildren();
+  counted.forEach((item) => {
+    const option = make("option", "", item.name);
+    option.value = item.id;
+    dom.productionWarehouse.append(option);
+  });
+  if (productionPreferred) dom.productionWarehouse.value = productionPreferred;
+  dom.productionWarehouseStatus.textContent = active.some((item) => item.isProduction)
+    ? `Production inventory will be deducted from ${active.find((item) => item.isProduction)?.name}.`
+    : counted.length
+      ? "Choose a warehouse that has an applied physical opening count."
+      : "Apply an opening physical count before designating a production warehouse.";
   const countable = active.filter((item) => !item.openingCountApplied
     && !openingCounts.some((count) => count.warehouseId === item.id && count.status !== "applied"));
   const openingPreferred = countable.some((item) => item.id === dom.openingWarehouse.value)
@@ -919,6 +939,31 @@ async function createWarehouse(event) {
     },
   });
 }
+async function setProductionWarehouse() {
+  if (!ensureWrite() || pending) {
+    if (pending) message("Resolve the saved request before changing the production warehouse.", "warning");
+    return;
+  }
+  const warehouse = warehouses.find((item) =>
+    item.id === dom.productionWarehouse.value && item.active && item.openingCountApplied);
+  if (!warehouse) {
+    message("Choose an active warehouse with an applied physical opening count.", "warning");
+    return;
+  }
+  await operation({
+    kind: "production-warehouse",
+    endpoint: `${INVENTORY}/production-warehouse`,
+    payload: { requestId: crypto.randomUUID(), warehouseId: warehouse.id },
+    responseKey: "warehouse",
+    validate: validateWarehouse,
+    label: "Production warehouse",
+    refresh: async (result) => {
+      warehouses = warehouses.map((item) => ({ ...item, isProduction: item.id === result.id }));
+      renderWarehouses();
+      clearMessage();
+    },
+  });
+}
 function validateMovementResult(result) {
   return object(result) && result.outcome === "accepted" && uuid(result.movementId)
     && uuid(result.warehouseId) && CODE.test(result.productCode) && quantity(result.quantity)
@@ -1007,6 +1052,10 @@ function updateStockWriteState() {
   const movementButton = dom.movementForm.querySelector('button[type="submit"]');
   const transferButton = dom.transferForm.querySelector('button[type="submit"]');
   const openingButton = dom.openingForm.querySelector('button[type="submit"]');
+  const selectedProduction = warehouses.find((item) =>
+    item.id === dom.productionWarehouse.value && item.active && item.openingCountApplied);
+  dom.productionWarehouseSet.disabled = !writable || !selectedProduction
+    || selectedProduction.isProduction === true;
   if (movementButton) movementButton.disabled = !movementReady;
   if (transferButton) transferButton.disabled = !transferReady;
   const countWarehouse = warehouses.find((item) => item.id === dom.openingWarehouse.value && item.active);
@@ -1139,6 +1188,7 @@ function bind() {
     if (item) void actOnImport(item, "apply");
   });
   dom.warehouseForm.addEventListener("submit", createWarehouse);
+  dom.productionWarehouseSet.addEventListener("click", () => { void setProductionWarehouse(); });
   dom.warehouseSelect.addEventListener("change", () => {
     movementNextCursor = null;
     movementWarehouseId = null;

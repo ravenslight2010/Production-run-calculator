@@ -95,6 +95,14 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
 .pending-box p { margin: 0; color: #655633; font-size: 12px; line-height: 1.45; }
 .pending-box button { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #c7ad72; background: transparent; color: #604610; font: 600 11px var(--display); cursor: pointer; }
 .pending-box button:hover { background: #eee0bd; }
+.inventory-receipt { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--line); background: var(--surface-raised); }
+.inventory-receipt h3 { margin: 0 0 7px; font: 600 14px var(--display); }
+.inventory-receipt p { margin: 6px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.inventory-receipt ul { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.inventory-receipt li { display: flex; justify-content: space-between; gap: 14px; color: var(--ink); font-size: 12px; line-height: 1.45; }
+.inventory-receipt li span:last-child { color: var(--muted); text-align: right; }
+.inventory-receipt.has-shortage { border-color: #c69a3a; background: #faf4e7; }
+.inventory-receipt.has-shortage p[role="status"] { color: #73520c; font-weight: 600; }
 
 .create-panel { padding: 21px clamp(20px, 3vw, 36px) 19px; border: 1px solid var(--line); background: #e9e9df; }
 .create-heading-row { display: flex; align-items: start; justify-content: space-between; }
@@ -377,6 +385,8 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
   .manager-inline-form .button { width: 100%; }
   .manager-list-item { align-items: start; }
   .manager-list-actions { flex-wrap: wrap; justify-content: end; }
+  .inventory-receipt li { flex-direction: column; gap: 2px; }
+  .inventory-receipt li span:last-child { text-align: left; }
 }
 @media (max-width: 380px) {
   .sync-stamp { display: none; }

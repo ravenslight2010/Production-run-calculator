@@ -85,7 +85,9 @@ function newRun(overrides = {}) {
     pausedAt: null,
     resumedAt: null,
     completedAt: null,
-    setupSnapshot: { label: "Browser test run", targetCases: 100, productCode: "DOUGH-A" },
+    setupSnapshot: {
+      label: "Browser test run", targetCases: 100, productCode: "DOUGH-A", productionSetupCode: "LINE-A",
+    },
     doughCapacity: { status: "available", reasons: [], doughballYield: 645.19, pizzasPerCase: 12 },
     pauseIntervals: [],
     stationProgress: {},
@@ -103,6 +105,12 @@ function applyCommand(fixture, command) {
     return { outcome: "accepted", replayed: true, run: fixture.receipts.get(command.commandId) };
   }
   if (command.expectedRevision !== fixture.run.revision) {
+    fixture.stationCommandOutcomes.push({ mode: command.mode, outcome: "conflict" });
+    return { outcome: "conflict", currentRun: snapshot(fixture) };
+  }
+  if (command.mode === "timer_start" && fixture.forceTimerStartConflict) {
+    fixture.forceTimerStartConflict = false;
+    fixture.stationCommandOutcomes.push({ mode: command.mode, outcome: "conflict" });
     return { outcome: "conflict", currentRun: snapshot(fixture) };
   }
   const key = command.stationKey;
@@ -152,11 +160,43 @@ function applyCommand(fixture, command) {
   fixture.run.updatedAt = now;
   const resultRun = snapshot(fixture);
   fixture.receipts.set(command.commandId, resultRun);
+  fixture.stationCommandOutcomes.push({ mode: command.mode, outcome: "accepted" });
   return { outcome: "accepted", replayed: false, run: resultRun };
 }
 
+function startMockServerStationWorker(fixture) {
+  const worker = setInterval(() => {
+    if (fixture.run.status !== "running") return;
+    const now = Date.now();
+    for (const [stationKey, state] of Object.entries(fixture.run.stationProgress)) {
+      const rate = Number(state.inputs.autoTrackRatePerMinute) || 0;
+      const current = Number(state.progress[AUTO_FIELD[stationKey]]) || 0;
+      const dueAt = Date.parse(state.nextDueAt || "");
+      if (rate <= 0 || current >= fixture.run.setupSnapshot.targetCases || !Number.isFinite(dueAt) || dueAt > now) continue;
+      applyCommand(fixture, {
+        commandId: crypto.randomUUID(),
+        expectedRevision: fixture.run.revision,
+        runId: fixture.run.id,
+        stationKey,
+        mode: "auto_track",
+        changes: {},
+      });
+    }
+  }, 25);
+  return () => clearInterval(worker);
+}
+
 async function createFixture(t, viewport = { width: 1440, height: 900 }, { manager = false } = {}) {
-  const fixture = { run: newRun(), receipts: new Map(), pageErrors: [], consoleErrors: [], imports: [] };
+  const fixture = {
+    run: newRun(),
+    receipts: new Map(),
+    pageErrors: [],
+    consoleErrors: [],
+    imports: [],
+    stationCommandOutcomes: [],
+    browserStationCommands: [],
+    forceTimerStartConflict: false,
+  };
   const server = createServer(async (request, response) => {
     const asset = WEB_ASSETS.get(new URL(request.url, "http://v2.test").pathname);
     if (!asset || !["GET", "HEAD"].includes(request.method)) {
@@ -238,10 +278,12 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
+            productionWarehouse: { id: "74000000-0000-4000-8000-000000000010", name: "Main Warehouse" },
             products: [{
               code: "DOUGH-A",
               name: "Dough Product",
               doughCapacity: fixture.run.doughCapacity,
+              productionSetups: [{ code: "LINE-A", name: "Main Line" }],
             }],
           }),
         });
@@ -406,6 +448,7 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
           return;
         }
         const body = JSON.parse(request.postData() || "{}");
+        fixture.browserStationCommands.push(body.mode);
         const result = applyCommand(fixture, {
           ...body,
           runId: match[1],
@@ -619,6 +662,8 @@ test("server auto-tracking and station timers are shared across devices", async 
     progress: { casesProduced: 0 },
     nextDueAt: dueAt,
   });
+  fixture.forceTimerStartConflict = true;
+  t.after(startMockServerStationWorker(fixture));
   const deviceA = await openDevice();
   const deviceB = await openDevice({ width: 390, height: 844 });
 
@@ -628,13 +673,29 @@ test("server auto-tracking and station timers are shared across devices", async 
   ), null, { timeout: 7000 });
 
   await deviceA.page.getByRole("button", { name: "Start timer" }).click();
+  try {
+    await waitForState(() => fixture.run.stationProgress.line.progress.timerStatus === "running", 5000);
+  } catch {
+    assert.fail(`timer command was not accepted: ${JSON.stringify({
+      state: fixture.run.stationProgress.line,
+      outcomes: fixture.stationCommandOutcomes,
+    })}`);
+  }
   await deviceA.page.getByText(/Timer running/).waitFor();
   await deviceB.page.getByText(/Timer running/).waitFor();
+  const timerStartOutcomes = fixture.stationCommandOutcomes
+    .filter(({ mode }) => mode === "timer_start")
+    .map(({ outcome }) => outcome);
+  assert.ok(timerStartOutcomes.length >= 2);
+  assert.equal(timerStartOutcomes[0], "conflict");
+  assert.equal(timerStartOutcomes.at(-1), "accepted");
+  assert.ok(timerStartOutcomes.slice(1, -1).every((outcome) => outcome === "conflict"));
   await deviceB.page.getByRole("button", { name: "Pause timer" }).click();
   await deviceB.page.getByText(/Timer paused/).waitFor();
   await deviceA.page.getByText(/Timer paused/).waitFor();
   assert.equal(fixture.run.stationProgress.line.progress.timerStatus, "paused");
   assert.ok(Number(fixture.run.stationProgress.line.progress.timerElapsedMs) >= 0);
+  assert.ok(!fixture.browserStationCommands.includes("auto_track"));
   assert.deepEqual(fixture.pageErrors, []);
 });
 
@@ -643,6 +704,15 @@ test("manager downloads each CSV template with parser-valid synthetic examples",
   const { page } = await fixture.openDevice();
   await page.locator("#manager-tools:not([hidden])").waitFor();
   await page.getByText("No setup imports recorded yet.").waitFor();
+  for (const width of [390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.equal(await page.getByLabel("Production warehouse").count(), 1);
+    assert.equal(await page.getByRole("button", { name: "Set production warehouse" }).getAttribute("type"), "button");
+    assert.ok(
+      await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
+      `manager inventory layout should not overflow at ${width}px`,
+    );
+  }
 
   for (const [kind, template] of Object.entries(setupImportCsvTemplates)) {
     await page.locator("#import-kind").selectOption(kind);

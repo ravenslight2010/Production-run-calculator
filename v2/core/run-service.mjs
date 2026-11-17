@@ -44,15 +44,21 @@ function normalizeAuth(auth) {
   }
 }
 
-function normalizeSetupSnapshot(value) {
+function normalizeSetupSnapshot(value, { fromStorage = false, requireProductionSetup = false } = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw invalidRequest("setupSnapshot must contain a run label and target case count.");
   }
   const keys = Object.keys(value).sort();
-  if (keys.some((key) => !["label", "productCode", "targetCases"].includes(key))
+  const allowedKeys = fromStorage
+    ? ["label", "productCode", "productionSetupCode", "productionPlan", "targetCases"]
+    : ["label", "productCode", "productionSetupCode", "targetCases"];
+  if (keys.some((key) => !allowedKeys.includes(key))
     || !keys.includes("label") || !keys.includes("targetCases")
     || (keys.includes("productCode") && (typeof value.productCode !== "string"
-      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.productCode)))) {
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.productCode)))
+    || (keys.includes("productionSetupCode") && (typeof value.productionSetupCode !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.productionSetupCode)))
+    || (requireProductionSetup && (!keys.includes("productCode") || !keys.includes("productionSetupCode")))) {
     throw invalidRequest("setupSnapshot contains missing or unsupported fields.");
   }
   if (typeof value.label !== "string") {
@@ -69,6 +75,7 @@ function normalizeSetupSnapshot(value) {
     label,
     targetCases: value.targetCases,
     ...(value.productCode ? { productCode: value.productCode } : {}),
+    ...(value.productionSetupCode ? { productionSetupCode: value.productionSetupCode } : {}),
   };
 }
 
@@ -77,6 +84,53 @@ function validCanonicalTimestamp(value, nullable = false) {
   if (typeof value !== "string") return false;
   const timestamp = new Date(value);
   return !Number.isNaN(timestamp.valueOf()) && timestamp.toISOString() === value;
+}
+
+function validInventoryConsumption(value) {
+  if (value === null) return true;
+  return value && typeof value === "object" && !Array.isArray(value)
+    && value.status === "completed"
+    && UUID_PATTERN.test(value.runId)
+    && UUID_PATTERN.test(value.warehouseId)
+    && typeof value.warehouseName === "string" && value.warehouseName.length >= 1 && value.warehouseName.length <= 120
+    && validCanonicalTimestamp(value.occurredAt)
+    && Array.isArray(value.lines)
+    && value.lines.every((line) => line && typeof line === "object" && !Array.isArray(line)
+      && UUID_PATTERN.test(line.productId)
+      && typeof line.productCode === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(line.productCode)
+      && typeof line.productName === "string" && line.productName.length >= 1 && line.productName.length <= 120
+      && typeof line.unit === "string" && /^[A-Za-z][A-Za-z0-9._/-]{0,15}$/u.test(line.unit)
+      && ["required", "deducted", "shortfall"].every((key) =>
+        typeof line[key] === "string" && /^(0|[1-9][0-9]{0,13})(\.[0-9]{1,6})?$/u.test(line[key])));
+}
+
+function validInventoryPlanLine(line) {
+  return line && typeof line === "object" && !Array.isArray(line)
+    && typeof line.productId === "string" && UUID_PATTERN.test(line.productId)
+    && typeof line.productCode === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(line.productCode)
+    && typeof line.productName === "string" && line.productName.length >= 1 && line.productName.length <= 120
+    && typeof line.unit === "string" && /^[A-Za-z][A-Za-z0-9._/-]{0,15}$/u.test(line.unit)
+    && typeof line.quantity === "string"
+    && /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,6})?$/u.test(line.quantity)
+    && Number(line.quantity) > 0;
+}
+
+function validProductionPlan(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    && typeof value.code === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.code)
+    && typeof value.name === "string" && value.name.length >= 1 && value.name.length <= 120
+    && value.warehouse && typeof value.warehouse === "object" && !Array.isArray(value.warehouse)
+    && typeof value.warehouse.id === "string" && UUID_PATTERN.test(value.warehouse.id)
+    && typeof value.warehouse.name === "string" && value.warehouse.name.length >= 1 && value.warehouse.name.length <= 120
+    && Array.isArray(value.recipes) && value.recipes.length >= 1 && value.recipes.length <= 20
+    && value.recipes.every((recipe) => recipe && typeof recipe === "object" && !Array.isArray(recipe)
+      && typeof recipe.code === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(recipe.code)
+      && typeof recipe.name === "string" && recipe.name.length >= 1 && recipe.name.length <= 120
+      && ["dough", "cheese", "pepperoni", "sauce", "frontline"].includes(recipe.stationKey)
+      && Array.isArray(recipe.ingredients) && recipe.ingredients.length >= 1 && recipe.ingredients.length <= 200
+      && recipe.ingredients.every(validInventoryPlanLine))
+    && Array.isArray(value.packagingPerCase) && value.packagingPerCase.length >= 1 && value.packagingPerCase.length <= 200
+    && value.packagingPerCase.every(validInventoryPlanLine);
 }
 
 function validateRun(value) {
@@ -98,9 +152,17 @@ function validateRun(value) {
     throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run storage returned invalid data.", 502);
   }
   try {
-    normalizeSetupSnapshot(value.setupSnapshot);
+    normalizeSetupSnapshot(value.setupSnapshot, { fromStorage: true });
   } catch {
     throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run storage returned invalid setup data.", 502);
+  }
+  if (value.setupSnapshot.productionPlan !== undefined
+    && (!value.setupSnapshot.productCode || !value.setupSnapshot.productionSetupCode
+      || !validProductionPlan(value.setupSnapshot.productionPlan))) {
+    throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run storage returned invalid production setup data.", 502);
+  }
+  if (value.inventoryConsumption !== undefined && !validInventoryConsumption(value.inventoryConsumption)) {
+    throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run storage returned invalid inventory consumption data.", 502);
   }
   if (value.doughCapacity !== undefined && (
     !value.doughCapacity || typeof value.doughCapacity !== "object" || Array.isArray(value.doughCapacity)
@@ -164,7 +226,7 @@ export function createRunService({ query, authorize: authorizeAction }) {
     async create({ auth, requestId, setupSnapshot }) {
       const identity = normalizeAuth(auth);
       const normalizedRequestId = normalizeUuid(requestId, "requestId");
-      const normalizedSetup = normalizeSetupSnapshot(setupSnapshot);
+      const normalizedSetup = normalizeSetupSnapshot(setupSnapshot, { requireProductionSetup: true });
       await authorize(authorizeAction, auth, "run.create");
 
       const requestHash = createHash("sha256").update(JSON.stringify({
@@ -195,9 +257,11 @@ export function createRunService({ query, authorize: authorizeAction }) {
       validateRun(response.run);
       if (
         response.run.status !== "planned"
+        || !response.run.setupSnapshot.productionPlan
         || response.run.setupSnapshot.label !== normalizedSetup.label
         || response.run.setupSnapshot.targetCases !== normalizedSetup.targetCases
         || response.run.setupSnapshot.productCode !== normalizedSetup.productCode
+        || response.run.setupSnapshot.productionSetupCode !== normalizedSetup.productionSetupCode
       ) {
         throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run creation returned a different run setup.", 502);
       }
@@ -243,11 +307,26 @@ export function createRunService({ query, authorize: authorizeAction }) {
       } catch (error) {
         throwSafeStorageError(error);
       }
-      const products = requireResult(result, Array.isArray, "Run product list returned an unexpected result.");
+      const catalog = requireResult(result, (value) => value && typeof value === "object" && !Array.isArray(value),
+        "Run product list returned an unexpected result.");
+      const products = catalog.products;
+      const productionWarehouse = catalog.productionWarehouse;
+      if (!Array.isArray(products)
+        || (productionWarehouse !== null && (!productionWarehouse
+          || typeof productionWarehouse !== "object" || Array.isArray(productionWarehouse)
+          || !UUID_PATTERN.test(productionWarehouse.id)
+          || typeof productionWarehouse.name !== "string"
+          || productionWarehouse.name.length < 1 || productionWarehouse.name.length > 120))) {
+        throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run product list returned invalid warehouse data.", 502);
+      }
       for (const product of products) {
         if (!product || typeof product !== "object" || Array.isArray(product)
           || typeof product.code !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(product.code)
           || typeof product.name !== "string" || product.name.length < 1 || product.name.length > 120
+          || !Array.isArray(product.productionSetups)
+          || product.productionSetups.some((setup) => !setup || typeof setup !== "object" || Array.isArray(setup)
+            || typeof setup.code !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(setup.code)
+            || typeof setup.name !== "string" || setup.name.length < 1 || setup.name.length > 120)
           || !product.doughCapacity || typeof product.doughCapacity !== "object"
           || !["available", "unavailable"].includes(product.doughCapacity.status)
           || !Array.isArray(product.doughCapacity.reasons)
@@ -260,7 +339,7 @@ export function createRunService({ query, authorize: authorizeAction }) {
           throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run product list returned invalid data.", 502);
         }
       }
-      return products;
+      return { products, productionWarehouse };
     },
   });
 }

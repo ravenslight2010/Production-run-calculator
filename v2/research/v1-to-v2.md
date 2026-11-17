@@ -44,6 +44,28 @@ physical devices, or establish published V1 behavior.
 | **Cutover and retained V1 history** | V1 schemas and existing plans distinguish setup/master data from production runs, sessions, inventory movement, and operational history. This assessment made no data query or transfer. | **Verified** for the documented scope boundary only; cutover execution is not run. | V2's architecture recommends carrying approved setup/master data and identities/roles, requiring fresh sign-in and a fresh physical inventory count, and excluding run history and V1 stock. It recommends a separately restricted read-only V1 archive with a retention decision; no archive exists. |
 | **Replit deployment boundary** | Current repository configuration is not a V2 deployment. The current V2 architecture records official Replit documentation checked 2026-11-10: same-project artifacts publish together; separate projects do not share a managed production DB; one Reserved VM can host multiple processes. | **Partially verified**; documented platform fit, not an executed application deployment. | The candidate is one V2 project/Reserved VM with supervised API and worker processes. Shared synthetic database behavior, restarts, publish compatibility, and usable connection limits remain untested. Do not publish the V1 project to test this. |
 
+## V2 implementation update
+
+The capability table above records the V2 source state on 2026-11-10. The
+following 2026-11-16 update supersedes only its V2 starting-point column; the
+V1 evidence, limitations, and cutover exclusions remain unchanged.
+
+- V2 now has an executable username/password server, run lifecycle, and
+  Line/Dough/Cheese/Pepperoni/Sauce/Frontline/Packaging workflows. The server
+  worker owns automatic progress; browsers only read and display canonical
+  state. Timer intents use bounded retries against the newest server revision,
+  while manual edits remain reviewable rather than silently overwritten.
+- V2 manager imports now stage standard inventory products, recipes, and
+  production setups, and support reviewed physical opening counts across
+  multiple warehouses within the single facility.
+- New runs require a linked product, production setup, and manager-designated
+  counted warehouse. They freeze the recipe/setup and inventory location.
+  Completion records actual batch and packed-case deductions, an immutable
+  receipt, and shortages in one transaction; retries do not deduct twice.
+- Current tests use disposable PostgreSQL and emulated desktop/phone browsers.
+  They do not establish V2 deployment readiness, physical-device behavior,
+  manager inventory usability on real devices, or production load.
+
 ## Status of the planning records
 
 Accessible task records were checked on 2026-11-10 and are preserved under

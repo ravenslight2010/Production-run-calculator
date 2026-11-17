@@ -51,8 +51,9 @@ test("download templates parse with canonical headers and synthetic example rows
   const countCsv = renderImportCsvTemplate(openingCountCsvTemplate);
   const counts = parseOpeningCountCsv(countCsv, productCodes);
   assert.deepEqual(counts.map(({ productCode, quantity }) => [productCode, quantity]), [
+    ["TEMPLATE-PIZZA", "0"],
     ["TEMPLATE-FLOUR", "0"],
-    ["TEMPLATE-CHEESE", "0"],
+    ["TEMPLATE-BOX", "0"],
   ]);
   assert.deepEqual(openingCountCsvTemplate.rows.map(([code]) => code), productCodes);
 });

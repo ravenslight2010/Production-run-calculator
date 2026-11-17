@@ -17,6 +17,30 @@ const RUN = {
   setupSnapshot: { label: "Run A", targetCases: 12 },
   pauseIntervals: [],
 };
+const PRODUCTION_PLAN = {
+  code: "LINE-A",
+  name: "Main line",
+  warehouse: { id: "00000000-0000-4000-8000-000000000005", name: "Main warehouse" },
+  recipes: [{
+    code: "DOUGH-RECIPE",
+    name: "Dough recipe",
+    stationKey: "dough",
+    ingredients: [{
+      productId: "00000000-0000-4000-8000-000000000006",
+      productCode: "FLOUR",
+      productName: "Flour",
+      quantity: "10",
+      unit: "lb",
+    }],
+  }],
+  packagingPerCase: [{
+    productId: "00000000-0000-4000-8000-000000000007",
+    productCode: "CARTON",
+    productName: "Carton",
+    quantity: "1",
+    unit: "each",
+  }],
+};
 const AUTH = { verified: true, facilityId: "00000000-0000-4000-8000-000000000001", actorId: "00000000-0000-4000-8000-000000000002" };
 
 async function listenHandler(t, handler, calls = []) {
@@ -37,7 +61,7 @@ async function withApi(t, overrides = {}, options = {}) {
   const runs = {
     listProducts: async (input) => {
       calls.push(["listProducts", input]);
-      return [];
+      return { products: [], productionWarehouse: null };
     },
     list: async (input) => {
       calls.push(["list", input]);
@@ -262,14 +286,26 @@ test("composes the HTTP API with server services and a parameterized PostgreSQL 
       query: async (sql, params) => {
         queries.push({ sql, params });
         if (sql.includes("v2.list_runs")) return { rows: [{ result: [RUN] }] };
-        if (sql.includes("v2.list_run_products")) return { rows: [{ result: [{
-          code: "DOUGH-A",
-          name: "Dough A",
-          doughCapacity: { status: "unavailable", reasons: ["dough_source_missing"] },
-        }] }] };
+        if (sql.includes("v2.list_run_products")) return { rows: [{ result: {
+          productionWarehouse: null,
+          products: [{
+            code: "DOUGH-A",
+            name: "Dough A",
+            doughCapacity: { status: "unavailable", reasons: ["dough_source_missing"] },
+            productionSetups: [],
+          }],
+        } }] };
         if (sql.includes("v2.create_planned_run")) {
           const setupSnapshot = JSON.parse(params[4]);
-          return { rows: [{ result: { outcome: "created", replayed: false, run: { ...RUN, setupSnapshot } } }] };
+          return {
+            rows: [{
+              result: {
+                outcome: "created",
+                replayed: false,
+                run: { ...RUN, setupSnapshot: { ...setupSnapshot, productionPlan: PRODUCTION_PLAN } },
+              },
+            }],
+          };
         }
         if (sql.includes("v2.apply_run_lifecycle_command")) {
           return {
@@ -307,7 +343,9 @@ test("composes the HTTP API with server services and a parameterized PostgreSQL 
     method: "POST",
     body: {
       requestId: "00000000-0000-4000-8000-000000000005",
-      setupSnapshot: { label: "Integrated run", targetCases: 24, productCode: "DOUGH-A" },
+      setupSnapshot: {
+        label: "Integrated run", targetCases: 24, productCode: "DOUGH-A", productionSetupCode: "LINE-A",
+      },
     },
   });
   assert.equal(createResponse.status, 201);

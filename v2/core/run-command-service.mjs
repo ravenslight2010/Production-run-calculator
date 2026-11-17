@@ -6,6 +6,9 @@ const COMMAND_KEYS = ["commandId", "commandType", "expectedRevision", "runId"];
 const SQL = `SELECT v2.apply_run_lifecycle_command(
   $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::bigint
 ) AS result`;
+const COMPLETE_SQL = `SELECT v2.complete_run_with_inventory(
+  $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::bigint
+) AS result`;
 
 export class RunCommandServiceError extends Error {
   constructor(code, message, status) {
@@ -105,7 +108,7 @@ export function createRunCommandService({ query, authorize }) {
         expectedRevision: normalizedCommand.expectedRevision,
       });
       const requestHash = createHash("sha256").update(canonicalRequest, "utf8").digest("hex");
-      const result = await query(SQL, [
+      const result = await query(normalizedCommand.commandType === "complete" ? COMPLETE_SQL : SQL, [
         identity.facilityId,
         normalizedCommand.runId,
         identity.actorId,

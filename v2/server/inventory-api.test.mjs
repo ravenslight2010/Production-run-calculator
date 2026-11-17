@@ -370,6 +370,43 @@ test("warehouse reads stay facility-scoped and reject unsupported query paramete
   assert.deepEqual(api.calls[0].values, [MANAGER.facilityId, WAREHOUSE_ID]);
 });
 
+test("production warehouse selection uses a manager-scoped, server-hashed command", async (t) => {
+  const selection = {
+    outcome: "accepted",
+    replayed: false,
+    warehouse: {
+      id: WAREHOUSE_ID,
+      name: "Main",
+      active: true,
+      isProduction: true,
+      openingCountApplied: true,
+    },
+  };
+  const api = await withApi(t, { query: async () => ({ rows: [{ result: selection }] }) });
+  const denied = await withApi(t, { csrf: false });
+  const blocked = await send(denied.baseUrl, "/api/v2/inventory/production-warehouse", {
+    method: "POST",
+    body: { requestId: "set-production-1", warehouseId: WAREHOUSE_ID },
+  });
+  assert.equal(blocked.status, 403);
+  assert.equal(denied.calls.length, 0);
+
+  const response = await send(api.baseUrl, "/api/v2/inventory/production-warehouse", {
+    method: "POST",
+    body: { requestId: "set-production-1", warehouseId: WAREHOUSE_ID },
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), selection);
+  assert.match(api.calls[0].text, /v2\.set_production_warehouse/);
+  assert.deepEqual(api.calls[0].values.slice(0, 3), [
+    MANAGER.facilityId,
+    MANAGER.actorId,
+    "set-production-1",
+  ]);
+  assert.match(api.calls[0].values[3], /^[0-9a-f]{64}$/);
+  assert.equal(api.calls[0].values[4], WAREHOUSE_ID);
+});
+
 test("opening-count history is manager-scoped and bounded", async (t) => {
   const api = await withApi(t, {
     query: async () => ({

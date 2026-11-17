@@ -79,6 +79,24 @@ test("uses verified server identity and a parameterized database command", async
   }]);
 });
 
+test("completes through the transaction-backed inventory wrapper", async () => {
+  const completion = { ...COMMAND, commandType: "complete", expectedRevision: 4 };
+  const { service, calls } = createService({
+    queryResult: { rows: [{ result: {
+      outcome: "accepted",
+      replayed: false,
+      run: { id: COMMAND.runId, status: "completed", revision: 5, inventoryConsumption: { status: "completed" } },
+    } }] },
+  });
+  const result = await service.execute({ auth: AUTH, command: completion });
+
+  assert.equal(result.run.inventoryConsumption.status, "completed");
+  assert.match(calls[0].text, /v2\.complete_run_with_inventory/);
+  assert.equal(calls[0].values.length, 7);
+  assert.equal(calls[0].values[5], "complete");
+  assert.equal(calls[0].values[6], 4);
+});
+
 test("normalizes UUID casing before hashing and database use", async () => {
   const { service, calls } = createService();
   await service.execute({

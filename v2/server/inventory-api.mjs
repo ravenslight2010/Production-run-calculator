@@ -526,6 +526,20 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
         sendJson(response, value.replayed ? 200 : 201, value);
         return true;
       }
+      if (isInventory && url.pathname === `${INVENTORY_PATH}/production-warehouse` && request.method === "POST") {
+        operation = "set_production_warehouse";
+        const body = await readJsonBody(request);
+        requireKeys(body, ["requestId", "warehouseId"]);
+        const requestId = validateRequestId(body.requestId);
+        const warehouseId = validateUuid(body.warehouseId, "Production warehouse ID");
+        const result = await pool.query(
+          "SELECT v2.set_production_warehouse($1::uuid, $2::uuid, $3::text, $4::text, $5::uuid) AS result",
+          [...scope, actor, requestId, hashRequest({ warehouseId }), warehouseId],
+        );
+        const value = resultValue(result);
+        sendJson(response, value.replayed ? 200 : 201, value);
+        return true;
+      }
       if (isInventory && url.pathname === `${INVENTORY_PATH}/products` && request.method === "GET") {
         operation = "list_products";
         if (url.search) throw new InventoryApiError(400, "Product lists do not accept query parameters.");
