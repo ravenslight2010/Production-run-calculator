@@ -14,8 +14,9 @@ Captured 2026-11-17, America/Chicago.
   still requires `V2_DATABASE_URL` and has no implicit fallback.
 - The existing V1 schemas and records were not read, imported, or changed. The
   six V2 migrations target objects explicitly in schema `v2`.
-- The V2 development schema is installed. It contains 21 tables; the run,
-  staff-account, and inventory-balance tables each contain zero rows.
+- The V2 development schema is installed. It contains 21 tables and one
+  enabled manager account. The run and inventory-balance tables contain zero
+  rows; no V1 account, session, or inventory data was transferred.
 - The production database was not queried or changed. The project is not
   deployed and no publish was started. The deployment run command now refuses
   publication until the production database gates are resolved; the Project
@@ -52,11 +53,15 @@ Captured 2026-11-17, America/Chicago.
 ## Data and secrets boundary
 
 - No V1 database, data, sessions, credentials, or inventory was used.
-- No V1-to-V2 data transfer has happened. V2 has no manager account or opening
-  inventory.
-- `V2_INITIAL_MANAGER_BOOTSTRAP_CODE` is not configured. The preview displays
-  the sign-in page, but authenticated manager and production screens have not
-  been verified in the live preview.
+- No V1-to-V2 data transfer has happened. V2's initial manager was created
+  directly in the V2 schema; no V1 account or opening inventory was transferred.
+- The owner created the first manager through the guarded bootstrap flow and
+  confirmed signing out and back in through the normal sign-in flow. A
+  read-only database check found one enabled manager and the durable bootstrap
+  marker; the API now reports first-manager setup unavailable. The one-time
+  `V2_INITIAL_MANAGER_BOOTSTRAP_CODE` secret was removed after setup.
+- The authenticated sign-in path is owner-confirmed, but manager inventory and
+  production screens have not yet been verified in the live preview.
 - No production migration, production query, database copy, or publish was
   performed. Do not paste database URLs or bootstrap codes into chat.
 - The preview's initial unauthenticated session check returns HTTP 401 by design;
@@ -77,6 +82,8 @@ they do not prove production or physical-device behavior.
 | V2 build/syntax checks | PASS |
 | Process supervisor configuration | PASS — both processes validated |
 | Development preview `/healthz` | PASS — API and worker healthy; no run work queued |
+| First-manager setup and secret cleanup | PASS — one enabled manager, bootstrap marker set, setup closed, one-time secret absent |
+| Normal sign-in | PASS — owner confirmed sign-out followed by successful sign-in |
 | Worker process restart | PASS — killed worker was restarted under supervision; API health recovered |
 | Runtime | PASS — API and worker use Node 24.22.2 |
 | Development DB connection setting | OBSERVED — 112 max, 4 reserved, 2 V2 app connections at check |
@@ -133,5 +140,5 @@ they do not prove production or physical-device behavior.
   Then verify the serving revision, worker health, synthetic run start/pause/
   resume/auto-track/complete, app and worker restarts, and connection use. No
   real production run or inventory should be created for that verification.
-- Provision a V2 manager through the secure bootstrap flow before authenticated
-  browser testing. Do not transfer V1 sessions or credentials.
+- Complete authenticated manager inventory browser testing using synthetic V2
+  data. Do not transfer V1 sessions or credentials.

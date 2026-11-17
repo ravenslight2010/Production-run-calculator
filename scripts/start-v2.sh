@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=./src/select-replit-shell-node.sh
 source "$ROOT/scripts/src/select-replit-shell-node.sh"
 EXPECTED_NODE_VERSION="$(tr -d '[:space:]' < "$ROOT/.nvmrc")"
 ACTUAL_NODE_VERSION="$(node --version)"

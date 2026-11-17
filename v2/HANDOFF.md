@@ -155,14 +155,17 @@ target, but is not published.
   recovered. The measured database setting was 112 maximum connections with
   four reserved; the configured API and worker pools allow five total.
 - V2 migrations `0001` through `0006` are applied to the development database's
-  `v2` schema only. The V2 run, staff, and inventory tables are empty. V1
-  schemas and records were not inspected or changed.
-- Production database function/trigger/grant setup, an authenticated manager
-  preview, production publish, full manager inventory browser verification,
-  tablet/WebKit, and physical-device verification remain future work. Do not
-  publish until the least-privilege runtime access and V2 production database
-  objects are reviewed. The deployment run command currently refuses to
-  publish; the `Project` workflow remains available for the private preview.
+  `v2` schema only. The private preview has one enabled manager account, created
+  through the guarded first-manager flow; the owner confirmed sign-out and
+  sign-in. The bootstrap marker is set and the one-time bootstrap secret was
+  removed. No run or inventory data has been seeded. V1 schemas and records were
+  not inspected or changed.
+- Production database function/trigger/grant setup, full manager inventory
+  browser verification, tablet/WebKit, physical-device verification, and
+  production publish remain future work. Do not publish until the
+  least-privilege runtime access and V2 production database objects are reviewed.
+  The deployment run command currently refuses to publish; the `Project`
+  workflow remains available for the private preview.
 - The latest in-workspace pilot status, evidence, and remaining actions are recorded
   in [PILOT-DEPLOYMENT-RECORD.md](PILOT-DEPLOYMENT-RECORD.md).
 
