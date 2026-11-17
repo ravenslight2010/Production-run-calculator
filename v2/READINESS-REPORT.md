@@ -15,6 +15,9 @@ schema of the project database
   verified in the production database. No V2 production SQL-object or business-
   data change was made; a separately approved, read-only V1 source audit is
   documented below.
+- The two custom V1 role equivalents are seeded only in V2 development.
+  Production role rows are not yet present or approved for transfer; Publish
+  does not copy development rows as production data.
 - Production has not been published or cut over. The deployment guard remains
   enabled; do not bypass it.
 - Physical-device checks and the manager workflow in the live private preview
@@ -36,6 +39,7 @@ schema of the project database
 | First-manager bootstrap | **PASS** | Setup is closed; exactly one enabled manager; bootstrap secret removed |
 | Owner sign-in | **PASS** | Owner confirmed sign-out followed by normal sign-in |
 | Worker restart | **PASS** | Existing pilot evidence confirms supervised restart and recovered health |
+| V2 staff role equivalents | **PASS** | `warehouse` and `qc-manager` are seeded in the V2 development schema with the reviewed least-privilege capability sets; disposable PostgreSQL role/session checks pass |
 | Live-preview authenticated manager screens | **NOT RUN** | Agent's preview browser has no owner session; isolated authenticated browser test is separate |
 | Physical Android/iOS operation | **NOT RUN** | No connected device test environment |
 | Safari/WebKit | **NOT RUN** | Chromium evidence only |
@@ -87,11 +91,12 @@ schema of the project database
 - **V1 cutover data — owner: project owner and migration operator.** Read-only
   source review is complete; see [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md).
   The owner chose to build equivalents for two custom roles before transferring
-  those accounts. Read only the roles' capability names after separate approval;
-  align them with V2 inventory and QC permissions. Review product, recipe, and
-  setup mappings and approve a destination before any transfer; approve a
-  separate production write window if production is later selected. Do not
-  copy historical runs, V1 stock, live sessions, or reset tokens.
+  those accounts; the exact role names were read under separate approval and
+  the V2 development roles are seeded and tested. `qc-manager` behavior still
+  depends on QC and manager-history work. Review product, recipe, and setup
+  mappings and approve a destination before any transfer; approve a separate
+  production write window if production is later selected. Do not copy
+  historical runs, V1 stock, live sessions, or reset tokens.
 
 ## V1 setup and staff transfer rehearsal
 

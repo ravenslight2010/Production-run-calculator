@@ -87,6 +87,9 @@ target, but is not published.
   server-recorded batch and packed-case use, appends the movements and receipt
   atomically, and records shortages without blocking completion or allowing
   negative stock.
+- `db/0007-staff-role-equivalents.sql` seeds the reviewed `warehouse` and
+  `qc-manager` roles in V2 development. The latter's QC and incident permissions
+  are enforced as Tasks #3964 and #3965 add those features.
 - `core/import-csv.mjs` accepts bounded V2 CSV templates for products, recipes,
   production setup, and opening counts. Imports are staged with server-computed
   idempotency, reopenable for manager review, and guarded for safe undo.
@@ -164,11 +167,12 @@ target, but is not published.
   automatic-progress ticks. Development restart was tested and the worker
   recovered. The measured database setting was 112 maximum connections with
   four reserved; the configured API and worker pools allow five total.
-- V2 migrations `0001` through `0006` are applied to the development database's
+- V2 migrations `0001` through `0007` are applied to the development database's
   `v2` schema only. The private preview has one enabled manager account, created
   through the guarded first-manager flow; the owner confirmed sign-out and
   sign-in. The bootstrap marker is set and the one-time bootstrap secret was
-  removed. No run or inventory data has been seeded. The V1 production source
+  removed. The two reviewed custom role definitions are now seeded; no V1 staff,
+  recipe, or inventory data has been imported. No run or inventory data has been seeded. The V1 production source
   received a limited read-only aggregate audit; no source records were exported,
   imported, or changed.
 - Production database function/trigger/grant setup, full manager inventory

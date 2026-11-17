@@ -726,6 +726,8 @@ V2_TEST_ADMIN_URL="$V2_TEST_ADMIN_URL" V2_DATABASE_URL="$V2_API_URL" \
 V2_DATABASE_URL="$V2_API_URL" NODE_ENV=development \
   node "$ROOT/v2/server/http-postgres.browser.integration.mjs"
 "${PSQL[@]}" -f "$ROOT/v2/db/0006-run-inventory-linkage.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/0007-staff-role-equivalents.sql" >/dev/null
+"${PSQL[@]}" -f "$ROOT/v2/db/0007-staff-role-equivalents.test.sql"
 "${PSQL[@]}" -f "$ROOT/v2/db/cutover-transfer-rehearsal.test.sql"
 
 printf 'Run schema and lifecycle checks passed.\n'

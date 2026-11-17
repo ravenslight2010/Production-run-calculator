@@ -1,15 +1,16 @@
 # V1-to-V2 setup and staff transfer rehearsal
 
-**Status:** synthetic V2-side rehearsal and a limited, authorized read-only V1
-source audit are complete. No V1 rows were exported or imported. The V2
-destination and every production write remain blocked.
+**Status:** synthetic V2-side rehearsal, limited authorized read-only V1 source
+audit, and the V2 development role equivalents are complete. No V1 staff or
+setup rows were imported. Production role seeding and every other production
+write remain blocked.
 
 **Evidence reviewed:** archived V1 schema sources under
 `lib/db/src/schema/`, especially `users.ts`, `userRoles.ts`, `roles.ts`,
 `inventory.ts`, `ingredients.ts`, `brandProfiles.ts`, `doughRecipes.ts`,
 `sauceRecipes.ts`, `cheeseRecipes.ts`, `mixes.ts`, `dieTypes.ts`,
 `dieLineDefaults.ts`, `productionRules.ts`, `freezerPullItems.ts`, and
-`runTemplates.ts`; V2 migrations `0001`–`0006`; `_archived/v1/README.md`;
+`runTemplates.ts`; V2 migrations `0001`–`0007`; `_archived/v1/README.md`;
 `v2/HANDOFF.md`; and `v2/READINESS-REPORT.md`. On 2026-11-17, the owner
 identified this project's production database as the V1 source and authorized a
 limited read-only review of the documented allowlist. The review used the
@@ -152,7 +153,7 @@ V2 import counts; **no source row has been applied to V2**.
 | Source family | Read-only result | Transfer disposition |
 | --- | --- | --- |
 | `users` | 10 total; 1 sandbox account excluded; 9 live enabled accounts; 0 disabled, blank/untrimmed, or case-insensitive duplicate usernames | Seven accounts have built-in roles eligible for reviewed mapping. Two accounts assigned custom roles remain on hold until equivalent V2 roles exist. No account identifiers or usernames were retained. |
-| `user_roles` / `roles` | 9 live assignments; 0 orphaned or roleless live accounts. Assignments: manager 3, operator 4, `qc-manager` 1, `warehouse` 1. Seven role definitions are present: 2 built-in and 5 custom. | V1 manager's 11-capability set exactly matches V2 manager; V1 operator's empty set exactly matches V2 operator. The two assigned custom roles match neither V2 built-in role. The owner directed that equivalent V2 roles be built before transferring those accounts. Their exact source capability names remain unread; no capability JSON was returned or copied. Three custom definitions have no live assignment. |
+| `user_roles` / `roles` | 9 live assignments; 0 orphaned or roleless live accounts. Assignments: manager 3, operator 4, `qc-manager` 1, `warehouse` 1. Seven role definitions are present: 2 built-in and 5 custom. | V1 manager's 11-capability set exactly matches V2 manager; V1 operator's empty set exactly matches V2 operator. With separate owner approval, only the two assigned custom roles' capability-name lists were read: `warehouse` has `manage-inventory`; `qc-manager` has `use-ai-tools`, `review-incidents`, `manage-allergens`, `record-qc`, and `manage-qc`. V2 development now has non-built-in role rows with those exact sets. `warehouse` maps to the existing inventory permission; QC and incident behavior still depends on Tasks #3964 and #3965. Three custom definitions have no live assignment; no other custom-role capabilities were read. |
 | `inventory_items` | 3 live entries: 1 ingredient in `cases`, 2 ingredients in `lbs`; 0 packaging-category entries, blank identity fields, or case-insensitive duplicate keys | All three require an explicitly reviewed V2 code/unit mapping. Legacy keys are not assumed to be V2 product codes. No V1 stock quantity or movement table was queried. |
 | `dough_recipes` | 18 live, all enabled; 0 duplicate identity groups by case-insensitive name/brand plus flavors. All have empty flavor arrays and blank brands; 5 have empty component arrays. The 101 component names have 0 exact-name candidates among the 3 live V1 inventory items. | Empty flavor assignments can mean shared/untagged recipes in V1; they are not treated as errors. The 5 empty formulas need review; component links cannot be mapped from the current inventory-item allowlist. |
 | `sauce_recipes` | 26 live, all enabled; 0 duplicate identity groups. All have empty flavor arrays and blank brands; none have empty or malformed component arrays. The 109 component names have 0 exact-name candidates among the 3 live V1 inventory items. | Shared/untagged source semantics are preserved for review. Component links cannot be mapped from the current inventory-item allowlist. |
@@ -160,11 +161,13 @@ V2 import counts; **no source row has been applied to V2**.
 | `brand_profiles` | 157 live; 18 have blank flavor; 0 blank brands, invalid JSON-object shapes, or duplicate case-insensitive brand/flavor pairs. Recipe-name references: dough 114/114 unique exact-name candidates; sauce 128/145 unique (17 unmatched); cheese 153/196 unique (43 unmatched); no ambiguous name matches. | No direct V2 profile destination exists. Exact recipe-name candidates still need product/brand/flavor review. A key-only field inventory found run-progress/correction metadata keys in the profile payload, so neither JSON blob is copied; only separately reviewed setup fields can be mapped. |
 
 Role assignment accounting is 9 live accounts = 7 built-in-role candidates +
-2 accounts held until equivalent V2 roles exist. The single sandbox account is
-excluded. All 3 inventory items, 178 recipe rows, and 157 profiles remain
-unapplied pending owner-reviewed mappings and an approved destination. No rows
-were transferred, dropped, or silently merged. Source duplicate checks covered
-case-insensitive usernames, inventory keys, recipe name/brand/flavor
+2 accounts held until their equivalent V2 features are ready. The single
+sandbox account is excluded. All 3 inventory items, 178 recipe rows, and 157
+profiles remain unapplied pending owner-reviewed mappings and an approved
+destination. The two V2 role definitions are present in the development
+database only; production seeding has not been performed or approved. No V1
+rows were transferred, dropped, or silently merged. Source duplicate checks
+covered case-insensitive usernames, inventory keys, recipe name/brand/flavor
 identities, and profile brand/flavor identities; each reported zero duplicate
 groups.
 
@@ -191,12 +194,11 @@ Safari/PWA verification.
 
 **Current blocker:** source access is approved and the aggregate source review
 is complete, but a complete row-level mapping is not. The owner chose to build
-equivalent V2 roles before transferring the two custom-role accounts. The
-existing read approval excludes their capability JSON, so the exact source
-capability names need a separate narrow read approval. Role implementation
-must align with the inventory and QC capability work in Tasks #3963 and #3964;
-do not map either account to the broader manager role. Other blockers include
-legacy product keys,
+equivalent V2 roles before transferring the two custom-role accounts. Those
+role definitions now exist in V2 development; QC and incident behavior must
+still be implemented by Tasks #3964 and #3965 before the `qc-manager` account
+is usable. Do not map either account to the broader manager role. Other
+blockers include legacy product keys,
 recipe ingredient names, and setup/profile values lack reviewed V2 code/link
 mappings; packaging products are absent from the V1 inventory-item catalog;
 all 639 recipe component references lack an exact-name inventory-item match;

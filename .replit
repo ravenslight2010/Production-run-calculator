@@ -5,6 +5,7 @@ router = "application"
 deploymentTarget = "vm"
 build = ["bash", "scripts/src/run-release-node.sh", "pnpm", "--filter", "@workspace/lucia-v2", "run", "build"]
 run = ["bash", "scripts/deny-v2-publish.sh"]
+ignorePorts = false
 
 [workflows]
 runButton = "Project"
