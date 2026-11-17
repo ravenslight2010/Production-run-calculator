@@ -152,6 +152,8 @@ been created.
   verification, and physical-device verification remain future work.
 - There is no production data connection, V1 data migration, or separate V2
   Replit project.
+- The latest isolated-pilot status, evidence, and owner prerequisite are recorded
+  in [PILOT-DEPLOYMENT-RECORD.md](PILOT-DEPLOYMENT-RECORD.md).
 
 ## Remaining V2 validation
 
