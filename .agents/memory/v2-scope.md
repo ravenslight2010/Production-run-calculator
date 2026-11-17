@@ -38,3 +38,11 @@ The owner accepted the managed database's elevated role for a private synthetic-
 **Why:** The running development API and worker connections were observed with superuser privileges, despite Replit's general documentation describing non-superuser application roles. The owner chose to continue a private test, not to accept that privilege for a public production app.
 
 **How to apply:** Keep the V2 preview private and synthetic. Do not copy V1 data or publish while the role discrepancy and production functions/triggers/grants remain unresolved. If the production role is privileged, use an approved restricted database connection or keep V2 unpublished.
+
+## Expanded V2 feature scope
+
+The owner also wants V2 to restore scheduling and production planning, the remaining V1 import workflows, fuller inventory/preparation workflows, selected operational history and most manager tools, and QC/allergen workflows. The detailed manager-tool list and exact release timing remain subject to the staged task plans.
+
+**Why:** The owner wants an upgraded successor rather than a simplified replacement and explicitly asked to bring these V1 capabilities into V2.
+
+**How to apply:** Treat this as V2 capability scope, not permission to import historical runs or V1 stock, publish before readiness gates pass, enable offline writes, add multiple facilities, or introduce QC/shipping blocks or regulatory claims. Keep schedule import with scheduling; use the canonical setup models for other imports; retain V2-generated history only unless a separate archive policy is approved. Preserve the approved record-first QC boundaries and unknown/not-evaluated behavior.
