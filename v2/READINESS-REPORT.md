@@ -55,10 +55,11 @@ schema of the project database
   project database.
 - A limited read-only audit of the owner-identified V1 production source was
   performed for the allowlisted setup/staff scope. Only aggregates, role parity
-  results, category/unit counts, and profile field-key frequencies were retained.
+  results, category/unit counts, profile field-key frequencies, and
+  names/categories-only ingredient-reference match counts were retained.
   No individual usernames, account IDs, recipe/formula rows, profile values,
-  credentials, sessions, reset tokens, runs, or inventory balances/movements
-  were returned or saved.
+  ingredient IDs, allergen fields, credentials, sessions, reset tokens, runs,
+  or inventory balances/movements were returned or saved.
 - No publication, production cutover, or production data migration occurred.
 
 ## Next gates

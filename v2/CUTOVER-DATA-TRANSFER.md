@@ -18,10 +18,12 @@ production read-only query path. Exact database revision and snapshot time are
 unknown.
 
 Only aggregate counts, validation results, role-capability parity, product
-category/unit counts, and profile field-key frequencies are retained below.
-No individual usernames, account IDs, recipe rows, formula payloads, profile
-values, passwords/hashes, sessions, reset tokens, run data, or inventory
-balances/movements were returned or saved. Sandbox accounts and non-live
+category/unit counts, profile field-key frequencies, and names/categories-only
+ingredient-reference match counts are retained below. No individual usernames,
+account IDs, recipe rows, formula payloads, profile values, passwords/hashes,
+sessions, reset tokens, run data, or inventory balances/movements were returned
+or saved. The approved ingredient check did not select ingredient IDs,
+merge-target values, or allergen fields. Sandbox accounts and non-live
 master-data scopes were excluded from eligible counts. The V2 development
 database was not used as a V1 source.
 
@@ -152,13 +154,20 @@ V2 import counts; **no source row has been applied to V2**.
 
 | Source family | Read-only result | Transfer disposition |
 | --- | --- | --- |
-| `users` | 10 total; 1 sandbox account excluded; 9 live enabled accounts; 0 disabled, blank/untrimmed, or case-insensitive duplicate usernames | Seven accounts have built-in roles eligible for reviewed mapping. Two accounts assigned custom roles remain on hold until equivalent V2 roles exist. No account identifiers or usernames were retained. |
+| `users` | 10 total; 1 sandbox account excluded; 9 live enabled accounts; 0 disabled, blank/untrimmed, or case-insensitive duplicate usernames | Seven accounts have built-in roles eligible for reviewed mapping. Two custom-role accounts remain on hold until their V2 capabilities are enforced by the owning workflows. No account identifiers or usernames were retained. |
 | `user_roles` / `roles` | 9 live assignments; 0 orphaned or roleless live accounts. Assignments: manager 3, operator 4, `qc-manager` 1, `warehouse` 1. Seven role definitions are present: 2 built-in and 5 custom. | V1 manager's 11-capability set exactly matches V2 manager; V1 operator's empty set exactly matches V2 operator. With separate owner approval, only the two assigned custom roles' capability-name lists were read: `warehouse` has `manage-inventory`; `qc-manager` has `use-ai-tools`, `review-incidents`, `manage-allergens`, `record-qc`, and `manage-qc`. V2 development now has non-built-in role rows with those exact sets. `warehouse` maps to the existing inventory permission; QC and incident behavior still depends on Tasks #3964 and #3965. Three custom definitions have no live assignment; no other custom-role capabilities were read. |
 | `inventory_items` | 3 live entries: 1 ingredient in `cases`, 2 ingredients in `lbs`; 0 packaging-category entries, blank identity fields, or case-insensitive duplicate keys | All three require an explicitly reviewed V2 code/unit mapping. Legacy keys are not assumed to be V2 product codes. No V1 stock quantity or movement table was queried. |
+| `ingredients` | Live, enabled, unmerged names/categories produced 121 unique exact-name/category-compatible candidates covering 545 of 639 recipe component references; 36 distinct names covering 94 references were unmatched. No ambiguous names or category conflicts. | This was an aggregate match check only; no IDs, merge-target values, or allergen fields were read. Candidate links are not V2 codes. Task #3960 owns the V2 ingredient/allergen target; no recipe component link is imported before that target and mapping are reviewed. |
 | `dough_recipes` | 18 live, all enabled; 0 duplicate identity groups by case-insensitive name/brand plus flavors. All have empty flavor arrays and blank brands; 5 have empty component arrays. The 101 component names have 0 exact-name candidates among the 3 live V1 inventory items. | Empty flavor assignments can mean shared/untagged recipes in V1; they are not treated as errors. The 5 empty formulas need review; component links cannot be mapped from the current inventory-item allowlist. |
 | `sauce_recipes` | 26 live, all enabled; 0 duplicate identity groups. All have empty flavor arrays and blank brands; none have empty or malformed component arrays. The 109 component names have 0 exact-name candidates among the 3 live V1 inventory items. | Shared/untagged source semantics are preserved for review. Component links cannot be mapped from the current inventory-item allowlist. |
 | `cheese_recipes` | 134 live, all enabled; 0 duplicate identity groups. 70 have empty flavor arrays; 6 have blank brands; 6 have empty component arrays. Of 429 component rows, 29 have a non-positive, missing, or nonnumeric quantity; none of the component names exactly match a live V1 inventory item. | The 6 empty formulas and 29 invalid component quantities require review. Ingredient names are not mapped to V2 product codes automatically. |
 | `brand_profiles` | 157 live; 18 have blank flavor; 0 blank brands, invalid JSON-object shapes, or duplicate case-insensitive brand/flavor pairs. Recipe-name references: dough 114/114 unique exact-name candidates; sauce 128/145 unique (17 unmatched); cheese 153/196 unique (43 unmatched); no ambiguous name matches. | No direct V2 profile destination exists. Exact recipe-name candidates still need product/brand/flavor review. A key-only field inventory found run-progress/correction metadata keys in the profile payload, so neither JSON blob is copied; only separately reviewed setup fields can be mapped. |
+
+For component matching, recipe names were compared case-insensitively after
+trimming against active ingredient names, with the matching recipe category
+(`dough`, `frontline` for sauce, or `cheese`) or `general`. An initial query
+counted distinct names rather than occurrences; it was discarded and rerun with
+occurrence weighting. Only the corrected aggregate counts above are retained.
 
 Role assignment accounting is 9 live accounts = 7 built-in-role candidates +
 2 accounts held until their equivalent V2 features are ready. The single
@@ -172,11 +181,12 @@ identities, and profile brand/flavor identities; each reported zero duplicate
 groups.
 
 Across all three recipe families, 639 component references have no exact-name
-match to the 3 live V1 `inventory_items`. The separate ingredient catalog is
-outside this transfer allowlist and is owned by Task #3960; until that V2
-representation and an explicit mapping are approved, none of those component
-links can be staged. Profile-to-recipe name matches are candidate links only,
-not approved relationships or V2 codes.
+match to the 3 live V1 `inventory_items`; the limited ingredient-catalog review
+found unique category-compatible name candidates for 545 references and none
+for 94. These are candidate links only, not approved relationships or V2 codes.
+The separate ingredient/allergen identity target is owned by Task #3960, so no
+recipe component link can be staged until its target and explicit mapping are
+reviewed. Profile-to-recipe name matches are also candidates only.
 
 The source audit does not establish V2 production readiness. The V2 production
 schema/SQL objects and least-privilege role remain unresolved in
@@ -198,11 +208,10 @@ equivalent V2 roles before transferring the two custom-role accounts. Those
 role definitions now exist in V2 development; QC and incident behavior must
 still be implemented by Tasks #3964 and #3965 before the `qc-manager` account
 is usable. Do not map either account to the broader manager role. Other
-blockers include legacy product keys,
-recipe ingredient names, and setup/profile values lack reviewed V2 code/link
-mappings; packaging products are absent from the V1 inventory-item catalog;
-all 639 recipe component references lack an exact-name inventory-item match;
-and recipe component issues remain quarantined. Unsupported V1 master-data
+blockers include legacy product keys, ingredient and setup/profile code/link
+mappings, and packaging products absent from the V1 inventory-item catalog.
+The 94 unmatched component references and recipe component issues remain
+quarantined. Unsupported V1 master-data
 families are owned by Task #3960 and must not be solved by copying their raw
 values here.
 
