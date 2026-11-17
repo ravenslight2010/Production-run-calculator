@@ -86,11 +86,12 @@ schema of the project database
   substitute.
 - **V1 cutover data — owner: project owner and migration operator.** Read-only
   source review is complete; see [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md).
-  The owner must decide the two custom-role dispositions and review product,
-  recipe, and setup mappings. Identify and approve a destination before any
-  transfer; approve a separate production write window if production is later
-  selected. Do not copy historical runs, V1 stock, live sessions, or reset
-  tokens.
+  The owner chose to build equivalents for two custom roles before transferring
+  those accounts. Read only the roles' capability names after separate approval;
+  align them with V2 inventory and QC permissions. Review product, recipe, and
+  setup mappings and approve a destination before any transfer; approve a
+  separate production write window if production is later selected. Do not
+  copy historical runs, V1 stock, live sessions, or reset tokens.
 
 ## V1 setup and staff transfer rehearsal
 

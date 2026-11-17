@@ -52,8 +52,9 @@ The first usable V2 release is a web/PWA production tool with:
   [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). A limited,
   owner-authorized read-only audit of the V1 production source has now returned
   aggregate counts and mapping checks; no V1 records were exported, imported,
-  or changed. Custom staff roles, product/recipe/setup links, and unmapped
-  master-data families remain cutover blockers.
+  or changed. The owner chose to build V2 equivalents for two custom roles
+  before transfer; their capabilities still need separate read approval. Product/
+  recipe/setup links and unmapped master-data families also remain cutover blockers.
 
 ## Current V2 source status
 
