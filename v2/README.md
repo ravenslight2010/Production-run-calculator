@@ -1,9 +1,11 @@
 # V2 development area
 
-This directory is an isolated V2 build area. V1 is no longer live; preserve its
-source baseline and data while replacing functionality here in stages. V2 is a
-separate package in the source workspace, not a V1 artifact, workflow, or
-deployment. It must not connect to V1 databases, credentials, or sessions.
+This directory is the V2 application source. V1 is archived and no longer live;
+preserve its source baseline and data while replacing functionality here in
+stages. The owner approved converting this workspace to V2 and using the
+project-managed database with V2 objects restricted to schema `v2`. This is
+schema isolation, not a separate physical database. V2 must not access V1
+schemas, credentials, or sessions.
 
 See [HANDOFF.md](./HANDOFF.md) for the approved V2 scope, data-transfer
 decisions, current implementation status, and the next implementation steps.
@@ -21,6 +23,10 @@ progress. A database-backed worker advances due progress without an open
 browser; clients only refresh canonical state and never submit auto-track
 ticks. Run and station updates use revisions, idempotency receipts, events,
 and outbox records.
+
+In Replit preview and the configured VM target, `process-compose` supervises the
+API and station worker as separate processes. The launcher selects the exact
+Node version from `.nvmrc`; the worker health listener is loopback-only.
 
 A secret-guarded first-manager setup is available only when
 `V2_INITIAL_MANAGER_BOOTSTRAP_CODE` is configured and neither a staff account nor
@@ -49,24 +55,31 @@ shortage without blocking run completion or allowing negative stock. No V1
 balances, stock history, credentials, or sessions are copied.
 
 V2 remains incomplete as a production replacement: the full manager inventory
-journey has not yet been verified in a real browser, and production deployment,
-separate-project isolation, and physical-device verification remain separate
-gates. No separate V2 Replit project or deployment exists.
+journey has not yet been verified in an authenticated browser, production
+database functions/triggers/grants still need owner-reviewed application, no
+production publish has been initiated, and physical-device verification remains
+open.
 
 Database functions are backend-only. The API must derive facility and actor
 identity from verified V2 authorization, compute request hashes itself, and
-never expose database credentials or direct SQL access to a browser. The schema
-revokes public table access; the API role receives execute permission for
-approved functions, not direct table writes. The V2 host requires
-`V2_DATABASE_URL`; it never falls back to `DATABASE_URL`, runs no migrations at
-startup, and refuses to start if it cannot connect to its configured database.
-No V1 sessions or data have been copied.
+never expose database credentials or direct SQL access to a browser. Disposable
+database tests verify an API role with execute-only access. The current Replit
+development preview maps the managed project database through the explicit V2
+launcher; that managed connection is broader than the restricted test role.
+Before publishing, establish and verify the least-privilege production runtime
+role through a supported database process. The V2 server requires
+`V2_DATABASE_URL`, runs no migrations at startup, and refuses to start if it
+cannot connect. The Replit launcher may map the managed `DATABASE_URL` only
+when `V2_USE_PROJECT_DATABASE=true`; keep V2 SQL confined to schema `v2` and
+preserve all V1 schemas and records. No V1 sessions or data have been copied.
 Authentication uses the Node 24.22.2 built-in Argon2id implementation with a
 bounded number of concurrent password hash and verification operations; only
 salted password hashes are stored in the V2 database.
-Production deployment validation still requires a separate V2 Replit project
-and disposable database; that is not a prerequisite to writing isolated code
-here.
+Production validation now uses this workspace's Reserved VM target after the
+owner reviews the deployment and production-database changes. Replit Publish
+does not automatically migrate SQL functions, triggers, or grants; verify those
+objects through the supported production database process before relying on
+them.
 
 Run the current focused checks from the repository root:
 

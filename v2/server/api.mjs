@@ -167,7 +167,19 @@ export function createV2Api({
         try {
           await pool.query({ text: "SELECT 1", query_timeout: healthTimeoutMs });
           const body = { status: "ok" };
-          if (workerHealth) body.stationWorker = workerHealth();
+          if (workerHealth) {
+            const stationWorker = await workerHealth();
+            body.stationWorker = stationWorker;
+            if (!stationWorker || ["starting", "degraded", "stopped"].includes(stationWorker.status)) {
+              logger({
+                event: "v2.health.worker_unavailable",
+                requestId,
+                workerStatus: stationWorker?.status ?? "unknown",
+              });
+              sendJson(response, 503, { error: "The service is temporarily unavailable." });
+              return;
+            }
+          }
           sendJson(response, 200, body);
         } catch (error) {
           logger({

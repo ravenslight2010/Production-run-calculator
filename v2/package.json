@@ -7,7 +7,9 @@
     "node": "24.22.2"
   },
   "scripts": {
-    "start": "node server/main.mjs",
+    "start": "bash ../scripts/start-v2.sh",
+    "start:api": "node server/main.mjs",
+    "start:worker": "node server/worker-main.mjs",
     "build": "for file in server/*.mjs web/*.js; do node --check \"$file\" || exit; done",
     "test": "node --test core/*.test.mjs server/*.test.mjs web/*.test.mjs",
     "test:browser": "node --test e2e/*.test.mjs",

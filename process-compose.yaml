@@ -1,0 +1,13 @@
+version: "0.5"
+is_strict: true
+processes:
+  api:
+    command: node v2/server/main.mjs
+    availability:
+      restart: on_failure
+      backoff_seconds: 2
+  station-worker:
+    command: node v2/server/worker-main.mjs
+    availability:
+      restart: on_failure
+      backoff_seconds: 2

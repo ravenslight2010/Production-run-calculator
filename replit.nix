@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.process-compose
     pkgs.util-linux
     pkgs.curl
     pkgs.ollama

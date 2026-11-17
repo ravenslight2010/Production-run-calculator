@@ -1,11 +1,11 @@
 ## Run & Operate
 
-- **Production publication boundary:** V1 is archived and this workspace is not deployed. Its Replit build/run commands fail closed; do not publish this workspace. V2 pilot deployment belongs in its separate project. GitHub is for source backup and CI/testing; pushes, releases, workflow runs, test artifacts, and container builds do not publish an app.
+- **V2 conversion boundary:** V1 is archived and no longer live. The owner approved converting this workspace to V2, using its managed PostgreSQL database with V2 objects confined to schema `v2`, and configuring a Reserved VM with separately supervised API and worker processes. The V2 preview is running; production publication has not been started.
 
-- **V1 publishing is retired here:** the repository's legacy `publish:ready` scripts and the `.replit` deployment guard are not a route to publish V2. Use the isolated-project pilot and production gates before any V2 release.
+- **Do not publish without the production database gate:** Replit Publish migrates supported schema objects, but SQL functions, triggers, and grants require a separately reviewed production-database step. Before any V2 publication, confirm those objects and the least-privilege production runtime access are ready. Publishing remains an owner-controlled action.
 
 - V1's API and web workflows have been removed. Their source and artifact manifests are preserved under `_archived/v1/artifacts/`.
-- V2 focused checks are listed in [v2/README.md](v2/README.md). They use disposable local PostgreSQL for database verification and never use `DATABASE_URL`.
+- V2 focused checks are listed in [v2/README.md](v2/README.md). They use disposable local PostgreSQL for database verification. The Replit V2 launcher maps the project-managed `DATABASE_URL` to `V2_DATABASE_URL` only when `V2_USE_PROJECT_DATABASE=true`; application SQL and migrations must stay within schema `v2`.
 - `pnpm run typecheck` — typecheck shared libraries, scripts, and remaining artifacts; V1 application packages are excluded.
 - New Replit interactive Bash shells load the project-specific `.config/bashrc`,
   which selects the exact `.nvmrc` Node runtime for the shell and child commands.
@@ -21,19 +21,19 @@
 - Run `bash scripts/src/show-release-lock-history.sh` to display up to 20 valid recent wait events for the current workspace. The read-only output omits malformed rows and does not include Replit-managed task-runner waits.
 - `pnpm run build` — typecheck the remaining workspace packages and syntax-check V2's unbundled runtime; it does not create a production bundle.
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- Do not run the V1 `@workspace/db` schema push from this source workspace. V2 uses its isolated database and migration process.
+- Do not run the V1 `@workspace/db` schema push from this source workspace. Apply only reviewed V2 migrations, and keep all V2 database objects within schema `v2`; preserve V1 schemas and records.
 - **Factory data reset:** a manager calls `POST /api/sync/reset` (requires `manage-staff`). In one transaction it clears all `daily_sync` rows for the scope, bumps a per-scope reset epoch, and broadcasts a reset over SSE so every populated client wipes its local copy and reloads — no code change, marker bump, or manual API-down/truncate. Accounts (`users`/`roles`/`user_roles`) are untouched. See `.agents/memory/one-time-data-purge.md`.
 - **Source workbook corpus:** the customer's complete source library (19 spec sheets, 13 dough + 15 sauce procedures, cheese/premix/shipping/schedule workbooks) lives in `attached_assets/source-library/{specs,dough,sauce,cheese,premix,shipping,schedule}` — use it for importer tests and audits. Latest audit report: `attached_assets/source-library/AUDIT-REPORT-2026-07-21.md`.
 - **Corpus regression harness (no AI):** `test:corpus` workflow runs `lib/corpus-harness` — deterministic parses of the full source-library corpus compared against checked-in JSON snapshots (`lib/corpus-harness/snapshots/*.json`) plus invariant tripwires (grid sanity, dropped rows, mix-vs-cheese routing, near-dup pressure). After an intentional importer behavior change, regenerate snapshots with `pnpm --filter @workspace/corpus-harness run snapshots` and review the diff.
 - V1's real-AI spec-import harness and browser tests are preserved with the archive; they are not active V2 checks.
 - **Stable branch delivery:** Develop on `Replit`, which tracks `origin/Replit`, and use pull requests to merge into protected `main`. Local `main` tracks `origin/main` for comparison and diverts ordinary pushes to the backup remote. The legacy `pnpm run push:main` helper targets direct `origin/main` and is expected to be rejected by the live branch rule; do not use it for routine delivery. See `.github/repository-policy.md` and `docs/guarded-github-push.md`.
-- V1 environment variables and database settings are retired with the archive. V2's `V2_DATABASE_URL` and bootstrap settings belong only in the separate V2 project's secret store; see [v2/README.md](v2/README.md).
+- V1 environment variables and database settings are retired with the archive. V2's launcher may explicitly map the managed project database; bootstrap settings must use the secure environment-secret flow, never source or chat. See [v2/README.md](v2/README.md).
 - **HTTP security headers:** Express sets MIME-sniffing, referrer, framing, and CSP headers but intentionally omits HSTS because Replit may terminate TLS before requests reach the API. The retained Docker Caddy site adds HSTS only to HTTPS responses when Caddy itself terminates TLS; `SITE_ADDRESS=:80` remains plain HTTP.
 
 ## Stack
 
 - **V1 archive:** pnpm workspaces, Node.js 24, React/Vite, Express 5, PostgreSQL/Drizzle, Zod, Orval, and esbuild. This is preserved source, not an active app.
-- **V2 source:** Node.js 24.22.2, server-owned JavaScript modules, PostgreSQL, and a responsive web/PWA client. V2 is not deployed from this workspace.
+- **V2 app:** Node.js 24.22.2, server-owned JavaScript modules, PostgreSQL, and a responsive web/PWA client. The API and station worker run as separate supervised processes. The workspace preview is running; no production publish has occurred.
 
 ## Where things live
 

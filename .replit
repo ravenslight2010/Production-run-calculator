@@ -2,9 +2,9 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
-build = "bash _archived/v1/disable-deployment.sh"
-run = ["bash", "_archived/v1/disable-deployment.sh"]
+deploymentTarget = "vm"
+build = ["bash", "scripts/src/run-release-node.sh", "pnpm", "--filter", "@workspace/lucia-v2", "run", "build"]
+run = ["bash", "scripts/start-v2.sh"]
 
 [workflows]
 runButton = "Project"
@@ -147,9 +147,13 @@ name = "Project"
 mode = "sequential"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+waitForPort = 5000
+
 [[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "release:standard"
+task = "shell.exec"
+args = "bash scripts/start-v2.sh"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -167,7 +171,6 @@ packages = ["freetype", "gumbo", "harfbuzz", "jbig2dec", "libjpeg_turbo", "mupdf
 [[ports]]
 localPort = 5000
 externalPort = 80
-exposeLocalhost = true
 
 [[ports]]
 localPort = 5173
@@ -198,3 +201,4 @@ localPort = 26038
 [userenv]
 
 [userenv.shared]
+V2_USE_PROJECT_DATABASE = "true"

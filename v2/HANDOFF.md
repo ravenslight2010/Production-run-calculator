@@ -1,8 +1,8 @@
 # V2 project handoff
 
 This file carries the approved V2 decisions and current implementation status
-when the V2 source is moved into a separate Replit project. It supplements the
-code; it does not contain credentials or production data.
+for the V2 source in this workspace. It supplements the code; it does not
+contain credentials or production data.
 
 Research record: [portable V1-to-V2 research bundle](research/README.md),
 prepared 2026-11-10 and checked against V1 revision
@@ -21,14 +21,18 @@ The first usable V2 release is a web/PWA production tool with:
 
 ## Architecture and deployment boundary
 
-- V1 is no longer live. Preserve its source baseline and data while developing
-  V2 under `v2/`; do not move shared V1 code until dependency ownership is mapped.
-- V2 must be a separate Replit project for an independent database and
-  deployment. A second artifact in the V1 project is not isolation: artifacts
-  in one project share backend, database, secrets, and publishing lifecycle.
-- The approved starting architecture is one V2 deployment with supervised API
-  and worker processes using one V2 database. Validate it in the separate V2
-  project before publishing.
+- V1 is archived and no longer live. Preserve its source baseline and data while
+  developing V2 under `v2/`; do not move shared V1 code until dependency
+  ownership is mapped.
+- The owner approved converting this workspace to V2 and using the project's
+  managed PostgreSQL database with V2 objects confined to schema `v2`. This is
+  schema isolation, not a separate physical database. Existing V1 schemas and
+  records must remain untouched.
+- The approved deployment architecture is one Reserved VM with separately
+  supervised API and worker processes. Replit's managed production database is
+  distinct from development. Publish handles supported schema objects, while
+  SQL functions, triggers, and grants need a separately reviewed production
+  database step.
 - The server owns canonical run state. Lifecycle commands use revisions and
   stable idempotency keys; their state change, receipt, event, and outbox entry
   are committed atomically.
@@ -48,8 +52,8 @@ The first usable V2 release is a web/PWA production tool with:
 ## Current V2 source status
 
 The source is under this `v2/` directory and is registered as its own workspace
-package. It is not deployed, and no separate V2 Replit project or artifact has
-been created.
+package. The current project is configured for a V2 preview and Reserved VM
+target, but is not published.
 
 - `core/run-lifecycle.mjs` contains the server-time, revision-checked lifecycle
   model for start, pause, resume, and completion.
@@ -107,12 +111,14 @@ been created.
   bounded, payload-free request logs.
 - `server/main.mjs` starts the API with `pg`, a bounded pool, startup database
   probe, `/healthz`, and graceful shutdown. It requires `V2_DATABASE_URL` and
-  never reads V1 `DATABASE_URL`; it does not run migrations automatically.
+  does not run migrations automatically. The launcher maps the managed project
+  `DATABASE_URL` only when `V2_USE_PROJECT_DATABASE=true`.
 - `core/station-auto-track-worker.mjs` advances due station counters on the
   server without an open browser. Database-backed leases coordinate instances,
   while the existing station transaction remains responsible for pause-aware
   time, idempotency, target caps, and fractional carry. Worker state is exposed
-  from `/healthz`; retry and shutdown behavior is covered by local checks.
+  to the API through a loopback-only worker health endpoint; retry, restart,
+  and shutdown behavior is covered by checks.
 - `api/openapi.yaml` records health, authentication, manager setup, run control,
   production stations, imports, and inventory routes.
 - `web/` now connects the username/password sign-in, session check, sign-out,
@@ -143,16 +149,20 @@ been created.
   progress across desktop and phone-sized Chromium contexts. This is emulated
   browser evidence, not physical-device coverage. Manager inventory screens
   have not been exercised in a real browser.
-- The current source includes a database-leased station worker in the V2 server;
-  browsers only refresh canonical state and never submit automatic-progress
-  ticks. This keeps server-worker timing separate from user timer/manual actions.
-  The separate-project pilot must still verify process supervision,
-  aggregate connection limits, and whole-deployment restart behavior.
-- Production deployment, a separate V2 project, full manager inventory browser
-  verification, and physical-device verification remain future work.
-- There is no production data connection, V1 data migration, or separate V2
-  Replit project.
-- The latest isolated-pilot status, evidence, and owner prerequisite are recorded
+- The V2 preview now runs the API and database-leased worker as separate,
+  supervised processes; browsers only refresh canonical state and never submit
+  automatic-progress ticks. Development restart was tested and the worker
+  recovered. The measured database setting was 112 maximum connections with
+  four reserved; the configured API and worker pools allow five total.
+- V2 migrations `0001` through `0006` are applied to the development database's
+  `v2` schema only. The V2 run, staff, and inventory tables are empty. V1
+  schemas and records were not inspected or changed.
+- Production database function/trigger/grant setup, an authenticated manager
+  preview, production publish, full manager inventory browser verification,
+  tablet/WebKit, and physical-device verification remain future work. Do not
+  publish until the least-privilege runtime access and V2 production database
+  objects are reviewed.
+- The latest in-workspace pilot status, evidence, and remaining actions are recorded
   in [PILOT-DEPLOYMENT-RECORD.md](PILOT-DEPLOYMENT-RECORD.md).
 
 ## Remaining V2 validation
@@ -163,8 +173,9 @@ been created.
    shortages, and mobile/tablet layouts.
 2. Verify station calculations against approved floor examples and test station
    workflows, wake/reconnect, and multi-device operation on real phones/tablets.
-3. Keep a separate-project VM/database/restart/capacity pilot as a pre-release
-   gate.
+3. Complete the production-database and least-privilege review, then verify the
+   Reserved VM, worker, and synthetic run behavior after owner-initiated
+   publication.
 
 ## Focused checks
 

@@ -17,13 +17,17 @@ paths:
       security: []
       responses:
         "200":
-          description: API can query its configured V2 database
+          description: API and station worker can serve requests
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
         "503":
-          $ref: "#/components/responses/Error"
+          description: The database or station worker is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "405":
           $ref: "#/components/responses/Error"
   /api/v2/auth/sign-in:
@@ -1260,6 +1264,34 @@ components:
       properties:
         status:
           const: ok
+        stationWorker:
+          type: object
+          required:
+            - status
+            - lastCycleAt
+            - lastSuccessAt
+            - consecutiveFailures
+            - lastErrorName
+            - processedLastCycle
+          properties:
+            status:
+              type: string
+              enum: [active, standby]
+            lastCycleAt:
+              type: [string, "null"]
+              format: date-time
+            lastSuccessAt:
+              type: [string, "null"]
+              format: date-time
+            consecutiveFailures:
+              type: integer
+              minimum: 0
+            lastErrorName:
+              type: [string, "null"]
+              pattern: "^[A-Za-z][A-Za-z0-9_]{0,79}$"
+            processedLastCycle:
+              type: integer
+              minimum: 0
     AuthSignIn:
       type: object
       additionalProperties: false
