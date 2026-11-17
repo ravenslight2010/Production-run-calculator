@@ -49,9 +49,11 @@ The first usable V2 release is a web/PWA production tool with:
 - A previously requested full production-to-development preservation copy is
   separate from V2 cutover. No data copy was completed as part of this V2 work.
 - The current synthetic transfer rehearsal and its allowlist are documented in
-  [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). It does not read a V1
-  database or write production data; unmappable V1 master-data families and the
-  missing authorized read-only source path remain explicit cutover blockers.
+  [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). A limited,
+  owner-authorized read-only audit of the V1 production source has now returned
+  aggregate counts and mapping checks; no V1 records were exported, imported,
+  or changed. Custom staff roles, product/recipe/setup links, and unmapped
+  master-data families remain cutover blockers.
 
 ## Current V2 source status
 
@@ -165,8 +167,9 @@ target, but is not published.
   `v2` schema only. The private preview has one enabled manager account, created
   through the guarded first-manager flow; the owner confirmed sign-out and
   sign-in. The bootstrap marker is set and the one-time bootstrap secret was
-  removed. No run or inventory data has been seeded. V1 schemas and records were
-  not inspected or changed.
+  removed. No run or inventory data has been seeded. The V1 production source
+  received a limited read-only aggregate audit; no source records were exported,
+  imported, or changed.
 - Production database function/trigger/grant setup, full manager inventory
   browser verification, tablet/WebKit, physical-device verification, and
   production publish remain future work. Do not publish until the

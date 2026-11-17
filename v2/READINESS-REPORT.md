@@ -12,8 +12,9 @@ schema of the project database
   database guidance. A disposable test separately proves the API can run using
   a restricted role, but that does not establish the published role.
 - V2 database functions, triggers, and grants have not been installed and
-  verified in the production database. No production database query or change
-  was made.
+  verified in the production database. No V2 production SQL-object or business-
+  data change was made; a separately approved, read-only V1 source audit is
+  documented below.
 - Production has not been published or cut over. The deployment guard remains
   enabled; do not bypass it.
 - Physical-device checks and the manager workflow in the live private preview
@@ -38,7 +39,8 @@ schema of the project database
 | Live-preview authenticated manager screens | **NOT RUN** | Agent's preview browser has no owner session; isolated authenticated browser test is separate |
 | Physical Android/iOS operation | **NOT RUN** | No connected device test environment |
 | Safari/WebKit | **NOT RUN** | Chromium evidence only |
-| Production database and publish | **BLOCKED** | Role and SQL-object setup remain unresolved; guard remains active |
+| V1 source review | **PARTIAL** | Authorized production read-only audit returned aggregate counts only; exact database revision is unknown; no V1 rows were exported or imported |
+| Production database and publish | **BLOCKED** | V2 role and SQL-object setup remain unresolved; guard remains active |
 
 ## Data and safety boundary
 
@@ -47,7 +49,12 @@ schema of the project database
 - The V2 development schema still has one enabled manager and no run or
   inventory-balance rows. No synthetic test inventory was written to the
   project database.
-- V1 schemas, records, sessions, and production data were not read or changed.
+- A limited read-only audit of the owner-identified V1 production source was
+  performed for the allowlisted setup/staff scope. Only aggregates, role parity
+  results, category/unit counts, and profile field-key frequencies were retained.
+  No individual usernames, account IDs, recipe/formula rows, profile values,
+  credentials, sessions, reset tokens, runs, or inventory balances/movements
+  were returned or saved.
 - No publication, production cutover, or production data migration occurred.
 
 ## Next gates
@@ -77,9 +84,13 @@ schema of the project database
   Exercise wake/reconnect and run/station controls on the target device, and
   record the browser/device and result. Current Chromium emulation is not a
   substitute.
-- **V1 cutover data — owner: project owner and migration operator.** Approve a
-  separate, limited transfer plan for setup/master data and staff identities/
-  roles. Do not copy historical runs, V1 stock, live sessions, or reset tokens.
+- **V1 cutover data — owner: project owner and migration operator.** Read-only
+  source review is complete; see [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md).
+  The owner must decide the two custom-role dispositions and review product,
+  recipe, and setup mappings. Identify and approve a destination before any
+  transfer; approve a separate production write window if production is later
+  selected. Do not copy historical runs, V1 stock, live sessions, or reset
+  tokens.
 
 ## V1 setup and staff transfer rehearsal
 
@@ -91,12 +102,12 @@ setup undo, disabled staff handling, and a fresh V2 session. The existing
 authenticated integration also verifies V2 password hashing and sign-in for a
 new synthetic operator.
 
-**No V1 rows were extracted or transferred.** The archived V1 tree contains
-application source, not a database snapshot, and no authorized read-only V1
-source path is configured. The V2 development database is not a V1 source.
-Actual source counts, role capability parity, row-level relationships, and
-real duplicate cases remain unverified. No production read/export/write was
-authorized or performed. The transfer is not ready for real cutover until the
-owner separately identifies and authorizes a read-only source path, resolves
-unmapped master-data families, reviews the actual mapping, and separately
-approves any production destination write.
+**No V1 rows were exported, imported, or changed.** An owner-authorized,
+read-only production-source audit returned aggregate table counts, duplicate
+checks, role-capability parity, and profile field-key frequencies. Its exact
+database revision is unknown; individual staff identities, formula/profile
+payloads, credentials, active runs, and inventory stock were not returned or
+retained. The audited source counts and unresolved mappings are recorded in
+[CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). The transfer is not
+ready for cutover until the owner reviews the role and setup mappings, approves
+a destination, and separately approves any production write.

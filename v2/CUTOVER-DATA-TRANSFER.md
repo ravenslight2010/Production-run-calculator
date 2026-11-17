@@ -1,7 +1,8 @@
 # V1-to-V2 setup and staff transfer rehearsal
 
-**Status:** synthetic V2-side rehearsal prepared; production-source extraction
-and every production write remain blocked.
+**Status:** synthetic V2-side rehearsal and a limited, authorized read-only V1
+source audit are complete. No V1 rows were exported or imported. The V2
+destination and every production write remain blocked.
 
 **Evidence reviewed:** archived V1 schema sources under
 `lib/db/src/schema/`, especially `users.ts`, `userRoles.ts`, `roles.ts`,
@@ -9,20 +10,26 @@ and every production write remain blocked.
 `sauceRecipes.ts`, `cheeseRecipes.ts`, `mixes.ts`, `dieTypes.ts`,
 `dieLineDefaults.ts`, `productionRules.ts`, `freezerPullItems.ts`, and
 `runTemplates.ts`; V2 migrations `0001`–`0006`; `_archived/v1/README.md`;
-`v2/HANDOFF.md`; and `v2/READINESS-REPORT.md`.
+`v2/HANDOFF.md`; and `v2/READINESS-REPORT.md`. On 2026-11-17, the owner
+identified this project's production database as the V1 source and authorized a
+limited read-only review of the documented allowlist. The review used the
+production read-only query path. Exact database revision and snapshot time are
+unknown.
 
-This is a schema-based plan, not a review of V1 rows. The V1 application is
-archived, its old workflows are absent, and this workspace has no configured
-read-only V1 source connection. The current V2 development database is not an
-authorized substitute for a V1 source. No source records, production
-database, V2 shared database, or credentials were accessed for this rehearsal.
+Only aggregate counts, validation results, role-capability parity, product
+category/unit counts, and profile field-key frequencies are retained below.
+No individual usernames, account IDs, recipe rows, formula payloads, profile
+values, passwords/hashes, sessions, reset tokens, run data, or inventory
+balances/movements were returned or saved. Sandbox accounts and non-live
+master-data scopes were excluded from eligible counts. The V2 development
+database was not used as a V1 source.
 
 ## Allowlist and disposition
 
 The approved cutover boundary is limited to setup/master data and staff
 identity/role information. The following is the narrowest transfer boundary
 that can be represented safely by the current V2 schema. “Eligible after
-review” is not approval to extract or write production data.
+review” is not approval to transfer or write production data.
 
 | V1 source | Fields eligible for the reviewed projection | V2 destination and rules |
 | --- | --- | --- |
@@ -137,6 +144,42 @@ provisioned operator from the batch using V2's actual password hashing. This
 proves the synthetic V2 path; it does not import a V1 password or prove any
 production account can sign in.
 
+### Authorized V1 source audit (2026-11-17)
+
+The source audit returned aggregate results only. These are source counts, not
+V2 import counts; **no source row has been applied to V2**.
+
+| Source family | Read-only result | Transfer disposition |
+| --- | --- | --- |
+| `users` | 10 total; 1 sandbox account excluded; 9 live enabled accounts; 0 disabled, blank/untrimmed, or case-insensitive duplicate usernames | Seven accounts have built-in roles eligible for reviewed mapping. Two accounts assigned custom roles remain quarantined. No account identifiers or usernames were retained. |
+| `user_roles` / `roles` | 9 live assignments; 0 orphaned or roleless live accounts. Assignments: manager 3, operator 4, `qc-manager` 1, `warehouse` 1. Seven role definitions are present: 2 built-in and 5 custom. | V1 manager's 11-capability set exactly matches V2 manager; V1 operator's empty set exactly matches V2 operator. The two assigned custom roles match neither V2 built-in role. Three custom definitions have no live assignment. No capability JSON was returned or copied. |
+| `inventory_items` | 3 live entries: 1 ingredient in `cases`, 2 ingredients in `lbs`; 0 packaging-category entries, blank identity fields, or case-insensitive duplicate keys | All three require an explicitly reviewed V2 code/unit mapping. Legacy keys are not assumed to be V2 product codes. No V1 stock quantity or movement table was queried. |
+| `dough_recipes` | 18 live, all enabled; 0 duplicate identity groups by case-insensitive name/brand plus flavors. All have empty flavor arrays and blank brands; 5 have empty component arrays. The 101 component names have 0 exact-name candidates among the 3 live V1 inventory items. | Empty flavor assignments can mean shared/untagged recipes in V1; they are not treated as errors. The 5 empty formulas need review; component links cannot be mapped from the current inventory-item allowlist. |
+| `sauce_recipes` | 26 live, all enabled; 0 duplicate identity groups. All have empty flavor arrays and blank brands; none have empty or malformed component arrays. The 109 component names have 0 exact-name candidates among the 3 live V1 inventory items. | Shared/untagged source semantics are preserved for review. Component links cannot be mapped from the current inventory-item allowlist. |
+| `cheese_recipes` | 134 live, all enabled; 0 duplicate identity groups. 70 have empty flavor arrays; 6 have blank brands; 6 have empty component arrays. Of 429 component rows, 29 have a non-positive, missing, or nonnumeric quantity; none of the component names exactly match a live V1 inventory item. | The 6 empty formulas and 29 invalid component quantities require review. Ingredient names are not mapped to V2 product codes automatically. |
+| `brand_profiles` | 157 live; 18 have blank flavor; 0 blank brands, invalid JSON-object shapes, or duplicate case-insensitive brand/flavor pairs. Recipe-name references: dough 114/114 unique exact-name candidates; sauce 128/145 unique (17 unmatched); cheese 153/196 unique (43 unmatched); no ambiguous name matches. | No direct V2 profile destination exists. Exact recipe-name candidates still need product/brand/flavor review. A key-only field inventory found run-progress/correction metadata keys in the profile payload, so neither JSON blob is copied; only separately reviewed setup fields can be mapped. |
+
+Role assignment accounting is 9 live accounts = 7 built-in-role candidates +
+2 custom-role quarantines. The single sandbox account is excluded. All 3
+inventory items, 178 recipe rows, and 157 profiles remain unapplied pending
+owner-reviewed mappings and an approved destination. No rows were transferred,
+dropped, or silently merged. Source duplicate checks covered case-insensitive usernames,
+inventory keys, recipe name/brand/flavor identities, and profile brand/flavor
+identities; each reported zero duplicate groups.
+
+Across all three recipe families, 639 component references have no exact-name
+match to the 3 live V1 `inventory_items`. The separate ingredient catalog is
+outside this transfer allowlist and is owned by Task #3960; until that V2
+representation and an explicit mapping are approved, none of those component
+links can be staged. Profile-to-recipe name matches are candidate links only,
+not approved relationships or V2 codes.
+
+The source audit does not establish V2 production readiness. The V2 production
+schema/SQL objects and least-privilege role remain unresolved in
+[READINESS-REPORT.md](./READINESS-REPORT.md). Any later destination write,
+including a production write, needs its own owner approval after review of the
+complete mapping and destination.
+
 The rehearsal uses SQL/API tests and no manager setup screen, so desktop,
 phone, tablet-portrait, tablet-landscape, Chromium, and WebKit visual coverage
 are **not applicable to this database-only rehearsal**. Existing browser test
@@ -145,24 +188,25 @@ Safari/PWA verification.
 
 ## Blocker and owner-controlled next steps
 
-**Exact source-access blocker:** no authorized read-only V1 data path is
-configured or identified in the project. `_archived/v1/` contains application
-source, not a database snapshot. The V1 app workflows are retired. The
-available project-managed V2 database is not a permitted V1 source. Therefore
-no V1 row counts, actual relationships, real duplicate list, source extract,
-or production-source data validation can be reported.
+**Current blocker:** source access is approved and the aggregate source review
+is complete, but a complete row-level mapping is not. In particular, the two
+custom staff roles have no equivalent V2 built-in role; legacy product keys,
+recipe ingredient names, and setup/profile values lack reviewed V2 code/link
+mappings; packaging products are absent from the V1 inventory-item catalog;
+all 639 recipe component references lack an exact-name inventory-item match;
+and recipe component issues remain quarantined. Unsupported V1 master-data
+families are owned by Task #3960 and must not be solved by copying their raw
+values here.
 
-Before any real extraction, the owner must separately authorize a specific
-read-only V1 source and its limited field projection through an approved
-access path. Before any final V2 production write, the owner must separately
-approve the reviewed transform, destination, and write window. Do not request
-credentials in chat or use the V2 development connection as a substitute.
-Any records in unmapped families remain a cutover blocker until their V2
-representation is approved.
+The owner must review the role disposition and the proposed product/recipe/
+setup mappings before any transfer. The target destination must then be
+identified and separately approved. Any final V2 production write also needs a
+separate approval and write window after the destination and full batch are
+reviewed. Do not request credentials in chat, use the V2 development database
+as a V1 source, or bypass the publication/production database gates.
 
-For a future approved cutover, record per-source-table input, eligible,
-imported, duplicate, quarantined, and excluded counts; validate all target
-references and role mappings; stage and review every V2 setup batch; verify
-fresh V2 sign-in without V1 sessions or reset tokens; and retain the exact
-request IDs and Apply/Undo outcomes. The owner/operator, not this rehearsal,
-controls production extraction and final writes.
+For the next approved transfer step, retain per-source-table counts and
+quarantine reasons, review every target reference and role mapping, then stage
+each batch only on the approved destination. Verify fresh V2 sign-in without
+V1 sessions or reset tokens and retain request IDs plus Apply/Undo outcomes.
+The owner/operator controls destination approval and all production writes.
