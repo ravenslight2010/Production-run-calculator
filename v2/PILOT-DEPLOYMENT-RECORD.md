@@ -33,16 +33,20 @@ Captured 2026-11-17, America/Chicago.
   `superuser_reserved_connections=4`; two V2 application connections were
   observed during this pilot check. This is PostgreSQL's reported setting, not
   an independently confirmed Replit provider-wide capacity guarantee.
-- The development `DATABASE_URL` database role has superuser capability. The
-  isolated preview currently uses that managed connection, while disposable
-  integration tests verify the API through a restricted role. Do not publish
-  with broad runtime access; a least-privilege production role is not yet
-  configured or verified.
+- During repeated health checks, both the V2 API and station-worker sessions
+  were observed in `pg_stat_activity` using a superuser role. Disposable
+  integration tests separately verify the API through a restricted role.
+  Replit's general database documentation says managed application roles are
+  not superusers and that custom database roles are not supported, so this
+  project-specific observation conflicts with the general guidance. The
+  production app role is unknown; resolve the mismatch and verify least
+  privilege before publication.
 - Replit documents that Publish migrates supported tables, columns, indexes,
   constraints, views, enums, sequences, and row-level security policies, but
   does not automatically migrate functions, triggers, or grants. Those V2
   objects still need an owner-reviewed production-database step before the
-  published app can safely use them.
+  published app can safely use them. See [Publish database changes](https://docs.replit.com/features/data-and-storage/publish-database-changes)
+  and [SQL Database](https://docs.replit.com/features/data-and-storage/sql-database).
 
 ## Data and secrets boundary
 
@@ -111,6 +115,11 @@ they do not prove production or physical-device behavior.
   schema changes and apply V2 functions, triggers, and grants through the
   supported production SQL-console/publish process. The agent has no write
   access to the production database.
+- Resolve the development-role observation against Replit's general guidance,
+  and confirm the actual production app role without exposing its connection
+  string. Replit's [database guidance](https://docs.replit.com/features/data-and-storage/sql-database)
+  says custom roles are not supported; if the published role is privileged,
+  keep V2 unpublished or use an approved external database.
 - After production database preparation, the owner must initiate publication.
   Then verify the serving revision, worker health, synthetic run start/pause/
   resume/auto-track/complete, app and worker restarts, and connection use. No

@@ -6,6 +6,7 @@
 
 - V1's API and web workflows have been removed. Their source and artifact manifests are preserved under `_archived/v1/artifacts/`.
 - V2 focused checks are listed in [v2/README.md](v2/README.md). They use disposable local PostgreSQL for database verification. The Replit V2 launcher maps the project-managed `DATABASE_URL` to `V2_DATABASE_URL` only when `V2_USE_PROJECT_DATABASE=true`; application SQL and migrations must stay within schema `v2`.
+- The root `release:standard` check still expects the former V1 API artifact at `artifacts/api-server/` and currently fails after that artifact was archived. It is not a V2 release gate; use the focused V2 tests, browser checks, local PostgreSQL checks, and build until that legacy inventory is retired or updated.
 - `pnpm run typecheck` — typecheck shared libraries, scripts, and remaining artifacts; V1 application packages are excluded.
 - New Replit interactive Bash shells load the project-specific `.config/bashrc`,
   which selects the exact `.nvmrc` Node runtime for the shell and child commands.

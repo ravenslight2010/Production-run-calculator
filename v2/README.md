@@ -65,9 +65,12 @@ identity from verified V2 authorization, compute request hashes itself, and
 never expose database credentials or direct SQL access to a browser. Disposable
 database tests verify an API role with execute-only access. The current Replit
 development preview maps the managed project database through the explicit V2
-launcher; that managed connection is broader than the restricted test role.
-Before publishing, establish and verify the least-privilege production runtime
-role through a supported database process. The V2 server requires
+launcher; its application connection was observed using a superuser role, which
+conflicts with Replit's general documentation that application roles are not
+superusers and that custom roles are not supported. Both API and worker sessions
+were observed with that privilege in development. Verify this project-specific
+discrepancy and the actual production role before publishing; do not expose a
+connection string. The V2 server requires
 `V2_DATABASE_URL`, runs no migrations at startup, and refuses to start if it
 cannot connect. The Replit launcher may map the managed `DATABASE_URL` only
 when `V2_USE_PROJECT_DATABASE=true`; keep V2 SQL confined to schema `v2` and
