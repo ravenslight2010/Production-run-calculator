@@ -3,12 +3,8 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-build = "bash scripts/src/run-project-pnpm.sh run publish:ready"
-run = ["bash", "-c", "source scripts/src/select-replit-shell-node.sh && bash scripts/src/run-project-pnpm.sh --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
-
-[deployment.postBuild]
-args = ["bash", "scripts/src/run-project-pnpm.sh", "store", "prune"]
-env = { "CI" = "true" }
+build = "bash _archived/v1/disable-deployment.sh"
+run = ["bash", "_archived/v1/disable-deployment.sh"]
 
 [workflows]
 runButton = "Project"
@@ -24,25 +20,6 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python3 scripts/local_model_eval_setup.py serve"
-
-[[workflows.workflow]]
-name = "test"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/api-server run test"
-
-[[workflows.workflow]]
-name = "test:client"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/run-calculator run test"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[workflows.workflow]]
 name = "test:rules"
@@ -123,14 +100,6 @@ task = "shell.exec"
 args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run check-operational-skill-evidence"
 
 [[workflows.workflow]]
-name = "check:clean-start"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh env CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
-
-[[workflows.workflow]]
 name = "typecheck"
 author = "agent"
 
@@ -181,48 +150,6 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "release:standard"
-
-[[workflows.workflow]]
-name = "browser-full-159"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh bash scripts/src/run-isolated-browser-suite.sh"
-
-[[workflows.workflow]]
-name = "client-tests"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/run-calculator run test"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "clean-start"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh env CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "api-unit"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/src/run-release-node.sh env NODE_ENV=test E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 pnpm --filter @workspace/api-server run test:release:unit"
-
-[workflows.workflow.metadata]
-isValidation = true
-
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"

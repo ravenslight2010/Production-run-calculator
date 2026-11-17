@@ -71,17 +71,21 @@ These are project-owned skills that encode how to do key tasks correctly. **Read
 
 ### Tests
 
-The test suites below are part of the repo and run in CI. **Do not delete or weaken them.** When you change code in their area, run them:
+V1's web and API applications are archived under `_archived/v1/artifacts/` and
+are no longer workspace packages or active Replit workflows. Do not restore
+their workflows or run V1 database operations as part of V2 work. The archive
+README records the exact baseline and restoration steps.
 
-- `artifacts/api-server/src/routes/cacheControl.integration.test.ts` — no-store cache headers on at-risk GET endpoints
-- `artifacts/api-server/src/lib/rateLimitCost.test.ts` + `artifacts/api-server/src/middlewares/costLimitMiddleware.test.ts` — AI cost limiting
-- `artifacts/api-server/src/routes/signupAccessCode.integration.test.ts` — sign-up bootstrap hardening
-- `artifacts/api-server/src/routes/*.integration.test.ts` — API integration tests (Postgres-backed)
-- `lib/*/src/*.test.ts` — shared library unit tests
+V2 focused checks:
 
-Run tests with: `pnpm --filter @workspace/api-server test` (API), `pnpm --filter @workspace/run-calculator test` (web), `pnpm -r --filter "./lib/**" --if-present test` (libraries).
+- `pnpm --filter @workspace/lucia-v2 test`
+- `pnpm --filter @workspace/lucia-v2 test:browser`
+- `pnpm --filter @workspace/lucia-v2 test:db` — disposable local PostgreSQL only
+- `node --check v2/server/main.mjs`
 
-To run in production with the same Postgres-backed integration tests, ensure `DATABASE_URL` is set.
+Shared pure-library checks remain available with
+`pnpm -r --filter "./lib/**" --if-present test`. Preserve the archived V1 tests;
+do not delete or weaken them.
 
 ## Key facts
 

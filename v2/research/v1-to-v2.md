@@ -24,8 +24,8 @@ Thirteen focused test files passed, 286 assertions/tests total, on
 | Inventory math | `lib/inventory-math/src/index.test.ts`, `mixSurplus.test.ts` | 96 passed |
 | Production rules | `lib/production-rules/src/index.test.ts` | 17 passed |
 | Import parsing/review semantics | `lib/spec-import/src/importSafety.test.ts`, `deterministicWorkbook.test.ts`, `mergeParsedSpecImports.test.ts` | 40 passed |
-| Server auto-track claims and capability checks | `artifacts/api-server/src/lib/autoTrackServerTicks.test.ts`, `autoTrackCoordination.test.ts`, `middlewares/requireCapability.test.ts` | 74 passed |
-| Client lifecycle and sync policy | `artifacts/run-calculator/src/domain/runSyncPolicy.test.ts`, `startRunReadiness.test.ts`, `hooks/useRunLifecycleManager.test.tsx` | 45 passed |
+| Server auto-track claims and capability checks | `_archived/v1/artifacts/api-server/src/lib/autoTrackServerTicks.test.ts`, `autoTrackCoordination.test.ts`, `middlewares/requireCapability.test.ts` | 74 passed |
+| Client lifecycle and sync policy | `_archived/v1/artifacts/run-calculator/src/domain/runSyncPolicy.test.ts`, `startRunReadiness.test.ts`, `hooks/useRunLifecycleManager.test.tsx` | 45 passed |
 
 These are focused unit-level checks. They did not use PostgreSQL, test all
 importer families, validate a full manager/operator UI journey, exercise two

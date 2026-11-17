@@ -64,21 +64,7 @@ run_phase_or_exit pnpm-selection bash scripts/src/run-project-pnpm.sh --version
 
 run_phase_or_exit frozen-install env CI=true bash scripts/src/run-project-pnpm.sh install --frozen-lockfile
 
-# drizzle push can hit transient "too many clients already" on the dev DB
-# (leftover backends from killed test/validation runs). Retry a few times.
-attempts=0
-until run_phase "schema-push-attempt-$((attempts + 1))" \
-  bash scripts/src/run-project-pnpm.sh --filter db push-force; do
-  push_status=$?
-  attempts=$((attempts + 1))
-  if [ "$attempts" -ge 4 ]; then
-    echo "db push-force failed after $attempts attempts" >&2
-    exit "$push_status"
-  fi
-  echo "db push-force failed (attempt $attempts), retrying in 15s..." >&2
-  sleep 15
-done
-
-# Keep the independent publish expectation synchronized with the merged source.
-# Deployment builds reuse this exact record and fail if source changes afterward.
-run_phase_or_exit prepare-publish bash scripts/src/run-project-pnpm.sh run prepare:publish
+# V1's app and database are archived. Do not push its schema or prepare a V1
+# deployment as a side effect of merging V2 source changes. The isolated V2
+# pilot owns its own database and deployment setup.
+run_phase_or_exit v2-source-syntax node --check v2/server/main.mjs

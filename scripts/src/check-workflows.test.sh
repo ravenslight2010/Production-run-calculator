@@ -53,10 +53,22 @@ name = "release:standard"
 name = "release:full"
 
 [[workflows.workflow]]
-name = "test"
+name = "test:rules"
 
 [[workflows.workflow]]
-name = "test:client"
+name = "test:inventory-math"
+
+[[workflows.workflow]]
+name = "test:spec-reconcile"
+
+[[workflows.workflow]]
+name = "test:scheduled-recipe-check"
+
+[[workflows.workflow]]
+name = "test:spec-export"
+
+[[workflows.workflow]]
+name = "test:corpus"
 
 [[workflows.workflow]]
 name = "typecheck"
@@ -65,13 +77,7 @@ name = "typecheck"
 name = "security:prod"
 
 [[workflows.workflow]]
-name = "check:clean-start"
-
-[[workflows.workflow]]
 name = "evidence:release"
-
-[[workflows.workflow]]
-name = "browser-full-159"
 EOF
   cat > "${workspace}/scripts/package.json" <<EOF
 {
@@ -563,35 +569,25 @@ test_ci_docker_images_are_build_only_and_runtime_checked() {
 
 test_release_build_identity_is_prepared_for_container_and_browser_smoke() {
   local release_configuration
-  local smoke_script
-  local scripts_package
   local dockerfile
   local web_identity_script
   local browser_servers
 
   release_configuration=$(<"${SCRIPT_DIR}/release-check.mts")
-  smoke_script=$(<"${SCRIPT_DIR}/verify-render-image.mts")
-  scripts_package=$(<"${SCRIPT_DIR}/../package.json")
   dockerfile=$(<"${SCRIPT_DIR}/../../Dockerfile")
   web_identity_script=$(<"${SCRIPT_DIR}/build-web-source.mjs")
-  browser_servers=$(<"${SCRIPT_DIR}/../../artifacts/run-calculator/playwright.release-servers.ts")
+  browser_servers=$(<"${SCRIPT_DIR}/../../_archived/v1/artifacts/run-calculator/playwright.release-servers.ts")
 
-  assert_contains "$release_configuration" 'label: "Render image smoke"'
-  assert_contains "$release_configuration" 'args: ["run", "check:render-image"]'
-  assert_contains "$scripts_package" '"check:render-image": "tsx ./src/verify-render-image.mts"'
-  assert_contains "$smoke_script" "Building Render API image as"
-  assert_contains "$smoke_script" '"build"'
-  assert_contains "$smoke_script" '"run"'
+  if grep -Fq 'label: "Render image smoke"' <<<"$release_configuration" ||
+    grep -Fq 'check:render-image' <<<"$release_configuration"; then
+    printf 'The release gate must not run the unused Render image smoke.\n' >&2
+    return 1
+  fi
   assert_contains "$dockerfile" "pnpm run prepare:publish"
   assert_contains "$dockerfile" "node scripts/src/finalize-build-identity.mjs"
   assert_contains "$web_identity_script" "BUILD_IDENTITY_MODE"
   assert_contains "$browser_servers" "BUILD_IDENTITY_MODE=development"
-  if grep -Eiq 'ghcr\.io|render\.com|docker[[:space:]]+push|"push"|"login"' \
-    <<<"$smoke_script"; then
-    printf 'Render image smoke must stay a disposable local Docker test, not an external publish/deploy path.\n' >&2
-    return 1
-  fi
-  echo "PASS: prepares shared identities for container and isolated browser builds"
+  echo "PASS: keeps build identities while excluding the unused Render release smoke"
 }
 
 test_docker_executable_targets_default_to_nonroot() {
@@ -604,7 +600,8 @@ test_docker_executable_targets_default_to_nonroot() {
   assert_contains "$dockerfile" 'COPY lib/field-check-contract/package.json ./lib/field-check-contract/package.json'
   assert_contains "$dockerfile" $'FROM ${NODE_IMAGE} AS api\nENV NODE_ENV=production\nWORKDIR /app\nCOPY --chown=node:node'
   assert_contains "$dockerfile" $'COPY --chown=node:node --from=api-migrate-runtime /app/migration ./migration\nUSER node\nCMD ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]'
-  assert_contains "$dockerfile" $'FROM caddy:2-alpine AS web\nUSER root\nRUN chown 1001:1001 /data /config'
+  assert_contains "$dockerfile" "FROM caddy:2.11.9-alpine@sha256:"
+  assert_contains "$dockerfile" $'USER root\nRUN chown 1001:1001 /data /config'
   assert_contains "$dockerfile" $'COPY --from=builder /app/artifacts/run-calculator/dist/public /srv\nUSER 1001:1001'
   assert_contains "$compose" '    user: node'
   assert_contains "$compose" '    user: "1001:1001"'
@@ -1273,6 +1270,38 @@ test_accepts_staged_project_run_workflow() {
   echo "PASS: accepts a single staged Project release workflow"
 }
 
+test_rejects_archived_v1_app_workflows() {
+  local retired_workflow workspace
+  local index=0
+  for retired_workflow in \
+    test \
+    test:client \
+    check:clean-start \
+    browser-full-159 \
+    client-tests \
+    clean-start \
+    api-unit; do
+    index=$((index + 1))
+    workspace=$(make_workspace "retired-v1-${index}" 1.7.12 1.7.12)
+    printf '\n[[workflows.workflow]]\nname = "%s"\n' "$retired_workflow" \
+      >>"$workspace/.replit"
+
+    run_check "$workspace"
+    [[ "$CHECK_STATUS" -ne 0 ]] || {
+      printf 'Expected archived V1 workflow %s to fail. Output:\n%s\n' \
+        "$retired_workflow" "$CHECK_OUTPUT" >&2
+      return 1
+    }
+    assert_contains "$CHECK_OUTPUT" "do not restore archived V1 app workflows"
+    [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+      printf 'Expected V1 workflow rejection before actionlint: %s.\n' \
+        "$retired_workflow" >&2
+      return 1
+    }
+  done
+  echo "PASS: rejects archived V1 app workflows"
+}
+
 test_rejects_parallel_project_children() {
   local workspace
   workspace=$(make_workspace parallel-project 1.7.12 1.7.12)
@@ -1880,6 +1909,7 @@ test_department_navigation_readiness_contract() {
 
 test_accepts_matching_versions
 test_accepts_staged_project_run_workflow
+test_rejects_archived_v1_app_workflows
 test_rejects_parallel_project_children
 test_rejects_full_release_as_project_default
 test_accepts_quoted_ci_version_with_inline_comment

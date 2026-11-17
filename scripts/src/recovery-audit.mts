@@ -26,18 +26,41 @@ export type EntryAudit = {
   missing: string[];
 };
 
+function archivedV1Path(file: string): string | undefined {
+  return /^artifacts\/(?:api-server|run-calculator)\//.test(file)
+    ? `_archived/v1/${file}`
+    : undefined;
+}
+
 async function checkEvidence(root: string, evidence: Evidence[]): Promise<EvidenceResult[]> {
   return Promise.all(evidence.map(async (item) => {
-    const path = resolve(root, item.file);
-    try {
-      await access(path);
-      if (item.contains === undefined) return { ...item, present: true };
-      const content = await readFile(path, "utf8");
-      return content.includes(item.contains)
-        ? { ...item, present: true }
-        : { ...item, present: false, reason: `does not contain ${JSON.stringify(item.contains)}` };
-    } catch {
+    const candidates = [item.file, archivedV1Path(item.file)].filter(
+      (candidate): candidate is string => candidate !== undefined,
+    );
+    let resolvedPath: string | undefined;
+    let resolvedFile = item.file;
+    for (const candidate of candidates) {
+      const candidatePath = resolve(root, candidate);
+      try {
+        await access(candidatePath);
+        resolvedPath = candidatePath;
+        resolvedFile = candidate;
+        break;
+      } catch {
+        // Try the archived V1 location only when its original path is absent.
+      }
+    }
+    if (!resolvedPath) {
       return { ...item, present: false, reason: "file is missing or unreadable" };
+    }
+    try {
+      if (item.contains === undefined) return { ...item, file: resolvedFile, present: true };
+      const content = await readFile(resolvedPath, "utf8");
+      return content.includes(item.contains)
+        ? { ...item, file: resolvedFile, present: true }
+        : { ...item, file: resolvedFile, present: false, reason: `does not contain ${JSON.stringify(item.contains)}` };
+    } catch {
+      return { ...item, file: resolvedFile, present: false, reason: "file is missing or unreadable" };
     }
   }));
 }

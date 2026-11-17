@@ -33,13 +33,22 @@ check_project_workflow_topology() {
       project_target_count = 0
       workflow_names["release:standard"] = 0
       workflow_names["release:full"] = 0
-      workflow_names["test"] = 0
-      workflow_names["test:client"] = 0
       workflow_names["typecheck"] = 0
       workflow_names["security:prod"] = 0
-      workflow_names["check:clean-start"] = 0
       workflow_names["evidence:release"] = 0
-      workflow_names["browser-full-159"] = 0
+      workflow_names["test:rules"] = 0
+      workflow_names["test:inventory-math"] = 0
+      workflow_names["test:spec-reconcile"] = 0
+      workflow_names["test:scheduled-recipe-check"] = 0
+      workflow_names["test:spec-export"] = 0
+      workflow_names["test:corpus"] = 0
+      retired_workflow_names["test"] = 0
+      retired_workflow_names["test:client"] = 0
+      retired_workflow_names["check:clean-start"] = 0
+      retired_workflow_names["browser-full-159"] = 0
+      retired_workflow_names["client-tests"] = 0
+      retired_workflow_names["clean-start"] = 0
+      retired_workflow_names["api-unit"] = 0
     }
     $0 == "[workflows]" {
       section = "settings"
@@ -80,6 +89,8 @@ check_project_workflow_topology() {
         project_workflow_count++
       } else if (workflow_name in workflow_names) {
         workflow_names[workflow_name]++
+      } else if (workflow_name in retired_workflow_names) {
+        retired_workflow_names[workflow_name]++
       }
       next
     }
@@ -100,13 +111,16 @@ check_project_workflow_topology() {
       for (name in workflow_names) {
         if (workflow_names[name] != 1) failed = 1
       }
+      for (name in retired_workflow_names) {
+        if (retired_workflow_names[name] != 0) failed = 1
+      }
       exit failed
     }
   ' "$project_workflow_config"; then
     cat >&2 <<'EOF'
 Workflow configuration check failed: the Project run button must launch only
-release:standard. Keep release:full and focused validation workflows available
-as separate runs.
+release:standard. Keep release:full and shared focused validation workflows
+available as separate runs, and do not restore archived V1 app workflows.
 EOF
     return 1
   fi

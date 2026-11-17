@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node server/main.mjs",
+    "build": "for file in server/*.mjs web/*.js; do node --check \"$file\" || exit; done",
     "test": "node --test core/*.test.mjs server/*.test.mjs web/*.test.mjs",
     "test:browser": "node --test e2e/*.test.mjs",
     "test:db": "bash db/run-local-tests.sh"
@@ -15,5 +16,8 @@
   "dependencies": {
     "pg": "8.23.1",
     "xlsx": "npm:@e965/xlsx@0.20.3"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
   }
 }

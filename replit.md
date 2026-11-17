@@ -1,12 +1,12 @@
 ## Run & Operate
 
-- **Production publication authority:** Only the Replit deployment is authorized to publish the active production app. GitHub is for source backup and CI/testing: pushes, releases, workflow runs, test artifacts, and container builds neither publish the app nor prove what is live. Retained Render and manual Docker production material is legacy and unsupported for current publication; repository edits do not change any external account, service, or deployment settings.
+- **Production publication boundary:** V1 is archived and this workspace is not deployed. Its Replit build/run commands fail closed; do not publish this workspace. V2 pilot deployment belongs in its separate project. GitHub is for source backup and CI/testing; pushes, releases, workflow runs, test artifacts, and container builds do not publish an app.
 
-- **Publish version identity:** After the final source edit, run `pnpm run publish:ready` before offering Publish. This single command refreshes the independent source identity and runs the focused API/web publish build; it does not publish or run the full release suites. If any source changes afterward, run it again. Replit's build still rejects a stale identity. After the owner publishes, resolve the official URL through deployment metadata and run `pnpm run check:published-build -- --url <official-url>`; this verifies the live source identity and waits for readiness. If Replit reports a failed build, check whether that exact build is nevertheless live and healthy before asking for another publish. Never derive the expected record from the live response. Source-match receipts do not replace controlled handoff/GO gates. See `docs/automatic-build-version-reporting.md`.
+- **V1 publishing is retired here:** the repository's legacy `publish:ready` scripts and the `.replit` deployment guard are not a route to publish V2. Use the isolated-project pilot and production gates before any V2 release.
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server on the artifact-configured local workflow port 8080 (`artifacts/api-server/.replit-artifact/artifact.toml`). The guarded launcher refuses confirmed deployed Replit runtimes, applies the audit-log protection step, then starts `dev:without-schema-push`; it does not run a general schema push. Keep development startup no-push; deliberate schema changes belong to the approved schema/release process. `REPLIT_ENVIRONMENT=production` alone does not trigger the refusal because isolated workspaces can carry it. CI may intentionally override the port with `PORT=5000`; do not use the CI port as local startup guidance.
-- `pnpm --filter @workspace/run-calculator run prepare:e2e:department` — for a fresh isolated browser-test database, fail closed unless the target is disposable, apply the canonical schema, then start the API; run `test:e2e:department` separately while it stays up
-- `pnpm run typecheck` — full typecheck across all packages
+- V1's API and web workflows have been removed. Their source and artifact manifests are preserved under `_archived/v1/artifacts/`.
+- V2 focused checks are listed in [v2/README.md](v2/README.md). They use disposable local PostgreSQL for database verification and never use `DATABASE_URL`.
+- `pnpm run typecheck` — typecheck shared libraries, scripts, and remaining artifacts; V1 application packages are excluded.
 - New Replit interactive Bash shells load the project-specific `.config/bashrc`,
   which selects the exact `.nvmrc` Node runtime for the shell and child commands.
   Confirm with `node --version` and `node -p process.execPath`. If selection
@@ -17,37 +17,29 @@
   version through npm with a private temporary cache, retains the Node and
   HTTPS-only safeguards, and removes the cache after the command.
 - **Release evidence handoff:** start at [docs/release-evidence-handoff.md](docs/release-evidence-handoff.md) for the standard/full commands, selected-revision report/checkpoint status, CI artifacts, and production-proof boundary
-- `pnpm --filter @workspace/api-server run typecheck:routes` — focused API route check when a generated validator build blocks the full API check; it uses the last successful `@workspace/api-zod` declarations and does not replace the authoritative `typecheck` command
 - The Node-pinned release runner serializes validation commands per workspace. Waiting for that local filesystem lock is capped at two hours (the configured post-merge validation timeout); contention reports the owning process and start time, then exits with a retryable error at the limit. `RELEASE_RUNNER_LOCK_WAIT_SECONDS` may shorten, but cannot extend, that cap. Its private temporary lock directory keeps the newest 20 local wait events per workspace (UTC timestamp, elapsed seconds, outcome, owner PID, and owner start time) in a mode-`600` file; command arguments, environment values, and test output are never retained. This does not control Replit-managed task merge locks or interrupt an already-running validation command.
 - Run `bash scripts/src/show-release-lock-history.sh` to display up to 20 valid recent wait events for the current workspace. The read-only output omits malformed rows and does not include Replit-managed task-runner waits.
-- `pnpm run build` — typecheck + build all packages
+- `pnpm run build` — typecheck the remaining workspace packages and syntax-check V2's unbundled runtime; it does not create a production bundle.
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- Do not run the V1 `@workspace/db` schema push from this source workspace. V2 uses its isolated database and migration process.
 - **Factory data reset:** a manager calls `POST /api/sync/reset` (requires `manage-staff`). In one transaction it clears all `daily_sync` rows for the scope, bumps a per-scope reset epoch, and broadcasts a reset over SSE so every populated client wipes its local copy and reloads — no code change, marker bump, or manual API-down/truncate. Accounts (`users`/`roles`/`user_roles`) are untouched. See `.agents/memory/one-time-data-purge.md`.
 - **Source workbook corpus:** the customer's complete source library (19 spec sheets, 13 dough + 15 sauce procedures, cheese/premix/shipping/schedule workbooks) lives in `attached_assets/source-library/{specs,dough,sauce,cheese,premix,shipping,schedule}` — use it for importer tests and audits. Latest audit report: `attached_assets/source-library/AUDIT-REPORT-2026-07-21.md`.
 - **Corpus regression harness (no AI):** `test:corpus` workflow runs `lib/corpus-harness` — deterministic parses of the full source-library corpus compared against checked-in JSON snapshots (`lib/corpus-harness/snapshots/*.json`) plus invariant tripwires (grid sanity, dropped rows, mix-vs-cheese routing, near-dup pressure). After an intentional importer behavior change, regenerate snapshots with `pnpm --filter @workspace/corpus-harness run snapshots` and review the diff.
-- `pnpm --filter @workspace/scripts run verify-large-spec-import` — manual real-AI check that huge spec imports survive chunking with no data loss; run after any AI model change (needs API server up + manager creds; see script header)
-- **Client validation:** `pnpm --filter @workspace/run-calculator run test` runs the client unit suite; `pnpm --filter @workspace/run-calculator run test:e2e:phone` runs the phone-sized Playwright usability smoke suite against the artifact-managed web app.
+- V1's real-AI spec-import harness and browser tests are preserved with the archive; they are not active V2 checks.
 - **Stable branch delivery:** Develop on `Replit`, which tracks `origin/Replit`, and use pull requests to merge into protected `main`. Local `main` tracks `origin/main` for comparison and diverts ordinary pushes to the backup remote. The legacy `pnpm run push:main` helper targets direct `origin/main` and is expected to be rejected by the live branch rule; do not use it for routine delivery. See `.github/repository-policy.md` and `docs/guarded-github-push.md`.
-- Required env: `DATABASE_URL` — Postgres connection string
-- Security-relevant env: `STAFF_SIGNUP_CODE` — transitional code used until a manager rotates or disables it; `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` — BOTH must match to bootstrap the first manager (fails closed); `SESSION_TTL_SEC` — absolute session lifetime (default 30 days); `SESSION_IDLE_TIMEOUT_SEC` — idle lifetime (default 12 hours). Managers control ongoing onboarding with one-time invitations and can disable accounts or revoke sessions.
+- V1 environment variables and database settings are retired with the archive. V2's `V2_DATABASE_URL` and bootstrap settings belong only in the separate V2 project's secret store; see [v2/README.md](v2/README.md).
 - **HTTP security headers:** Express sets MIME-sniffing, referrer, framing, and CSP headers but intentionally omits HSTS because Replit may terminate TLS before requests reach the API. The retained Docker Caddy site adds HSTS only to HTTPS responses when Caddy itself terminates TLS; `SITE_ADDRESS=:80` remains plain HTTP.
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- **V1 archive:** pnpm workspaces, Node.js 24, React/Vite, Express 5, PostgreSQL/Drizzle, Zod, Orval, and esbuild. This is preserved source, not an active app.
+- **V2 source:** Node.js 24.22.2, server-owned JavaScript modules, PostgreSQL, and a responsive web/PWA client. V2 is not deployed from this workspace.
 
 ## Where things live
 
-- **Web app:** `artifacts/run-calculator` (React + Vite), responsive for desktop, phone, and tablet browsers. The bulk of the UI/logic lives in `src/pages/home.tsx` (Tabs/activeTab system, run identity, packaging, draining panel). Per-run form values are persisted in localStorage.
-- **API server:** `artifacts/api-server` (Express 5). Routes in `src/routes/*` (~70 files; AI endpoints prefixed `ai*`). Server validates with Zod schemas from `@workspace/api-zod` and never uses `console.log` (use `req.log` / the singleton `logger`).
-- **API contract (source of truth):** `lib/api-spec/openapi.yaml`. Run `pnpm --filter @workspace/api-spec run codegen` to regenerate React Query hooks (`@workspace/api-client-react`) and Zod schemas (`@workspace/api-zod`). Do NOT edit generated files or the OpenAPI `info.title` (it controls generated filenames).
-- **DB schema (source of truth):** `lib/db/src/schema/*` (Drizzle), barrelled via `lib/db/src/schema/index.ts`. Push with `pnpm --filter @workspace/db run push`.
+- **V1 source archive:** `_archived/v1/artifacts/run-calculator` and `_archived/v1/artifacts/api-server`. See `_archived/v1/README.md` for the source baseline and restoration.
+- **V2 development area:** `v2/`. Its API contract, database migrations, server, browser client, and focused tests are contained there; see [v2/README.md](v2/README.md).
+- **V1 API contract and database schema:** `lib/api-spec/openapi.yaml` and `lib/db/src/schema/*` remain for source preservation only. Do not use them to configure or migrate V2.
 - **Shared pure logic:** `lib/*` — e.g. `inventory-math`, `fill-missing`, `recipe-apply`, `spec-import`, `production-rules`, `allergen`, `voice-commands`, `merge-suggest`, `ai-memory`, `onboarding`, `cheese-recipes`, `cheese-import`. The web app keeps only thin platform glue and tests import the libraries directly.
 - **Cheese recipes** are server-backed factory-wide master-data (own `cheese_recipes` table, managed like Mixes but deliberately NOT routed through Mixes — cheese components are per-BATCH lbs, mixes are per-pizza oz). Managers manage them under Manage Lists → Cheese Recipes and import "Cheese Mix Recipe Specs" workbooks (deterministic, no AI). Run applicator "Cheese" cards are pick-only and hydrate rows read-only from the pool. See `.agents/memory/cheese-server-master-data.md`.
 
@@ -69,7 +61,7 @@
 
 - **Fix task-scoped errors immediately.** Any TypeScript, test, or build error within the approved task scope must be fixed before moving on. Bring an unrelated error into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk; otherwise de-duplicate it and capture a bounded Draft with evidence and a next action. Do not silently lose errors.
 - **Investigation is not a fix veto.** When the owner asks to investigate further, continue gathering evidence rather than treating that choice as rejection. Once reasonable in-scope investigations are exhausted, proceed with a safe, task-scoped repair and regression coverage without asking again. Still obtain approval for user-controlled or irreversible operations such as production writes or publication.
-- **Web-only product:** The maintained application is `artifacts/run-calculator`, and it must remain usable in responsive desktop, phone, and tablet browsers.
+- **Web/PWA-first product:** V2 targets responsive desktop, phone, and tablet browsers. V1's web app is archived; the V2 pilot and production readiness gates remain separate.
 - **Automatically preserve future improvements:** When a distinct, actionable feature, upgrade, technical-debt item, or meaningful test gap is discussed but deferred, search current work for overlap and submit a task only when no existing task covers it and it meets the follow-up rules below. The task platform's settings determine whether a submitted task immediately becomes Active or remains a Draft; repository guidance does not change those settings. If the idea matters but is too vague to scope honestly, use a bounded discovery or decision plan instead of inventing requirements. Do not create tasks for casual speculation, temporary conversation details, secrets, personal information, or ideas already covered by existing work.
 
 ## Gotchas

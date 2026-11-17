@@ -53,6 +53,31 @@ async function run() {
     assert.match(formatAudit(result), /DIFFERENT fixture/);
     assert.equal(summarizeAudit(result).missing, 0);
     assert.equal(summarizeAudit(result).intentionalDifference, 1);
+
+    const archivedRoot = await fixture({
+      "_archived/v1/artifacts/run-calculator/src/feature.ts": "export const feature = true;",
+      "_archived/v1/artifacts/api-server/src/routes.ts": "router.use(feature);",
+      "src/feature.ts": "current V2 files are not fallback candidates",
+    });
+    try {
+      const archivedManifest: RecoveryManifest = {
+        version: 1,
+        entries: [{
+          id: "archived-v1",
+          feature: "Archived V1 evidence",
+          files: ["artifacts/run-calculator/src/feature.ts"],
+          wiring: [{ file: "artifacts/api-server/src/routes.ts", contains: "router.use(feature)" }],
+          tests: ["artifacts/api-server/src/missing.test.ts"].map((file) => ({ file })),
+          intentionalDifference: "V1 source is preserved under the archive path.",
+        }],
+      };
+      const archivedResult = await auditManifest(archivedRoot, archivedManifest);
+      assert.equal(archivedResult[0].status, "intentional-difference");
+      assert.equal(archivedResult[0].files[0].file, "_archived/v1/artifacts/run-calculator/src/feature.ts");
+      assert.match(archivedResult[0].missing[0], /artifacts\/api-server\/src\/missing\.test\.ts/);
+    } finally {
+      await rm(archivedRoot, { recursive: true, force: true });
+    }
     console.log("Recovery audit tests passed (pass, missing, intentional difference).");
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -37,8 +37,12 @@ node_modules
 /artifacts/run-calculator/playwright-report/
 /artifacts/run-calculator/test-results/
 /artifacts/run-calculator/generated-artifacts/
+/_archived/v1/artifacts/run-calculator/playwright-report/
+/_archived/v1/artifacts/run-calculator/test-results/
+/_archived/v1/artifacts/run-calculator/generated-artifacts/
 # Recreated by prepare:publish; generated build identity is not source input.
 /artifacts/api-server/publish-source-record.json
+/_archived/v1/artifacts/api-server/publish-source-record.json
 /release-evidence/clean-start/
 /release-evidence/release-check-checkpoint.md
 /release-evidence/release-check-report.md

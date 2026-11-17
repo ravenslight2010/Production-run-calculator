@@ -122,6 +122,7 @@
 - [GitHub CI evidence](github-actions-evidence-extraction.md) + [trigger access](github-ci-trigger-access.md) — retain run/revision records and verify access before claiming a run.
 - [PR dependency snapshots](pr-dependency-snapshot-isolation.md) — compare base dependency risk using only its lockfile in a credential-isolated temporary project.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
+- [Archived artifact discovery](replit-artifact-discovery.md) — move Replit artifact manifests outside `.replit-artifact` before archiving, or previews and workflows are recreated.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
 - [Local validation runtime](local-validation-runtime-index.md) + [pnpm bootstrap](pnpm-workspace-tool-cache.md) + [CodeExecution](codeexecution-network-globals.md) — runner locks, Node/CA conflicts, offline fixtures, and impure-only network calls.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
