@@ -8,6 +8,7 @@ const MAX_RUN_LIST_LIMIT = 100;
 const CREATE_SQL = `SELECT v2.create_planned_run($1::uuid, $2::uuid, $3::text, $4::text, $5::jsonb) AS result`;
 const GET_SQL = `SELECT v2.get_run($1::uuid, $2::uuid) AS result`;
 const LIST_SQL = `SELECT v2.list_runs($1::uuid, $2::integer) AS result`;
+const LIST_PRODUCTS_SQL = `SELECT v2.list_run_products($1::uuid) AS result`;
 
 export class RunServiceError extends Error {
   constructor(code, message, status) {
@@ -48,7 +49,10 @@ function normalizeSetupSnapshot(value) {
     throw invalidRequest("setupSnapshot must contain a run label and target case count.");
   }
   const keys = Object.keys(value).sort();
-  if (keys.length !== 2 || keys[0] !== "label" || keys[1] !== "targetCases") {
+  if (keys.some((key) => !["label", "productCode", "targetCases"].includes(key))
+    || !keys.includes("label") || !keys.includes("targetCases")
+    || (keys.includes("productCode") && (typeof value.productCode !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(value.productCode)))) {
     throw invalidRequest("setupSnapshot contains missing or unsupported fields.");
   }
   if (typeof value.label !== "string") {
@@ -61,7 +65,11 @@ function normalizeSetupSnapshot(value) {
   if (!Number.isSafeInteger(value.targetCases) || value.targetCases < 1) {
     throw invalidRequest("Target cases must be a positive whole number.");
   }
-  return { label, targetCases: value.targetCases };
+  return {
+    label,
+    targetCases: value.targetCases,
+    ...(value.productCode ? { productCode: value.productCode } : {}),
+  };
 }
 
 function validCanonicalTimestamp(value, nullable = false) {
@@ -93,6 +101,22 @@ function validateRun(value) {
     normalizeSetupSnapshot(value.setupSnapshot);
   } catch {
     throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run storage returned invalid setup data.", 502);
+  }
+  if (value.doughCapacity !== undefined && (
+    !value.doughCapacity || typeof value.doughCapacity !== "object" || Array.isArray(value.doughCapacity)
+    || !["available", "unavailable"].includes(value.doughCapacity.status)
+    || !Array.isArray(value.doughCapacity.reasons)
+    || value.doughCapacity.reasons.some((reason) => typeof reason !== "string" || reason.length > 80)
+    || (value.doughCapacity.status === "available"
+      && (typeof value.doughCapacity.doughballYield !== "number"
+        || !Number.isFinite(value.doughCapacity.doughballYield)
+        || value.doughCapacity.doughballYield <= 0
+        || typeof value.doughCapacity.pizzasPerCase !== "number"
+        || !Number.isSafeInteger(value.doughCapacity.pizzasPerCase)
+        || value.doughCapacity.pizzasPerCase < 1
+        || value.doughCapacity.pizzasPerCase > 100))
+  )) {
+    throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run storage returned invalid dough source status.", 502);
   }
   for (const interval of value.pauseIntervals) {
     if (
@@ -173,6 +197,7 @@ export function createRunService({ query, authorize: authorizeAction }) {
         response.run.status !== "planned"
         || response.run.setupSnapshot.label !== normalizedSetup.label
         || response.run.setupSnapshot.targetCases !== normalizedSetup.targetCases
+        || response.run.setupSnapshot.productCode !== normalizedSetup.productCode
       ) {
         throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run creation returned a different run setup.", 502);
       }
@@ -207,6 +232,35 @@ export function createRunService({ query, authorize: authorizeAction }) {
       }
       const runs = requireResult(result, Array.isArray, "Run list returned an unexpected result.");
       return runs.map(validateRun);
+    },
+
+    async listProducts({ auth }) {
+      const identity = normalizeAuth(auth);
+      await authorize(authorizeAction, auth, "run.read");
+      let result;
+      try {
+        result = await query(LIST_PRODUCTS_SQL, [identity.facilityId]);
+      } catch (error) {
+        throwSafeStorageError(error);
+      }
+      const products = requireResult(result, Array.isArray, "Run product list returned an unexpected result.");
+      for (const product of products) {
+        if (!product || typeof product !== "object" || Array.isArray(product)
+          || typeof product.code !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(product.code)
+          || typeof product.name !== "string" || product.name.length < 1 || product.name.length > 120
+          || !product.doughCapacity || typeof product.doughCapacity !== "object"
+          || !["available", "unavailable"].includes(product.doughCapacity.status)
+          || !Array.isArray(product.doughCapacity.reasons)
+          || product.doughCapacity.reasons.some((reason) => typeof reason !== "string" || reason.length > 80)
+          || (product.doughCapacity.status === "available"
+            && (typeof product.doughCapacity.doughballYield !== "number"
+              || !Number.isFinite(product.doughCapacity.doughballYield)
+              || typeof product.doughCapacity.pizzasPerCase !== "number"
+              || !Number.isSafeInteger(product.doughCapacity.pizzasPerCase)))) {
+          throw new RunServiceError("INVALID_STORAGE_RESPONSE", "Run product list returned invalid data.", 502);
+        }
+      }
+      return products;
     },
   });
 }

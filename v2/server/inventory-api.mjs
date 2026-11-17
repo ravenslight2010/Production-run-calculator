@@ -4,10 +4,18 @@ import {
   parseOpeningCountCsv,
   parseSetupImportCsv,
 } from "../core/import-csv.mjs";
+import {
+  linkWorkbookCapacityRows,
+  parseDoughCapacityWorkbook,
+  parseShippingCapacityWorkbook,
+  WorkbookCapacityImportError,
+  workbookCapacityImportLimits,
+} from "../core/workbook-capacity-import.mjs";
 
 const IMPORTS_PATH = "/api/v2/imports";
 const INVENTORY_PATH = "/api/v2/inventory";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_WORKBOOK_BODY_BYTES = 7_250 * 1024;
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -33,7 +41,7 @@ function sendJson(response, status, body, headers = {}) {
   response.end(JSON.stringify(body));
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, maxBytes = MAX_BODY_BYTES) {
   const contentType = request.headers["content-type"];
   if (typeof contentType !== "string" || !/^application\/json(?:\s*;|$)/i.test(contentType)) {
     throw new InventoryApiError(415, "Send this request as JSON.");
@@ -42,7 +50,7 @@ async function readJsonBody(request) {
   const chunks = [];
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > MAX_BODY_BYTES) throw new InventoryApiError(413, "The request is too large.");
+    if (bytes > maxBytes) throw new InventoryApiError(413, "The request is too large.");
     chunks.push(chunk);
   }
   if (bytes === 0) throw new InventoryApiError(400, "A JSON request body is required.");
@@ -122,6 +130,7 @@ function parseLimit(url, { extra = [] } = {}) {
 function safeStatus(error) {
   if (error instanceof InventoryApiError) return error.status;
   if (error instanceof ImportCsvError) return 400;
+  if (error instanceof WorkbookCapacityImportError) return 400;
   switch (error?.code) {
     case "P0002": return 404;
     case "42501": return 403;
@@ -139,6 +148,7 @@ function safeStatus(error) {
 function safeMessage(error, operation) {
   if (error instanceof InventoryApiError) return error.message;
   if (error instanceof ImportCsvError) return error.message;
+  if (error instanceof WorkbookCapacityImportError) return error.message;
   switch (error?.code) {
     case "P0002": return "That warehouse, product, import, or count is no longer available.";
     case "42501": return "You do not have access to this inventory.";
@@ -249,11 +259,12 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
         }
         if (
           url.pathname === IMPORTS_PATH
+          || url.pathname === `${IMPORTS_PATH}/workbooks`
           || url.pathname === `${INVENTORY_PATH}/opening-counts`
         ) {
           const limit = uploadLimiter.consume(auth.actorId);
           if (!limit.allowed) {
-            throw new InventoryApiError(429, "Too many CSV uploads. Wait briefly, then try again.", limit.retryAfterSeconds);
+            throw new InventoryApiError(429, "Too many imports. Wait briefly, then try again.", limit.retryAfterSeconds);
           }
         }
       }
@@ -284,6 +295,103 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
         );
         const staged = resultValue(result);
         sendJson(response, staged.replayed ? 200 : 201, { ...staged, records });
+        return true;
+      }
+
+      if (isImports && url.pathname === `${IMPORTS_PATH}/workbooks` && request.method === "POST") {
+        operation = "create_workbook_import";
+        const body = await readJsonBody(request, MAX_WORKBOOK_BODY_BYTES);
+        requireKeys(body, ["requestId", "family", "fileName", "workbookBase64"]);
+        const requestId = validateRequestId(body.requestId);
+        if (!["dough-procedure", "shipping-guide"].includes(body.family)) {
+          throw new InventoryApiError(400, "Choose a dough procedure or shipping guide workbook.");
+        }
+        if (typeof body.workbookBase64 !== "string"
+          || body.workbookBase64.length > Math.ceil(workbookCapacityImportLimits.maxBytes / 3) * 4
+          || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(body.workbookBase64)) {
+          throw new InventoryApiError(400, "Choose a valid XLSX workbook no larger than 5 MiB.");
+        }
+        const workbookBytes = Buffer.from(body.workbookBase64, "base64");
+        if (workbookBytes.byteLength > workbookCapacityImportLimits.maxBytes
+          || workbookBytes.toString("base64") !== body.workbookBase64) {
+          throw new InventoryApiError(400, "Choose a valid XLSX workbook no larger than 5 MiB.");
+        }
+        const parsed = body.family === "dough-procedure"
+          ? parseDoughCapacityWorkbook(workbookBytes, body.fileName)
+          : parseShippingCapacityWorkbook(workbookBytes, body.fileName);
+        const productResult = await pool.query(
+          "SELECT v2.list_inventory_products($1::uuid) AS result",
+          scope,
+        );
+        const products = resultValue(productResult);
+        if (!Array.isArray(products)) {
+          throw new InventoryApiError(502, "The active product list is unavailable. Refresh and try again.");
+        }
+        const priorResult = await pool.query(
+          "SELECT v2.list_workbook_source_links($1::uuid, $2::text) AS result",
+          [...scope, body.family],
+        );
+        const priorLinks = resultValue(priorResult);
+        if (!Array.isArray(priorLinks)) {
+          throw new InventoryApiError(502, "Saved workbook product links are unavailable. Refresh and try again.");
+        }
+        const linkedRows = linkWorkbookCapacityRows(parsed.rows, products, priorLinks);
+        const records = linkedRows
+          .filter((row) => row.productCode)
+          .map((row) => ({
+            code: `${body.family === "dough-procedure" ? "DOUGH" : "SHIP"}-${row.sourceKey}`,
+            name: row.name,
+            productCode: row.productCode,
+            data: body.family === "dough-procedure"
+              ? {
+                sourceFamily: body.family,
+                sourceKey: row.sourceKey,
+                fileName: parsed.fileName,
+                fileSha256: parsed.fileSha256,
+                source: row.source,
+                doughballYield: row.doughballYield,
+                doughballWeightOz: row.doughballWeightOz,
+                doughballsPerTray: row.doughballsPerTray,
+              }
+              : {
+                sourceFamily: body.family,
+                sourceKey: row.sourceKey,
+                fileName: parsed.fileName,
+                fileSha256: parsed.fileSha256,
+                source: row.source,
+                pizzasPerCase: row.pizzasPerCase,
+              },
+          }));
+        if (records.length === 0) {
+          throw new InventoryApiError(
+            409,
+            "No workbook rows matched an active product name exactly. Add or rename V2 products, then upload the workbook again.",
+          );
+        }
+        const kind = body.family === "dough-procedure" ? "recipes" : "production-setups";
+        const requestHash = hashRequest({ family: body.family, fileSha256: parsed.fileSha256, records });
+        const result = await pool.query(
+          "SELECT v2.stage_setup_import($1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::jsonb) AS result",
+          [...scope, actor, requestId, requestHash, kind, JSON.stringify(records)],
+        );
+        const staged = resultValue(result);
+        const unmatchedRows = linkedRows
+          .filter((row) => !row.productCode)
+          .map((row) => ({ name: row.name, row: row.source.row, reason: row.linkType }));
+        sendJson(response, staged.replayed ? 200 : 201, {
+          ...staged,
+          records,
+          sourceFamily: body.family,
+          fileName: parsed.fileName,
+          fileSha256: parsed.fileSha256,
+          linkedCount: records.length,
+          rememberedCount: linkedRows.filter((row) => row.linkType === "remembered").length,
+          unmatchedRows: unmatchedRows.slice(0, 100),
+          unmatchedCount: unmatchedRows.length,
+          invalidValueCount: linkedRows.filter((row) => body.family === "dough-procedure"
+            ? row.doughballYield === null
+            : row.pizzasPerCase === null).length,
+        });
         return true;
       }
 

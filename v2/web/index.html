@@ -172,6 +172,12 @@
                   <span>Target cases</span>
                   <input id="target-cases" name="targetCases" type="number" inputmode="numeric" min="1" step="1" placeholder="0" required data-testid="input-target-cases" />
                 </label>
+                <label class="field field-product" for="run-product">
+                  <span>Imported product</span>
+                  <select id="run-product" name="productCode" required data-testid="select-run-product">
+                    <option value="">Loading products…</option>
+                  </select>
+                </label>
                 <button class="button button-create" id="create-button" type="submit" data-testid="button-create-run">
                   <span>Prepare run</span><span class="button-arrow" aria-hidden="true">↗</span>
                 </button>
@@ -273,6 +279,32 @@
               </div>
               <h4 class="manager-subheading">Recent imports</h4>
               <ul class="manager-list" id="import-history" aria-live="polite"></ul>
+            </section>
+
+            <section class="manager-card manager-card-wide" aria-labelledby="capacity-workbook-heading">
+              <p class="eyebrow">DOUGH CAPACITY SOURCES · V2 ONLY</p>
+              <h3 id="capacity-workbook-heading">Import dough and shipping workbooks</h3>
+              <p class="manager-help">Upload one dough procedure or shipping guide at a time. V2 links rows only to one exact product-name match, remembers confirmed product codes, and stages matched rows for review before applying them.</p>
+              <form id="capacity-workbook-form" class="manager-form">
+                <label class="field" for="capacity-workbook-family">
+                  <span>Workbook type</span>
+                  <select id="capacity-workbook-family" name="family" required>
+                    <option value="dough-procedure">Dough procedure</option>
+                    <option value="shipping-guide">Shipping guide</option>
+                  </select>
+                </label>
+                <label class="field" for="capacity-workbook-file">
+                  <span>XLSX workbook</span>
+                  <input id="capacity-workbook-file" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required aria-describedby="capacity-workbook-help" />
+                </label>
+                <p class="field-hint" id="capacity-workbook-help">One workbook per import, up to 5 MiB. Other workbook families are not imported here.</p>
+                <button class="button button-primary" id="capacity-workbook-review" type="submit">Validate and review workbook</button>
+                <button class="button button-secondary" id="capacity-workbook-retry" type="button" hidden>Retry the same workbook</button>
+              </form>
+              <div id="capacity-workbook-preview" class="manager-preview" aria-live="polite" hidden></div>
+              <div class="manager-actions" id="capacity-workbook-actions" hidden>
+                <button class="button button-primary" id="capacity-workbook-apply" type="button">Apply reviewed workbook</button>
+              </div>
             </section>
 
             <section class="manager-card" aria-labelledby="warehouse-heading">

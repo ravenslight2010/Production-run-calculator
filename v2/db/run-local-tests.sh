@@ -118,6 +118,8 @@ fi
 " >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0004-import-inventory.sql" >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0004-import-inventory.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/0005-dough-capacity-sources.sql" >/dev/null
+"${PSQL[@]}" -f "$ROOT/v2/db/0005-dough-capacity-sources.test.sql"
 
 "${PSQL[@]}" -c "
   CREATE ROLE v2_api_test NOLOGIN;
@@ -127,6 +129,8 @@ fi
   GRANT EXECUTE ON FUNCTION v2.create_planned_run(uuid, uuid, text, text, jsonb) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.get_run(uuid, uuid) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.list_runs(uuid, integer) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_run_products(uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_workbook_source_links(uuid, text) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.apply_run_lifecycle_command(
     uuid, uuid, uuid, text, text, text, bigint
   ) TO v2_api_test;
@@ -274,6 +278,13 @@ fi
   FROM test_time
 " >/dev/null
 
+"${PSQL[@]}" -c "
+  INSERT INTO v2.products (facility_id, code, name, base_unit, active)
+  VALUES
+    ('40000000-0000-4000-8000-000000000001', 'TEST-RUN', 'Test Run Product', 'case', true),
+    ('60000000-0000-4000-8000-000000000001', 'TEST-RACE', 'Test Race Product', 'case', true);
+" >/dev/null
+
 API_ROLE_RESULT="$("${PSQL[@]}" -c "
   SET ROLE v2_api_test;
   SELECT (result->>'outcome') || '|' || (result->>'replayed') || '|' ||
@@ -307,7 +318,7 @@ CREATE_RESULT="$("${PSQL[@]}" -c "
       '40000000-0000-4000-8000-000000000001',
       '40000000-0000-4000-8000-000000000002',
       'create-run-once', repeat('e', 64),
-      '{\"label\":\"V2 run\",\"targetCases\":7}'::jsonb
+       '{\"label\":\"V2 run\",\"targetCases\":7,\"productCode\":\"TEST-RUN\"}'::jsonb
     ) AS result
   ) AS created;
   RESET ROLE;
@@ -328,7 +339,7 @@ REPLAY_RESULT="$("${PSQL[@]}" -c "
       '40000000-0000-4000-8000-000000000001',
       '40000000-0000-4000-8000-000000000002',
       'create-run-once', repeat('e', 64),
-      '{\"label\":\"V2 run\",\"targetCases\":7}'::jsonb
+       '{\"label\":\"V2 run\",\"targetCases\":7,\"productCode\":\"TEST-RUN\"}'::jsonb
     ) AS result
   ) AS replayed;
   RESET ROLE;
@@ -375,7 +386,7 @@ CREATE_RACE_SQL="
       '60000000-0000-4000-8000-000000000002',
       '60000000-0000-4000-8000-000000000003',
       repeat('f', 64),
-      '{\"label\":\"Concurrent create\",\"targetCases\":12}'::jsonb
+       '{\"label\":\"Concurrent create\",\"targetCases\":12,\"productCode\":\"TEST-RACE\"}'::jsonb
     ) AS result
   ) AS created
 "

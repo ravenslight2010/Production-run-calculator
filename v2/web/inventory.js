@@ -11,11 +11,17 @@ const CODE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 const QTY = /^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/;
 const PENDING_KEY = "fieldline:v2:inventory-pending";
 const IMPORT_KINDS = new Set(["products", "recipes", "production-setups"]);
+const WORKBOOK_IMPORT_FAMILIES = new Set(["dough-procedure", "shipping-guide"]);
+const MAX_WORKBOOK_BYTES = 5 * 1024 * 1024;
 
 const byId = (id) => document.getElementById(id);
 const dom = {
   panel: byId("manager-tools"), error: byId("manager-error"),
   importForm: byId("setup-import-form"), importKind: byId("import-kind"), importFile: byId("import-file"),
+  workbookForm: byId("capacity-workbook-form"), workbookFamily: byId("capacity-workbook-family"),
+  workbookFile: byId("capacity-workbook-file"), workbookRetry: byId("capacity-workbook-retry"),
+  workbookPreview: byId("capacity-workbook-preview"), workbookActions: byId("capacity-workbook-actions"),
+  workbookApply: byId("capacity-workbook-apply"),
   templateColumns: byId("csv-template-columns"), templateDownload: byId("csv-template-download"),
   openingTemplateDownload: byId("opening-count-template-download"),
   importPreview: byId("import-preview"), importActions: byId("import-actions"),
@@ -47,6 +53,7 @@ let currentCount = null;
 let pending = loadPending();
 let loading = false;
 let inFlight = false;
+let workbookPreparing = false;
 let lastConfirmed = false;
 
 function object(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
@@ -109,6 +116,7 @@ function loadPending() {
 function validPendingRoute(kind, endpoint) {
   if (typeof endpoint !== "string") return false;
   if (kind === "setup-import") return endpoint === IMPORTS;
+  if (kind === "workbook-import") return endpoint === `${IMPORTS}/workbooks`;
   if (kind === "warehouse-create") return endpoint === `${INVENTORY}/warehouses`;
   if (kind === "movement") return endpoint === `${INVENTORY}/movements`;
   if (kind === "transfer") return endpoint === `${INVENTORY}/transfers`;
@@ -222,7 +230,8 @@ function validateCountSummary(item) {
 }
 function setBusy(busy) {
   inFlight = busy;
-  [dom.importApply, ...dom.importForm.querySelectorAll("button"), ...dom.warehouseForm.querySelectorAll("button"),
+  [dom.importApply, dom.workbookApply, ...dom.importForm.querySelectorAll("button"),
+    ...dom.workbookForm.querySelectorAll("button"), ...dom.warehouseForm.querySelectorAll("button"),
     ...dom.movementForm.querySelectorAll("button"), ...dom.transferForm.querySelectorAll("button"),
     ...dom.openingForm.querySelectorAll("button"), dom.openingReview, dom.openingApply].filter(Boolean)
     .forEach((button) => { button.disabled = busy || (button.dataset.requiresWrite === "true" && !writeGate); });
@@ -246,12 +255,13 @@ function renderPending() {
     message("An unconfirmed inventory request belongs to another staff account. Sign in as its original manager to retry; it will not be resent under this account.", "warning");
   }
   dom.importRetry.hidden = !(pending && pending.kind === "setup-import" && owned);
+  dom.workbookRetry.hidden = !(pending && pending.kind === "workbook-import" && owned);
   dom.openingRetry.hidden = !(pending && pending.kind === "opening-count" && owned);
   const existing = dom.error.querySelector("[data-retry-pending]");
   if (existing) existing.remove();
   if (pending && owned) {
     if (dom.error.hidden) message("An inventory request needs confirmation. Retry the same saved request; do not submit a duplicate.", "warning");
-    if (!["setup-import", "opening-count"].includes(pending.kind)) {
+    if (!["setup-import", "opening-count", "workbook-import"].includes(pending.kind)) {
       const retry = actionButton("Retry saved request", retrySavedRequest, "button button-secondary button-small pending-retry");
       retry.dataset.retryPending = "true";
       retry.disabled = !writeGate || !lastConfirmed || inFlight;
@@ -493,7 +503,7 @@ async function loadAll() {
     updateReadOnly();
   }
 }
-async function operation({ kind, endpoint, payload, responseKey, validate, refresh, label }) {
+async function operation({ kind, endpoint, payload, requestBody = null, responseKey, validate, refresh, label }) {
   if (inFlight || !ensureWrite()) return null;
   if (pending && pending.actorId !== staff.userId) {
     message("The saved request belongs to another manager. Sign in as that person before retrying.", "warning"); return null;
@@ -506,7 +516,10 @@ async function operation({ kind, endpoint, payload, responseKey, validate, refre
   setBusy(true);
   let confirmed = false;
   try {
-    const body = await request(attempt.endpoint, { method: "POST", body: attempt.payload });
+    const body = await request(attempt.endpoint, {
+      method: "POST",
+      body: requestBody ?? attempt.payload,
+    });
     if (responseKey && !(responseKey in body)) throw new Error(`The server response did not confirm ${label}. Retry the same request.`);
     const result = responseKey ? body[responseKey] : body;
     if (validate && !validate(result)) throw new Error(`The server returned an unexpected ${label} result. Retry the same request to confirm it.`);
@@ -599,6 +612,128 @@ async function submitImport(event) {
   try { await stageImport(await file.text(), kind, crypto.randomUUID()); }
   catch { message("The CSV file could not be read. Choose it again and retry.", "error"); }
 }
+function workbookImportResponse(value, family = null, fileSha256 = null) {
+  return object(value) && value.outcome === "staged" && uuid(value.importId)
+    && IMPORT_KINDS.has(value.kind)
+    && value.kind === (value.sourceFamily === "dough-procedure" ? "recipes" : "production-setups")
+    && WORKBOOK_IMPORT_FAMILIES.has(value.sourceFamily)
+    && (!family || value.sourceFamily === family)
+    && text(value.fileName, 120)
+    && /^[0-9a-f]{64}$/u.test(value.fileSha256)
+    && (!fileSha256 || value.fileSha256 === fileSha256)
+    && Number.isSafeInteger(value.linkedCount) && value.linkedCount >= 1
+    && Number.isSafeInteger(value.rememberedCount) && value.rememberedCount >= 0
+    && Number.isSafeInteger(value.unmatchedCount) && value.unmatchedCount >= 0
+    && Number.isSafeInteger(value.invalidValueCount) && value.invalidValueCount >= 0
+    && Array.isArray(value.unmatchedRows) && value.unmatchedRows.length <= 100
+    && value.unmatchedRows.every((row) => object(row) && text(row.name, 120)
+      && Number.isSafeInteger(row.row) && row.row > 0
+      && ["unmatched", "ambiguous"].includes(row.reason))
+    && Array.isArray(value.records) && value.records.length === value.linkedCount
+    && value.records.every((record) => validateRecord(record, value.kind));
+}
+function renderWorkbookPreview(result) {
+  renderPreview(dom.workbookPreview, result.records, `Staged · ${result.sourceFamily} · ${result.fileName}`);
+  dom.workbookPreview.insertBefore(
+    make("p", "manager-help", `${result.linkedCount} rows linked; ${result.rememberedCount} previously confirmed links retained; ${result.unmatchedCount} rows not linked; ${result.invalidValueCount} linked rows have a missing or invalid source value.`),
+    dom.workbookPreview.children[1] || null,
+  );
+  if (result.unmatchedCount > 0) {
+    const details = make("details", "workbook-unmatched");
+    details.append(make("summary", "", `Show up to ${result.unmatchedRows.length} unmatched workbook rows`));
+    const list = make("ul", "preview-records");
+    result.unmatchedRows.forEach((row) => {
+      list.append(make("li", "", `${row.name} · row ${row.row} · ${row.reason === "ambiguous" ? "multiple exact product matches" : "no exact product match"}`));
+    });
+    details.append(list);
+    dom.workbookPreview.append(details);
+  }
+  dom.workbookActions.hidden = false;
+  dom.workbookApply.dataset.importId = result.importId;
+}
+async function workbookFileDetails(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const fileSha256 = [...new Uint8Array(digest)].map((part) => part.toString(16).padStart(2, "0")).join("");
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 32_768) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
+  }
+  return { fileSha256, workbookBase64: btoa(binary) };
+}
+async function uploadCapacityWorkbook(file, saved = null) {
+  if (!ensureWrite()) return null;
+  if (workbookPreparing) return null;
+  if (pending && !saved) {
+    message("Resolve the saved request first. Retry its exact action before starting another import.", "warning");
+    return null;
+  }
+  workbookPreparing = true;
+  dom.workbookForm.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  try {
+  if (!file || file.size < 22 || file.size > MAX_WORKBOOK_BYTES
+    || !/\.xlsx$/iu.test(file.name) || file.name.length > 120) {
+    message("Choose a standard .xlsx workbook no larger than 5 MiB.", "warning");
+    return null;
+  }
+  const family = saved?.payload.family || dom.workbookFamily.value;
+  if (!WORKBOOK_IMPORT_FAMILIES.has(family)) {
+    message("Choose a dough procedure or shipping guide workbook.", "warning");
+    return null;
+  }
+  if (saved && (file.name !== saved.payload.fileName || family !== saved.payload.family)) {
+    message("Choose the same workbook type and file name used for the saved request.", "warning");
+    return null;
+  }
+  let details;
+  try { details = await workbookFileDetails(file); }
+  catch {
+    message("The workbook could not be read for a safe retry. Choose it again.", "error");
+    return null;
+  }
+  if (saved && details.fileSha256 !== saved.payload.fileSha256) {
+    message("This is not the same workbook as the saved request. Keep the saved request and choose its original file.", "warning");
+    return null;
+  }
+  const payload = saved?.payload || {
+    requestId: crypto.randomUUID(),
+    family,
+    fileName: file.name,
+    fileSha256: details.fileSha256,
+  };
+  const requestBody = {
+    requestId: payload.requestId,
+    family: payload.family,
+    fileName: payload.fileName,
+    workbookBase64: details.workbookBase64,
+  };
+  return operation({
+    kind: "workbook-import",
+    endpoint: `${IMPORTS}/workbooks`,
+    payload,
+    requestBody,
+    validate: (result) => workbookImportResponse(result, payload.family, payload.fileSha256),
+    label: "Workbook import",
+    refresh: async (result) => {
+      renderWorkbookPreview(result);
+      await refreshImportHistory();
+    },
+  });
+  } finally {
+    workbookPreparing = false;
+    updateReadOnly();
+  }
+}
+async function submitCapacityWorkbook(event) {
+  event.preventDefault();
+  const saved = pending?.kind === "workbook-import" ? pending : null;
+  if (pending && !saved) {
+    renderPending();
+    message("Resolve the saved request first. Retry its exact action before starting another import.", "warning");
+    return;
+  }
+  await uploadCapacityWorkbook(dom.workbookFile.files?.[0], saved);
+}
 async function retryImport() {
   if (!pending || pending.kind !== "setup-import" || pending.actorId !== staff?.userId) return;
   await operation({
@@ -611,12 +746,15 @@ async function retryImport() {
 async function actOnImport(item, action) {
   if (!ensureWrite()) return;
   if (action === "undo" && !window.confirm(`Undo the applied ${item.kind} import? The server will validate whether this is still safe.`)) return;
-  await operation({
+  const result = await operation({
     kind: `import-${action}`, endpoint: `${IMPORTS}/${encodeURIComponent(item.id)}/${action}`, payload: {},
     responseKey: null, validate: (result) => object(result) && (result.id === undefined || result.id === item.id),
     label: `Import ${action}`,
     refresh: async () => { await refreshImportHistory(); await loadAll(); },
   });
+  if (result && action === "apply" && dom.workbookApply.dataset.importId === item.id) {
+    dom.workbookActions.hidden = true;
+  }
 }
 async function createWarehouse(event) {
   event.preventDefault();
@@ -793,6 +931,10 @@ async function retryOpeningCount() {
 async function retrySavedRequest() {
   const saved = pending;
   if (!saved || saved.actorId !== staff?.userId || !ensureWrite()) return;
+  if (saved.kind === "workbook-import") {
+    await uploadCapacityWorkbook(dom.workbookFile.files?.[0], saved);
+    return;
+  }
   const validator = saved.kind === "setup-import"
     ? (value) => importResponse(value)
              : saved.kind === "opening-count" ? stagedCountResponse
@@ -829,8 +971,14 @@ function bind() {
   dom.importKind.addEventListener("change", updateTemplates);
   dom.importForm.addEventListener("submit", submitImport);
   dom.importRetry.addEventListener("click", retryImport);
+  dom.workbookForm.addEventListener("submit", submitCapacityWorkbook);
+  dom.workbookRetry.addEventListener("click", retrySavedRequest);
   dom.importApply.addEventListener("click", () => {
     const item = imports.find((entry) => entry.id === dom.importApply.dataset.importId);
+    if (item) void actOnImport(item, "apply");
+  });
+  dom.workbookApply.addEventListener("click", () => {
+    const item = imports.find((entry) => entry.id === dom.workbookApply.dataset.importId);
     if (item) void actOnImport(item, "apply");
   });
   dom.warehouseForm.addEventListener("submit", createWarehouse);
@@ -881,7 +1029,8 @@ export function updateInventoryContext(nextStaff, canWrite) {
   dom.panel.hidden = false;
   if (changedUser) {
     imports = []; warehouses = []; products = []; stock = []; movements = []; openingCounts = []; currentCount = null;
-    dom.importPreview.hidden = true; dom.importActions.hidden = true; dom.openingPreview.hidden = true; dom.openingActions.hidden = true;
+    dom.importPreview.hidden = true; dom.importActions.hidden = true; dom.workbookPreview.hidden = true; dom.workbookActions.hidden = true;
+    dom.openingPreview.hidden = true; dom.openingActions.hidden = true;
   }
   if (writeGate) lastConfirmed = false;
   updateReadOnly();

@@ -1,6 +1,7 @@
 const MAX_VALUE = 1_000_000;
 const MAX_DECIMAL_PLACES = 3;
 const MAX_DECIMAL_PLACES_BY_FIELD = new Map([["casesPerBatch", 4]]);
+const DERIVED_INPUT_FIELDS = new Set(["casesPerBatch"]);
 const INTEGER_FIELDS = new Set([
   "timerDurationSeconds", "casesPerSkid", "traysPerBatch",
   "pizzasPerCase", "casesProduced", "casesOnLine", "casesInFreezer",
@@ -98,6 +99,9 @@ function normalizeChanges(stationKey, changes, mode) {
   for (const [field, rawValue] of entries) {
     const value = requireFiniteNumber(rawValue, field);
     if (station.inputs.includes(field)) {
+      if (DERIVED_INPUT_FIELDS.has(field)) {
+        throw new StationWorkflowError(`${field} is calculated from the selected product and cannot be entered manually.`);
+      }
       if (field === "casesPerSkid" || field === "casesPerBatch" || field === "traysPerBatch"
         || field === "pizzasPerCase" || field === "batchLbs" || field === "barrelLbs") {
         if (value <= 0) throw new StationWorkflowError(`${field} must be greater than zero.`);
@@ -171,6 +175,17 @@ function round(value, digits = 2) {
   return Math.round((value + Number.EPSILON) * scale) / scale;
 }
 
+export function deriveDoughCasesPerBatch({ doughballYield, pizzasPerCase } = {}) {
+  if (typeof doughballYield !== "number" || !Number.isFinite(doughballYield)
+    || doughballYield <= 0 || doughballYield > MAX_VALUE
+    || typeof pizzasPerCase !== "number" || !Number.isSafeInteger(pizzasPerCase)
+    || pizzasPerCase < 1 || pizzasPerCase > 100) {
+    return null;
+  }
+  const casesPerBatch = round(doughballYield / pizzasPerCase, 4);
+  return casesPerBatch > 0 ? casesPerBatch : null;
+}
+
 export function calculateStationMetrics({ stationKey, run, state }) {
   const station = STATIONS[stationKey];
   if (!station) throw new StationWorkflowError("Choose a supported production station.");
@@ -191,10 +206,17 @@ export function calculateStationMetrics({ stationKey, run, state }) {
   }
 
   if (stationKey === "dough") {
-    const casesPerBatch = valueFrom(state, "inputs", "casesPerBatch");
+    const capacity = run?.doughCapacity;
+    const casesPerBatch = capacity?.status === "available"
+      ? deriveDoughCasesPerBatch({
+        doughballYield: capacity.doughballYield,
+        pizzasPerCase: capacity.pizzasPerCase,
+      })
+      : null;
     metrics.casesProduced = valueFrom(state, "progress", "casesProduced");
     metrics.casesRemaining = Math.max(0, targetCases - metrics.casesProduced);
-    metrics.batchesNeeded = casesPerBatch > 0 ? Math.ceil(targetCases / casesPerBatch) : null;
+    metrics.casesPerBatch = casesPerBatch;
+    metrics.batchesNeeded = casesPerBatch !== null ? Math.ceil(targetCases / casesPerBatch) : null;
     metrics.batchesRemaining = metrics.batchesNeeded === null
       ? null
       : Math.max(0, metrics.batchesNeeded - valueFrom(state, "progress", "batchesMade"));

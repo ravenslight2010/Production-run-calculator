@@ -117,7 +117,8 @@ export function createRunApi({
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
   logger = () => {},
 }) {
-  if (!runs || typeof runs.create !== "function" || typeof runs.get !== "function" || typeof runs.list !== "function") {
+  if (!runs || typeof runs.create !== "function" || typeof runs.get !== "function"
+    || typeof runs.list !== "function" || typeof runs.listProducts !== "function") {
     throw new TypeError("Run read and creation services are required.");
   }
   if (!commands || typeof commands.execute !== "function") {
@@ -154,6 +155,13 @@ export function createRunApi({
       if (url.pathname === API_PREFIX && request.method === "GET") {
         const listedRuns = await runs.list({ auth, limit: parseLimit(url) });
         sendJson(response, 200, { runs: listedRuns });
+        return;
+      }
+
+      if (url.pathname === `${API_PREFIX}/products` && request.method === "GET") {
+        if (url.search) throw new RunApiError(400, "Product-list query parameters are not supported.");
+        const products = await runs.listProducts({ auth });
+        sendJson(response, 200, { products });
         return;
       }
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as XLSX from "xlsx";
 import { startV2Server } from "./main.mjs";
 
 const MANAGER_PASSWORD = "v2-test-manager-password";
@@ -7,6 +8,12 @@ const BOOTSTRAP_CODE = "v2-test-initial-manager-bootstrap-code";
 
 async function jsonResponse(response) {
   return response.json();
+}
+
+function workbookBase64(sheetName, rows) {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), sheetName);
+  return XLSX.write(workbook, { type: "base64", bookType: "xlsx" });
 }
 
 async function signIn(baseUrl, username, password) {
@@ -184,7 +191,7 @@ async function main() {
     const productImportRequest = {
       requestId: "73000000-0000-4000-8000-000000000204",
       kind: "products",
-      csv: "code,name,unit\nCORN,Test Flour,lb\n",
+      csv: "code,name,unit\nCORN,Test Flour,lb\nDOUGH-A,North Shop,case\n",
     };
     const stagedImportResponse = await managerPost("/api/v2/imports", productImportRequest);
     assert.equal(stagedImportResponse.status, 201, await stagedImportResponse.clone().text());
@@ -207,11 +214,50 @@ async function main() {
     const applyImportRetry = await managerPost(`/api/v2/imports/${stagedImport.importId}/apply`, {});
     assert.equal((await jsonResponse(applyImportRetry)).replayed, true);
 
+    const doughWorkbook = await managerPost("/api/v2/imports/workbooks", {
+      requestId: "73000000-0000-4000-8000-000000000210",
+      family: "dough-procedure",
+      fileName: "north-shop-dough.xlsx",
+      workbookBase64: workbookBase64("Procedure", [
+        ["Customer", "OZ", "LBS", "YIELD", "PER TRAY"],
+        ["North Shop", 7.7, 310.5, 645.19, 84],
+      ]),
+    });
+    assert.equal(doughWorkbook.status, 201, await doughWorkbook.clone().text());
+    const stagedDough = await jsonResponse(doughWorkbook);
+    assert.equal(stagedDough.records[0].productCode, "DOUGH-A");
+    assert.equal(stagedDough.records[0].data.doughballYield, 645.19);
+    const appliedDough = await managerPost(`/api/v2/imports/${stagedDough.importId}/apply`, {});
+    assert.equal(appliedDough.status, 200);
+
+    const shippingWorkbook = await managerPost("/api/v2/imports/workbooks", {
+      requestId: "73000000-0000-4000-8000-000000000211",
+      family: "shipping-guide",
+      fileName: "north-shop-shipping.xlsx",
+      workbookBase64: workbookBase64("Shipping", [
+        ["Pizza", "Notes", "Pizzas/CS"],
+        ["North Shop", "", 12],
+      ]),
+    });
+    assert.equal(shippingWorkbook.status, 201, await shippingWorkbook.clone().text());
+    const stagedShipping = await jsonResponse(shippingWorkbook);
+    assert.equal(stagedShipping.records[0].productCode, "DOUGH-A");
+    assert.equal(stagedShipping.records[0].data.pizzasPerCase, 12);
+    const appliedShipping = await managerPost(`/api/v2/imports/${stagedShipping.importId}/apply`, {});
+    assert.equal(appliedShipping.status, 200);
+
+    const runProductsResponse = await fetch(`${baseUrl}/api/v2/runs/products`, {
+      headers: { Cookie: operator.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(runProductsResponse.status, 200);
+    const runProducts = await jsonResponse(runProductsResponse);
+    assert.equal(runProducts.products.find((product) => product.code === "DOUGH-A").doughCapacity.status, "available");
+
     async function establishOpeningCount(warehouse, requestId, quantity) {
       const staged = await managerPost("/api/v2/inventory/opening-counts", {
         requestId,
         warehouseId: warehouse.id,
-        csv: `product_code,quantity\nCORN,${quantity}\n`,
+        csv: `product_code,quantity\nCORN,${quantity}\nDOUGH-A,0\n`,
       });
       assert.equal(staged.status, 201, await staged.clone().text());
       const count = await jsonResponse(staged);
@@ -286,7 +332,7 @@ async function main() {
     const stagedCountResponse = await managerPost("/api/v2/inventory/opening-counts", {
       requestId: "73000000-0000-4000-8000-000000000207",
       warehouseId: openingWarehouse.id,
-      csv: "product_code,quantity\nCORN,2\n",
+      csv: "product_code,quantity\nCORN,2\nDOUGH-A,0\n",
     });
     assert.equal(stagedCountResponse.status, 201, await stagedCountResponse.clone().text());
     const stagedCount = await jsonResponse(stagedCountResponse);
@@ -300,7 +346,7 @@ async function main() {
       { headers: { Cookie: manager.cookieHeader, Accept: "application/json" } },
     );
     assert.equal(openingStockResponse.status, 200);
-    assert.equal((await jsonResponse(openingStockResponse)).stock[0].quantity, "2.000000");
+    assert.equal((await jsonResponse(openingStockResponse)).stock.find((item) => item.code === "CORN").quantity, "2.000000");
     const managerWarehouses = await fetch(`${baseUrl}/api/v2/inventory/warehouses`, {
       headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
     });
@@ -322,7 +368,7 @@ async function main() {
       },
       body: JSON.stringify({
         requestId: "73000000-0000-4000-8000-000000000101",
-        setupSnapshot: { label: "Two-session check", targetCases: 5 },
+        setupSnapshot: { label: "Two-session check", targetCases: 5, productCode: "DOUGH-A" },
       }),
     });
     if (createdResponse.status !== 201) {
@@ -331,6 +377,8 @@ async function main() {
     const created = await jsonResponse(createdResponse);
     assert.equal(created.run.status, "planned");
     assert.equal(created.run.revision, 0);
+    assert.equal(created.run.doughCapacity.doughballYield, 645.19);
+    assert.equal(created.run.doughCapacity.pizzasPerCase, 12);
 
     const operatorList = await fetch(`${baseUrl}/api/v2/runs`, {
       headers: { Cookie: operator.cookieHeader, Accept: "application/json" },

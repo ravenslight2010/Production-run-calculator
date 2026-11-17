@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import * as XLSX from "xlsx";
 import { createInventoryApi } from "./inventory-api.mjs";
 
 const MANAGER = {
@@ -45,6 +46,12 @@ function send(baseUrl, path, { method = "GET", body, csrf = true } = {}) {
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+function workbookBase64(rows) {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), "Procedure");
+  return XLSX.write(workbook, { type: "base64", bookType: "xlsx" });
 }
 
 test("inventory routes require a verified manager before database access", async (t) => {
@@ -98,6 +105,88 @@ test("setup import CSV is validated before staging and request hash is server-co
   assert.match(api.calls[0].values[3], /^[0-9a-f]{64}$/);
   assert.notEqual(api.calls[0].values[3], "client-hash");
   assert.equal(api.calls[0].values[5], JSON.stringify([{ code: "FLOUR", name: "Bread Flour", unit: "lb" }]));
+});
+
+test("workbook source rows are linked exactly and staged through the reviewed import lifecycle", async (t) => {
+  const api = await withApi(t, {
+    query: async (sql, values) => {
+      if (sql.includes("list_inventory_products")) {
+        return { rows: [{ result: [{ code: "DOUGH-A", name: "North Shop" }] }] };
+      }
+      if (sql.includes("list_workbook_source_links")) return { rows: [{ result: [] }] };
+      if (sql.includes("stage_setup_import")) {
+        return { rows: [{ result: {
+          outcome: "staged",
+          importId: "10000000-0000-4000-8000-000000000008",
+          kind: values[4],
+          rowCount: JSON.parse(values[5]).length,
+          replayed: false,
+        } }] };
+      }
+      throw new Error("Unexpected test query");
+    },
+  });
+  const response = await send(api.baseUrl, "/api/v2/imports/workbooks", {
+    method: "POST",
+    body: {
+      requestId: "dough-workbook-1",
+      family: "dough-procedure",
+      fileName: "north-dough.xlsx",
+      workbookBase64: workbookBase64([
+        ["Customer", "OZ", "LBS", "YIELD", "PER TRAY"],
+        ["North Shop", 7.7, 310.5, 645.19, 84],
+      ]),
+    },
+  });
+  assert.equal(response.status, 201);
+  const body = await response.json();
+  assert.equal(body.sourceFamily, "dough-procedure");
+  assert.equal(body.linkedCount, 1);
+  assert.equal(body.unmatchedCount, 0);
+  assert.equal(body.records[0].productCode, "DOUGH-A");
+  assert.equal(body.records[0].data.doughballYield, 645.19);
+  assert.equal(body.records[0].data.source.yieldCell, "Procedure!D2");
+  const stageCall = api.calls.find((call) => call.text.includes("stage_setup_import"));
+  assert.ok(stageCall);
+  assert.equal(stageCall.values[4], "recipes");
+  assert.notEqual(stageCall.values[3], "client-hash");
+});
+
+test("workbook upload rejects unmatched rows and legacy XLS files without staging", async (t) => {
+  const api = await withApi(t, {
+    query: async (sql) => {
+      if (sql.includes("list_inventory_products")) return { rows: [{ result: [] }] };
+      if (sql.includes("list_workbook_source_links")) return { rows: [{ result: [] }] };
+      throw new Error("Workbook with no matches should not stage");
+    },
+  });
+  const validWorkbook = workbookBase64([
+    ["Pizza", "Notes", "Pizzas/CS"],
+    ["North Shop", "", 12],
+  ]);
+  const unmatched = await send(api.baseUrl, "/api/v2/imports/workbooks", {
+    method: "POST",
+    body: {
+      requestId: "shipping-no-match",
+      family: "shipping-guide",
+      fileName: "shipping.xlsx",
+      workbookBase64: validWorkbook,
+    },
+  });
+  assert.equal(unmatched.status, 409);
+  assert.match((await unmatched.json()).error, /matched an active product name exactly/u);
+
+  const unsupported = await send(api.baseUrl, "/api/v2/imports/workbooks", {
+    method: "POST",
+    body: {
+      requestId: "wrong-family",
+      family: "dough-procedure",
+      fileName: "schedule.xls",
+      workbookBase64: validWorkbook,
+    },
+  });
+  assert.equal(unsupported.status, 400);
+  assert.equal(api.calls.length, 2);
 });
 
 test("setup import details can be reopened by another manager", async (t) => {

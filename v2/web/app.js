@@ -65,6 +65,7 @@ const el = {
   createNote: document.querySelector("#create-note"),
   label: document.querySelector("#setup-label"),
   target: document.querySelector("#target-cases"),
+  product: document.querySelector("#run-product"),
   announcer: document.querySelector("#live-announcer"),
   stationPanel: document.querySelector("#station-panel"),
   stationTabs: document.querySelector("#station-tabs"),
@@ -89,6 +90,7 @@ let authCheckInFlight = false;
 let authInFlight = false;
 let signOutInFlight = false;
 let currentStaff = null;
+let runProducts = [];
 let authGeneration = 0;
 let bootstrapAvailable = false;
 let bootstrapStatusInFlight = false;
@@ -137,6 +139,23 @@ function validateRun(run) {
     || !run.setupSnapshot.label.trim() || !Number.isSafeInteger(run.setupSnapshot.targetCases)
     || run.setupSnapshot.targetCases < 1 || !Array.isArray(run.pauseIntervals)) {
     throw new Error("The server returned run data in an unexpected format. Refresh to load the current state.");
+  }
+  if (run.setupSnapshot.productCode !== undefined
+    && (typeof run.setupSnapshot.productCode !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(run.setupSnapshot.productCode))) {
+    throw new Error("The server returned a run with an invalid product link. Refresh to load the current state.");
+  }
+  if (run.doughCapacity !== undefined
+    && (!isObject(run.doughCapacity)
+      || !["available", "unavailable"].includes(run.doughCapacity.status)
+      || !Array.isArray(run.doughCapacity.reasons)
+      || run.doughCapacity.reasons.some((reason) => typeof reason !== "string" || reason.length > 80)
+      || (run.doughCapacity.status === "available"
+        && (typeof run.doughCapacity.doughballYield !== "number"
+          || !Number.isFinite(run.doughCapacity.doughballYield)
+          || typeof run.doughCapacity.pizzasPerCase !== "number"
+          || !Number.isSafeInteger(run.doughCapacity.pizzasPerCase))))) {
+    throw new Error("The server returned invalid dough source status. Refresh to load the current state.");
   }
   if (run.serverNow !== undefined && !isTimestamp(run.serverNow)) {
     throw new Error("The server returned an invalid server clock. Refresh to load the current state.");
@@ -362,12 +381,17 @@ function updateCreateFormForAuth() {
   if (!pendingCreate) {
     el.label.disabled = createInFlight || !writable;
     el.target.disabled = createInFlight || !writable;
-    el.createButton.disabled = createInFlight || !writable;
+    el.product.disabled = createInFlight || !writable || runProducts.length === 0;
+    el.createButton.disabled = createInFlight || !writable || runProducts.length === 0;
     el.createButton.textContent = "Prepare run";
+    el.createNote.textContent = runProducts.length === 0 && writable
+      ? "Import products before preparing a run."
+      : "The server creates the run in planned status. No run starts until an operator starts it.";
     return;
   }
   el.label.disabled = true;
   el.target.disabled = true;
+  el.product.disabled = true;
   const belongsToCurrentStaff = currentStaff?.userId === pendingCreate.actorId;
   el.createButton.disabled = !belongsToCurrentStaff || createInFlight || !writable;
   el.createButton.textContent = belongsToCurrentStaff ? "Retry same request" : "Another account's request";
@@ -844,7 +868,10 @@ function loadPendingCreate() {
     if (!isObject(pending) || !UUID.test(pending.requestId) || !UUID.test(pending.actorId)
       || !isObject(pending.setupSnapshot)
       || typeof pending.setupSnapshot.label !== "string" || !pending.setupSnapshot.label.trim()
-      || !Number.isSafeInteger(pending.setupSnapshot.targetCases) || pending.setupSnapshot.targetCases < 1) return null;
+       || !Number.isSafeInteger(pending.setupSnapshot.targetCases) || pending.setupSnapshot.targetCases < 1
+       || (pending.setupSnapshot.productCode !== undefined
+         && (typeof pending.setupSnapshot.productCode !== "string"
+           || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(pending.setupSnapshot.productCode)))) return null;
     return pending;
   } catch {
     return null;
@@ -857,6 +884,7 @@ function savePendingCreate(pending) {
     pendingCreate = pending;
     el.label.value = pending.setupSnapshot.label;
     el.target.value = String(pending.setupSnapshot.targetCases);
+    if (pending.setupSnapshot.productCode) el.product.value = pending.setupSnapshot.productCode;
     updateCreateFormForAuth();
   } catch {
     pendingCreate = null;
@@ -933,7 +961,7 @@ function renderRun(run) {
     : "";
   el.runContent.innerHTML = `<div class="status-row"><span class="status-pill ${run.status}" data-testid="status-run">${statusLabel(run.status)}</span></div>
     <h2 class="run-label" id="run-label" data-testid="text-run-label">${escapeHtml(run.setupSnapshot.label)}</h2>
-    <div class="run-meta"><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.targetCases.toLocaleString()} target cases</span><span><i class="meta-marker" aria-hidden="true"></i>${run.startedAt ? `Started ${escapeHtml(formatDate(run.startedAt))}` : `Created ${escapeHtml(formatDate(run.createdAt))}`}</span></div>
+    <div class="run-meta"><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.targetCases.toLocaleString()} target cases</span><span><i class="meta-marker" aria-hidden="true"></i>${run.setupSnapshot.productCode ? escapeHtml(productName(run.setupSnapshot.productCode)) : "Product not linked"}</span><span><i class="meta-marker" aria-hidden="true"></i>${run.startedAt ? `Started ${escapeHtml(formatDate(run.startedAt))}` : `Created ${escapeHtml(formatDate(run.createdAt))}`}</span></div>
     <div class="run-divider"></div><p class="control-label">RUN CONTROLS</p>
     <div class="controls">${actionMarkup}</div>${pendingMarkup}`;
   el.runContent.querySelectorAll("[data-command]").forEach((button) => {
@@ -988,6 +1016,52 @@ function mergeServerRuns(serverRuns, currentRuns) {
   return merged;
 }
 
+function validateRunProduct(product) {
+  return isObject(product)
+    && typeof product.code === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(product.code)
+    && typeof product.name === "string" && product.name.length >= 1 && product.name.length <= 120
+    && isObject(product.doughCapacity)
+    && ["available", "unavailable"].includes(product.doughCapacity.status)
+    && Array.isArray(product.doughCapacity.reasons)
+    && product.doughCapacity.reasons.every((reason) => typeof reason === "string" && reason.length <= 80)
+    && (product.doughCapacity.status !== "available"
+      || (typeof product.doughCapacity.doughballYield === "number"
+        && Number.isFinite(product.doughCapacity.doughballYield)
+        && typeof product.doughCapacity.pizzasPerCase === "number"
+        && Number.isSafeInteger(product.doughCapacity.pizzasPerCase)));
+}
+
+function productName(code) {
+  const match = runProducts.find((product) => product.code.toLocaleLowerCase("en-US") === code.toLocaleLowerCase("en-US"));
+  return match ? `${match.name} · ${match.code}` : code;
+}
+
+function renderRunProducts() {
+  if (!el.product) return;
+  const preferred = pendingCreate?.setupSnapshot.productCode || el.product.value;
+  el.product.replaceChildren();
+  if (runProducts.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No products available";
+    el.product.append(option);
+    return;
+  }
+  for (const product of runProducts) {
+    const option = document.createElement("option");
+    option.value = product.code;
+    const capacity = product.doughCapacity;
+    const derived = capacity.status === "available"
+      ? Number(capacity.doughballYield / capacity.pizzasPerCase).toFixed(4)
+      : null;
+    option.textContent = `${product.name} · ${product.code} · ${derived ? `${derived} cases/batch` : "dough capacity unavailable"}`;
+    el.product.append(option);
+  }
+  if (runProducts.some((product) => product.code === preferred)) el.product.value = preferred;
+  else if (!pendingCreate) el.product.value = runProducts[0].code;
+  el.product.disabled = !canWriteNow() || createInFlight || Boolean(pendingCreate);
+}
+
 function render() {
   renderRuns();
   renderRun(selectedRun());
@@ -1024,6 +1098,7 @@ const STATION_METRIC_LABELS = Object.freeze({
   workInProgress: "Work in progress",
   completionPercent: "Run completion",
   casesProduced: "Cases produced",
+  casesPerBatch: "Cases per dough batch",
   batchesNeeded: "Batches needed",
   batchesRemaining: "Batches remaining",
   casesPacked: "Cases packed",
@@ -1157,15 +1232,19 @@ function renderStationPanel(run) {
     ? `Timer ${state.progress.timerStatus.replace("_", " ")}`
     : state.status.replace("_", " ");
   const metrics = calculateStationMetrics({ stationKey: selectedStationKey, run, state: { inputs, progress } });
-  el.stationMetrics.innerHTML = Object.entries(metrics)
+  const metricMarkup = Object.entries(metrics)
     .filter(([key, value]) => value !== null && value !== undefined && STATION_METRIC_LABELS[key])
     .map(([key, value]) => `<div class="station-metric"><span>${STATION_METRIC_LABELS[key]}</span><strong>${escapeHtml(formatMetric(value, key))}</strong></div>`)
     .join("");
+  const capacityNotice = selectedStationKey === "dough" && run.doughCapacity?.status !== "available"
+    ? `<p class="station-capacity-notice" role="status">Dough capacity unavailable: ${escapeHtml(describeDoughCapacity(run.doughCapacity))}</p>`
+    : "";
+  el.stationMetrics.innerHTML = `${metricMarkup}${capacityNotice}`;
 
   const makeFields = (title, group, fields) => `
     <div class="station-field-group">
       <h3>${title}</h3>
-      ${fields.map((field) => {
+      ${fields.filter((field) => !(selectedStationKey === "dough" && field === "casesPerBatch")).map((field) => {
         const [label, unit] = STATION_FIELD_META[field] || [field, ""];
         const raw = group[field];
         const fallback = station.progress.includes(field) ? 0 : (field === "autoTrackRatePerMinute" ? 0 : "");
@@ -1221,9 +1300,26 @@ function renderStationPanel(run) {
 
 function formatMetric(value, key) {
   if (key === "completionPercent") return `${Number(value).toFixed(1)}%`;
+  if (key === "casesPerBatch") return `${Number(value).toFixed(4)} cases`;
   if (["ingredientLbsNeeded", "totalIngredientLbs", "stockOnLineLbs", "stockConsumedLbs"].includes(key)) return `${Number(value).toFixed(2)} lb`;
   if (key === "barrelsNeeded" || key === "stockBarrels") return `${Number(value).toFixed(2)} barrels`;
   return Number.isInteger(value) ? value.toLocaleString() : Number(value).toFixed(2);
+}
+
+function describeDoughCapacity(capacity) {
+  const labels = {
+    product_not_selected: "this run has no linked product",
+    dough_source_missing: "no single matching dough yield was imported",
+    shipping_source_missing: "no single matching pizzas-per-case value was imported",
+    dough_source_ambiguous: "more than one dough yield matches this product",
+    shipping_source_ambiguous: "more than one shipping row matches this product",
+    dough_yield_invalid: "the linked dough yield is unavailable",
+    pizzas_per_case_invalid: "the linked case size is unavailable",
+  };
+  if (!Array.isArray(capacity?.reasons) || capacity.reasons.length === 0) {
+    return "review the product’s dough and shipping workbook sources";
+  }
+  return capacity.reasons.map((reason) => labels[reason] || "review the linked workbook sources").join("; ");
 }
 
 function renderStationTimerControls(run, state, canMutate) {
@@ -1482,14 +1578,21 @@ async function fetchRuns({ quiet = false } = {}) {
   const requestGeneration = authGeneration;
   if (!quiet) el.refresh.disabled = true;
   try {
-    const response = await fetch(API, { method: "GET", credentials: "include", headers: { Accept: "application/json" } });
-    const body = await readJson(response);
+    const [response, productResponse] = await Promise.all([
+      fetch(API, { method: "GET", credentials: "include", headers: { Accept: "application/json" } }),
+      fetch(`${API}/products`, { method: "GET", credentials: "include", headers: { Accept: "application/json" } }),
+    ]);
+    const [body, productBody] = await Promise.all([readJson(response), readJson(productResponse)]);
     if (requestGeneration !== authGeneration || !currentStaff) return;
     if (navigator.onLine === false) {
       enterOfflineMode();
       return false;
     }
     if (!Array.isArray(body.runs)) throw new Error("The server returned an unexpected run list. Refresh again to retry.");
+    if (!Array.isArray(productBody.products) || !productBody.products.every(validateRunProduct)) {
+      throw new Error("The server returned an unexpected product list. Refresh again to retry.");
+    }
+    runProducts = productBody.products;
     const nextRuns = body.runs.map(validateRun);
     runs = mergeServerRuns(nextRuns, runs);
     if (!runs.some((run) => run.id === selectedRunId)) {
@@ -1502,6 +1605,7 @@ async function fetchRuns({ quiet = false } = {}) {
     setLastCheck();
     serverStateConfirmed = true;
     updateInventoryContext(currentStaff, canWriteNow());
+    renderRunProducts();
     updateCreateFormForAuth();
     render();
     saveOfflineCache();
@@ -1680,14 +1784,16 @@ async function createRun(event) {
   }
   const label = pendingCreate?.setupSnapshot.label ?? el.label.value.trim();
   const targetCases = pendingCreate?.setupSnapshot.targetCases ?? Number(el.target.value);
-  if (!label || !Number.isSafeInteger(targetCases) || targetCases < 1) {
-    showError("Enter a run label and a whole-number target greater than zero.", "Check run details");
+  const productCode = pendingCreate?.setupSnapshot.productCode ?? el.product.value;
+  if (!label || !Number.isSafeInteger(targetCases) || targetCases < 1
+    || (!pendingCreate && !runProducts.some((product) => product.code === productCode))) {
+    showError("Enter a run label, target, and active imported product.", "Check run details");
     return;
   }
   const request = pendingCreate || {
     requestId: crypto.randomUUID(),
     actorId: currentStaff.userId,
-    setupSnapshot: { label, targetCases },
+    setupSnapshot: { label, targetCases, productCode },
   };
   if (!pendingCreate) {
     savePendingCreate(request);
@@ -1707,7 +1813,9 @@ async function createRun(event) {
       throw new Error("The server returned an unexpected creation result. Retry the same request to confirm it.");
     }
     const run = validateRun(body.run);
-    if (run.status !== "planned" || run.setupSnapshot.label !== request.setupSnapshot.label || run.setupSnapshot.targetCases !== request.setupSnapshot.targetCases) {
+    if (run.status !== "planned" || run.setupSnapshot.label !== request.setupSnapshot.label
+      || run.setupSnapshot.targetCases !== request.setupSnapshot.targetCases
+      || run.setupSnapshot.productCode !== request.setupSnapshot.productCode) {
       throw new Error("The server returned a run that does not match this request. Retry the same request to confirm it.");
     }
     upsertRun(run);
@@ -1743,6 +1851,7 @@ async function createRun(event) {
 if (pendingCreate) {
   el.label.value = pendingCreate.setupSnapshot.label;
   el.target.value = String(pendingCreate.setupSnapshot.targetCases);
+  if (pendingCreate.setupSnapshot.productCode) el.product.value = pendingCreate.setupSnapshot.productCode;
   el.label.disabled = true;
   el.target.disabled = true;
   el.createButton.textContent = "Retry same request";

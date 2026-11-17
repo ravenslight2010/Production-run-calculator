@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   calculateStationMetrics,
+  deriveDoughCasesPerBatch,
   STATIONS,
   validateStationCommand,
 } from "./station-workflows.mjs";
@@ -111,13 +112,16 @@ test("computes ingredient pounds and batch counts from case and recipe inputs", 
 test("calculates dough requirements and packaging skid remainders without negative values", () => {
   assert.deepEqual(calculateStationMetrics({
     stationKey: "dough",
-    run,
+    run: {
+      ...run,
+      doughCapacity: { status: "available", doughballYield: 360, pizzasPerCase: 12 },
+    },
     state: {
-      inputs: { casesPerBatch: 30 },
       progress: { casesProduced: 125, batchesMade: 3 },
     },
   }), {
     targetCases: 120, casesProduced: 125, casesRemaining: 0,
+    casesPerBatch: 30,
     batchesNeeded: 4, batchesRemaining: 1,
   });
 
@@ -212,15 +216,10 @@ test("validates required station setup and timer values", () => {
     changes: { autoTrackRatePerMinute: 600.1 },
   }), /600 or less/);
 
-  const fractionalDoughCapacity = validateStationCommand({
-    stationKey: "dough",
-    changes: { casesPerBatch: 53.7658 },
-  });
-  assert.equal(fractionalDoughCapacity.inputs.casesPerBatch, 53.7658);
   assert.throws(() => validateStationCommand({
     stationKey: "dough",
-    changes: { casesPerBatch: 53.76581 },
-  }), /at most 4 decimal places/);
+    changes: { casesPerBatch: 53.7658 },
+  }), /calculated from the selected product/);
 });
 
 test("matches the cheese workbook's explicit worked calculation", () => {
@@ -264,15 +263,18 @@ test("uses the approved count-only case target for line and dough planning", () 
   assert.ok(Math.abs(calculatedYieldFromRecipeInputs - approvedDoughballYield) < 0.01);
   assert.deepEqual(calculateStationMetrics({
     stationKey: "dough",
-    run: floorExampleRun,
+    run: {
+      ...floorExampleRun,
+      doughCapacity: { status: "available", doughballYield: approvedDoughballYield, pizzasPerCase: 12 },
+    },
     state: {
-      inputs: { casesPerBatch: Number((approvedDoughballYield / 12).toFixed(4)) },
       progress: { casesProduced: 0, batchesMade: 0 },
     },
   }), {
     targetCases: 55,
     casesProduced: 0,
     casesRemaining: 55,
+    casesPerBatch: 53.7658,
     batchesNeeded: 2,
     batchesRemaining: 2,
   });
@@ -368,17 +370,37 @@ test("matches workbook-based recipe pounds, station allowances, and skid target"
 test("preserves fractional workbook yield at dough batch boundaries", () => {
   const yieldDoughballsPerBatch = 645.19;
   const pizzasPerCase = 12;
-  const casesPerBatch = Number((yieldDoughballsPerBatch / pizzasPerCase).toFixed(4));
   const batchesAt = (targetCases) => calculateStationMetrics({
     stationKey: "dough",
-    run: { setupSnapshot: { targetCases } },
-    state: { inputs: { casesPerBatch }, progress: { batchesMade: 0 } },
+    run: {
+      setupSnapshot: { targetCases },
+      doughCapacity: { status: "available", doughballYield: yieldDoughballsPerBatch, pizzasPerCase },
+    },
+    state: { progress: { batchesMade: 0 } },
   }).batchesNeeded;
+  assert.equal(deriveDoughCasesPerBatch({ doughballYield: yieldDoughballsPerBatch, pizzasPerCase }), 53.7658);
 
   assert.deepEqual(
     [batchesAt(53), batchesAt(54), batchesAt(107), batchesAt(108)],
     [1, 2, 2, 3],
   );
+});
+
+test("dough capacity is unavailable rather than taken from a stale manual value", () => {
+  assert.equal(deriveDoughCasesPerBatch({ doughballYield: 645.19, pizzasPerCase: 0 }), null);
+  assert.equal(deriveDoughCasesPerBatch({ doughballYield: null, pizzasPerCase: 12 }), null);
+  assert.deepEqual(calculateStationMetrics({
+    stationKey: "dough",
+    run: { setupSnapshot: { targetCases: 54 }, doughCapacity: { status: "unavailable", reasons: ["shipping_source_missing"] } },
+    state: { inputs: { casesPerBatch: 53.7658 }, progress: { batchesMade: 0, casesProduced: 0 } },
+  }), {
+    targetCases: 54,
+    casesProduced: 0,
+    casesRemaining: 54,
+    casesPerBatch: null,
+    batchesNeeded: null,
+    batchesRemaining: null,
+  });
 });
 
 test("covers Sauce barrel, Frontline supply, and Packaging skid boundaries", () => {

@@ -74,10 +74,12 @@ function safeRouteName(url) {
   if (url.pathname === "/api/v2/auth/staff") return "auth.staff";
   if (/^\/api\/v2\/auth\/staff\/[0-9a-f-]{36}$/i.test(url.pathname)) return "auth.staff_item";
   if (url.pathname === "/api/v2/runs") return "runs.collection";
+  if (url.pathname === "/api/v2/runs/products") return "runs.products";
   if (/^\/api\/v2\/runs\/[^/]+\/commands$/.test(url.pathname)) return "runs.command";
   if (/^\/api\/v2\/runs\/[^/]+\/stations\/[^/]+\/commands$/.test(url.pathname)) return "runs.station_command";
   if (/^\/api\/v2\/runs\/[^/]+$/.test(url.pathname)) return "runs.detail";
   if (url.pathname === "/api/v2/imports") return "imports.collection";
+  if (url.pathname === "/api/v2/imports/workbooks") return "imports.workbooks";
   if (/^\/api\/v2\/imports\/[^/]+$/.test(url.pathname)) return "imports.detail";
   if (/^\/api\/v2\/imports\/[^/]+\/(apply|undo)$/.test(url.pathname)) return "imports.action";
   if (url.pathname.startsWith("/api/v2/inventory/")) return "inventory.operation";

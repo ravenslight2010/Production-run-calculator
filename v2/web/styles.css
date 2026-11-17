@@ -100,10 +100,11 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
 .create-heading-row { display: flex; align-items: start; justify-content: space-between; }
 .create-heading-row h2, .section-heading h2 { margin: 5px 0 0; font-size: 21px; letter-spacing: -.04em; font-weight: 600; }
 .create-index { font: 500 11px var(--mono); color: #8a9084; }
-.create-form { display: grid; grid-template-columns: minmax(0, 1fr) 145px auto; gap: 10px; align-items: end; margin-top: 19px; }
+.create-form { display: grid; grid-template-columns: minmax(0, 1fr) 125px minmax(0, .9fr) auto; gap: 10px; align-items: end; margin-top: 19px; }
 .field { display: grid; gap: 7px; min-width: 0; }
 .field > span { color: #5f675e; font: 500 10px var(--mono); letter-spacing: .04em; }
 .field input { width: 100%; height: 47px; min-width: 0; padding: 0 12px; border: 1px solid #c9cbbf; border-radius: 0; background: #f8f7f0; color: var(--ink); font-size: 14px; }
+.field select { width: 100%; height: 47px; min-width: 0; padding: 0 10px; border: 1px solid #c9cbbf; border-radius: 0; background: #f8f7f0; color: var(--ink); font: 13px var(--display); }
 .field input::placeholder { color: #9a9e92; }
 .field input[type=number] { font-family: var(--mono); }
 .button-create { height: 47px; min-height: 47px; padding: 0 14px; color: #fffdf6; background: var(--ink); white-space: nowrap; }
@@ -148,6 +149,7 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
 .station-metric { min-height: 68px; padding: 11px 12px; border: 1px solid var(--line); background: #f5f4ed; }
 .station-metric span { display: block; color: var(--muted); font: 500 9px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
 .station-metric strong { display: block; margin-top: 7px; color: var(--ink); font: 600 17px var(--mono); }
+.station-capacity-notice { grid-column: 1 / -1; margin: 0; padding: 10px 12px; border-left: 3px solid #c78f30; background: #f5edda; color: #655633; font-size: 11px; line-height: 1.45; }
 .station-timer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--line); background: #edf0e8; }
 .station-timer > div:first-child { display: grid; gap: 5px; }
 .station-timer strong { font: 600 17px var(--mono); }

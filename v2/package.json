@@ -13,6 +13,7 @@
     "test:db": "bash db/run-local-tests.sh"
   },
   "dependencies": {
-    "pg": "8.23.1"
+    "pg": "8.23.1",
+    "xlsx": "npm:@e965/xlsx@0.20.3"
   }
 }

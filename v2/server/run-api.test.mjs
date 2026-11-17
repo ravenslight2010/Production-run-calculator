@@ -35,6 +35,10 @@ async function listenHandler(t, handler, calls = []) {
 async function withApi(t, overrides = {}, options = {}) {
   const calls = [];
   const runs = {
+    listProducts: async (input) => {
+      calls.push(["listProducts", input]);
+      return [];
+    },
     list: async (input) => {
       calls.push(["list", input]);
       return [RUN];
@@ -258,6 +262,11 @@ test("composes the HTTP API with server services and a parameterized PostgreSQL 
       query: async (sql, params) => {
         queries.push({ sql, params });
         if (sql.includes("v2.list_runs")) return { rows: [{ result: [RUN] }] };
+        if (sql.includes("v2.list_run_products")) return { rows: [{ result: [{
+          code: "DOUGH-A",
+          name: "Dough A",
+          doughCapacity: { status: "unavailable", reasons: ["dough_source_missing"] },
+        }] }] };
         if (sql.includes("v2.create_planned_run")) {
           const setupSnapshot = JSON.parse(params[4]);
           return { rows: [{ result: { outcome: "created", replayed: false, run: { ...RUN, setupSnapshot } } }] };
@@ -290,11 +299,15 @@ test("composes the HTTP API with server services and a parameterized PostgreSQL 
   assert.equal(listResponse.status, 200);
   assert.deepEqual((await listResponse.json()).runs, [RUN]);
 
+  const productsResponse = await send(baseUrl, "/api/v2/runs/products");
+  assert.equal(productsResponse.status, 200);
+  assert.equal((await productsResponse.json()).products[0].code, "DOUGH-A");
+
   const createResponse = await send(baseUrl, "/api/v2/runs", {
     method: "POST",
     body: {
       requestId: "00000000-0000-4000-8000-000000000005",
-      setupSnapshot: { label: "Integrated run", targetCases: 24 },
+      setupSnapshot: { label: "Integrated run", targetCases: 24, productCode: "DOUGH-A" },
     },
   });
   assert.equal(createResponse.status, 201);
@@ -306,9 +319,9 @@ test("composes the HTTP API with server services and a parameterized PostgreSQL 
   assert.equal(commandResponse.status, 200);
   assert.equal((await commandResponse.json()).run.status, "running");
 
-  assert.equal(queries.length, 3);
+  assert.equal(queries.length, 4);
   assert.ok(queries.every(({ sql, params }) => sql.includes("$1") && Array.isArray(params)));
-  assert.deepEqual(authorizations.map(({ action }) => action), ["run.read", "run.create", "run.lifecycle.command"]);
-  assert.equal(authorizations[2].commandType, "start");
+  assert.deepEqual(authorizations.map(({ action }) => action), ["run.read", "run.read", "run.create", "run.lifecycle.command"]);
+  assert.equal(authorizations[3].commandType, "start");
   assert.ok(authorizations.every(({ auth }) => auth === AUTH));
 });

@@ -1505,6 +1505,9 @@ importers:
       pg:
         specifier: 8.23.1
         version: 8.23.1
+      xlsx:
+        specifier: npm:@e965/xlsx@0.20.3
+        version: '@e965/xlsx@0.20.3'
 
 packages:
 

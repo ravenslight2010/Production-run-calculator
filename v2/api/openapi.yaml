@@ -329,8 +329,9 @@ paths:
         - v2Session: []
           v2CsrfCookie: []
       description: >
-        requestId is an idempotency key. Repeating the same request returns the
-        original run; reusing the key for different details returns 409.
+        New runs require an active imported product. requestId is an idempotency
+        key. Repeating the same request returns the original run; reusing the
+        key for different details returns 409.
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
       requestBody:
@@ -346,7 +347,7 @@ paths:
                   type: string
                   format: uuid
                 setupSnapshot:
-                  $ref: "#/components/schemas/RunSetup"
+                  $ref: "#/components/schemas/RunCreateSetup"
       responses:
         "201":
           description: New planned run created
@@ -371,6 +372,31 @@ paths:
         "413":
           $ref: "#/components/responses/Error"
         "415":
+          $ref: "#/components/responses/Error"
+        "405":
+          $ref: "#/components/responses/Error"
+  /api/v2/runs/products:
+    get:
+      operationId: listRunProducts
+      summary: List active products with current dough capacity source status
+      responses:
+        "200":
+          description: Active products and their current dough source availability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [products]
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RunProduct"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "500":
           $ref: "#/components/responses/Error"
         "405":
           $ref: "#/components/responses/Error"
@@ -581,6 +607,53 @@ paths:
         "413":
           $ref: "#/components/responses/Error"
         "415":
+          $ref: "#/components/responses/Error"
+  /api/v2/imports/workbooks:
+    post:
+      operationId: stageDoughCapacityWorkbook
+      summary: Validate and stage one dough or shipping workbook
+      description: >
+        Manager-only and V2-only. Accepts dough procedure or shipping guide
+        workbooks, maps rows only to one exact normalized active product name,
+        and stages linked rows for review through the existing import lifecycle.
+        Confirmed product-code links are reused on later imports.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapacityWorkbookImportRequest"
+      responses:
+        "201":
+          description: Workbook validated and staged for manager review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapacityWorkbookImportPreview"
+        "200":
+          description: Previously staged workbook request confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapacityWorkbookImportPreview"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+        "429":
           $ref: "#/components/responses/Error"
   /api/v2/imports/{importId}:
     get:
@@ -1241,6 +1314,54 @@ components:
           type: integer
           minimum: 1
           maximum: 9007199254740991
+        productCode:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          description: Stable link to the active V2 product selected when the run is created.
+    RunCreateSetup:
+      type: object
+      additionalProperties: false
+      required: [label, targetCases, productCode]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+        targetCases:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        productCode:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    DoughCapacity:
+      type: object
+      required: [status, reasons, doughballYield, pizzasPerCase]
+      properties:
+        status:
+          type: string
+          enum: [available, unavailable]
+        reasons:
+          type: array
+          items:
+            type: string
+        doughballYield:
+          type: [number, "null"]
+          minimum: 0
+        pizzasPerCase:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 100
+    RunProduct:
+      type: object
+      required: [code, name, doughCapacity]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        doughCapacity:
+          $ref: "#/components/schemas/DoughCapacity"
     PauseInterval:
       type: object
       required: [startedAt, endedAt]
@@ -1265,6 +1386,7 @@ components:
         - completedAt
         - serverNow
         - setupSnapshot
+        - doughCapacity
         - pauseIntervals
         - stationProgress
       properties:
@@ -1301,6 +1423,8 @@ components:
           format: date-time
         setupSnapshot:
           $ref: "#/components/schemas/RunSetup"
+        doughCapacity:
+          $ref: "#/components/schemas/DoughCapacity"
         pauseIntervals:
           type: array
           items:
@@ -1454,6 +1578,99 @@ components:
         csv:
           type: string
           maxLength: 1048576
+    CapacityWorkbookImportRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, family, fileName, workbookBase64]
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        family:
+          type: string
+          enum: [dough-procedure, shipping-guide]
+        fileName:
+          type: string
+          minLength: 5
+          maxLength: 120
+        workbookBase64:
+          type: string
+          maxLength: 6990508
+          contentEncoding: base64
+          contentMediaType: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    CapacityWorkbookImportPreview:
+      type: object
+      required:
+        - outcome
+        - importId
+        - kind
+        - rowCount
+        - replayed
+        - records
+        - sourceFamily
+        - fileName
+        - fileSha256
+        - linkedCount
+        - rememberedCount
+        - unmatchedRows
+        - unmatchedCount
+        - invalidValueCount
+      properties:
+        outcome:
+          type: string
+          enum: [staged]
+        importId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [recipes, production-setups]
+        rowCount:
+          type: integer
+          minimum: 1
+          maximum: 2000
+        replayed:
+          type: boolean
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/SetupImportMasterRecord"
+        sourceFamily:
+          type: string
+          enum: [dough-procedure, shipping-guide]
+        fileName:
+          type: string
+        fileSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        linkedCount:
+          type: integer
+          minimum: 1
+        rememberedCount:
+          type: integer
+          minimum: 0
+        unmatchedRows:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [name, row, reason]
+            properties:
+              name:
+                type: string
+              row:
+                type: integer
+                minimum: 1
+              reason:
+                type: string
+                enum: [unmatched, ambiguous]
+        unmatchedCount:
+          type: integer
+          minimum: 0
+        invalidValueCount:
+          type: integer
+          minimum: 0
     SetupImportProduct:
       type: object
       required: [code, name, unit]

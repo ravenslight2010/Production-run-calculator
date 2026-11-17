@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { chromium } from "../../node_modules/.pnpm/node_modules/playwright/index.mjs";
+import * as XLSX from "xlsx";
 import { parseOpeningCountCsv, parseSetupImportCsv } from "../core/import-csv.mjs";
+import {
+  linkWorkbookCapacityRows,
+  parseDoughCapacityWorkbook,
+  parseShippingCapacityWorkbook,
+} from "../core/workbook-capacity-import.mjs";
 import {
   openingCountCsvTemplate,
   renderImportCsvTemplate,
@@ -18,7 +24,7 @@ const STAFF_ID = "72000000-0000-4000-8000-000000000001";
 const RUN_ID = "73000000-0000-4000-8000-000000000001";
 const INPUTS = Object.freeze({
   line: ["autoTrackRatePerMinute", "timerDurationSeconds", "casesPerSkid"],
-  dough: ["autoTrackRatePerMinute", "timerDurationSeconds", "casesPerBatch", "traysPerBatch"],
+  dough: ["autoTrackRatePerMinute", "timerDurationSeconds", "traysPerBatch"],
   cheese: ["autoTrackRatePerMinute", "timerDurationSeconds", "pizzasPerCase", "ozPerPizza", "batchLbs"],
   pepperoni: ["autoTrackRatePerMinute", "timerDurationSeconds", "pizzasPerCase", "ozPerPizza", "batchLbs"],
   sauce: ["autoTrackRatePerMinute", "timerDurationSeconds", "pizzasPerCase", "ozPerPizza", "barrelLbs"],
@@ -79,7 +85,8 @@ function newRun(overrides = {}) {
     pausedAt: null,
     resumedAt: null,
     completedAt: null,
-    setupSnapshot: { label: "Browser test run", targetCases: 100 },
+    setupSnapshot: { label: "Browser test run", targetCases: 100, productCode: "DOUGH-A" },
+    doughCapacity: { status: "available", reasons: [], doughballYield: 645.19, pizzasPerCase: 12 },
     pauseIntervals: [],
     stationProgress: {},
     ...overrides,
@@ -149,7 +156,7 @@ function applyCommand(fixture, command) {
 }
 
 async function createFixture(t, viewport = { width: 1440, height: 900 }, { manager = false } = {}) {
-  const fixture = { run: newRun(), receipts: new Map(), pageErrors: [] };
+  const fixture = { run: newRun(), receipts: new Map(), pageErrors: [], consoleErrors: [], imports: [] };
   const server = createServer(async (request, response) => {
     const asset = WEB_ASSETS.get(new URL(request.url, "http://v2.test").pathname);
     if (!asset || !["GET", "HEAD"].includes(request.method)) {
@@ -203,7 +210,7 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
         return;
       }
       if (manager && url.pathname === "/api/v2/imports" && request.method() === "GET") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ imports: [] }) });
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ imports: fixture.imports }) });
         return;
       }
       if (manager && url.pathname === "/api/v2/inventory/warehouses" && request.method() === "GET") {
@@ -211,7 +218,11 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
         return;
       }
       if (manager && url.pathname === "/api/v2/inventory/products" && request.method() === "GET") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ products: [] }) });
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ products: [{ code: "DOUGH-A", name: "North Shop", unit: "case" }] }),
+        });
         return;
       }
       if (manager && url.pathname === "/api/v2/inventory/opening-counts" && request.method() === "GET") {
@@ -220,6 +231,133 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
       }
       if (url.pathname === "/api/v2/runs" && request.method() === "GET") {
         await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ runs: [snapshot(fixture)] }) });
+        return;
+      }
+      if (url.pathname === "/api/v2/runs/products" && request.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            products: [{
+              code: "DOUGH-A",
+              name: "Dough Product",
+              doughCapacity: fixture.run.doughCapacity,
+            }],
+          }),
+        });
+        return;
+      }
+      if (manager && url.pathname === "/api/v2/imports/workbooks" && request.method() === "POST") {
+        if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
+          await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
+          return;
+        }
+        const body = request.postDataJSON();
+        const workbookBuffer = Buffer.from(body.workbookBase64, "base64");
+        const parsed = body.family === "dough-procedure"
+          ? parseDoughCapacityWorkbook(workbookBuffer, body.fileName)
+          : parseShippingCapacityWorkbook(workbookBuffer, body.fileName);
+        const rows = linkWorkbookCapacityRows(parsed.rows, [{ code: "DOUGH-A", name: "North Shop" }], []);
+        const records = rows.filter((row) => row.productCode).map((row) => ({
+          code: `${body.family === "dough-procedure" ? "DOUGH" : "SHIP"}-${row.sourceKey}`,
+          name: row.name,
+          productCode: row.productCode,
+          data: body.family === "dough-procedure"
+            ? {
+              sourceFamily: body.family,
+              sourceKey: row.sourceKey,
+              fileName: parsed.fileName,
+              fileSha256: parsed.fileSha256,
+              source: row.source,
+              doughballYield: row.doughballYield,
+              doughballWeightOz: row.doughballWeightOz,
+              doughballsPerTray: row.doughballsPerTray,
+            }
+            : {
+              sourceFamily: body.family,
+              sourceKey: row.sourceKey,
+              fileName: parsed.fileName,
+              fileSha256: parsed.fileSha256,
+              source: row.source,
+              pizzasPerCase: row.pizzasPerCase,
+            },
+        }));
+        const importId = "74000000-0000-4000-8000-000000000001";
+        const kind = body.family === "dough-procedure" ? "recipes" : "production-setups";
+        const history = {
+          id: importId,
+          kind,
+          status: "staged",
+          records,
+          rowCount: records.length,
+          createdBy: STAFF_ID,
+          appliedBy: null,
+          undoneBy: null,
+          createdAt: new Date().toISOString(),
+        };
+        fixture.imports = [history, ...fixture.imports];
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            outcome: "staged",
+            importId,
+            kind,
+            rowCount: records.length,
+            replayed: false,
+            records,
+            sourceFamily: body.family,
+            fileName: parsed.fileName,
+            fileSha256: parsed.fileSha256,
+            linkedCount: records.length,
+            rememberedCount: 0,
+            unmatchedRows: [],
+            unmatchedCount: 0,
+            invalidValueCount: records.filter((record) => body.family === "dough-procedure"
+              ? record.data.doughballYield === null
+              : record.data.pizzasPerCase === null).length,
+          }),
+        });
+        return;
+      }
+      const applyImport = url.pathname.match(/^\/api\/v2\/imports\/([0-9a-f-]{36})\/apply$/i);
+      if (manager && applyImport && request.method() === "POST") {
+        if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
+          await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
+          return;
+        }
+        const item = fixture.imports.find((entry) => entry.id === applyImport[1]);
+        if (!item) {
+          await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Import not found." }) });
+          return;
+        }
+        item.status = "applied";
+        item.appliedBy = STAFF_ID;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ outcome: "applied", importId: item.id, kind: item.kind, replayed: false }),
+        });
+        return;
+      }
+      const undoImport = url.pathname.match(/^\/api\/v2\/imports\/([0-9a-f-]{36})\/undo$/i);
+      if (manager && undoImport && request.method() === "POST") {
+        if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
+          await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
+          return;
+        }
+        const item = fixture.imports.find((entry) => entry.id === undoImport[1]);
+        if (!item || item.status !== "applied") {
+          await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "Import cannot be undone." }) });
+          return;
+        }
+        item.status = "undone";
+        item.undoneBy = STAFF_ID;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ outcome: "undone", importId: item.id, kind: item.kind, replayed: false }),
+        });
         return;
       }
       const match = url.pathname.match(/^\/api\/v2\/runs\/([^/]+)\/stations\/([^/]+)\/commands$/);
@@ -246,6 +384,9 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
     await context.route("**/api/v2/**", routeApi);
     const page = await context.newPage();
     page.on("pageerror", (error) => fixture.pageErrors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") fixture.consoleErrors.push(message.text());
+    });
     await page.goto(baseUrl);
     await page.locator("#station-panel:not([hidden])").waitFor({ timeout: 5000 });
     await page.getByTestId("tab-station-line").waitFor();
@@ -287,26 +428,101 @@ test("two live sessions preserve a manual edit when another device wins first", 
   assert.deepEqual(fixture.pageErrors, []);
 });
 
-test("dough capacity accepts four decimals and survives a reload", async (t) => {
+test("dough capacity is derived from the selected product and has no editable override", async (t) => {
   const { fixture, openDevice } = await createFixture(t);
   const { page } = await openDevice();
 
   await page.getByTestId("tab-station-dough").click();
-  const capacityInput = page.locator('[data-station-field="casesPerBatch"]');
-  assert.equal(await capacityInput.getAttribute("step"), "0.0001");
-  await capacityInput.fill("53.7658");
+  assert.match(await page.locator("#run-product").inputValue(), /DOUGH-A/u);
+  assert.equal(await page.locator('[data-station-field="casesPerBatch"]').count(), 0);
+  assert.equal(await page.getByText("Cases per dough batch").count(), 1);
+  assert.equal(await page.getByText("53.7658 cases", { exact: true }).count(), 1);
+  await page.locator('[data-station-field="traysPerBatch"]').fill("84");
   await page.getByTestId("button-save-station").click();
   await page.getByText("Saved to the shared run.").waitFor();
-  assert.equal(fixture.run.stationProgress.dough.inputs.casesPerBatch, 53.7658);
+  assert.equal(fixture.run.stationProgress.dough.inputs.traysPerBatch, 84);
 
   await page.reload();
   await page.locator("#station-panel:not([hidden])").waitFor({ timeout: 5000 });
   await page.getByTestId("tab-station-dough").click();
-  assert.equal(
-    await page.locator('[data-station-field="casesPerBatch"]').inputValue(),
-    "53.7658",
-  );
+  assert.equal(await page.locator('[data-station-field="casesPerBatch"]').count(), 0);
+  assert.equal(await page.getByText("53.7658 cases", { exact: true }).count(), 1);
+  assert.equal(await page.locator('[data-station-field="traysPerBatch"]').inputValue(), "84");
+  assert.equal(fixture.run.doughCapacity.doughballYield, 645.19);
+
+  fixture.run.doughCapacity = {
+    status: "available",
+    reasons: [],
+    doughballYield: 648,
+    pizzasPerCase: 12,
+  };
+  await page.reload();
+  await page.locator("#station-panel:not([hidden])").waitFor({ timeout: 5000 });
+  await page.getByTestId("tab-station-dough").click();
+  assert.equal(await page.getByText("54.0000 cases", { exact: true }).count(), 1);
   assert.deepEqual(fixture.pageErrors, []);
+  assert.deepEqual(fixture.consoleErrors, []);
+});
+
+test("manager reviews and applies a dough procedure workbook in V2", async (t) => {
+  const browserState = await createFixture(t, { width: 1440, height: 900 }, { manager: true });
+  const { page } = await browserState.openDevice();
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["Customer", "OZ", "LBS", "YIELD", "PER TRAY"],
+    ["North Shop", 7.7, 310.5, 645.19, 84],
+  ]), "Procedure");
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  await page.locator("#capacity-workbook-file").setInputFiles({
+    name: "north-shop-dough.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer,
+  });
+  await page.getByRole("button", { name: "Validate and review workbook" }).click();
+  await page.getByText(/Staged · dough-procedure/u).waitFor();
+  await page.getByText(/1 rows linked/u).waitFor();
+  await page.getByText("North Shop", { exact: true }).first().waitFor();
+  await page.getByRole("button", { name: "Apply reviewed workbook" }).click();
+  await page.locator("#capacity-workbook-actions").waitFor({ state: "hidden" });
+  await page.getByText("recipes · applied", { exact: true }).waitFor();
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Undo" }).click();
+  await page.getByText("recipes · undone", { exact: true }).waitFor();
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const input = page.locator("#capacity-workbook-file");
+    await input.scrollIntoViewIfNeeded();
+    const bounds = await input.boundingBox();
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= viewport.width,
+      `workbook upload control fits ${viewport.width}×${viewport.height}`);
+  }
+  assert.ok((await page.locator("body").evaluate(() => document.documentElement.scrollWidth)) <= 1024);
+  assert.deepEqual(await page.locator("#capacity-workbook-preview").isVisible(), true);
+  assert.deepEqual(browserState.fixture.pageErrors, []);
+  assert.deepEqual(browserState.fixture.consoleErrors, []);
+});
+
+test("missing dough sources display unavailable instead of estimating batches", async (t) => {
+  const { fixture, openDevice } = await createFixture(t);
+  fixture.run.doughCapacity = {
+    status: "unavailable",
+    reasons: ["dough_source_missing", "shipping_source_missing"],
+    doughballYield: null,
+    pizzasPerCase: null,
+  };
+  const { page } = await openDevice();
+  await page.getByTestId("tab-station-dough").click();
+  await page.getByText(/Dough capacity unavailable/u).waitFor();
+  assert.equal(await page.getByText("53.7658 cases", { exact: true }).count(), 0);
+  assert.equal(await page.getByText("Batches needed").count(), 0);
+  assert.match(await page.locator("#run-product").inputValue(), /DOUGH-A/u);
+  assert.deepEqual(fixture.pageErrors, []);
+  assert.deepEqual(fixture.consoleErrors, []);
 });
 
 test("offline reload stays read-only and wakes into the latest server state", async (t) => {
