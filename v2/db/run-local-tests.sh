@@ -723,6 +723,8 @@ V2_TEST_ADMIN_URL="postgresql://$ENCODED_DB_USER@127.0.0.1:$PORT/v2_test"
 V2_API_URL="postgresql://v2_api_login@127.0.0.1:$PORT/v2_test"
 V2_TEST_ADMIN_URL="$V2_TEST_ADMIN_URL" V2_DATABASE_URL="$V2_API_URL" \
   NODE_ENV=development PORT=0 node "$ROOT/v2/server/http-postgres.integration.mjs"
+V2_DATABASE_URL="$V2_API_URL" NODE_ENV=development \
+  node "$ROOT/v2/server/http-postgres.browser.integration.mjs"
 "${PSQL[@]}" -f "$ROOT/v2/db/0006-run-inventory-linkage.test.sql"
 
 printf 'Run schema and lifecycle checks passed.\n'

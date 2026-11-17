@@ -60,14 +60,17 @@ Captured 2026-11-17, America/Chicago.
   read-only database check found one enabled manager and the durable bootstrap
   marker; the API now reports first-manager setup unavailable. The one-time
   `V2_INITIAL_MANAGER_BOOTSTRAP_CODE` secret was removed after setup.
-- The authenticated sign-in path is owner-confirmed, but manager inventory and
-  production screens have not yet been verified in the live preview.
+- The owner confirmed normal sign-out/sign-in. A separate Chromium integration
+  now signs in through the real V2 server and exercises manager product import,
+  reviewed opening counts, warehouse assignment, stock receipt/transfer, and
+  persistence after reload against disposable PostgreSQL data. The live preview's
+  manager inventory and production screens remain unverified by the agent.
 - No production migration, production query, database copy, or publish was
   performed. Do not paste database URLs or bootstrap codes into chat.
 - The preview's initial unauthenticated session check returns HTTP 401 by design;
-  the sign-in page renders and `/healthz` is healthy. Chrome also reports an
-  autofill warning for the separate sign-in and first-manager forms; no
-  authenticated UI was verified.
+  the sign-in page renders and `/healthz` is healthy. The screenshot browser does
+  not carry the owner's session; the owner-confirmed sign-in and isolated
+  authenticated browser integration are separate evidence.
 
 ## Checks completed
 
@@ -79,6 +82,7 @@ they do not prove production or physical-device behavior.
 | V2 unit and API suite | PASS — 129 tests |
 | V2 browser suite | PASS — 7 tests using emulated Chromium sessions |
 | V2 PostgreSQL suite | PASS — disposable local PostgreSQL cluster |
+| Authenticated manager inventory browser journey | PASS — real V2 server + disposable PostgreSQL; product import, two reviewed counts, warehouse assignment, receipt, transfer, reload |
 | V2 build/syntax checks | PASS |
 | Process supervisor configuration | PASS — both processes validated |
 | Development preview `/healthz` | PASS — API and worker healthy; no run work queued |
@@ -96,7 +100,7 @@ they do not prove production or physical-device behavior.
 | --- | --- |
 | Desktop Chromium | PASS — automated V2 browser tests |
 | Phone-sized Chromium emulation | PASS — automated V2 browser tests |
-| Tablet portrait and landscape | NOT RUN |
+| Tablet portrait and landscape | PARTIAL — Chromium viewport coverage only; no physical tablet |
 | WebKit / Safari | NOT RUN |
 | Physical Android Chrome / PWA | NOT RUN |
 | Physical iOS Safari / PWA | NOT RUN |
@@ -140,5 +144,6 @@ they do not prove production or physical-device behavior.
   Then verify the serving revision, worker health, synthetic run start/pause/
   resume/auto-track/complete, app and worker restarts, and connection use. No
   real production run or inventory should be created for that verification.
-- Complete authenticated manager inventory browser testing using synthetic V2
-  data. Do not transfer V1 sessions or credentials.
+- Extend authenticated browser coverage to recipe and production-setup imports,
+  run completion and shortages, then verify those screens in the live private
+  preview. Do not transfer V1 sessions or credentials.

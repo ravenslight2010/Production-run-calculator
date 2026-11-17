@@ -147,8 +147,11 @@ target, but is not published.
 - Browser automation covers manual-edit conflicts between sessions, offline
   reload and reconnection, plus server-driven station timers and automatic
   progress across desktop and phone-sized Chromium contexts. This is emulated
-  browser evidence, not physical-device coverage. Manager inventory screens
-  have not been exercised in a real browser.
+  browser evidence, not physical-device coverage. A separate authenticated
+  Chromium integration now exercises manager product import, physical-count
+  review/application, production-warehouse selection, receipt, transfer, and
+  reload persistence against the real V2 server and a disposable PostgreSQL
+  cluster. It does not verify the live preview's manager UI or physical devices.
 - The V2 preview now runs the API and database-leased worker as separate,
   supervised processes; browsers only refresh canonical state and never submit
   automatic-progress ticks. Development restart was tested and the worker
@@ -171,10 +174,9 @@ target, but is not published.
 
 ## Remaining V2 validation
 
-1. Verify the complete manager inventory UI in an authenticated browser using a
-   disposable V2 database, including product/recipe/setup imports, opening
-   counts, production warehouse selection, movements, transfers, run completion,
-   shortages, and mobile/tablet layouts.
+1. Extend authenticated manager browser coverage for recipe and production-setup
+   imports, run completion and shortages, then verify the complete workflow in
+   the live private preview and on phone/tablet layouts.
 2. Verify station calculations against approved floor examples and test station
    workflows, wake/reconnect, and multi-device operation on real phones/tablets.
 3. Complete the production-database and least-privilege review, then verify the
