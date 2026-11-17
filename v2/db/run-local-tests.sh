@@ -726,6 +726,7 @@ V2_TEST_ADMIN_URL="$V2_TEST_ADMIN_URL" V2_DATABASE_URL="$V2_API_URL" \
 V2_DATABASE_URL="$V2_API_URL" NODE_ENV=development \
   node "$ROOT/v2/server/http-postgres.browser.integration.mjs"
 "${PSQL[@]}" -f "$ROOT/v2/db/0006-run-inventory-linkage.test.sql"
+"${PSQL[@]}" -f "$ROOT/v2/db/cutover-transfer-rehearsal.test.sql"
 
 printf 'Run schema and lifecycle checks passed.\n'
 printf 'Concurrent first-manager bootstrap passed: exactly one manager was created.\n'
@@ -745,3 +746,4 @@ printf 'Stored state and event counts passed: %s\n' "$FINAL_STATE"
 printf 'Concurrent stock adjustment and ledger reconciliation passed: %s\n' "$STOCK_RACE_STATE"
 printf 'V2 run-to-inventory snapshot, shortage, and retry checks passed.\n'
 printf 'Restricted API run/inventory command grants passed: %s\n' "$INVENTORY_COMPLETION_PRIVILEGES"
+printf 'Synthetic V1-to-V2 setup and staff transfer rehearsal passed.\n'

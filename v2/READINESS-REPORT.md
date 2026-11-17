@@ -80,3 +80,23 @@ schema of the project database
 - **V1 cutover data — owner: project owner and migration operator.** Approve a
   separate, limited transfer plan for setup/master data and staff identities/
   roles. Do not copy historical runs, V1 stock, live sessions, or reset tokens.
+
+## V1 setup and staff transfer rehearsal
+
+The synthetic V2-side rehearsal and schema-based field allowlist are recorded
+in [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). The disposable
+database test verifies approved-field validation, synthetic products/recipe/
+setup references, duplicate handling, same-request retries, reverse-order
+setup undo, disabled staff handling, and a fresh V2 session. The existing
+authenticated integration also verifies V2 password hashing and sign-in for a
+new synthetic operator.
+
+**No V1 rows were extracted or transferred.** The archived V1 tree contains
+application source, not a database snapshot, and no authorized read-only V1
+source path is configured. The V2 development database is not a V1 source.
+Actual source counts, role capability parity, row-level relationships, and
+real duplicate cases remain unverified. No production read/export/write was
+authorized or performed. The transfer is not ready for real cutover until the
+owner separately identifies and authorizes a read-only source path, resolves
+unmapped master-data families, reviews the actual mapping, and separately
+approves any production destination write.

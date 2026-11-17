@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
+import { buildAllowlistedCutoverBatch } from "../core/cutover-transform.mjs";
 import { startV2Server } from "./main.mjs";
 
 const MANAGER_PASSWORD = "v2-test-manager-password";
@@ -14,6 +15,39 @@ function workbookBase64(sheetName, rows) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), sheetName);
   return XLSX.write(workbook, { type: "base64", bookType: "xlsx" });
+}
+
+function csvCell(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function allowlistedRehearsalBatch() {
+  return buildAllowlistedCutoverBatch({
+    products: [
+      { code: "CORN", name: "Test Flour", unit: "lb" },
+      { code: "DOUGH-A", name: "North Shop", unit: "case" },
+      { code: "CARTON", name: "Shipping Carton", unit: "each" },
+    ],
+    recipes: [{
+      code: "DOUGH-A-RECIPE",
+      name: "North Shop dough",
+      productCode: "DOUGH-A",
+      data: {
+        station_key: "dough",
+        ingredients: [{ product_code: "CORN", quantity: 10, unit: "lb" }],
+      },
+    }],
+    productionSetups: [{
+      code: "LINE-A",
+      name: "North Shop line",
+      productCode: "DOUGH-A",
+      data: {
+        recipe_codes: ["DOUGH-A-RECIPE"],
+        packaging_per_case: [{ product_code: "CARTON", quantity: 1, unit: "each" }],
+      },
+    }],
+    staff: [{ username: "V2IntegrationOperator", disabled: false, roleName: "operator" }],
+  });
 }
 
 async function signIn(baseUrl, username, password) {
@@ -100,6 +134,7 @@ async function main() {
     const bootstrapBody = await jsonResponse(bootstrapResponse);
     assert.equal(bootstrapBody.staff.role, "manager");
     const MANAGER_ID = bootstrapBody.staff.userId;
+    const cutoverBatch = allowlistedRehearsalBatch();
     assert.doesNotMatch(JSON.stringify(bootstrapBody), /v2-test-initial-manager-bootstrap-code|v2-test-manager-password|argon2id|v2_session/);
     const managerCookies = bootstrapResponse.headers.getSetCookie().map((cookie) => cookie.split(";", 1)[0]);
     const manager = {
@@ -123,7 +158,7 @@ async function main() {
         "Sec-Fetch-Site": "same-origin",
       },
       body: JSON.stringify({
-        username: "V2IntegrationOperator",
+        username: cutoverBatch.staff[0].username,
         password: OPERATOR_PASSWORD,
         roleName: "operator",
       }),
@@ -199,20 +234,24 @@ async function main() {
     const productImportRequest = {
       requestId: "73000000-0000-4000-8000-000000000204",
       kind: "products",
-      csv: "code,name,unit\nCORN,Test Flour,lb\nDOUGH-A,North Shop,case\nCARTON,Shipping Carton,each\n",
+      csv: [
+        "code,name,unit",
+        ...cutoverBatch.products.map((product) =>
+          [product.code, product.name, product.unit].map(csvCell).join(",")),
+      ].join("\n") + "\n",
     };
     const stagedImportResponse = await managerPost("/api/v2/imports", productImportRequest);
     assert.equal(stagedImportResponse.status, 201, await stagedImportResponse.clone().text());
     const stagedImport = await jsonResponse(stagedImportResponse);
     assert.equal(stagedImport.outcome, "staged");
-    assert.equal(stagedImport.records[0].code, "CORN");
+    assert.ok(stagedImport.records.some((record) => record.code === "CORN"));
     const reopenedImportResponse = await fetch(`${baseUrl}/api/v2/imports/${stagedImport.importId}`, {
       headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
     });
     assert.equal(reopenedImportResponse.status, 200);
     const reopenedImport = await jsonResponse(reopenedImportResponse);
     assert.equal(reopenedImport.import.status, "staged");
-    assert.equal(reopenedImport.import.records[0].name, "Test Flour");
+    assert.equal(reopenedImport.import.records.find((record) => record.code === "CORN").name, "Test Flour");
     const importRetryResponse = await managerPost("/api/v2/imports", productImportRequest);
     assert.equal(importRetryResponse.status, 200);
     assert.equal((await jsonResponse(importRetryResponse)).importId, stagedImport.importId);
@@ -254,23 +293,31 @@ async function main() {
     const appliedShipping = await managerPost(`/api/v2/imports/${stagedShipping.importId}/apply`, {});
     assert.equal(appliedShipping.status, 200);
 
+    const rehearsalRecipe = cutoverBatch.recipes[0];
     const recipeImport = await managerPost("/api/v2/imports", {
       requestId: "73000000-0000-4000-8000-000000000212",
       kind: "recipes",
-      csv: `code,name,product_code,definition_json
-DOUGH-A-RECIPE,North Shop dough,DOUGH-A,"{""station_key"":""dough"",""ingredients"":[{""product_code"":""CORN"",""quantity"":10,""unit"":""lb""}]}"
-`,
+      csv: [
+        "code,name,product_code,definition_json",
+        [rehearsalRecipe.code, rehearsalRecipe.name, rehearsalRecipe.productCode, JSON.stringify(rehearsalRecipe.data)]
+          .map(csvCell)
+          .join(","),
+      ].join("\n") + "\n",
     });
     assert.equal(recipeImport.status, 201, await recipeImport.clone().text());
     const stagedRecipe = await jsonResponse(recipeImport);
     const appliedRecipe = await managerPost(`/api/v2/imports/${stagedRecipe.importId}/apply`, {});
     assert.equal(appliedRecipe.status, 200, await appliedRecipe.clone().text());
+    const rehearsalSetup = cutoverBatch.productionSetups[0];
     const setupImport = await managerPost("/api/v2/imports", {
       requestId: "73000000-0000-4000-8000-000000000213",
       kind: "production-setups",
-      csv: `code,name,product_code,config_json
-LINE-A,North Shop line,DOUGH-A,"{""recipe_codes"":[""DOUGH-A-RECIPE""],""packaging_per_case"":[{""product_code"":""CARTON"",""quantity"":1,""unit"":""each""}]}"
-`,
+      csv: [
+        "code,name,product_code,config_json",
+        [rehearsalSetup.code, rehearsalSetup.name, rehearsalSetup.productCode, JSON.stringify(rehearsalSetup.data)]
+          .map(csvCell)
+          .join(","),
+      ].join("\n") + "\n",
     });
     assert.equal(setupImport.status, 201, await setupImport.clone().text());
     const stagedSetup = await jsonResponse(setupImport);

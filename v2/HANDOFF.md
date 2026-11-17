@@ -48,6 +48,10 @@ The first usable V2 release is a web/PWA production tool with:
 - Establish opening inventory from a new physical count, not V1 balances.
 - A previously requested full production-to-development preservation copy is
   separate from V2 cutover. No data copy was completed as part of this V2 work.
+- The current synthetic transfer rehearsal and its allowlist are documented in
+  [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). It does not read a V1
+  database or write production data; unmappable V1 master-data families and the
+  missing authorized read-only source path remain explicit cutover blockers.
 
 ## Current V2 source status
 
