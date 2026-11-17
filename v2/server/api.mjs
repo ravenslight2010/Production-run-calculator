@@ -80,6 +80,7 @@ function safeRouteName(url) {
   if (/^\/api\/v2\/runs\/[^/]+$/.test(url.pathname)) return "runs.detail";
   if (url.pathname === "/api/v2/imports") return "imports.collection";
   if (url.pathname === "/api/v2/imports/workbooks") return "imports.workbooks";
+  if (url.pathname === "/api/v2/imports/workbooks/preview") return "imports.workbooks_preview";
   if (/^\/api\/v2\/imports\/[^/]+$/.test(url.pathname)) return "imports.detail";
   if (/^\/api\/v2\/imports\/[^/]+\/(apply|undo)$/.test(url.pathname)) return "imports.action";
   if (url.pathname.startsWith("/api/v2/inventory/")) return "inventory.operation";

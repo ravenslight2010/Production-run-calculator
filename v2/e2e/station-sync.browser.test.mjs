@@ -247,6 +247,37 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
         });
         return;
       }
+      if (manager && url.pathname === "/api/v2/imports/workbooks/preview" && request.method() === "POST") {
+        if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
+          await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
+          return;
+        }
+        const body = request.postDataJSON();
+        const workbookBuffer = Buffer.from(body.workbookBase64, "base64");
+        const parsed = body.family === "dough-procedure"
+          ? parseDoughCapacityWorkbook(workbookBuffer, body.fileName)
+          : parseShippingCapacityWorkbook(workbookBuffer, body.fileName);
+        const products = [{ code: "DOUGH-A", name: "North Shop" }];
+        const rows = linkWorkbookCapacityRows(parsed.rows, products, []);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            sourceFamily: body.family,
+            fileName: parsed.fileName,
+            fileSha256: parsed.fileSha256,
+            rows: rows.map((row) => ({
+              sourceKey: row.sourceKey,
+              name: row.name,
+              row: row.source.row,
+              reason: row.linkType,
+              productCode: row.productCode,
+            })),
+            products,
+          }),
+        });
+        return;
+      }
       if (manager && url.pathname === "/api/v2/imports/workbooks" && request.method() === "POST") {
         if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
           await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
@@ -257,7 +288,12 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
         const parsed = body.family === "dough-procedure"
           ? parseDoughCapacityWorkbook(workbookBuffer, body.fileName)
           : parseShippingCapacityWorkbook(workbookBuffer, body.fileName);
-        const rows = linkWorkbookCapacityRows(parsed.rows, [{ code: "DOUGH-A", name: "North Shop" }], []);
+        const rows = linkWorkbookCapacityRows(
+          parsed.rows,
+          [{ code: "DOUGH-A", name: "North Shop" }],
+          [],
+          body.productLinks || [],
+        );
         const records = rows.filter((row) => row.productCode).map((row) => ({
           code: `${body.family === "dough-procedure" ? "DOUGH" : "SHIP"}-${row.sourceKey}`,
           name: row.name,
@@ -311,8 +347,11 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
             fileSha256: parsed.fileSha256,
             linkedCount: records.length,
             rememberedCount: 0,
-            unmatchedRows: [],
-            unmatchedCount: 0,
+            managerMappedCount: rows.filter((row) => row.linkType === "manager").length,
+            unmatchedRows: rows.filter((row) => !row.productCode).map((row) => ({
+              sourceKey: row.sourceKey, name: row.name, row: row.source.row, reason: row.linkType,
+            })),
+            unmatchedCount: rows.filter((row) => !row.productCode).length,
             invalidValueCount: records.filter((record) => body.family === "dough-procedure"
               ? record.data.doughballYield === null
               : record.data.pizzasPerCase === null).length,
@@ -464,13 +503,14 @@ test("dough capacity is derived from the selected product and has no editable ov
   assert.deepEqual(fixture.consoleErrors, []);
 });
 
-test("manager reviews and applies a dough procedure workbook in V2", async (t) => {
+test("manager resolves an unmatched workbook row, reviews its link, and applies it", async (t) => {
   const browserState = await createFixture(t, { width: 1440, height: 900 }, { manager: true });
   const { page } = await browserState.openDevice();
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
     ["Customer", "OZ", "LBS", "YIELD", "PER TRAY"],
     ["North Shop", 7.7, 310.5, 645.19, 84],
+    ["Nroth Shop", 7.8, 310.5, 646, 84],
   ]), "Procedure");
   const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
   await page.locator("#capacity-workbook-file").setInputFiles({
@@ -478,10 +518,15 @@ test("manager reviews and applies a dough procedure workbook in V2", async (t) =
     mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     buffer,
   });
-  await page.getByRole("button", { name: "Validate and review workbook" }).click();
+  await page.getByRole("button", { name: "Preview workbook links" }).click();
+  await page.getByText("Exact name match · DOUGH-A").waitFor();
+  await page.getByLabel("Choose a product for Nroth Shop, workbook row 3").selectOption("DOUGH-A");
+  await page.getByRole("button", { name: "Stage reviewed workbook" }).click();
   await page.getByText(/Staged · dough-procedure/u).waitFor();
-  await page.getByText(/1 rows linked/u).waitFor();
+  await page.getByText(/2 rows staged/u).waitFor();
+  await page.getByText(/1 manager-selected links included/u).waitFor();
   await page.getByText("North Shop", { exact: true }).first().waitFor();
+  await page.getByText(/Product: DOUGH-A/u).first().waitFor();
   await page.getByRole("button", { name: "Apply reviewed workbook" }).click();
   await page.locator("#capacity-workbook-actions").waitFor({ state: "hidden" });
   await page.getByText("recipes · applied", { exact: true }).waitFor();

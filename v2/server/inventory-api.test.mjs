@@ -65,6 +65,13 @@ test("inventory routes require a verified manager before database access", async
   const operatorResponse = await send(operator.baseUrl, "/api/v2/inventory/warehouses");
   assert.equal(operatorResponse.status, 403);
   assert.equal(operator.calls.length, 0);
+
+  const restrictedPreview = await send(operator.baseUrl, "/api/v2/imports/workbooks/preview", {
+    method: "POST",
+    body: {},
+  });
+  assert.equal(restrictedPreview.status, 403);
+  assert.equal(operator.calls.length, 0);
 });
 
 test("setup import CSV is validated before staging and request hash is server-computed", async (t) => {
@@ -111,7 +118,7 @@ test("workbook source rows are linked exactly and staged through the reviewed im
   const api = await withApi(t, {
     query: async (sql, values) => {
       if (sql.includes("list_inventory_products")) {
-        return { rows: [{ result: [{ code: "DOUGH-A", name: "North Shop" }] }] };
+        return { rows: [{ result: [{ code: "DOUGH-A", name: "North Shop", active: true }] }] };
       }
       if (sql.includes("list_workbook_source_links")) return { rows: [{ result: [] }] };
       if (sql.includes("stage_setup_import")) {
@@ -132,6 +139,7 @@ test("workbook source rows are linked exactly and staged through the reviewed im
       requestId: "dough-workbook-1",
       family: "dough-procedure",
       fileName: "north-dough.xlsx",
+      productLinks: [],
       workbookBase64: workbookBase64([
         ["Customer", "OZ", "LBS", "YIELD", "PER TRAY"],
         ["North Shop", 7.7, 310.5, 645.19, 84],
@@ -170,11 +178,12 @@ test("workbook upload rejects unmatched rows and legacy XLS files without stagin
       requestId: "shipping-no-match",
       family: "shipping-guide",
       fileName: "shipping.xlsx",
+      productLinks: [],
       workbookBase64: validWorkbook,
     },
   });
   assert.equal(unmatched.status, 409);
-  assert.match((await unmatched.json()).error, /matched an active product name exactly/u);
+  assert.match((await unmatched.json()).error, /select an active product/iu);
 
   const unsupported = await send(api.baseUrl, "/api/v2/imports/workbooks", {
     method: "POST",
@@ -182,11 +191,97 @@ test("workbook upload rejects unmatched rows and legacy XLS files without stagin
       requestId: "wrong-family",
       family: "dough-procedure",
       fileName: "schedule.xls",
+      productLinks: [],
       workbookBase64: validWorkbook,
     },
   });
   assert.equal(unsupported.status, 400);
   assert.equal(api.calls.length, 2);
+});
+
+test("workbook preview is read-only and manager mappings can stage only unresolved active products", async (t) => {
+  const workbook = workbookBase64([
+    ["Pizza", "Notes", "Pizzas/CS"],
+    ["Known Product", "", 12],
+    ["Misspelled Product", "", 10],
+    ["Ambiguous Product", "", 8],
+  ]);
+  const products = [
+    { code: "KNOWN", name: "Known Product", active: true },
+    { code: "TARGET", name: "Correct Product", active: true },
+    { code: "DUP-A", name: "Ambiguous Product", active: true },
+    { code: "DUP-B", name: " ambiguous product ", active: true },
+  ];
+  const api = await withApi(t, {
+    query: async (sql, values) => {
+      if (sql.includes("list_inventory_products")) return { rows: [{ result: products }] };
+      if (sql.includes("list_workbook_source_links")) return { rows: [{ result: [] }] };
+      if (sql.includes("stage_setup_import")) {
+        return { rows: [{ result: {
+          outcome: "staged",
+          importId: "10000000-0000-4000-8000-000000000008",
+          kind: values[4],
+          rowCount: JSON.parse(values[5]).length,
+          replayed: false,
+        } }] };
+      }
+      throw new Error("Unexpected workbook mapping query");
+    },
+  });
+  const preview = await send(api.baseUrl, "/api/v2/imports/workbooks/preview", {
+    method: "POST",
+    body: { family: "shipping-guide", fileName: "shipping.xlsx", workbookBase64: workbook },
+  });
+  assert.equal(preview.status, 200);
+  const previewBody = await preview.json();
+  assert.deepEqual(previewBody.rows.map(({ reason }) => reason), ["exact", "unmatched", "ambiguous"]);
+  assert.equal(previewBody.products.length, products.length);
+  assert.equal(api.calls.some((call) => call.text.includes("stage_setup_import")), false);
+
+  const mapping = [{ sourceKey: previewBody.rows[1].sourceKey, productCode: "TARGET" }];
+  const staged = await send(api.baseUrl, "/api/v2/imports/workbooks", {
+    method: "POST",
+    body: {
+      requestId: "shipping-manager-map",
+      family: "shipping-guide",
+      fileName: "shipping.xlsx",
+      productLinks: mapping,
+      workbookBase64: workbook,
+    },
+  });
+  assert.equal(staged.status, 201);
+  const stagedBody = await staged.json();
+  assert.equal(stagedBody.linkedCount, 2);
+  assert.equal(stagedBody.managerMappedCount, 1);
+  assert.deepEqual(stagedBody.unmatchedRows.map(({ reason }) => reason), ["ambiguous"]);
+  assert.deepEqual(stagedBody.records.map(({ productCode }) => productCode), ["KNOWN", "TARGET"]);
+  assert.equal(api.calls.some((call) => call.text.includes("stage_setup_import")), true);
+
+  const exactOverride = await send(api.baseUrl, "/api/v2/imports/workbooks", {
+    method: "POST",
+    body: {
+      requestId: "shipping-exact-override",
+      family: "shipping-guide",
+      fileName: "shipping.xlsx",
+      productLinks: [{ sourceKey: previewBody.rows[0].sourceKey, productCode: "TARGET" }],
+      workbookBase64: workbook,
+    },
+  });
+  assert.equal(exactOverride.status, 400);
+  assert.match((await exactOverride.json()).error, /unmatched workbook row/u);
+
+  const inactiveOverride = await send(api.baseUrl, "/api/v2/imports/workbooks", {
+    method: "POST",
+    body: {
+      requestId: "shipping-inactive-override",
+      family: "shipping-guide",
+      fileName: "shipping.xlsx",
+      productLinks: [{ sourceKey: previewBody.rows[1].sourceKey, productCode: "INACTIVE" }],
+      workbookBase64: workbook,
+    },
+  });
+  assert.equal(inactiveOverride.status, 400);
+  assert.match((await inactiveOverride.json()).error, /active product/u);
 });
 
 test("setup import details can be reopened by another manager", async (t) => {

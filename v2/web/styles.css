@@ -284,6 +284,8 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
 .preview-records { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .preview-records li { display: grid; grid-template-columns: minmax(70px, .35fr) minmax(0, 1fr); gap: 10px; padding-top: 5px; border-top: 1px solid #e3e3d9; color: #4c554b; font-size: 11px; overflow-wrap: anywhere; }
 .preview-detail { grid-column: 1 / -1; color: #777e74; font: 10px/1.5 var(--mono); overflow-wrap: anywhere; }
+.workbook-product-link { grid-column: 1 / -1; width: 100%; min-width: 0; min-height: 42px; padding: 0 9px; border: 1px solid #c9cbbf; border-radius: 0; background: #fff; color: var(--ink); font: 12px var(--display); }
+.workbook-product-link:focus-visible { outline: 3px solid #bb8122; outline-offset: 2px; }
 .preview-code, .table-code { color: #7d8479; font: 10px var(--mono); }
 .inventory-table-wrap { max-width: 100%; overflow-x: auto; border-top: 1px solid var(--line); }
 .inventory-table { width: 100%; border-collapse: collapse; text-align: left; }

@@ -608,14 +608,54 @@ paths:
           $ref: "#/components/responses/Error"
         "415":
           $ref: "#/components/responses/Error"
+  /api/v2/imports/workbooks/preview:
+    post:
+      operationId: previewDoughCapacityWorkbookLinks
+      summary: Preview exact and remembered workbook product links
+      description: >
+        Manager-only and V2-only. Parses one dough procedure or shipping guide
+        without staging data. Unique exact normalized product names and confirmed
+        product-code links are automatic; ambiguous and unmatched rows remain
+        unlinked until a manager explicitly selects an active product during staging.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapacityWorkbookPreviewRequest"
+      responses:
+        "200":
+          description: Workbook rows and active products for manager review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapacityWorkbookLinkPreview"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
   /api/v2/imports/workbooks:
     post:
       operationId: stageDoughCapacityWorkbook
       summary: Validate and stage one dough or shipping workbook
       description: >
         Manager-only and V2-only. Accepts dough procedure or shipping guide
-        workbooks, maps rows only to one exact normalized active product name,
-        and stages linked rows for review through the existing import lifecycle.
+        workbooks, preserves automatic unique exact-name and confirmed links, and
+        accepts explicit active-product selections only for unmatched or ambiguous
+        rows. Stages linked rows for review through the existing import lifecycle.
         Confirmed product-code links are reused on later imports.
       security:
         - v2Session: []
@@ -1599,6 +1639,82 @@ components:
           maxLength: 6990508
           contentEncoding: base64
           contentMediaType: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+        productLinks:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/CapacityWorkbookProductLink"
+    CapacityWorkbookPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [family, fileName, workbookBase64]
+      properties:
+        family:
+          type: string
+          enum: [dough-procedure, shipping-guide]
+        fileName:
+          type: string
+          minLength: 5
+          maxLength: 120
+        workbookBase64:
+          type: string
+          maxLength: 6990508
+          contentEncoding: base64
+          contentMediaType: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    CapacityWorkbookProductLink:
+      type: object
+      additionalProperties: false
+      required: [sourceKey, productCode]
+      properties:
+        sourceKey:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        productCode:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    CapacityWorkbookLinkPreview:
+      type: object
+      required: [sourceFamily, fileName, fileSha256, rows, products]
+      properties:
+        sourceFamily:
+          type: string
+          enum: [dough-procedure, shipping-guide]
+        fileName:
+          type: string
+        fileSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        rows:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            required: [sourceKey, name, row, reason, productCode]
+            properties:
+              sourceKey:
+                type: string
+                pattern: "^[0-9a-f]{64}$"
+              name:
+                type: string
+              row:
+                type: integer
+                minimum: 1
+              reason:
+                type: string
+                enum: [exact, remembered, unmatched, ambiguous]
+              productCode:
+                type: [string, "null"]
+        products:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            required: [code, name]
+            properties:
+              code:
+                type: string
+              name:
+                type: string
     CapacityWorkbookImportPreview:
       type: object
       required:
@@ -1613,6 +1729,7 @@ components:
         - fileSha256
         - linkedCount
         - rememberedCount
+        - managerMappedCount
         - unmatchedRows
         - unmatchedCount
         - invalidValueCount
@@ -1650,13 +1767,19 @@ components:
         rememberedCount:
           type: integer
           minimum: 0
+        managerMappedCount:
+          type: integer
+          minimum: 0
         unmatchedRows:
           type: array
           maxItems: 100
           items:
             type: object
-            required: [name, row, reason]
+            required: [sourceKey, name, row, reason]
             properties:
+              sourceKey:
+                type: string
+                pattern: "^[0-9a-f]{64}$"
               name:
                 type: string
               row:

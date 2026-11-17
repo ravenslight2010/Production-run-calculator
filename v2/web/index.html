@@ -284,7 +284,7 @@
             <section class="manager-card manager-card-wide" aria-labelledby="capacity-workbook-heading">
               <p class="eyebrow">DOUGH CAPACITY SOURCES · V2 ONLY</p>
               <h3 id="capacity-workbook-heading">Import dough and shipping workbooks</h3>
-              <p class="manager-help">Upload one dough procedure or shipping guide at a time. V2 links rows only to one exact product-name match, remembers confirmed product codes, and stages matched rows for review before applying them.</p>
+              <p class="manager-help">Upload one dough procedure or shipping guide at a time. Exact product-name matches remain automatic; managers can select active products for unmatched rows, review staged links, and apply them. Confirmed links are remembered by product code.</p>
               <form id="capacity-workbook-form" class="manager-form">
                 <label class="field" for="capacity-workbook-family">
                   <span>Workbook type</span>
@@ -298,11 +298,12 @@
                   <input id="capacity-workbook-file" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required aria-describedby="capacity-workbook-help" />
                 </label>
                 <p class="field-hint" id="capacity-workbook-help">One workbook per import, up to 5 MiB. Other workbook families are not imported here.</p>
-                <button class="button button-primary" id="capacity-workbook-review" type="submit">Validate and review workbook</button>
+                <button class="button button-primary" id="capacity-workbook-review" type="submit">Preview workbook links</button>
                 <button class="button button-secondary" id="capacity-workbook-retry" type="button" hidden>Retry the same workbook</button>
               </form>
               <div id="capacity-workbook-preview" class="manager-preview" aria-live="polite" hidden></div>
               <div class="manager-actions" id="capacity-workbook-actions" hidden>
+                <button class="button button-primary" id="capacity-workbook-stage" type="button" hidden>Stage reviewed workbook</button>
                 <button class="button button-primary" id="capacity-workbook-apply" type="button">Apply reviewed workbook</button>
               </div>
             </section>

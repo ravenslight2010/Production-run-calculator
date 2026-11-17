@@ -5,6 +5,7 @@ DECLARE
   v_facility uuid;
   v_actor uuid := '99500000-0000-4000-8000-000000000002';
   v_capacity jsonb;
+  v_links jsonb;
   v_run_result jsonb;
   v_run_id uuid;
   v_run jsonb;
@@ -26,8 +27,19 @@ BEGIN
   VALUES (
     v_facility, 'recipes', 'DOUGH-SYNTH-ROW', 'Synthetic Dough Product',
     'DOUGH-SYNTH',
-    '{"sourceFamily":"dough-procedure","doughballYield":645.19}'::jsonb
+    jsonb_build_object(
+      'sourceFamily', 'dough-procedure',
+      'sourceKey', repeat('c', 64),
+      'doughballYield', 645.19
+    )
   );
+  v_links := v2.list_workbook_source_links(v_facility, 'dough-procedure');
+  IF NOT (v_links @> jsonb_build_array(jsonb_build_object(
+    'sourceKey', repeat('c', 64),
+    'productCode', 'DOUGH-SYNTH'
+  ))) THEN
+    RAISE EXCEPTION 'A confirmed workbook link was not retained by stable product code: %', v_links;
+  END IF;
   v_capacity := v2.dough_capacity_snapshot(v_facility, 'DOUGH-SYNTH');
   IF v_capacity->>'status' <> 'unavailable'
     OR NOT (v_capacity->'reasons' @> '["shipping_source_missing"]'::jsonb) THEN

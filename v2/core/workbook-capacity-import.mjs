@@ -225,13 +225,19 @@ function uniqueNameKeyMap(products) {
   return groups;
 }
 
-function mapRowsToProducts(rows, products, priorLinks) {
+function mapRowsToProducts(rows, products, priorLinks, managerLinks = []) {
   const productByCode = new Map(products.map((product) => [product.code.toLocaleLowerCase("en-US"), product]));
   const exactNames = uniqueNameKeyMap(products);
   const existingLinks = new Map();
+  const explicitLinks = new Map();
   for (const link of priorLinks) {
     if (typeof link?.sourceKey === "string" && typeof link?.productCode === "string") {
       existingLinks.set(link.sourceKey, link.productCode);
+    }
+  }
+  for (const link of managerLinks) {
+    if (typeof link?.sourceKey === "string" && typeof link?.productCode === "string") {
+      explicitLinks.set(link.sourceKey, link.productCode);
     }
   }
 
@@ -241,6 +247,11 @@ function mapRowsToProducts(rows, products, priorLinks) {
     if (existingProduct) return { ...row, productCode: existingProduct.code, linkType: "remembered" };
     const exactMatches = exactNames.get(normalizedMatchKey(row.name)) ?? [];
     if (exactMatches.length === 1) return { ...row, productCode: exactMatches[0].code, linkType: "exact" };
+    const explicitCode = explicitLinks.get(row.sourceKey);
+    const explicitProduct = explicitCode
+      ? productByCode.get(explicitCode.toLocaleLowerCase("en-US"))
+      : null;
+    if (explicitProduct) return { ...row, productCode: explicitProduct.code, linkType: "manager" };
     return {
       ...row,
       productCode: null,
@@ -407,11 +418,11 @@ export function parseShippingCapacityWorkbook(buffer, fileName) {
   };
 }
 
-export function linkWorkbookCapacityRows(rows, products, priorLinks = []) {
-  if (!Array.isArray(products) || !Array.isArray(priorLinks)) {
-    throw new TypeError("Active products and prior source links are required.");
+export function linkWorkbookCapacityRows(rows, products, priorLinks = [], managerLinks = []) {
+  if (!Array.isArray(products) || !Array.isArray(priorLinks) || !Array.isArray(managerLinks)) {
+    throw new TypeError("Active products and source links are required.");
   }
-  return mapRowsToProducts(rows, products, priorLinks);
+  return mapRowsToProducts(rows, products, priorLinks, managerLinks);
 }
 
 export const workbookCapacityImportLimits = Object.freeze({

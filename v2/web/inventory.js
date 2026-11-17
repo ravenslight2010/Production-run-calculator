@@ -21,7 +21,7 @@ const dom = {
   workbookForm: byId("capacity-workbook-form"), workbookFamily: byId("capacity-workbook-family"),
   workbookFile: byId("capacity-workbook-file"), workbookRetry: byId("capacity-workbook-retry"),
   workbookPreview: byId("capacity-workbook-preview"), workbookActions: byId("capacity-workbook-actions"),
-  workbookApply: byId("capacity-workbook-apply"),
+  workbookStage: byId("capacity-workbook-stage"), workbookApply: byId("capacity-workbook-apply"),
   templateColumns: byId("csv-template-columns"), templateDownload: byId("csv-template-download"),
   openingTemplateDownload: byId("opening-count-template-download"),
   importPreview: byId("import-preview"), importActions: byId("import-actions"),
@@ -54,6 +54,7 @@ let pending = loadPending();
 let loading = false;
 let inFlight = false;
 let workbookPreparing = false;
+let workbookDraft = null;
 let lastConfirmed = false;
 
 function object(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
@@ -230,7 +231,7 @@ function validateCountSummary(item) {
 }
 function setBusy(busy) {
   inFlight = busy;
-  [dom.importApply, dom.workbookApply, ...dom.importForm.querySelectorAll("button"),
+  [dom.importApply, dom.workbookStage, dom.workbookApply, ...dom.importForm.querySelectorAll("button"),
     ...dom.workbookForm.querySelectorAll("button"), ...dom.warehouseForm.querySelectorAll("button"),
     ...dom.movementForm.querySelectorAll("button"), ...dom.transferForm.querySelectorAll("button"),
     ...dom.openingForm.querySelectorAll("button"), dom.openingReview, dom.openingApply].filter(Boolean)
@@ -623,19 +624,77 @@ function workbookImportResponse(value, family = null, fileSha256 = null) {
     && (!fileSha256 || value.fileSha256 === fileSha256)
     && Number.isSafeInteger(value.linkedCount) && value.linkedCount >= 1
     && Number.isSafeInteger(value.rememberedCount) && value.rememberedCount >= 0
+    && Number.isSafeInteger(value.managerMappedCount) && value.managerMappedCount >= 0
     && Number.isSafeInteger(value.unmatchedCount) && value.unmatchedCount >= 0
     && Number.isSafeInteger(value.invalidValueCount) && value.invalidValueCount >= 0
     && Array.isArray(value.unmatchedRows) && value.unmatchedRows.length <= 100
-    && value.unmatchedRows.every((row) => object(row) && text(row.name, 120)
+    && value.unmatchedRows.every((row) => object(row) && /^[0-9a-f]{64}$/u.test(row.sourceKey)
+      && text(row.name, 120)
       && Number.isSafeInteger(row.row) && row.row > 0
       && ["unmatched", "ambiguous"].includes(row.reason))
     && Array.isArray(value.records) && value.records.length === value.linkedCount
     && value.records.every((record) => validateRecord(record, value.kind));
 }
+function workbookLinkPreviewResponse(value, family, fileSha256) {
+  return object(value) && value.sourceFamily === family && WORKBOOK_IMPORT_FAMILIES.has(value.sourceFamily)
+    && text(value.fileName, 120) && /^[0-9a-f]{64}$/u.test(value.fileSha256)
+    && value.fileSha256 === fileSha256
+    && Array.isArray(value.rows) && value.rows.length >= 1 && value.rows.length <= 2000
+    && value.rows.every((row) => object(row) && /^[0-9a-f]{64}$/u.test(row.sourceKey)
+      && text(row.name, 120) && Number.isSafeInteger(row.row) && row.row > 0
+      && ["exact", "remembered", "unmatched", "ambiguous"].includes(row.reason)
+      && (row.productCode === null || typeof row.productCode === "string" && CODE.test(row.productCode)))
+    && Array.isArray(value.products) && value.products.length <= 2000
+    && value.products.every((product) => object(product) && CODE.test(product.code) && text(product.name, 120));
+}
+function renderWorkbookLinkReview(preview) {
+  dom.workbookPreview.replaceChildren();
+  dom.workbookPreview.hidden = false;
+  dom.workbookPreview.append(
+    make("strong", "", `Preview · ${preview.sourceFamily} · ${preview.fileName}`),
+    make("p", "preview-summary", `${preview.rows.length} workbook rows · ${preview.products.length} active products available`),
+    make("p", "manager-help", "Exact and previously confirmed links are automatic. Select an active product for any unmatched or ambiguous row you want included. Unresolved rows will stay out of this import."),
+  );
+  const list = make("ul", "preview-records");
+  preview.rows.forEach((row) => {
+    const line = make("li");
+    line.append(make("span", "preview-code", `Row ${row.row}`), make("span", "", row.name));
+    if (row.productCode) {
+      const description = row.reason === "remembered" ? "Previously confirmed link" : "Exact name match";
+      line.append(make("span", "preview-detail", `${description} · ${row.productCode}`));
+    } else {
+      const select = make("select", "workbook-product-link");
+      select.dataset.actionControl = "true";
+      select.dataset.sourceKey = row.sourceKey;
+      select.setAttribute("aria-label", `Choose a product for ${row.name}, workbook row ${row.row}`);
+      const placeholder = make("option", "", row.reason === "ambiguous"
+        ? "Choose a product · multiple exact matches"
+        : "Choose an active product");
+      placeholder.value = "";
+      select.append(placeholder);
+      preview.products.forEach((product) => {
+        const option = make("option", "", `${product.name} · ${product.code}`);
+        option.value = product.code;
+        select.append(option);
+      });
+      line.append(make("span", "preview-detail", row.reason === "ambiguous"
+        ? "Multiple exact product matches · manager selection required"
+        : "No exact product match · manager selection required"));
+      line.append(select);
+    }
+    list.append(line);
+  });
+  dom.workbookPreview.append(list);
+  dom.workbookActions.hidden = false;
+  dom.workbookStage.hidden = false;
+  dom.workbookStage.dataset.actionControl = "true";
+  dom.workbookApply.hidden = true;
+  updateReadOnly();
+}
 function renderWorkbookPreview(result) {
   renderPreview(dom.workbookPreview, result.records, `Staged · ${result.sourceFamily} · ${result.fileName}`);
   dom.workbookPreview.insertBefore(
-    make("p", "manager-help", `${result.linkedCount} rows linked; ${result.rememberedCount} previously confirmed links retained; ${result.unmatchedCount} rows not linked; ${result.invalidValueCount} linked rows have a missing or invalid source value.`),
+    make("p", "manager-help", `${result.linkedCount} rows staged; ${result.rememberedCount} previously confirmed links retained; ${result.managerMappedCount} manager-selected links included; ${result.unmatchedCount} rows remain unavailable; ${result.invalidValueCount} linked rows have a missing or invalid source value.`),
     dom.workbookPreview.children[1] || null,
   );
   if (result.unmatchedCount > 0) {
@@ -649,6 +708,8 @@ function renderWorkbookPreview(result) {
     dom.workbookPreview.append(details);
   }
   dom.workbookActions.hidden = false;
+  dom.workbookStage.hidden = true;
+  dom.workbookApply.hidden = false;
   dom.workbookApply.dataset.importId = result.importId;
 }
 async function workbookFileDetails(file) {
@@ -700,12 +761,14 @@ async function uploadCapacityWorkbook(file, saved = null) {
     family,
     fileName: file.name,
     fileSha256: details.fileSha256,
+    productLinks: selectedWorkbookProductLinks(),
   };
   const requestBody = {
     requestId: payload.requestId,
     family: payload.family,
     fileName: payload.fileName,
     workbookBase64: details.workbookBase64,
+    productLinks: payload.productLinks || [],
   };
   return operation({
     kind: "workbook-import",
@@ -716,6 +779,7 @@ async function uploadCapacityWorkbook(file, saved = null) {
     label: "Workbook import",
     refresh: async (result) => {
       renderWorkbookPreview(result);
+      workbookDraft = null;
       await refreshImportHistory();
     },
   });
@@ -732,7 +796,90 @@ async function submitCapacityWorkbook(event) {
     message("Resolve the saved request first. Retry its exact action before starting another import.", "warning");
     return;
   }
-  await uploadCapacityWorkbook(dom.workbookFile.files?.[0], saved);
+  if (saved) {
+    await uploadCapacityWorkbook(dom.workbookFile.files?.[0], saved);
+    return;
+  }
+  await previewCapacityWorkbook(dom.workbookFile.files?.[0]);
+}
+function selectedWorkbookProductLinks() {
+  return [...dom.workbookPreview.querySelectorAll("select[data-source-key]")]
+    .filter((select) => select.value)
+    .map((select) => ({ sourceKey: select.dataset.sourceKey, productCode: select.value }));
+}
+async function previewCapacityWorkbook(file) {
+  if (!ensureWrite() || workbookPreparing) return null;
+  if (pending) {
+    message("Resolve the saved request first. Retry its exact action before starting another import.", "warning");
+    return null;
+  }
+  workbookPreparing = true;
+  dom.workbookForm.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  try {
+    if (!file || file.size < 22 || file.size > MAX_WORKBOOK_BYTES
+      || !/\.xlsx$/iu.test(file.name) || file.name.length > 120) {
+      message("Choose a standard .xlsx workbook no larger than 5 MiB.", "warning");
+      return null;
+    }
+    const family = dom.workbookFamily.value;
+    if (!WORKBOOK_IMPORT_FAMILIES.has(family)) {
+      message("Choose a dough procedure or shipping guide workbook.", "warning");
+      return null;
+    }
+    let details;
+    try { details = await workbookFileDetails(file); }
+    catch {
+      message("The workbook could not be read for a safe preview. Choose it again.", "error");
+      return null;
+    }
+    const preview = await request(`${IMPORTS}/workbooks/preview`, {
+      method: "POST",
+      body: {
+        family,
+        fileName: file.name,
+        workbookBase64: details.workbookBase64,
+      },
+    });
+    if (!workbookLinkPreviewResponse(preview, family, details.fileSha256)) {
+      throw new Error("The server returned an unexpected workbook preview. Refresh and try again.");
+    }
+    workbookDraft = {
+      family,
+      fileName: file.name,
+      fileSha256: details.fileSha256,
+      workbookBase64: details.workbookBase64,
+    };
+    renderWorkbookLinkReview(preview);
+    clearMessage();
+    return preview;
+  } catch (error) {
+    workbookDraft = null;
+    dom.workbookActions.hidden = true;
+    message(error instanceof Error ? error.message : "The workbook could not be previewed. Refresh and try again.", "error");
+    return null;
+  } finally {
+    workbookPreparing = false;
+    updateReadOnly();
+  }
+}
+async function stageCapacityWorkbook() {
+  if (!workbookDraft || !ensureWrite()) return;
+  const file = dom.workbookFile.files?.[0];
+  if (!file || file.name !== workbookDraft.fileName || dom.workbookFamily.value !== workbookDraft.family) {
+    message("Choose the same workbook and type used for the current preview.", "warning");
+    return;
+  }
+  let details;
+  try { details = await workbookFileDetails(file); }
+  catch {
+    message("The workbook could not be rechecked. Preview it again before staging.", "error");
+    return;
+  }
+  if (details.fileSha256 !== workbookDraft.fileSha256) {
+    message("The selected workbook changed after preview. Preview it again before staging.", "warning");
+    return;
+  }
+  await uploadCapacityWorkbook(file);
 }
 async function retryImport() {
   if (!pending || pending.kind !== "setup-import" || pending.actorId !== staff?.userId) return;
@@ -972,7 +1119,17 @@ function bind() {
   dom.importForm.addEventListener("submit", submitImport);
   dom.importRetry.addEventListener("click", retryImport);
   dom.workbookForm.addEventListener("submit", submitCapacityWorkbook);
+  const discardWorkbookPreview = () => {
+    if (!workbookDraft) return;
+    workbookDraft = null;
+    dom.workbookPreview.replaceChildren();
+    dom.workbookPreview.hidden = true;
+    dom.workbookActions.hidden = true;
+  };
+  dom.workbookFamily.addEventListener("change", discardWorkbookPreview);
+  dom.workbookFile.addEventListener("change", discardWorkbookPreview);
   dom.workbookRetry.addEventListener("click", retrySavedRequest);
+  dom.workbookStage.addEventListener("click", () => { void stageCapacityWorkbook(); });
   dom.importApply.addEventListener("click", () => {
     const item = imports.find((entry) => entry.id === dom.importApply.dataset.importId);
     if (item) void actOnImport(item, "apply");

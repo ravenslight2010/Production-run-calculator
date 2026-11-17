@@ -180,6 +180,66 @@ function resultValue(result) {
   return result?.rows?.[0]?.result ?? null;
 }
 
+function parseWorkbookUpload(body) {
+  if (!["dough-procedure", "shipping-guide"].includes(body.family)) {
+    throw new InventoryApiError(400, "Choose a dough procedure or shipping guide workbook.");
+  }
+  if (typeof body.workbookBase64 !== "string"
+    || body.workbookBase64.length > Math.ceil(workbookCapacityImportLimits.maxBytes / 3) * 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(body.workbookBase64)) {
+    throw new InventoryApiError(400, "Choose a valid XLSX workbook no larger than 5 MiB.");
+  }
+  const workbookBytes = Buffer.from(body.workbookBase64, "base64");
+  if (workbookBytes.byteLength > workbookCapacityImportLimits.maxBytes
+    || workbookBytes.toString("base64") !== body.workbookBase64) {
+    throw new InventoryApiError(400, "Choose a valid XLSX workbook no larger than 5 MiB.");
+  }
+  const parsed = body.family === "dough-procedure"
+    ? parseDoughCapacityWorkbook(workbookBytes, body.fileName)
+    : parseShippingCapacityWorkbook(workbookBytes, body.fileName);
+  return parsed;
+}
+
+function validateWorkbookProductLinks(value) {
+  if (!Array.isArray(value) || value.length > workbookCapacityImportLimits.maxRows) {
+    throw new InventoryApiError(400, "Review the workbook product links and try again.");
+  }
+  const seen = new Set();
+  return value.map((link) => {
+    if (!link || typeof link !== "object" || Array.isArray(link)
+      || Object.keys(link).sort().join(",") !== "productCode,sourceKey"
+      || typeof link.sourceKey !== "string" || !/^[0-9a-f]{64}$/u.test(link.sourceKey)
+      || typeof link.productCode !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u.test(link.productCode)
+      || seen.has(link.sourceKey)) {
+      throw new InventoryApiError(400, "Review the workbook product links and try again.");
+    }
+    seen.add(link.sourceKey);
+    return { sourceKey: link.sourceKey, productCode: link.productCode };
+  });
+}
+
+async function workbookLinkContext(pool, scope, family) {
+  const productResult = await pool.query(
+    "SELECT v2.list_inventory_products($1::uuid) AS result",
+    scope,
+  );
+  const products = resultValue(productResult);
+  if (!Array.isArray(products)
+    || products.some((product) => !product || typeof product.code !== "string"
+      || typeof product.name !== "string" || product.active !== true)) {
+    throw new InventoryApiError(502, "The active product list is unavailable. Refresh and try again.");
+  }
+  const priorResult = await pool.query(
+    "SELECT v2.list_workbook_source_links($1::uuid, $2::text) AS result",
+    [...scope, family],
+  );
+  const priorLinks = resultValue(priorResult);
+  if (!Array.isArray(priorLinks)) {
+    throw new InventoryApiError(502, "Saved workbook product links are unavailable. Refresh and try again.");
+  }
+  return { products, priorLinks };
+}
+
 function createUploadLimiter({ maxRequests = 10, windowMs = 60_000, maxKeys = 10_000, clock = Date.now } = {}) {
   const entries = new Map();
   return {
@@ -260,6 +320,7 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
         if (
           url.pathname === IMPORTS_PATH
           || url.pathname === `${IMPORTS_PATH}/workbooks`
+          || url.pathname === `${IMPORTS_PATH}/workbooks/preview`
           || url.pathname === `${INVENTORY_PATH}/opening-counts`
         ) {
           const limit = uploadLimiter.consume(auth.actorId);
@@ -298,44 +359,52 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
         return true;
       }
 
+      if (isImports && url.pathname === `${IMPORTS_PATH}/workbooks/preview` && request.method === "POST") {
+        operation = "preview_workbook_import";
+        const body = await readJsonBody(request, MAX_WORKBOOK_BODY_BYTES);
+        requireKeys(body, ["family", "fileName", "workbookBase64"]);
+        const parsed = parseWorkbookUpload(body);
+        const { products, priorLinks } = await workbookLinkContext(pool, scope, body.family);
+        const rows = linkWorkbookCapacityRows(parsed.rows, products, priorLinks);
+        sendJson(response, 200, {
+          sourceFamily: body.family,
+          fileName: parsed.fileName,
+          fileSha256: parsed.fileSha256,
+          rows: rows.map((row) => ({
+            sourceKey: row.sourceKey,
+            name: row.name,
+            row: row.source.row,
+            reason: row.linkType,
+            productCode: row.productCode,
+          })),
+          products: products.map(({ code, name }) => ({ code, name })),
+        });
+        return true;
+      }
+
       if (isImports && url.pathname === `${IMPORTS_PATH}/workbooks` && request.method === "POST") {
         operation = "create_workbook_import";
         const body = await readJsonBody(request, MAX_WORKBOOK_BODY_BYTES);
-        requireKeys(body, ["requestId", "family", "fileName", "workbookBase64"]);
+        const requiredKeys = ["requestId", "family", "fileName", "workbookBase64"];
+        const allowedKeys = new Set([...requiredKeys, "productLinks"]);
+        if (requiredKeys.some((key) => !Object.hasOwn(body, key))
+          || Object.keys(body).some((key) => !allowedKeys.has(key))) {
+          throw new InventoryApiError(400, "The request contains missing or unsupported fields.");
+        }
         const requestId = validateRequestId(body.requestId);
-        if (!["dough-procedure", "shipping-guide"].includes(body.family)) {
-          throw new InventoryApiError(400, "Choose a dough procedure or shipping guide workbook.");
+        const managerLinks = validateWorkbookProductLinks(body.productLinks ?? []);
+        const parsed = parseWorkbookUpload(body);
+        const { products, priorLinks } = await workbookLinkContext(pool, scope, body.family);
+        const automaticRows = linkWorkbookCapacityRows(parsed.rows, products, priorLinks);
+        const unresolvedKeys = new Set(automaticRows.filter((row) => !row.productCode).map((row) => row.sourceKey));
+        const productsByCode = new Map(products.map((product) => [product.code.toLocaleLowerCase("en-US"), product]));
+        for (const link of managerLinks) {
+          if (!unresolvedKeys.has(link.sourceKey)
+            || !productsByCode.has(link.productCode.toLocaleLowerCase("en-US"))) {
+            throw new InventoryApiError(400, "Choose an active product for an unmatched workbook row.");
+          }
         }
-        if (typeof body.workbookBase64 !== "string"
-          || body.workbookBase64.length > Math.ceil(workbookCapacityImportLimits.maxBytes / 3) * 4
-          || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(body.workbookBase64)) {
-          throw new InventoryApiError(400, "Choose a valid XLSX workbook no larger than 5 MiB.");
-        }
-        const workbookBytes = Buffer.from(body.workbookBase64, "base64");
-        if (workbookBytes.byteLength > workbookCapacityImportLimits.maxBytes
-          || workbookBytes.toString("base64") !== body.workbookBase64) {
-          throw new InventoryApiError(400, "Choose a valid XLSX workbook no larger than 5 MiB.");
-        }
-        const parsed = body.family === "dough-procedure"
-          ? parseDoughCapacityWorkbook(workbookBytes, body.fileName)
-          : parseShippingCapacityWorkbook(workbookBytes, body.fileName);
-        const productResult = await pool.query(
-          "SELECT v2.list_inventory_products($1::uuid) AS result",
-          scope,
-        );
-        const products = resultValue(productResult);
-        if (!Array.isArray(products)) {
-          throw new InventoryApiError(502, "The active product list is unavailable. Refresh and try again.");
-        }
-        const priorResult = await pool.query(
-          "SELECT v2.list_workbook_source_links($1::uuid, $2::text) AS result",
-          [...scope, body.family],
-        );
-        const priorLinks = resultValue(priorResult);
-        if (!Array.isArray(priorLinks)) {
-          throw new InventoryApiError(502, "Saved workbook product links are unavailable. Refresh and try again.");
-        }
-        const linkedRows = linkWorkbookCapacityRows(parsed.rows, products, priorLinks);
+        const linkedRows = linkWorkbookCapacityRows(parsed.rows, products, priorLinks, managerLinks);
         const records = linkedRows
           .filter((row) => row.productCode)
           .map((row) => ({
@@ -365,7 +434,7 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
         if (records.length === 0) {
           throw new InventoryApiError(
             409,
-            "No workbook rows matched an active product name exactly. Add or rename V2 products, then upload the workbook again.",
+            "No workbook rows are linked to active products. Select an active product for at least one row before staging.",
           );
         }
         const kind = body.family === "dough-procedure" ? "recipes" : "production-setups";
@@ -377,7 +446,12 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
         const staged = resultValue(result);
         const unmatchedRows = linkedRows
           .filter((row) => !row.productCode)
-          .map((row) => ({ name: row.name, row: row.source.row, reason: row.linkType }));
+          .map((row) => ({
+            sourceKey: row.sourceKey,
+            name: row.name,
+            row: row.source.row,
+            reason: row.linkType,
+          }));
         sendJson(response, staged.replayed ? 200 : 201, {
           ...staged,
           records,
@@ -386,6 +460,7 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
           fileSha256: parsed.fileSha256,
           linkedCount: records.length,
           rememberedCount: linkedRows.filter((row) => row.linkType === "remembered").length,
+          managerMappedCount: linkedRows.filter((row) => row.linkType === "manager").length,
           unmatchedRows: unmatchedRows.slice(0, 100),
           unmatchedCount: unmatchedRows.length,
           invalidValueCount: linkedRows.filter((row) => body.family === "dough-procedure"

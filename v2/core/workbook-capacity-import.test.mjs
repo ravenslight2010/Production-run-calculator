@@ -84,6 +84,37 @@ test("links only unique exact normalized product names and remembers confirmed p
   assert.deepEqual([changedCode.productCode, changedCode.linkType], [null, "unmatched"]);
 });
 
+test("manager links resolve only unmatched rows and retain the active product's stable code", () => {
+  const rows = [
+    { sourceKey: "a".repeat(64), name: "Misspelled Product" },
+    { sourceKey: "b".repeat(64), name: "Exact Product" },
+    { sourceKey: "c".repeat(64), name: "Duplicate Product" },
+  ];
+  const products = [
+    { code: "PRODUCT-A", name: "Correct Product" },
+    { code: "EXACT", name: "Exact Product" },
+    { code: "DUP-A", name: "Duplicate Product" },
+    { code: "DUP-B", name: " duplicate product " },
+  ];
+  const managerLinks = [
+    { sourceKey: rows[0].sourceKey, productCode: "product-a" },
+    { sourceKey: rows[1].sourceKey, productCode: "PRODUCT-A" },
+    { sourceKey: rows[2].sourceKey, productCode: "DUP-A" },
+  ];
+
+  const linked = linkWorkbookCapacityRows(rows, products, [], managerLinks);
+  assert.deepEqual(linked.map(({ productCode, linkType }) => [productCode, linkType]), [
+    ["PRODUCT-A", "manager"],
+    ["EXACT", "exact"],
+    ["DUP-A", "manager"],
+  ]);
+  assert.equal(linkWorkbookCapacityRows(
+    [rows[2]],
+    products,
+    [],
+  )[0].productCode, null);
+});
+
 test("parses every local dough procedure and the approved shipping guide", async () => {
   const doughDirectory = new URL("../../attached_assets/source-library/dough/", import.meta.url);
   const shippingDirectory = new URL("../../attached_assets/source-library/shipping/", import.meta.url);
