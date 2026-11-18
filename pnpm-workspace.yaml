@@ -73,6 +73,9 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # Local security fork based on picomatch 4.0.7. Remove after upstream ships
+  # a published fix for GHSA-fc5q-39xc-vjpf.
+  picomatch: "file:./patches/picomatch"
   # Security overrides formerly stored in package.json. Keep them here because
   # pnpm reads workspace overrides and ignores package.json.pnpm.
   adm-zip: "0.6.1"

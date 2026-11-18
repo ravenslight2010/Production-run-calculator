@@ -1,0 +1,15 @@
+{
+  "name": "picomatch",
+  "version": "4.0.8+workspace.1",
+  "description": "Workspace-maintained security fork of picomatch 4.0.7",
+  "license": "MIT",
+  "main": "index.js",
+  "sideEffects": false,
+  "private": true,
+  "engines": {
+    "node": ">=12"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.cjs"
+  }
+}
