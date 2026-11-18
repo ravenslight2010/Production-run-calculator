@@ -146,3 +146,4 @@
 - [Vitest source-file reads](vitest-source-file-reads.md) — filesystem contracts need an explicit package root; transformed source URLs may not be file URLs.
 - [Follow-up task scope](follow-up-task-scope.md) — keep investigation, implementation, tests and verification together; avoid recursive proposals unless the outcome is independent.
 - [V2 scope](v2-scope.md) — upgraded successor; preserve features, stage implementation, and treat warehouses as inventory locations within one facility.
+- [V1 data recovery boundary](v1-data-recovery-boundary.md) — do not assume the removed V1 production database can be restored; rebuild only approved setup from surviving sources and count stock afresh.
