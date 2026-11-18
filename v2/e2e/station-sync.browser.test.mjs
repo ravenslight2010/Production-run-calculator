@@ -18,6 +18,7 @@ import {
   renderImportCsvTemplate,
   setupImportCsvTemplates,
 } from "../core/import-csv-templates.mjs";
+import { parseSetupCatalogCsv, setupCatalogCsvTemplates } from "../core/setup-catalog-csv.mjs";
 
 const CSRF_TOKEN = "a".repeat(43);
 const STAFF_ID = "72000000-0000-4000-8000-000000000001";
@@ -55,9 +56,12 @@ const WEB_ASSETS = new Map([
   ["/v2/web/favicon.svg", ["../web/favicon.svg", "image/svg+xml"]],
   ["/v2/web/app.js", ["../web/app.js", "text/javascript; charset=utf-8"]],
   ["/v2/web/inventory.js", ["../web/inventory.js", "text/javascript; charset=utf-8"]],
+  ["/v2/web/setup-catalog.js", ["../web/setup-catalog.js", "text/javascript; charset=utf-8"]],
   ["/v2/web/styles.css", ["../web/styles.css", "text/css; charset=utf-8"]],
   ["/v2/web/write-gate.mjs", ["../web/write-gate.mjs", "text/javascript; charset=utf-8"]],
   ["/v2/core/import-csv-templates.mjs", ["../core/import-csv-templates.mjs", "text/javascript; charset=utf-8"]],
+  ["/v2/core/import-csv.mjs", ["../core/import-csv.mjs", "text/javascript; charset=utf-8"]],
+  ["/v2/core/setup-catalog-csv.mjs", ["../core/setup-catalog-csv.mjs", "text/javascript; charset=utf-8"]],
   ["/v2/core/station-workflows.mjs", ["../core/station-workflows.mjs", "text/javascript; charset=utf-8"]],
 ]);
 
@@ -196,6 +200,7 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
     pageErrors: [],
     consoleErrors: [],
     imports: [],
+    setupCatalogImports: [],
     stationCommandOutcomes: [],
     browserStationCommands: [],
     forceTimerStartConflict: false,
@@ -254,6 +259,58 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
       }
       if (manager && url.pathname === "/api/v2/imports" && request.method() === "GET") {
         await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ imports: fixture.imports }) });
+        return;
+      }
+      if (manager && url.pathname === "/api/v2/setup-catalog/imports" && request.method() === "GET") {
+        await route.fulfill({
+          status: 200, contentType: "application/json",
+          body: JSON.stringify({ imports: fixture.setupCatalogImports }),
+        });
+        return;
+      }
+      if (manager && url.pathname === "/api/v2/setup-catalog/imports" && request.method() === "POST") {
+        if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
+          await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
+          return;
+        }
+        const body = request.postDataJSON();
+        const records = parseSetupCatalogCsv(body.family, body.csv);
+        const importId = "74000000-0000-4000-8000-000000000099";
+        const item = {
+          id: importId, family: body.family, status: "staged", rowCount: records.length,
+          records, createdAt: new Date().toISOString(),
+        };
+        fixture.setupCatalogImports = [item, ...fixture.setupCatalogImports.filter((entry) => entry.id !== importId)];
+        await route.fulfill({
+          status: 201, contentType: "application/json",
+          body: JSON.stringify({ outcome: "staged", importId, family: body.family, rowCount: records.length, replayed: false, records }),
+        });
+        return;
+      }
+      const catalogDetail = url.pathname.match(/^\/api\/v2\/setup-catalog\/imports\/([0-9a-f-]{36})$/i);
+      if (manager && catalogDetail && request.method() === "GET") {
+        const item = fixture.setupCatalogImports.find((entry) => entry.id === catalogDetail[1]);
+        await route.fulfill(item
+          ? { status: 200, contentType: "application/json", body: JSON.stringify(item) }
+          : { status: 404, contentType: "application/json", body: JSON.stringify({ error: "Import not found." }) });
+        return;
+      }
+      const catalogAction = url.pathname.match(/^\/api\/v2\/setup-catalog\/imports\/([0-9a-f-]{36})\/(apply|undo)$/i);
+      if (manager && catalogAction && request.method() === "POST") {
+        if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
+          await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
+          return;
+        }
+        const item = fixture.setupCatalogImports.find((entry) => entry.id === catalogAction[1]);
+        if (!item) {
+          await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Import not found." }) });
+          return;
+        }
+        item.status = catalogAction[2] === "apply" ? "applied" : "undone";
+        await route.fulfill({
+          status: 200, contentType: "application/json",
+          body: JSON.stringify({ outcome: item.status, importId: item.id, family: item.family, replayed: false }),
+        });
         return;
       }
       if (manager && url.pathname === "/api/v2/inventory/warehouses" && request.method() === "GET") {
@@ -473,7 +530,11 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
       if (message.type() === "error") fixture.consoleErrors.push(message.text());
     });
     await page.goto(baseUrl);
-    await page.locator("#station-panel:not([hidden])").waitFor({ timeout: 5000 });
+    try {
+      await page.locator("#station-panel:not([hidden])").waitFor({ timeout: 5000 });
+    } catch (error) {
+      throw new Error(`${error.message}; page errors: ${JSON.stringify(fixture.pageErrors)}; console errors: ${JSON.stringify(fixture.consoleErrors)}`);
+    }
     await page.getByTestId("tab-station-line").waitFor();
     return { context, page, routeApi };
   }
@@ -750,4 +811,62 @@ test("manager downloads each CSV template with parser-valid synthetic examples",
     assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= viewport.width,
       `template download link fits ${viewport.width}×${viewport.height}`);
   }
+});
+
+test("manager reviews, applies, and safely undoes a setup catalog across responsive widths", async (t) => {
+  const { fixture, openDevice } = await createFixture(t, undefined, { manager: true });
+  const { page } = await openDevice();
+  await page.locator("#setup-catalog-panel:not([hidden])").waitFor();
+  await page.getByText("No additional setup imports recorded yet.").waitFor();
+
+  for (const [family, template] of Object.entries(setupCatalogCsvTemplates)) {
+    const csv = renderImportCsvTemplate(template);
+    assert.equal(parseSetupCatalogCsv(family, csv).length, 1);
+    await page.locator("#setup-catalog-family").selectOption(family);
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.locator("#setup-catalog-template-download").click(),
+    ]);
+    assert.equal(download.suggestedFilename(), template.fileName);
+    assert.equal(await readFile(await download.path(), "utf8"), csv);
+  }
+
+  const ingredients = 'code,name,categories_json,allergens_json,allergens_reviewed,merged_into_code,enabled\n' +
+    'BROWSER-ING,Fixture Flour,"[""dough""]","[]",true,,true\n';
+  await page.locator("#setup-catalog-family").selectOption("ingredients");
+  await page.locator("#setup-catalog-file").setInputFiles({
+    name: "ingredients.csv", mimeType: "text/csv", buffer: Buffer.from(ingredients),
+  });
+  await page.getByRole("button", { name: "Validate and stage for review" }).click();
+  await page.getByText(/1 setup rows are staged/).waitFor();
+  assert.equal(fixture.setupCatalogImports[0].status, "staged");
+  assert.equal(await page.getByText("BROWSER-ING · Fixture Flour").count(), 1);
+  await page.getByRole("button", { name: "Apply reviewed setup" }).click();
+  await page.getByText("Setup import applied.").waitFor();
+  assert.equal(fixture.setupCatalogImports[0].status, "applied");
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page.getByText("Applied setup · imported values · 1 rows").waitFor();
+  assert.equal(await page.getByText("BROWSER-ING · Fixture Flour").count(), 1);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Undo" }).click();
+  await page.getByText("Setup import undone.").waitFor();
+  assert.equal(fixture.setupCatalogImports[0].status, "undone");
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+    { width: 1440, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    assert.ok(
+      await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
+      `setup catalog layout should not overflow at ${viewport.width}×${viewport.height}`,
+    );
+    const bounds = await page.locator("#setup-catalog-template-download").boundingBox();
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= viewport.width,
+      `setup template download fits ${viewport.width}×${viewport.height}`);
+  }
+  assert.deepEqual(fixture.pageErrors, []);
+  assert.deepEqual(fixture.consoleErrors, []);
 });

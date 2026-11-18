@@ -616,6 +616,159 @@ paths:
           $ref: "#/components/responses/Error"
         "415":
           $ref: "#/components/responses/Error"
+  /api/v2/setup-catalog/imports:
+    get:
+      operationId: listSetupCatalogImports
+      summary: List recent approved setup-family imports
+      description: Manager-only, facility-scoped history for the named V2 setup families.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Recent setup catalog imports
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [imports]
+                properties:
+                  imports:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SetupCatalogHistoryItem"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: stageSetupCatalogImport
+      summary: Validate and stage one approved setup-family CSV
+      description: >
+        Manager-only. Families have strict headers and field allowlists.
+        The server computes request identity; retry the same requestId and CSV
+        after an uncertain response. Apply and undo are separate manager actions.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupCatalogRequest"
+      responses:
+        "201":
+          description: CSV validated and staged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupCatalogStageResponse"
+        "200":
+          description: Previously submitted request confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupCatalogStageResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "415":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /api/v2/setup-catalog/imports/{importId}:
+    get:
+      operationId: getSetupCatalogImport
+      summary: Reopen staged or applied setup values
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+      responses:
+        "200":
+          description: Stored setup rows for manager review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupCatalogDetail"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v2/setup-catalog/imports/{importId}/apply:
+    post:
+      operationId: applySetupCatalogImport
+      summary: Apply a reviewed setup catalog import
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Setup applied or confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupCatalogActionResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v2/setup-catalog/imports/{importId}/undo:
+    post:
+      operationId: undoSetupCatalogImport
+      summary: Safely undo a setup catalog import
+      description: Undo is blocked when a later edit or dependent setup record references the imported record.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Setup restored or undo confirmed by retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupCatalogActionResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v2/imports/workbooks/preview:
     post:
       operationId: previewDoughCapacityWorkbookLinks
@@ -1819,6 +1972,141 @@ components:
         csv:
           type: string
           maxLength: 1048576
+    SetupCatalogRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, family, csv]
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 200
+        family:
+          type: string
+          enum:
+            - ingredients
+            - mixes
+            - die-types
+            - die-line-defaults
+            - production-rules
+            - freezer-pull-items
+            - run-templates
+            - manager-lists
+            - aliases
+        csv:
+          type: string
+          maxLength: 1048576
+          description: Strict family-specific CSV with a maximum of 2,000 data rows.
+    SetupCatalogRecord:
+      type: object
+      additionalProperties: false
+      required: [code, name, data]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        data:
+          type: object
+          description: Family-specific allowlisted values; unknown values are rejected.
+          additionalProperties: true
+    SetupCatalogStageResponse:
+      type: object
+      required: [outcome, importId, family, rowCount, replayed, records]
+      properties:
+        outcome:
+          type: string
+          enum: [staged, applied, undone]
+        importId:
+          type: string
+          format: uuid
+        family:
+          type: string
+          enum:
+            - ingredients
+            - mixes
+            - die-types
+            - die-line-defaults
+            - production-rules
+            - freezer-pull-items
+            - run-templates
+            - manager-lists
+            - aliases
+        rowCount:
+          type: integer
+          minimum: 1
+          maximum: 2000
+        replayed:
+          type: boolean
+        records:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/SetupCatalogRecord"
+    SetupCatalogHistoryItem:
+      type: object
+      required: [id, family, status, rowCount, createdBy, createdAt, appliedAt, undoneAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        family:
+          type: string
+        status:
+          type: string
+          enum: [staged, applied, undone]
+        rowCount:
+          type: integer
+          minimum: 1
+          maximum: 2000
+        createdBy:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        appliedAt:
+          type: [string, "null"]
+          format: date-time
+        undoneAt:
+          type: [string, "null"]
+          format: date-time
+    SetupCatalogDetail:
+      allOf:
+        - $ref: "#/components/schemas/SetupCatalogHistoryItem"
+        - type: object
+          required: [records]
+          properties:
+            records:
+              type: array
+              maxItems: 2000
+              items:
+                $ref: "#/components/schemas/SetupCatalogRecord"
+    SetupCatalogActionResult:
+      type: object
+      required: [outcome, importId, family, replayed]
+      properties:
+        outcome:
+          type: string
+          enum: [applied, undone]
+        importId:
+          type: string
+          format: uuid
+        family:
+          type: string
+        rowCount:
+          type: integer
+        appliedAt:
+          type: string
+          format: date-time
+        undoneAt:
+          type: string
+          format: date-time
+        replayed:
+          type: boolean
     CapacityWorkbookImportRequest:
       type: object
       additionalProperties: false

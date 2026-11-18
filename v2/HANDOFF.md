@@ -49,14 +49,13 @@ The first usable V2 release is a web/PWA production tool with:
 - A previously requested full production-to-development preservation copy is
   separate from V2 cutover. No data copy was completed as part of this V2 work.
 - The current synthetic transfer rehearsal and its allowlist are documented in
-  [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). A limited,
-  owner-authorized read-only audit of the V1 production source has now returned
-  aggregate counts and mapping checks; no V1 records were exported, imported,
-  or changed. The owner chose to build V2 equivalents for two custom roles,
-  which are now seeded in development. A separate names/categories-only read
-  found candidate links for 545 of 639 recipe component references; the V2
-  ingredient target, remaining links, product/setup mappings, and QC/incident
-  enforcement remain cutover blockers.
+  [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). It does not read a V1
+  database or write production data for this setup-family work. A limited,
+  owner-authorized read-only V1 audit from 2026-11-17 retained aggregate counts
+  and mapping checks only; no V1 records were exported, imported, or changed.
+  Approved setup families now have typed V2 destinations and a manager review
+  flow. Actual row-level transfer still requires approved mappings and a
+  separately authorized source and destination.
 
 ## Current V2 source status
 
@@ -92,9 +91,21 @@ target, but is not published.
 - `db/0007-staff-role-equivalents.sql` seeds the reviewed `warehouse` and
   `qc-manager` roles in V2 development. The latter's QC and incident permissions
   are enforced as Tasks #3964 and #3965 add those features.
+- `db/0007-approved-setup-catalogs.sql` adds a manager-only import lifecycle
+  and dedicated V2 tables for ingredients/allergen facts, mixes, die types and
+  defaults, production rules, freezer-pull items, run templates, approved
+  manager directories, and spec/merge aliases. Explicit ingredient, mix,
+  freezer-pull, and die-default links are facility-scoped. This import does not
+  execute production rules or use a V1 run template to start a run.
 - `core/import-csv.mjs` accepts bounded V2 CSV templates for products, recipes,
   production setup, and opening counts. Imports are staged with server-computed
   idempotency, reopenable for manager review, and guarded for safe undo.
+- `core/setup-catalog-csv.mjs` validates the approved setup-family CSV maps,
+  units, explicit nulls, duplicate identities, named manager-list keys, and
+  runtime-field exclusions. The manager setup panel in `web/` downloads each
+  family template, stages/reopens the exact values, supports idempotent apply
+  and guarded undo, and keeps unscoped flavors and unresolved ingredient names
+  unlinked rather than guessing their identity.
 - `server/inventory-api.mjs` exposes manager-only, facility-scoped inventory
   functions. It derives actor/scope from the V2 session, enforces CSRF on writes,
   rate-limits CSV staging, and returns safe errors. Managers can designate only
@@ -132,7 +143,7 @@ target, but is not published.
   to the API through a loopback-only worker health endpoint; retry, restart,
   and shutdown behavior is covered by checks.
 - `api/openapi.yaml` records health, authentication, manager setup, run control,
-  production stations, imports, and inventory routes.
+  production stations, product/setup/catalog imports, and inventory routes.
 - `web/` now connects the username/password sign-in, session check, sign-out,
   run controls, and the Line, Dough, Cheese, Pepperoni, Sauce, Frontline, and
   Packaging station workflows to the V2 API. Station edits, timers, and
@@ -163,22 +174,28 @@ target, but is not published.
   Chromium integration now exercises manager product import, physical-count
   review/application, production-warehouse selection, receipt, transfer, and
   reload persistence against the real V2 server and a disposable PostgreSQL
-  cluster. It does not verify the live preview's manager UI or physical devices.
+  cluster. A separate emulated Chromium manager setup journey covers family
+  templates, stage/review/apply/undo, and desktop, phone, tablet-portrait, and
+  tablet-landscape widths. WebKit and physical-device behavior are not proven
+  by this emulation.
 - The V2 preview now runs the API and database-leased worker as separate,
   supervised processes; browsers only refresh canonical state and never submit
   automatic-progress ticks. Development restart was tested and the worker
   recovered. The measured database setting was 112 maximum connections with
   four reserved; the configured API and worker pools allow five total.
-- V2 migrations `0001` through `0007` are applied to the development database's
-  `v2` schema only. The private preview has one enabled manager account, created
-  through the guarded first-manager flow; the owner confirmed sign-out and
-  sign-in. The bootstrap marker is set and the one-time bootstrap secret was
-  removed. The two reviewed custom role definitions are now seeded; no V1 staff,
-  recipe, or inventory data has been imported. No run or inventory data has been seeded. The V1 production source
-  received a limited read-only aggregate audit; no source records were exported,
-  imported, or changed.
+- V2 migrations through `0007-staff-role-equivalents.sql` are applied to the
+  development database's `v2` schema only. The setup-catalog migration is tested
+  against disposable PostgreSQL; it has not been applied to the shared
+  development or production database.
+- The private preview has one enabled manager account, created through the
+  guarded first-manager flow; the owner confirmed sign-out and sign-in. The
+  bootstrap marker is set and the one-time bootstrap secret was removed. The two
+  reviewed custom role definitions are seeded; no V1 staff, recipe, or inventory
+  data has been imported. No run or inventory data has been seeded.
+- The V1 production source received a limited read-only aggregate audit; no
+  source records were exported, imported, or changed.
 - Production database function/trigger/grant setup, full manager inventory
-  browser verification, tablet/WebKit, physical-device verification, and
+  browser verification, WebKit, physical-device verification, and
   production publish remain future work. Do not publish until the
   least-privilege runtime access and V2 production database objects are reviewed.
   The deployment run command currently refuses to publish; the `Project`
@@ -188,9 +205,9 @@ target, but is not published.
 
 ## Remaining V2 validation
 
-1. Extend authenticated manager browser coverage for recipe and production-setup
-   imports, run completion and shortages, then verify the complete workflow in
-   the live private preview and on phone/tablet layouts.
+1. Verify the manager setup/catalog and inventory journeys in the live private
+   preview, then extend authenticated manager coverage for recipe and
+   production-setup imports, run completion, and shortages.
 2. Verify station calculations against approved floor examples and test station
    workflows, wake/reconnect, and multi-device operation on real phones/tablets.
 3. Complete the production-database and least-privilege review, then verify the

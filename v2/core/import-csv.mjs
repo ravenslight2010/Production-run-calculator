@@ -20,9 +20,9 @@ function fail(message, row = null, field = null) {
   throw new ImportCsvError(message, row, field);
 }
 
-function parseRows(input) {
+export function parseCsvRows(input) {
   if (typeof input !== "string") fail("Upload a CSV file as text.");
-  if (Buffer.byteLength(input, "utf8") > MAX_CSV_BYTES) {
+  if (new TextEncoder().encode(input).byteLength > MAX_CSV_BYTES) {
     fail("CSV files must be 1 MiB or smaller.");
   }
   if (input.includes("\u0000") || input.includes("\uFFFD")) {
@@ -105,7 +105,7 @@ function parseRows(input) {
   return rows;
 }
 
-function validateHeaders(rows, expected) {
+export function validateCsvHeaders(rows, expected) {
   const [headers, ...data] = rows;
   if (headers.length !== expected.length || headers.some((header, index) => header !== expected[index])) {
     fail(`Use exactly these CSV columns, in order: ${expected.join(", ")}.`, 1);
@@ -119,14 +119,14 @@ function validateHeaders(rows, expected) {
   return data;
 }
 
-function parseCode(value, row, field = "code") {
+export function parseImportCode(value, row, field = "code") {
   if (typeof value !== "string" || !CODE_PATTERN.test(value)) {
     fail("Use 1–80 letters, numbers, dots, underscores, or hyphens; start with a letter or number.", row, field);
   }
   return value;
 }
 
-function parseName(value, row, field = "name") {
+export function parseImportName(value, row, field = "name") {
   const name = value.trim();
   if (name.length < 1 || name.length > 120 || /[\u0000-\u001f\u007f]/u.test(name)) {
     fail("Enter a name from 1 to 120 characters without control characters.", row, field);
@@ -134,7 +134,7 @@ function parseName(value, row, field = "name") {
   return name;
 }
 
-function parseObjectJson(value, row, field) {
+export function parseImportObjectJson(value, row, field) {
   if (value.length > 20_000) fail("JSON data must be 20,000 characters or less.", row, field);
   let parsed;
   try {
@@ -172,20 +172,20 @@ export function parseSetupImportCsv(kind, text) {
   );
   const headers = definitions[kind];
   if (!headers) fail("Choose a supported import type.");
-  const rows = validateHeaders(parseRows(text), headers);
+  const rows = validateCsvHeaders(parseCsvRows(text), headers);
   const seen = new Set();
   const records = rows.map((columns, index) => {
     const rowNumber = index + 2;
-    const code = parseCode(columns[0], rowNumber);
-    const name = parseName(columns[1], rowNumber);
+    const code = parseImportCode(columns[0], rowNumber);
+    const name = parseImportName(columns[1], rowNumber);
     const key = { code, name };
     if (kind === "products") {
       const unit = columns[2].trim();
       if (!UNIT_PATTERN.test(unit)) fail("Enter a valid base unit using letters, numbers, dots, slashes, or hyphens.", rowNumber, "unit");
       key.unit = unit.toLowerCase();
     } else {
-      key.productCode = parseCode(columns[2], rowNumber, "product_code");
-      key.data = parseObjectJson(columns[3], rowNumber, headers[3]);
+      key.productCode = parseImportCode(columns[2], rowNumber, "product_code");
+      key.data = parseImportObjectJson(columns[3], rowNumber, headers[3]);
     }
     ensureUnique(key, rowNumber, seen);
     return key;
@@ -195,11 +195,11 @@ export function parseSetupImportCsv(kind, text) {
 
 export function parseOpeningCountCsv(text, activeProductCodes) {
   if (!Array.isArray(activeProductCodes)) throw new TypeError("Active product codes are required.");
-  const rows = validateHeaders(parseRows(text), ["product_code", "quantity"]);
+  const rows = validateCsvHeaders(parseCsvRows(text), ["product_code", "quantity"]);
   const seen = new Set();
   const counts = rows.map((columns, index) => {
     const rowNumber = index + 2;
-    const productCode = parseCode(columns[0], rowNumber, "product_code");
+    const productCode = parseImportCode(columns[0], rowNumber, "product_code");
     const normalized = productCode.toLocaleLowerCase("en-US");
     if (seen.has(normalized)) fail("A product may appear only once in a count.", rowNumber, "product_code");
     seen.add(normalized);

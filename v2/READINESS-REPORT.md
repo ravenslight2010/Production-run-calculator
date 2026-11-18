@@ -1,10 +1,10 @@
 # V2 readiness report
 
-**Captured:** 2026-11-18, America/Chicago
-**Environment:** V2 development preview plus read-only metadata and aggregate
-checks against the unpublished production database
-**Recommendation:** **NO-GO for operational use; private pilot is conditional
-on resolving port mappings and first-manager setup**
+- **Captured:** 2026-11-18, America/Chicago
+- **Environment:** private development preview; V2 data in the isolated `v2`
+  schema of the project database, with separate read-only production metadata
+  and aggregate source evidence
+- **Recommendation:** **NO-GO for production publication or operational use**
 
 ## Why production remains blocked
 
@@ -36,10 +36,12 @@ on resolving port mappings and first-manager setup**
 
 | Area | Result | Scope |
 | --- | --- | --- |
-| V2 unit and API tests | **PARTIAL** | 136 passed; one deployment-port configuration assertion failed because five extra external mappings remain |
-| V2 station browser tests | **PASS** | 7 Chromium tests; mocked API, desktop and phone-sized viewports |
+| Project-level configuration tests | **PARTIAL** | 136 passed; one deployment-port assertion failed because five extra external mappings remain |
+| V2 package unit and API tests | **PASS** | 142 tests |
+| V2 browser tests | **PASS** | 8 Chromium tests; includes manager setup catalog stage/review/apply/undo at desktop, phone, and tablet portrait/landscape emulated viewports |
 | Authenticated manager inventory journey | **PASS** | Real V2 server and Chromium against a disposable PostgreSQL cluster: product import, two reviewed/applied physical counts, production warehouse selection, receipt, transfer, and reload persistence |
-| PostgreSQL and role checks | **PASS** | Disposable local cluster for behavior; production read-only metadata compared with development |
+| PostgreSQL and role checks | **PASS** | Disposable local cluster; manager/operator authorization, run/station conflicts, inventory ledger, run-to-inventory checks, and approved setup catalog links/retries/rollback/undo/facility fencing |
+| Setup-catalog manager UI and API | **PASS** | Chromium browser journey uses a mocked API; actual manager-only API and SQL lifecycle are separately exercised against disposable PostgreSQL |
 | V2 build/syntax | **PASS** | Server and web modules |
 | V2 production dependency audit | **PASS** | No known high/critical vulnerabilities in `@workspace/lucia-v2` production dependencies |
 | Private preview health | **PASS** | Dev-domain `/healthz` returned 200 with API and worker active; sign-in page rendered at 402×874 |
@@ -49,11 +51,12 @@ on resolving port mappings and first-manager setup**
 | V2 staff role equivalents | **PASS** | `warehouse` and `qc-manager` are seeded in the V2 development schema with the reviewed least-privilege capability sets; disposable PostgreSQL role/session checks pass |
 | Live-preview authenticated manager screens | **NOT RUN** | Agent's preview browser has no owner session; isolated authenticated browser test is separate |
 | Physical Android/iOS operation | **NOT RUN** | No connected device test environment |
-| Safari/WebKit | **NOT RUN** | Chromium evidence only |
+| Safari/WebKit | **BLOCKED** | WebKit download succeeded, but the container lacks runtime libraries needed to launch it |
 | V1 source review | **PARTIAL** | Authorized production read-only audit returned aggregate counts only; exact database revision is unknown; no V1 rows were exported or imported |
 | Production objects | **PASS (metadata)** | All 49 function definitions, 7 triggers, and 324 table/constraint/index fingerprints match development |
 | Production runtime role | **BLOCKED** | Read-only SQL console identity is known; API/worker identity awaits startup logs |
 | Private publish | **BLOCKED** | Extra external ports remain in Networking; no production manager/bootstrap code is configured |
+| Production database and publish | **BLOCKED** | Runtime role and port configuration remain unresolved; publication guard remains active |
 
 ## Data and safety boundary
 
@@ -89,7 +92,6 @@ on resolving port mappings and first-manager setup**
    records. Review and apply any separately approved V1 setup/staff transfer
    only after the destination mappings are accepted; opening inventory requires
    a fresh physical count.
-
 ## Open gates: owner and next action
 
 - **Networking port mappings — owner: project owner.** Use Tools → Networking to
@@ -113,25 +115,27 @@ on resolving port mappings and first-manager setup**
 - **Production function ACL hardening — owner: project owner and database
   operator.** Review revoking default PUBLIC EXECUTE on V2 functions before
   broadening access; the current schema has no PUBLIC USAGE or table grants.
-- **V1 cutover data — owner: project owner and migration operator.** Read-only
-  source review is complete; see [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md).
-  The owner chose to build equivalents for two custom roles before transferring
-  those accounts; the exact role names were read under separate approval and
-  the V2 development roles are seeded and tested. `qc-manager` behavior still
-  depends on QC and manager-history work. Review product, recipe, and setup
-  mappings and approve a destination before any transfer; approve a separate
-  production write window if production is later selected. Do not copy
-  historical runs, V1 stock, live sessions, or reset tokens.
+- **V1 cutover data — owner: project owner and migration operator.** The
+  approved setup-family targets and manager review workflow are implemented.
+  A limited aggregate source review is recorded in
+  [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md), but row-level mappings
+  and imports are not approved. Review the product, recipe, setup, and role
+  mappings, identify an authorized read-only source path for any future row-level
+  review, and approve a destination before transfer. `qc-manager` behavior still
+  depends on QC and manager-history work. Do not copy historical runs, V1 stock,
+  live sessions, or reset tokens; separately approve any production write.
 
 ## V1 setup and staff transfer rehearsal
 
-The synthetic V2-side rehearsal and schema-based field allowlist are recorded
+The synthetic V2-side rehearsal and schema-based field allowlists are recorded
 in [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). The disposable
-database test verifies approved-field validation, synthetic products/recipe/
-setup references, duplicate handling, same-request retries, reverse-order
-setup undo, disabled staff handling, and a fresh V2 session. The existing
+database tests verify products/recipe/setup references, the approved setup
+families, explicit ingredient and die links, unscoped legacy flavors,
+case-insensitive duplicates, same-request retries, rollback, guarded undo,
+facility scope, disabled staff handling, and a fresh V2 session. The
 authenticated integration also verifies V2 password hashing and sign-in for a
-new synthetic operator.
+new synthetic operator. A separate emulated Chromium manager journey verifies
+the setup-catalog UI; it is not a live-preview or physical-device test.
 
 **No V1 rows were exported, imported, or changed.** An owner-authorized,
 read-only production-source audit returned aggregate table counts, duplicate
@@ -141,4 +145,5 @@ payloads, credentials, active runs, and inventory stock were not returned or
 retained. The audited source counts and unresolved mappings are recorded in
 [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md). The transfer is not
 ready for cutover until the owner reviews the role and setup mappings, approves
-a destination, and separately approves any production write.
+a row-level source path and source-to-V2 links, and separately approves the
+destination and any production write.

@@ -4,6 +4,7 @@ import {
   parseOpeningCountCsv,
   parseSetupImportCsv,
 } from "../core/import-csv.mjs";
+import { parseSetupCatalogCsv, setupCatalogCsvLimits } from "../core/setup-catalog-csv.mjs";
 import {
   linkWorkbookCapacityRows,
   parseDoughCapacityWorkbook,
@@ -13,6 +14,7 @@ import {
 } from "../core/workbook-capacity-import.mjs";
 
 const IMPORTS_PATH = "/api/v2/imports";
+const SETUP_CATALOG_PATH = "/api/v2/setup-catalog/imports";
 const INVENTORY_PATH = "/api/v2/inventory";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_WORKBOOK_BODY_BYTES = 7_250 * 1024;
@@ -302,8 +304,9 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
       return false;
     }
     const isImports = url.pathname === IMPORTS_PATH || url.pathname.startsWith(`${IMPORTS_PATH}/`);
+    const isSetupCatalog = url.pathname === SETUP_CATALOG_PATH || url.pathname.startsWith(`${SETUP_CATALOG_PATH}/`);
     const isInventory = url.pathname === INVENTORY_PATH || url.pathname.startsWith(`${INVENTORY_PATH}/`);
-    if (!isImports && !isInventory) return false;
+    if (!isImports && !isSetupCatalog && !isInventory) return false;
 
     let operation = "unknown";
     try {
@@ -321,6 +324,7 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
           url.pathname === IMPORTS_PATH
           || url.pathname === `${IMPORTS_PATH}/workbooks`
           || url.pathname === `${IMPORTS_PATH}/workbooks/preview`
+          || url.pathname === SETUP_CATALOG_PATH
           || url.pathname === `${INVENTORY_PATH}/opening-counts`
         ) {
           const limit = uploadLimiter.consume(auth.actorId);
@@ -339,6 +343,68 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
           [...scope, parseLimit(url)],
         );
         sendJson(response, 200, { imports: resultValue(result) });
+        return true;
+      }
+
+      if (isSetupCatalog && url.pathname === SETUP_CATALOG_PATH && request.method === "GET") {
+        operation = "list_setup_catalog_imports";
+        const result = await pool.query(
+          "SELECT v2.list_setup_catalog_imports($1::uuid, $2::integer) AS result",
+          [...scope, parseLimit(url)],
+        );
+        sendJson(response, 200, { imports: resultValue(result) });
+        return true;
+      }
+
+      if (isSetupCatalog && url.pathname === SETUP_CATALOG_PATH && request.method === "POST") {
+        operation = "stage_setup_catalog_import";
+        const body = await readJsonBody(request);
+        requireKeys(body, ["requestId", "family", "csv"]);
+        const requestId = validateRequestId(body.requestId);
+        if (typeof body.family !== "string" || !setupCatalogCsvLimits.families.includes(body.family)) {
+          throw new InventoryApiError(400, "Choose a supported setup family.");
+        }
+        const records = parseSetupCatalogCsv(body.family, body.csv);
+        const requestHash = hashRequest({ family: body.family, records });
+        const result = await pool.query(
+          "SELECT v2.stage_setup_catalog_import($1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::jsonb) AS result",
+          [...scope, actor, requestId, requestHash, body.family, JSON.stringify(records)],
+        );
+        const staged = resultValue(result);
+        sendJson(response, staged.replayed ? 200 : 201, { ...staged, records });
+        return true;
+      }
+
+      const setupCatalogDetail = url.pathname.match(/^\/api\/v2\/setup-catalog\/imports\/([^/]+)$/);
+      if (isSetupCatalog && setupCatalogDetail && request.method === "GET") {
+        operation = "get_setup_catalog_import";
+        const importId = validateUuid(setupCatalogDetail[1], "Import ID");
+        const result = await pool.query(
+          "SELECT v2.get_setup_catalog_import($1::uuid, $2::uuid) AS result",
+          [...scope, importId],
+        );
+        const item = resultValue(result);
+        if (!item) throw new InventoryApiError(404, "That setup import is not available.");
+        sendJson(response, 200, item);
+        return true;
+      }
+
+      const setupCatalogAction = url.pathname.match(
+        /^\/api\/v2\/setup-catalog\/imports\/([^/]+)\/(apply|undo)$/,
+      );
+      if (isSetupCatalog && setupCatalogAction && request.method === "POST") {
+        operation = setupCatalogAction[2] === "apply"
+          ? "apply_setup_catalog_import"
+          : "undo_setup_catalog_import";
+        const importId = validateUuid(setupCatalogAction[1], "Import ID");
+        const body = await readJsonBody(request);
+        requireKeys(body, []);
+        const action = setupCatalogAction[2];
+        const result = await pool.query(
+          `SELECT v2.${action}_setup_catalog_import($1::uuid, $2::uuid, $3::uuid) AS result`,
+          [...scope, actor, importId],
+        );
+        sendJson(response, 200, resultValue(result));
         return true;
       }
 

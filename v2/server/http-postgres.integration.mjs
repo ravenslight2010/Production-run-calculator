@@ -192,7 +192,11 @@ async function main() {
     assert.equal(operatorInventory.status, 403, "operators must not read manager inventory data");
 
     async function managerPost(path, body) {
-      return sessionPost(manager, path, body);
+      const response = await sessionPost(manager, path, body);
+      if (response.status === 429) {
+        throw new Error(`The disposable manager journey exceeded its import-rate budget at ${path}.`);
+      }
+      return response;
     }
     async function sessionPost(session, path, body) {
       return fetch(`${baseUrl}${path}`, {
@@ -224,13 +228,6 @@ async function main() {
     });
     assert.equal(targetWarehouseResponse.status, 201, await targetWarehouseResponse.clone().text());
     const targetWarehouse = (await jsonResponse(targetWarehouseResponse)).warehouse;
-    const openingWarehouseResponse = await managerPost("/api/v2/inventory/warehouses", {
-      requestId: "73000000-0000-4000-8000-000000000203",
-      name: "Integration Opening",
-    });
-    assert.equal(openingWarehouseResponse.status, 201, await openingWarehouseResponse.clone().text());
-    const openingWarehouse = (await jsonResponse(openingWarehouseResponse)).warehouse;
-
     const productImportRequest = {
       requestId: "73000000-0000-4000-8000-000000000204",
       kind: "products",
@@ -260,6 +257,80 @@ async function main() {
     assert.equal((await jsonResponse(applyImportResponse)).outcome, "applied");
     const applyImportRetry = await managerPost(`/api/v2/imports/${stagedImport.importId}/apply`, {});
     assert.equal((await jsonResponse(applyImportRetry)).replayed, true);
+
+    const operatorCatalog = await fetch(`${baseUrl}/api/v2/setup-catalog/imports`, {
+      headers: { Cookie: operator.cookieHeader, Accept: "application/json" },
+    });
+    assert.equal(operatorCatalog.status, 403, "operators must not read setup catalog history");
+    const ingredientCsv = [
+      "code,name,categories_json,allergens_json,allergens_reviewed,merged_into_code,enabled",
+      ["CAT-ING", "Catalog Fixture Flour", '["dough"]', "[]", "true", "", "true"].map(csvCell).join(","),
+      "",
+    ].join("\n");
+    const ingredientRequest = {
+      requestId: "73000000-0000-4000-8000-000000000215",
+      family: "ingredients",
+      csv: ingredientCsv,
+    };
+    const stagedIngredientResponse = await managerPost("/api/v2/setup-catalog/imports", ingredientRequest);
+    assert.equal(stagedIngredientResponse.status, 201, await stagedIngredientResponse.clone().text());
+    const stagedIngredient = await jsonResponse(stagedIngredientResponse);
+    assert.equal(stagedIngredient.records[0].data.allergensReviewed, true);
+    assert.deepEqual(stagedIngredient.records[0].data.allergens, []);
+    const ingredientDetailResponse = await fetch(
+      `${baseUrl}/api/v2/setup-catalog/imports/${stagedIngredient.importId}`,
+      { headers: { Cookie: manager.cookieHeader, Accept: "application/json" } },
+    );
+    assert.equal(ingredientDetailResponse.status, 200);
+    assert.equal((await jsonResponse(ingredientDetailResponse)).status, "staged");
+    const appliedIngredientResponse = await managerPost(
+      `/api/v2/setup-catalog/imports/${stagedIngredient.importId}/apply`, {},
+    );
+    assert.equal(appliedIngredientResponse.status, 200, await appliedIngredientResponse.clone().text());
+    const appliedIngredient = await jsonResponse(appliedIngredientResponse);
+    assert.equal(appliedIngredient.outcome, "applied");
+    assert.equal((await jsonResponse(await managerPost(
+      `/api/v2/setup-catalog/imports/${stagedIngredient.importId}/apply`, {},
+    ))).replayed, true);
+
+    const mixComponents = JSON.stringify([{
+      ingredientName: "Catalog Fixture Flour",
+      ingredientCode: "CAT-ING",
+      perPizzaOz: 0.5,
+      perBatchLbs: 25,
+    }]);
+    const mixCsv = [
+      "code,name,brand,flavor,batch_size_lbs,days_early,notes,is_prep,enabled,components_json",
+      ["CAT-MIX", "Catalog Fixture Mix", "Example", "Plain", "25", "2", "", "false", "true", mixComponents]
+        .map(csvCell).join(","),
+      "",
+    ].join("\n");
+    const stagedMixResponse = await managerPost("/api/v2/setup-catalog/imports", {
+      requestId: "73000000-0000-4000-8000-000000000216",
+      family: "mixes",
+      csv: mixCsv,
+    });
+    assert.equal(stagedMixResponse.status, 201, await stagedMixResponse.clone().text());
+    const stagedMix = await jsonResponse(stagedMixResponse);
+    assert.equal(stagedMix.records[0].data.components[0].perPizzaOz, 0.5);
+    assert.equal(stagedMix.records[0].data.components[0].perBatchLbs, 25);
+    const appliedMixResponse = await managerPost(
+      `/api/v2/setup-catalog/imports/${stagedMix.importId}/apply`, {},
+    );
+    assert.equal(appliedMixResponse.status, 200, await appliedMixResponse.clone().text());
+    const undoneMixResponse = await managerPost(
+      `/api/v2/setup-catalog/imports/${stagedMix.importId}/undo`, {},
+    );
+    assert.equal(undoneMixResponse.status, 200);
+    assert.equal((await jsonResponse(undoneMixResponse)).outcome, "undone");
+    assert.equal((await jsonResponse(await managerPost(
+      `/api/v2/setup-catalog/imports/${stagedMix.importId}/undo`, {},
+    ))).replayed, true);
+    const undoneIngredientResponse = await managerPost(
+      `/api/v2/setup-catalog/imports/${stagedIngredient.importId}/undo`, {},
+    );
+    assert.equal(undoneIngredientResponse.status, 200, await undoneIngredientResponse.clone().text());
+    assert.equal((await jsonResponse(undoneIngredientResponse)).outcome, "undone");
 
     const doughWorkbook = await managerPost("/api/v2/imports/workbooks", {
       requestId: "73000000-0000-4000-8000-000000000210",
@@ -430,38 +501,17 @@ async function main() {
     assert.equal(secondPage.movements[0].id === firstPage.movements[0].id, false);
     assert.equal(secondPage.nextCursor, null);
 
-    const openingProductsResponse = await fetch(`${baseUrl}/api/v2/inventory/products`, {
-      headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
-    });
-    assert.equal(openingProductsResponse.status, 200);
-    const openingProducts = (await jsonResponse(openingProductsResponse)).products;
-    const openingCsv = [
-      "product_code,quantity",
-      ...openingProducts.map((product) => `${product.code},${product.code === "CORN" ? "2" : "0"}`),
-    ].join("\n") + "\n";
-    const stagedCountResponse = await managerPost("/api/v2/inventory/opening-counts", {
-      requestId: "73000000-0000-4000-8000-000000000207",
-      warehouseId: openingWarehouse.id,
-      csv: openingCsv,
-    });
-    assert.equal(stagedCountResponse.status, 201, await stagedCountResponse.clone().text());
-    const stagedCount = await jsonResponse(stagedCountResponse);
-    const reviewCountResponse = await managerPost(`/api/v2/inventory/opening-counts/${stagedCount.countId}/review`, {});
-    assert.equal(reviewCountResponse.status, 200);
-    const applyCountResponse = await managerPost(`/api/v2/inventory/opening-counts/${stagedCount.countId}/apply`, {});
-    assert.equal(applyCountResponse.status, 200);
-    assert.equal((await jsonResponse(applyCountResponse)).outcome, "applied");
     const openingStockResponse = await fetch(
-      `${baseUrl}/api/v2/inventory/stock?warehouseId=${openingWarehouse.id}`,
+      `${baseUrl}/api/v2/inventory/stock?warehouseId=${mainWarehouse.id}`,
       { headers: { Cookie: manager.cookieHeader, Accept: "application/json" } },
     );
     assert.equal(openingStockResponse.status, 200);
-    assert.equal((await jsonResponse(openingStockResponse)).stock.find((item) => item.code === "CORN").quantity, "2.000000");
+    assert.equal((await jsonResponse(openingStockResponse)).stock.find((item) => item.code === "CORN").quantity, "4.500000");
     const managerWarehouses = await fetch(`${baseUrl}/api/v2/inventory/warehouses`, {
       headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
     });
     assert.equal(managerWarehouses.status, 200);
-    assert.equal((await jsonResponse(managerWarehouses)).warehouses.length, initialWarehouseCount + 3);
+    assert.equal((await jsonResponse(managerWarehouses)).warehouses.length, initialWarehouseCount + 2);
     const appliedImportHistory = await fetch(`${baseUrl}/api/v2/imports?limit=50`, {
       headers: { Cookie: manager.cookieHeader, Accept: "application/json" },
     });
@@ -712,7 +762,7 @@ async function main() {
     for (const cookie of [manager.cookieHeader, operator.cookieHeader, promotedOperator.cookieHeader, demotedOperator.cookieHeader]) {
       assert.equal(JSON.stringify(logs).includes(cookie), false);
     }
-    console.log("V2 HTTP/PostgreSQL check passed: manager setup, inventory, and shared lifecycle/station revisions are authorized and persistent.");
+    console.log("V2 HTTP/PostgreSQL check passed: manager setup catalog, inventory, and shared lifecycle/station revisions are authorized and persistent.");
   } finally {
     if (serverInstance) await serverInstance.close();
   }

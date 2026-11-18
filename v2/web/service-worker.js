@@ -9,7 +9,10 @@ const SHELL_ASSETS = [
   ["/v2/web/write-gate.mjs", "/v2/web/write-gate.mjs"],
   ["/v2/web/app.js", "/v2/web/app.js"],
   ["/v2/web/inventory.js", "/v2/web/inventory.js"],
+  ["/v2/web/setup-catalog.js", "/v2/web/setup-catalog.js"],
   ["/v2/core/import-csv-templates.mjs", "/v2/core/import-csv-templates.mjs"],
+  ["/v2/core/import-csv.mjs", "/v2/core/import-csv.mjs"],
+  ["/v2/core/setup-catalog-csv.mjs", "/v2/core/setup-catalog-csv.mjs"],
   ["/v2/core/station-workflows.mjs", "/v2/core/station-workflows.mjs"],
 ];
 const SHELL_URLS = new Set(SHELL_ASSETS.map(([, cacheUrl]) => cacheUrl));

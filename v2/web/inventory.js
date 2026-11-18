@@ -3,6 +3,7 @@ import {
   renderImportCsvTemplate,
   setupImportCsvTemplates,
 } from "../core/import-csv-templates.mjs";
+import { updateSetupCatalogContext } from "./setup-catalog.js";
 
 const IMPORTS = "/api/v2/imports";
 const INVENTORY = "/api/v2/inventory";
@@ -244,6 +245,7 @@ function setBusy(busy) {
 }
 function updateReadOnly() {
   const writable = writeGate && lastConfirmed && staff?.capabilities?.includes("manage-inventory") === true;
+  updateSetupCatalogContext(staff, writable);
   dom.panel.dataset.mode = writable ? "writable" : "readonly";
   dom.panel.querySelectorAll("input,select,button").forEach((control) => {
     if (control.dataset.preservePending === "true") return;

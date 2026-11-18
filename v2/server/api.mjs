@@ -25,7 +25,10 @@ const WEB_ASSETS = new Map([
   ["/v2/web/app.js", { file: new URL("../web/app.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/core/station-workflows.mjs", { file: new URL("../core/station-workflows.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/core/import-csv-templates.mjs", { file: new URL("../core/import-csv-templates.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
+  ["/v2/core/import-csv.mjs", { file: new URL("../core/import-csv.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
+  ["/v2/core/setup-catalog-csv.mjs", { file: new URL("../core/setup-catalog-csv.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/inventory.js", { file: new URL("../web/inventory.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
+  ["/v2/web/setup-catalog.js", { file: new URL("../web/setup-catalog.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/write-gate.mjs", { file: new URL("../web/write-gate.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/web/styles.css", { file: new URL("../web/styles.css", import.meta.url), type: "text/css; charset=utf-8" }],
 ]);
@@ -70,7 +73,10 @@ function safeRouteName(url) {
   if (url.pathname === "/v2/web/app.js") return "web.app";
   if (url.pathname === "/v2/core/station-workflows.mjs") return "web.station_workflows";
   if (url.pathname === "/v2/core/import-csv-templates.mjs") return "web.import_csv_templates";
+  if (url.pathname === "/v2/core/import-csv.mjs") return "web.import_csv";
+  if (url.pathname === "/v2/core/setup-catalog-csv.mjs") return "web.setup_catalog_csv";
   if (url.pathname === "/v2/web/inventory.js") return "web.inventory";
+  if (url.pathname === "/v2/web/setup-catalog.js") return "web.setup_catalog";
   if (url.pathname === "/v2/web/write-gate.mjs") return "web.write-gate";
   if (url.pathname === "/v2/web/styles.css") return "web.styles";
   if (url.pathname === "/healthz") return "health";
@@ -87,6 +93,9 @@ function safeRouteName(url) {
   if (/^\/api\/v2\/runs\/[^/]+\/stations\/[^/]+\/commands$/.test(url.pathname)) return "runs.station_command";
   if (/^\/api\/v2\/runs\/[^/]+$/.test(url.pathname)) return "runs.detail";
   if (url.pathname === "/api/v2/imports") return "imports.collection";
+  if (url.pathname === "/api/v2/setup-catalog/imports") return "setup_catalog_imports.collection";
+  if (/^\/api\/v2\/setup-catalog\/imports\/[^/]+$/.test(url.pathname)) return "setup_catalog_imports.detail";
+  if (/^\/api\/v2\/setup-catalog\/imports\/[^/]+\/(apply|undo)$/.test(url.pathname)) return "setup_catalog_imports.action";
   if (url.pathname === "/api/v2/imports/workbooks") return "imports.workbooks";
   if (url.pathname === "/api/v2/imports/workbooks/preview") return "imports.workbooks_preview";
   if (/^\/api\/v2\/imports\/[^/]+$/.test(url.pathname)) return "imports.detail";

@@ -99,13 +99,14 @@ node --check v2/web/app.js
 ```
 
 The database script creates a temporary PostgreSQL cluster under the system temp
-directory, binds it to loopback only, applies the V2 schema through `0006`, runs
+directory, binds it to loopback only, applies the V2 schema through `0007`, runs
 lifecycle, import, opening count, run-consumption, ledger, reconciliation, and
 concurrency checks, and exercises manager-authenticated imports and warehouse
 operations over HTTP through a restricted V2 API role. It also launches
 Chromium (`CHROMIUM_PATH` or `chromium` on `PATH`) to sign in through the real
 V2 interface and run a manager inventory workflow against that disposable
-database. It then stops and removes the cluster. It does not read or write
-either V1 database.
+database. Setup-catalog imports are covered by synthetic SQL/API lifecycle
+checks and a separate responsive Chromium manager journey. The script then
+stops and removes the cluster. It does not read or write either V1 database.
 `pg@8.23.1` is the V2 package's pinned PostgreSQL driver (MIT); the production
 dependency audit reported no known vulnerabilities when checked.

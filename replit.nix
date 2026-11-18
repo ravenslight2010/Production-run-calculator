@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.openssl
     pkgs.process-compose
     pkgs.util-linux
     pkgs.curl

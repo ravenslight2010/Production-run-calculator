@@ -114,6 +114,82 @@ test("setup import CSV is validated before staging and request hash is server-co
   assert.equal(api.calls[0].values[5], JSON.stringify([{ code: "FLOUR", name: "Bread Flour", unit: "lb" }]));
 });
 
+test("approved setup catalogs are manager-only, strict, and staged with a server hash", async (t) => {
+  const staged = {
+    outcome: "staged",
+    importId: "10000000-0000-4000-8000-000000000005",
+    family: "ingredients",
+    rowCount: 1,
+    replayed: false,
+  };
+  const api = await withApi(t, { query: async () => ({ rows: [{ result: staged }] }) });
+  const invalid = await send(api.baseUrl, "/api/v2/setup-catalog/imports", {
+    method: "POST",
+    body: {
+      requestId: "catalog-1",
+      family: "ingredients",
+      csv: "code,name,categories_json,allergens_json,allergens_reviewed,merged_into_code,enabled\nI-1,Flour,oops,[],true,,true\n",
+    },
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal(api.calls.length, 0);
+
+  const response = await send(api.baseUrl, "/api/v2/setup-catalog/imports", {
+    method: "POST",
+    body: {
+      requestId: "catalog-1",
+      family: "ingredients",
+      csv: 'code,name,categories_json,allergens_json,allergens_reviewed,merged_into_code,enabled\n' +
+        'I-1,Flour,"[]","[]",true,,true\n',
+    },
+  });
+  assert.equal(response.status, 201);
+  const body = await response.json();
+  assert.deepEqual(body, {
+    ...staged,
+    records: [{
+      code: "I-1",
+      name: "Flour",
+      data: { categories: [], allergens: [], allergensReviewed: true, mergedIntoCode: null, enabled: true },
+    }],
+  });
+  assert.match(api.calls[0].text, /stage_setup_catalog_import/u);
+  assert.match(api.calls[0].values[3], /^[0-9a-f]{64}$/u);
+  assert.equal(api.calls[0].values[4], "ingredients");
+});
+
+test("setup catalog history and writes stay manager-only and CSRF protected", async (t) => {
+  const operator = await withApi(t, { auth: { ...MANAGER, capabilities: [] } });
+  const read = await send(operator.baseUrl, "/api/v2/setup-catalog/imports");
+  assert.equal(read.status, 403);
+  assert.equal(operator.calls.length, 0);
+  const write = await send(operator.baseUrl, "/api/v2/setup-catalog/imports", {
+    method: "POST",
+    body: {
+      requestId: "catalog-denied",
+      family: "ingredients",
+      csv: 'code,name,categories_json,allergens_json,allergens_reviewed,merged_into_code,enabled\n' +
+        'I-1,Flour,"[]","[]",true,,true\n',
+    },
+  });
+  assert.equal(write.status, 403);
+  assert.equal(operator.calls.length, 0);
+
+  const noCsrf = await withApi(t, { csrf: false });
+  const rejected = await send(noCsrf.baseUrl, "/api/v2/setup-catalog/imports", {
+    method: "POST",
+    body: {
+      requestId: "catalog-no-csrf",
+      family: "ingredients",
+      csv: 'code,name,categories_json,allergens_json,allergens_reviewed,merged_into_code,enabled\n' +
+        'I-1,Flour,"[]","[]",true,,true\n',
+    },
+    csrf: false,
+  });
+  assert.equal(rejected.status, 403);
+  assert.equal(noCsrf.calls.length, 0);
+});
+
 test("workbook source rows are linked exactly and staged through the reviewed import lifecycle", async (t) => {
   const api = await withApi(t, {
     query: async (sql, values) => {

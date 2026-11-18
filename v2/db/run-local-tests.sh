@@ -698,8 +698,27 @@ fi
   GRANT EXECUTE ON FUNCTION v2.set_production_warehouse(uuid, uuid, text, text, uuid) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.complete_run_with_inventory(uuid, uuid, uuid, text, text, text, bigint) TO v2_api_test;
 " >/dev/null
+"${PSQL[@]}" -f "$ROOT/v2/db/0007-approved-setup-catalogs.sql" >/dev/null
+"${PSQL[@]}" -c "
+  GRANT EXECUTE ON FUNCTION v2.stage_setup_catalog_import(uuid, uuid, text, text, text, jsonb) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.apply_setup_catalog_import(uuid, uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.undo_setup_catalog_import(uuid, uuid, uuid) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.list_setup_catalog_imports(uuid, integer) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.get_setup_catalog_import(uuid, uuid) TO v2_api_test;
+" >/dev/null
 assert_no_direct_table_access "v2.run_inventory_consumptions"
 assert_no_direct_table_access "v2.inventory_movements"
+assert_no_direct_table_access "v2.setup_catalog_imports"
+assert_no_direct_table_access "v2.setup_ingredient_records"
+assert_no_direct_table_access "v2.setup_mix_records"
+assert_no_direct_table_access "v2.setup_mix_component_links"
+assert_no_direct_table_access "v2.setup_die_type_records"
+assert_no_direct_table_access "v2.setup_die_default_records"
+assert_no_direct_table_access "v2.setup_production_rule_records"
+assert_no_direct_table_access "v2.setup_freezer_pull_records"
+assert_no_direct_table_access "v2.setup_run_template_records"
+assert_no_direct_table_access "v2.setup_manager_list_records"
+assert_no_direct_table_access "v2.setup_alias_records"
 INVENTORY_COMPLETION_PRIVILEGES="$("${PSQL[@]}" -c "
   SET ROLE v2_api_test;
   SELECT has_function_privilege(current_user,
@@ -712,6 +731,7 @@ if [[ "$INVENTORY_COMPLETION_PRIVILEGES" != "t" ]]; then
   echo "Restricted API role lacks the intended inventory/run command access." >&2
   exit 1
 fi
+"${PSQL[@]}" -f "$ROOT/v2/db/0007-approved-setup-catalogs.test.sql"
 ENCODED_DB_USER="$(python3 - "$DB_USER" <<'PY'
 import sys
 import urllib.parse
@@ -748,4 +768,5 @@ printf 'Stored state and event counts passed: %s\n' "$FINAL_STATE"
 printf 'Concurrent stock adjustment and ledger reconciliation passed: %s\n' "$STOCK_RACE_STATE"
 printf 'V2 run-to-inventory snapshot, shortage, and retry checks passed.\n'
 printf 'Restricted API run/inventory command grants passed: %s\n' "$INVENTORY_COMPLETION_PRIVILEGES"
+printf 'Synthetic setup family count, identity, replay, rollback, undo, and facility-scope checks passed.\n'
 printf 'Synthetic V1-to-V2 setup and staff transfer rehearsal passed.\n'

@@ -287,6 +287,46 @@
               <ul class="manager-list" id="import-history" aria-live="polite"></ul>
             </section>
 
+            <section class="manager-card" aria-labelledby="setup-catalog-heading" id="setup-catalog-panel" hidden>
+              <p class="eyebrow">APPROVED PRODUCTION SETUP · V2</p>
+              <h3 id="setup-catalog-heading">Review additional setup families</h3>
+              <p class="manager-help">Import ingredient identities and allergen review facts, mixes, die settings, production rules, freezer-pull items, run-setup templates, named manager lists, and aliases. Templates keep units explicit. Blank values stay blank; runtime counters, arbitrary settings, tombstones, and AI memory are not imported.</p>
+              <form id="setup-catalog-form" class="manager-form">
+                <label class="field" for="setup-catalog-family">
+                  <span>Setup family</span>
+                  <select id="setup-catalog-family" name="family" required>
+                    <option value="ingredients">Ingredient identities and allergen facts</option>
+                    <option value="mixes">Mixes</option>
+                    <option value="die-types">Die types</option>
+                    <option value="die-line-defaults">Die line defaults</option>
+                    <option value="production-rules">Production rules</option>
+                    <option value="freezer-pull-items">Freezer-pull items</option>
+                    <option value="run-templates">Run setup templates</option>
+                    <option value="manager-lists">Named manager lists</option>
+                    <option value="aliases">Spec and merge aliases</option>
+                  </select>
+                </label>
+                <p class="csv-template" id="setup-catalog-template" aria-live="polite">
+                  <span id="setup-catalog-template-columns"></span>
+                  <a class="button button-secondary button-small" id="setup-catalog-template-download" download>Download CSV template</a>
+                </p>
+                <label class="field" for="setup-catalog-file">
+                  <span>CSV file</span>
+                  <input id="setup-catalog-file" name="file" type="file" accept=".csv,text/csv" required aria-describedby="setup-catalog-template" />
+                </label>
+                <p class="field-hint">Linked ingredients and die types must already exist in V2, or be imported first. Run-template brand/flavor and source ingredient IDs remain text, not V2 product or ingredient links. Unmatched names stay unlinked; the importer never guesses identity.</p>
+                <button class="button button-primary" id="setup-catalog-review" type="submit">Validate and stage for review</button>
+                <button class="button button-secondary" id="setup-catalog-retry" type="button" hidden>Retry the same import</button>
+              </form>
+              <div id="setup-catalog-preview" class="manager-preview" aria-live="polite" hidden></div>
+              <div class="manager-actions" id="setup-catalog-actions" hidden>
+                <button class="button button-primary" id="setup-catalog-apply" type="button" hidden>Apply reviewed setup</button>
+              </div>
+              <h4 class="manager-subheading">Recent setup imports</h4>
+              <ul class="manager-list" id="setup-catalog-history" aria-live="polite"></ul>
+              <p class="manager-help" id="setup-catalog-status" role="status" aria-live="polite"></p>
+            </section>
+
             <section class="manager-card manager-card-wide" aria-labelledby="capacity-workbook-heading">
               <p class="eyebrow">DOUGH CAPACITY SOURCES · V2 ONLY</p>
               <h3 id="capacity-workbook-heading">Import dough and shipping workbooks</h3>
