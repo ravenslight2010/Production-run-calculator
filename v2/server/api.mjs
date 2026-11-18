@@ -14,9 +14,14 @@ const RESPONSE_SECURITY_HEADERS = {
 
 const WEB_ASSETS = new Map([
   ["/", { file: new URL("../web/index.html", import.meta.url), type: "text/html; charset=utf-8" }],
+  // V2's worker precaches these aliases so a still-active V1 worker cannot
+  // supply its cached root document, manifest, or icon during the V2 install.
+  ["/v2/web/app-shell.html", { file: new URL("../web/index.html", import.meta.url), type: "text/html; charset=utf-8" }],
   ["/manifest.webmanifest", { file: new URL("../web/manifest.webmanifest", import.meta.url), type: "application/manifest+json; charset=utf-8" }],
+  ["/v2/web/manifest.webmanifest", { file: new URL("../web/manifest.webmanifest", import.meta.url), type: "application/manifest+json; charset=utf-8" }],
   ["/service-worker.js", { file: new URL("../web/service-worker.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/favicon.ico", { file: new URL("../web/favicon.svg", import.meta.url), type: "image/svg+xml" }],
+  ["/v2/web/favicon.svg", { file: new URL("../web/favicon.svg", import.meta.url), type: "image/svg+xml" }],
   ["/v2/web/app.js", { file: new URL("../web/app.js", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/core/station-workflows.mjs", { file: new URL("../core/station-workflows.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
   ["/v2/core/import-csv-templates.mjs", { file: new URL("../core/import-csv-templates.mjs", import.meta.url), type: "text/javascript; charset=utf-8" }],
@@ -56,8 +61,11 @@ async function serveWebAsset(request, response, pathname) {
 function safeRouteName(url) {
   if (!url) return "invalid";
   if (url.pathname === "/") return "web.index";
+  if (url.pathname === "/v2/web/app-shell.html") return "web.app_shell";
   if (url.pathname === "/favicon.ico") return "web.favicon";
+  if (url.pathname === "/v2/web/favicon.svg") return "web.favicon_alias";
   if (url.pathname === "/manifest.webmanifest") return "web.manifest";
+  if (url.pathname === "/v2/web/manifest.webmanifest") return "web.manifest_alias";
   if (url.pathname === "/service-worker.js") return "web.service_worker";
   if (url.pathname === "/v2/web/app.js") return "web.app";
   if (url.pathname === "/v2/core/station-workflows.mjs") return "web.station_workflows";

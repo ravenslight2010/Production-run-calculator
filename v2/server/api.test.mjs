@@ -150,6 +150,18 @@ test("serves the V2 sign-in page and local assets with restrictive browser heade
     assert.equal(favicon.status, 200);
     assert.match(favicon.headers.get("content-type"), /image\/svg\+xml/);
 
+    const versionedShell = await fetch(`${baseUrl}/v2/web/app-shell.html`);
+    assert.equal(versionedShell.status, 200);
+    assert.match(await versionedShell.text(), /Sign in to the floor/);
+
+    const versionedManifest = await fetch(`${baseUrl}/v2/web/manifest.webmanifest`);
+    assert.equal(versionedManifest.status, 200);
+    assert.match(await versionedManifest.text(), /Fieldline Production Floor/);
+
+    const versionedFavicon = await fetch(`${baseUrl}/v2/web/favicon.svg`);
+    assert.equal(versionedFavicon.status, 200);
+    assert.match(versionedFavicon.headers.get("content-type"), /image\/svg\+xml/);
+
     const appScript = await fetch(`${baseUrl}/v2/web/app.js`);
     assert.equal(appScript.status, 200);
     assert.match(appScript.headers.get("content-type"), /javascript/);

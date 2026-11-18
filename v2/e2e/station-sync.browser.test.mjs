@@ -47,9 +47,12 @@ const AUTO_FIELD = Object.freeze({
 });
 const WEB_ASSETS = new Map([
   ["/", ["../web/index.html", "text/html; charset=utf-8"]],
+  ["/v2/web/app-shell.html", ["../web/index.html", "text/html; charset=utf-8"]],
   ["/manifest.webmanifest", ["../web/manifest.webmanifest", "application/manifest+json; charset=utf-8"]],
+  ["/v2/web/manifest.webmanifest", ["../web/manifest.webmanifest", "application/manifest+json; charset=utf-8"]],
   ["/service-worker.js", ["../web/service-worker.js", "text/javascript; charset=utf-8"]],
   ["/favicon.ico", ["../web/favicon.svg", "image/svg+xml"]],
+  ["/v2/web/favicon.svg", ["../web/favicon.svg", "image/svg+xml"]],
   ["/v2/web/app.js", ["../web/app.js", "text/javascript; charset=utf-8"]],
   ["/v2/web/inventory.js", ["../web/inventory.js", "text/javascript; charset=utf-8"]],
   ["/v2/web/styles.css", ["../web/styles.css", "text/css; charset=utf-8"]],
