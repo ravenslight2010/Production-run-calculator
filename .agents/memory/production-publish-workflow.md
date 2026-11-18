@@ -59,3 +59,18 @@ would not necessarily preserve later production fixes.
 source fingerprint matches the checkout before preparing another publish. If
 it does not, stop and request a source reconciliation rather than treating a
 new build identity as proof that the task's code is live.
+
+For a first publish used only to provision an empty production database, verify
+the resulting deployment visibility independently. The provisioning attempt can
+create the production schema even when the application startup guard then fails;
+an intended private attempt does not prove the stored visibility is private.
+
+**Why:** A V2 provisioning attempt reached startup and was correctly stopped by
+its safety guard, but Replit reported the resulting deployment visibility as
+public.
+
+**How to apply:** Before another publish or sharing a deployment URL, inspect
+the current Publishing settings and deployment metadata. Set visibility to
+Private explicitly, keep development-data copy disabled when an empty database
+is intended, and retain the startup guard until production role and SQL-object
+checks are complete.
