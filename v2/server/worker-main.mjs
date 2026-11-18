@@ -2,7 +2,12 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { createStationAutoTrackWorker } from "../core/station-auto-track-worker.mjs";
-import { boundedInteger, requiredV2DatabaseUrl, V2StartupError } from "./main.mjs";
+import {
+  boundedInteger,
+  readRuntimeDatabaseRole,
+  requiredV2DatabaseUrl,
+  V2StartupError,
+} from "./main.mjs";
 
 const { Pool } = pg;
 
@@ -117,7 +122,11 @@ export async function startStationWorkerProcess({ env = process.env, logger = lo
   let healthServer;
   let worker;
   try {
-    await pool.query({ text: "SELECT 1", query_timeout: 3000 });
+    const runtimeRole = await readRuntimeDatabaseRole(pool);
+    logger({
+      event: "v2.worker.database_identity",
+      role: runtimeRole,
+    });
     worker = createStationAutoTrackWorker({
       query: (text, values) => pool.query(text, values),
       logger,

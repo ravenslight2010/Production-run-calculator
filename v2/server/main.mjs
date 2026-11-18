@@ -40,6 +40,21 @@ export function requiredV2DatabaseUrl(env) {
   return value;
 }
 
+export async function readRuntimeDatabaseRole(pool) {
+  const result = await pool.query({
+    text: "SELECT current_user AS runtime_role",
+    query_timeout: 3000,
+  });
+  const runtimeRole = result.rows?.[0]?.runtime_role;
+  if (typeof runtimeRole !== "string" || runtimeRole.length === 0 || runtimeRole.length > 63) {
+    throw new V2StartupError(
+      "V2_DATABASE_IDENTITY_UNAVAILABLE",
+      "V2 could not verify its database identity.",
+    );
+  }
+  return runtimeRole;
+}
+
 export function boundedInteger(value, fallback, minimum, maximum, name, errorCode) {
   if (value === undefined || value === "") return fallback;
   const parsed = Number(value);
@@ -113,7 +128,11 @@ export async function startV2Server({ env = process.env, logger = logStructured 
   });
 
   try {
-    await pool.query({ text: "SELECT 1", query_timeout: 3000 });
+    const runtimeRole = await readRuntimeDatabaseRole(pool);
+    logger({
+      event: "v2.startup.database_identity",
+      role: runtimeRole,
+    });
   } catch (error) {
     try {
       await pool.end();

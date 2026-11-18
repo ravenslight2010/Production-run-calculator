@@ -9,6 +9,19 @@ Stage the complete proposed `.replit` file in a temporary file inside the worksp
 
 **How to apply:** Read the whole current `.replit`, make the smallest complete-file change, stage it inside the workspace, call the validator, and confirm it reports success before checking the resulting diff.
 
+For external port mappings, use **Tools → Networking** as the source of truth.
+Changing another `.replit` setting through the validator can restore older
+external mappings, so recheck the Networking Ports table after configuration
+changes and remove any extra external entries there.
+
+**Why:** A validated run-command update restored port mappings that had
+previously been removed from `.replit`; publishing requires the Networking
+configuration and project file to agree on the single exposed service.
+
+**How to apply:** Keep the intended external mapping in Networking, remove
+conflicting external mappings there, then rerun the project's deployment
+configuration check before publishing.
+
 ### Private evaluator readiness
 
 For a private console-only service, bind its readiness listener to `127.0.0.1`, do not configure `waitForPort`, and use its explicit health command as the readiness check. Do not add a `localPort`-only mapping just to make the workflow appear healthy; keep all evaluator ports unmapped.

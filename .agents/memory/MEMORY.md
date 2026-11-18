@@ -121,7 +121,7 @@
 - [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
 - [GitHub CI evidence](github-actions-evidence-extraction.md) + [trigger access](github-ci-trigger-access.md) — retain run/revision records and verify access before claiming a run.
 - [PR dependency snapshots](pr-dependency-snapshot-isolation.md) — compare base dependency risk using only its lockfile in a credential-isolated temporary project.
-- [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
+- [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — secrets can lag in shell; stage `.replit` changes, but manage external ports in Networking.
 - [Archived artifact discovery](replit-artifact-discovery.md) — move Replit artifact manifests outside `.replit-artifact` before archiving, or previews and workflows are recreated.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
 - [Local validation runtime](local-validation-runtime-index.md) + [pnpm bootstrap](pnpm-workspace-tool-cache.md) + [CodeExecution](codeexecution-network-globals.md) — runner locks, Node/CA conflicts, offline fixtures, and impure-only network calls.

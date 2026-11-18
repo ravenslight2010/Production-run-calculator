@@ -1,8 +1,8 @@
 # V2 in-workspace pilot record
 
-**Status: Development pilot running; production publication has not been initiated.**
+**Status: V2 development preview remains available; private production launch is prepared but blocked by Networking port mappings and first-manager bootstrap.**
 
-Captured 2026-11-17, America/Chicago.
+Updated 2026-11-18, America/Chicago.
 
 ## Owner-approved deployment and data boundary
 
@@ -17,10 +17,12 @@ Captured 2026-11-17, America/Chicago.
 - The V2 development schema is installed. It contains 21 tables and one
   enabled manager account. The run and inventory-balance tables contain zero
   rows; no V1 account, session, or inventory data was transferred.
-- The production database was not queried or changed. The project is not
-  deployed and no publish was started. The deployment run command now refuses
-  publication until the production database gates are resolved; the Project
-  workflow continues to launch the private development preview.
+- The project is unpublished. The deployment run command now starts the
+  supervised V2 launcher rather than the earlier unconditional publish guard.
+  The app has not been published or cut over.
+- The validated `.replit` replacement has restored five extra external port
+  mappings. Replit's Networking tool is the authoritative place to remove
+  them; keep only local port 5000 mapped externally to 80.
 
 ## Application and worker topology
 
@@ -35,20 +37,18 @@ Captured 2026-11-17, America/Chicago.
   `superuser_reserved_connections=4`; two V2 application connections were
   observed during this pilot check. This is PostgreSQL's reported setting, not
   an independently confirmed Replit provider-wide capacity guarantee.
-- During repeated health checks, both the V2 API and station-worker sessions
-  were observed in `pg_stat_activity` using a superuser role. Disposable
-  integration tests separately verify the API through a restricted role.
-  Replit's general database documentation says managed application roles are
-  not superusers and that custom database roles are not supported, so this
-  project-specific observation conflicts with the general guidance. The
-  production app role is unknown; resolve the mismatch and verify least
-  privilege before publication.
-- Replit documents that Publish migrates supported tables, columns, indexes,
-  constraints, views, enums, sequences, and row-level security policies, but
-  does not automatically migrate functions, triggers, or grants. Those V2
-  objects still need an owner-reviewed production-database step before the
-  published app can safely use them. See [Publish database changes](https://docs.replit.com/features/data-and-storage/publish-database-changes)
-  and [SQL Database](https://docs.replit.com/features/data-and-storage/sql-database).
+- Development health checks previously showed the API and worker sessions using
+  a superuser role. A production read-only SQL check now reports `neondb_owner`
+  (`rolsuper=false`, with elevated role/database creation and RLS-bypass
+  attributes). The owner accepted this role for a private pilot. The API and
+  worker now log their connected `current_user` at startup without logging the
+  connection string; verify those logs after private publication.
+- Production read-only metadata checks found the expected 21 V2 tables, 49
+  functions, and 7 triggers. All function and trigger definitions and 324
+  table/index/constraint fingerprints match development. Production has no
+  PUBLIC schema or table privileges; default PUBLIC EXECUTE remains on the
+  functions, but PUBLIC cannot use the schema. Review revoking that latent
+  privilege before broadening access.
 
 ## Data and secrets boundary
 
@@ -60,13 +60,18 @@ Captured 2026-11-17, America/Chicago.
   read-only database check found one enabled manager and the durable bootstrap
   marker; the API now reports first-manager setup unavailable. The one-time
   `V2_INITIAL_MANAGER_BOOTSTRAP_CODE` secret was removed after setup.
+- Production currently has zero V2 staff accounts, manager accounts, sessions,
+  bootstrap markers, runs, and inventory balances. No production bootstrap
+  secret is configured; the owner must create a fresh one-time code for the
+  private pilot and remove it after manager creation.
 - The owner confirmed normal sign-out/sign-in. A separate Chromium integration
   now signs in through the real V2 server and exercises manager product import,
   reviewed opening counts, warehouse assignment, stock receipt/transfer, and
   persistence after reload against disposable PostgreSQL data. The live preview's
   manager inventory and production screens remain unverified by the agent.
-- No production migration, production query, database copy, or publish was
-  performed. Do not paste database URLs or bootstrap codes into chat.
+- Production reads in this pass were read-only metadata and aggregate counts.
+  No production rows were written, copied, or published. Do not paste database
+  URLs or bootstrap codes into chat.
 - The preview's initial unauthenticated session check returns HTTP 401 by design;
   the sign-in page renders and `/healthz` is healthy. The screenshot browser does
   not carry the owner's session; the owner-confirmed sign-in and isolated
@@ -79,7 +84,7 @@ they do not prove production or physical-device behavior.
 
 | Check | Result |
 | --- | --- |
-| V2 unit and API suite | PASS — 129 tests |
+| V2 unit and API suite | PARTIAL — 136 tests passed; one deployment-port configuration assertion failed |
 | V2 browser suite | PASS — 7 tests using emulated Chromium sessions |
 | V2 PostgreSQL suite | PASS — disposable local PostgreSQL cluster |
 | Authenticated manager inventory browser journey | PASS — real V2 server + disposable PostgreSQL; product import, two reviewed counts, warehouse assignment, receipt, transfer, reload |
@@ -91,7 +96,10 @@ they do not prove production or physical-device behavior.
 | Worker process restart | PASS — killed worker was restarted under supervision; API health recovered |
 | Runtime | PASS — API and worker use Node 24.22.2 |
 | Development DB connection setting | OBSERVED — 112 max, 4 reserved, 2 V2 app connections at check |
-| Production deployment | BLOCKED — deployment guard refuses publication pending role and SQL-object review |
+| Production object metadata | PASS — definitions match development; PUBLIC schema/table privileges absent |
+| V2 production dependency audit | PASS — no known vulnerabilities in V2 production dependencies |
+| Production runtime role | BLOCKED — not yet verified in API/worker startup logs |
+| Private deployment | BLOCKED — five external port mappings remain; no production first manager/bootstrap secret |
 | Physical Android/iOS device checks | NOT RUN |
 
 ## Compatibility coverage
@@ -127,21 +135,17 @@ they do not prove production or physical-device behavior.
   with a deliberately invalid test database URL and timed out; no real URL or
   database was used. The launcher was then tested with a stub supervisor, and
   the actual preview subsequently started and passed its health check.
-- Before publishing, the owner must review the Replit-generated production
-  schema changes and apply V2 functions, triggers, and grants through the
-  supported production SQL-console/publish process. The agent has no write
-  access to the production database.
-- Resolve the development-role observation against Replit's general guidance,
-  and confirm the actual production app role without exposing its connection
-  string. Replit's [database guidance](https://docs.replit.com/features/data-and-storage/sql-database)
-  says custom roles are not supported; if the published role is privileged,
-  keep V2 unpublished or use an approved external database.
-- The configured deployment run script deliberately exits with status 78 and a
-  clear message. Restore the production V2 run command only after the database
-  role and SQL-object gates are resolved; do not remove this guard to bypass
-  them.
-- After production database preparation, the owner must initiate publication.
-  Then verify the serving revision, worker health, synthetic run start/pause/
+- The project owner must remove external mappings for 5173, 8081, 4200, 3001,
+  and 5000 in Tools → Networking, leaving only local 5000 → external 80. The
+  current V2 deployment test fails until those mappings are gone.
+- Production SQL metadata matches development, but the app runtime identity is
+  not proven until the private app starts and emits the new API/worker identity
+  log. The owner accepted `neondb_owner` for a private pilot only.
+- Before publication, the owner must configure a fresh one-time production
+  manager bootstrap code securely. After private publish, create the first
+  manager, then remove the code. Do not copy V1 data as part of this step.
+- After Networking and bootstrap preparation, the owner must initiate a private
+  publication. Then verify the serving revision, worker health, synthetic run start/pause/
   resume/auto-track/complete, app and worker restarts, and connection use. No
   real production run or inventory should be created for that verification.
 - Extend authenticated browser coverage to recipe and production-setup imports,

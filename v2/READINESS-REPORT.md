@@ -1,25 +1,31 @@
 # V2 readiness report
 
-**Captured:** 2026-11-17, America/Chicago  
-**Environment:** private development preview; V2 data in the isolated `v2`
-schema of the project database  
-**Recommendation:** **NO-GO for production publication or switching the live app**
+**Captured:** 2026-11-18, America/Chicago
+**Environment:** V2 development preview plus read-only metadata and aggregate
+checks against the unpublished production database
+**Recommendation:** **NO-GO for operational use; private pilot is conditional
+on resolving port mappings and first-manager setup**
 
 ## Why production remains blocked
 
-- The production database role is unknown. The development API and worker were
-  observed using a superuser role, which conflicts with the general managed
-  database guidance. A disposable test separately proves the API can run using
-  a restricted role, but that does not establish the published role.
-- V2 database functions, triggers, and grants have not been installed and
-  verified in the production database. No V2 production SQL-object or business-
-  data change was made; a separately approved, read-only V1 source audit is
-  documented below.
+- The production read-only SQL identity is `neondb_owner`, not a superuser, but
+  it has elevated role-creation, database-creation, and RLS-bypass attributes.
+  The owner accepted this role for a private pilot. The actual API and worker
+  runtime identity remains unverified until the private app starts.
+- Production contains the expected V2 schema objects: 21 tables, 49 functions,
+  and 7 triggers. Function definitions, trigger definitions, and table/index/
+  constraint fingerprints match development. No PUBLIC schema or table access
+  is granted. PUBLIC has default EXECUTE ACLs on the 49 functions, but without
+  schema USAGE those functions are not directly callable by PUBLIC; this
+  remains a hardening item to review before broader access.
 - The two custom V1 role equivalents are seeded only in V2 development.
   Production role rows are not yet present or approved for transfer; Publish
   does not copy development rows as production data.
-- Production has not been published or cut over. The deployment guard remains
-  enabled; do not bypass it.
+- Production has no V2 staff accounts, manager, sessions, bootstrap marker,
+  runs, or inventory balances. The one-time manager bootstrap secret is absent.
+- Production is unpublished. The V2 launcher is configured, but the Networking
+  tool still shows extra external port mappings that conflict with the
+  single-port deployment requirement.
 - Physical-device checks and the manager workflow in the live private preview
   have not been completed.
 - V1 setup/master data and staff-account transfer have not been performed.
@@ -30,12 +36,13 @@ schema of the project database
 
 | Area | Result | Scope |
 | --- | --- | --- |
-| V2 unit and API tests | **PASS** | 129 tests |
+| V2 unit and API tests | **PARTIAL** | 136 passed; one deployment-port configuration assertion failed because five extra external mappings remain |
 | V2 station browser tests | **PASS** | 7 Chromium tests; mocked API, desktop and phone-sized viewports |
 | Authenticated manager inventory journey | **PASS** | Real V2 server and Chromium against a disposable PostgreSQL cluster: product import, two reviewed/applied physical counts, production warehouse selection, receipt, transfer, and reload persistence |
-| PostgreSQL and role checks | **PASS** | Disposable local cluster; manager/operator authorization, run/station conflicts, inventory ledger, and run-to-inventory checks |
+| PostgreSQL and role checks | **PASS** | Disposable local cluster for behavior; production read-only metadata compared with development |
 | V2 build/syntax | **PASS** | Server and web modules |
-| Private preview health | **PASS** | `/healthz` returned `ok`; station worker active, zero consecutive failures |
+| V2 production dependency audit | **PASS** | No known high/critical vulnerabilities in `@workspace/lucia-v2` production dependencies |
+| Private preview health | **PASS** | Dev-domain `/healthz` returned 200 with API and worker active; sign-in page rendered at 402×874 |
 | First-manager bootstrap | **PASS** | Setup is closed; exactly one enabled manager; bootstrap secret removed |
 | Owner sign-in | **PASS** | Owner confirmed sign-out followed by normal sign-in |
 | Worker restart | **PASS** | Existing pilot evidence confirms supervised restart and recovered health |
@@ -44,7 +51,9 @@ schema of the project database
 | Physical Android/iOS operation | **NOT RUN** | No connected device test environment |
 | Safari/WebKit | **NOT RUN** | Chromium evidence only |
 | V1 source review | **PARTIAL** | Authorized production read-only audit returned aggregate counts only; exact database revision is unknown; no V1 rows were exported or imported |
-| Production database and publish | **BLOCKED** | V2 role and SQL-object setup remain unresolved; guard remains active |
+| Production objects | **PASS (metadata)** | All 49 function definitions, 7 triggers, and 324 table/constraint/index fingerprints match development |
+| Production runtime role | **BLOCKED** | Read-only SQL console identity is known; API/worker identity awaits startup logs |
+| Private publish | **BLOCKED** | Extra external ports remain in Networking; no production manager/bootstrap code is configured |
 
 ## Data and safety boundary
 
@@ -60,27 +69,39 @@ schema of the project database
   No individual usernames, account IDs, recipe/formula rows, profile values,
   ingredient IDs, allergen fields, credentials, sessions, reset tokens, runs,
   or inventory balances/movements were returned or saved.
-- No publication, production cutover, or production data migration occurred.
+- Production reads were limited to schema/object metadata and aggregate counts;
+  no business rows or credentials were returned. No production data was written,
+  no publication occurred, and no V1 data was transferred.
 
 ## Next gates
 
-1. Resolve and verify the production app's database role and supported
-   installation path for V2 functions, triggers, and grants.
-2. Complete a live-preview manager walkthrough and physical Android/tablet checks
-   with synthetic records; record those separately from Chromium emulation.
-3. Prepare the separately approved V1 setup/master-data and staff-account
-   transfer, with fresh V2 sign-in and a new physical inventory count.
-4. Only after those gates are reviewed, ask the owner to authorize and initiate
-   publication. Verify the serving revision, API/worker health, and a synthetic
-   run before any production use.
+1. In **Tools → Networking**, remove the external mappings for ports 5173, 8081,
+   4200, 3001, and 5000; keep only external port 80 for the API on local port
+   5000. The controlled `.replit` replacement does not reliably persist
+   Networking-managed mappings.
+2. Configure a fresh one-time production manager bootstrap code through Replit
+   Secrets, create the first V2 manager after private publication, then remove
+   the code. The production database currently has no staff accounts.
+3. Set the deployment to private, publish it, and verify the serving revision,
+   actual API/worker DB role logs, `/healthz`, sign-in, and a synthetic run
+   lifecycle before operational use.
+4. Complete manager workflows and physical Android/tablet checks with synthetic
+   records. Review and apply any separately approved V1 setup/staff transfer
+   only after the destination mappings are accepted; opening inventory requires
+   a fresh physical count.
 
 ## Open gates: owner and next action
 
-- **Production database role and SQL objects — owner: project owner and Replit
-  database operator.** Confirm the actual app role without sharing connection
-  details, then review and apply the V2 functions, triggers, and grants through
-  the supported production database process. Keep publication blocked until
-  verified.
+- **Networking port mappings — owner: project owner.** Use Tools → Networking to
+  remove the five extra external mappings. Confirm only the local 5000 → external
+  80 mapping remains before publishing.
+- **Production runtime identity — owner: project owner and Replit database
+  operator.** After the private app starts, compare the API and worker's
+  structured role logs with the approved private-pilot database role. Do not
+  share database URLs or credentials.
+- **First production manager — owner: project owner.** Set a fresh one-time
+  bootstrap secret securely, create the first manager through the existing
+  guarded setup, and remove the secret immediately afterward.
 - **Live-preview manager walkthrough — owner: project owner.** Use the existing
   signed-in private preview with synthetic records to check setup imports,
   opening counts, warehouse operations, and reload persistence. The agent's
@@ -89,6 +110,9 @@ schema of the project database
   Exercise wake/reconnect and run/station controls on the target device, and
   record the browser/device and result. Current Chromium emulation is not a
   substitute.
+- **Production function ACL hardening — owner: project owner and database
+  operator.** Review revoking default PUBLIC EXECUTE on V2 functions before
+  broadening access; the current schema has no PUBLIC USAGE or table grants.
 - **V1 cutover data — owner: project owner and migration operator.** Read-only
   source review is complete; see [CUTOVER-DATA-TRANSFER.md](./CUTOVER-DATA-TRANSFER.md).
   The owner chose to build equivalents for two custom roles before transferring
