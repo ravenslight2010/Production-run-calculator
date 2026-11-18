@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chromium } from "../../node_modules/.pnpm/node_modules/playwright/index.mjs";
+import { chromium, webkit } from "../../node_modules/.pnpm/node_modules/playwright/index.mjs";
 import * as XLSX from "xlsx";
 import { parseOpeningCountCsv, parseSetupImportCsv } from "../core/import-csv.mjs";
 import {
@@ -19,10 +19,18 @@ import {
   setupImportCsvTemplates,
 } from "../core/import-csv-templates.mjs";
 import { parseSetupCatalogCsv, setupCatalogCsvTemplates } from "../core/setup-catalog-csv.mjs";
+import { parseSourceWorkbook } from "../core/source-workbook-import.mjs";
 
 const CSRF_TOKEN = "a".repeat(43);
 const STAFF_ID = "72000000-0000-4000-8000-000000000001";
 const RUN_ID = "73000000-0000-4000-8000-000000000001";
+const webkitExecutablePath = process.env.V2_WEBKIT_EXECUTABLE_PATH || webkit.executablePath();
+let webkitInstalled = true;
+try {
+  await access(webkitExecutablePath);
+} catch {
+  webkitInstalled = false;
+}
 const INPUTS = Object.freeze({
   line: ["autoTrackRatePerMinute", "timerDurationSeconds", "casesPerSkid"],
   dough: ["autoTrackRatePerMinute", "timerDurationSeconds", "traysPerBatch"],
@@ -193,7 +201,7 @@ function startMockServerStationWorker(fixture) {
   return () => clearInterval(worker);
 }
 
-async function createFixture(t, viewport = { width: 1440, height: 900 }, { manager = false } = {}) {
+async function createFixture(t, viewport = { width: 1440, height: 900 }, { manager = false, browserEngine = chromium } = {}) {
   const fixture = {
     run: newRun(),
     receipts: new Map(),
@@ -201,6 +209,9 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
     consoleErrors: [],
     imports: [],
     setupCatalogImports: [],
+    setupCatalogApplyCalls: 0,
+    loseNextApplyResponse: false,
+    expectedLostApplyConsoleError: false,
     stationCommandOutcomes: [],
     browserStationCommands: [],
     forceTimerStartConflict: false,
@@ -227,9 +238,15 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
-  const browserPath = process.env.CHROMIUM_PATH
-    || execFileSync("which", ["chromium"], { encoding: "utf8" }).trim();
-  const browser = await chromium.launch({ headless: true, executablePath: browserPath, args: ["--no-sandbox"] });
+  const launchOptions = { headless: true };
+  if (browserEngine === chromium) {
+    launchOptions.executablePath = process.env.CHROMIUM_PATH
+      || execFileSync("which", ["chromium"], { encoding: "utf8" }).trim();
+    launchOptions.args = ["--no-sandbox"];
+  } else if (browserEngine === webkit && process.env.V2_WEBKIT_EXECUTABLE_PATH) {
+    launchOptions.executablePath = process.env.V2_WEBKIT_EXECUTABLE_PATH;
+  }
+  const browser = await browserEngine.launch(launchOptions);
   t.after(async () => {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
@@ -237,7 +254,10 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   async function openDevice(deviceViewport = viewport) {
-    const context = await browser.newContext({ viewport: deviceViewport });
+    const context = await browser.newContext({
+      viewport: deviceViewport,
+      ...(browserEngine === webkit ? { serviceWorkers: "block" } : {}),
+    });
     const routeApi = async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -268,6 +288,20 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
         });
         return;
       }
+      if (manager && url.pathname === "/api/v2/setup-catalog/imports/workbooks/preview" && request.method() === "POST") {
+        if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
+          await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
+          return;
+        }
+        const body = request.postDataJSON();
+        const parsed = parseSourceWorkbook(
+          body.family,
+          Buffer.from(body.workbookBase64, "base64"),
+          body.fileName,
+        );
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(parsed) });
+        return;
+      }
       if (manager && url.pathname === "/api/v2/setup-catalog/imports" && request.method() === "POST") {
         if (request.headers()["x-csrf-token"] !== CSRF_TOKEN) {
           await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Invalid CSRF test token." }) });
@@ -278,12 +312,15 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
         const importId = "74000000-0000-4000-8000-000000000099";
         const item = {
           id: importId, family: body.family, status: "staged", rowCount: records.length,
-          records, createdAt: new Date().toISOString(),
+          records, sourceSummary: body.sourceSummary ?? null, createdAt: new Date().toISOString(),
         };
         fixture.setupCatalogImports = [item, ...fixture.setupCatalogImports.filter((entry) => entry.id !== importId)];
         await route.fulfill({
           status: 201, contentType: "application/json",
-          body: JSON.stringify({ outcome: "staged", importId, family: body.family, rowCount: records.length, replayed: false, records }),
+          body: JSON.stringify({
+            outcome: "staged", importId, family: body.family, rowCount: records.length,
+            replayed: false, records, sourceSummary: body.sourceSummary ?? null,
+          }),
         });
         return;
       }
@@ -306,10 +343,23 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
           await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Import not found." }) });
           return;
         }
+        const replayed = catalogAction[2] === "apply" && item.status === "applied";
+        if (catalogAction[2] === "apply") fixture.setupCatalogApplyCalls += 1;
         item.status = catalogAction[2] === "apply" ? "applied" : "undone";
+        item.createdCount = 1;
+        item.updatedCount = 0;
+        if (catalogAction[2] === "apply" && fixture.loseNextApplyResponse) {
+          fixture.loseNextApplyResponse = false;
+          await route.fulfill({ status: 503, contentType: "text/plain", body: "Apply response was lost after commit." });
+          return;
+        }
         await route.fulfill({
           status: 200, contentType: "application/json",
-          body: JSON.stringify({ outcome: item.status, importId: item.id, family: item.family, replayed: false }),
+          body: JSON.stringify({
+            outcome: item.status, importId: item.id, family: item.family, replayed,
+            createdCount: item.createdCount, updatedCount: item.updatedCount,
+            ...(item.sourceSummary ? { sourceSummary: item.sourceSummary } : {}),
+          }),
         });
         return;
       }
@@ -527,7 +577,13 @@ async function createFixture(t, viewport = { width: 1440, height: 900 }, { manag
     const page = await context.newPage();
     page.on("pageerror", (error) => fixture.pageErrors.push(error.message));
     page.on("console", (message) => {
-      if (message.type() === "error") fixture.consoleErrors.push(message.text());
+      if (message.type() === "error" && !message.text().includes("TLS support is not available")) {
+        if (fixture.expectedLostApplyConsoleError && message.text().includes("503 (Service Unavailable)")) {
+          fixture.expectedLostApplyConsoleError = false;
+          return;
+        }
+        fixture.consoleErrors.push(message.text());
+      }
     });
     await page.goto(baseUrl);
     try {
@@ -842,14 +898,14 @@ test("manager reviews, applies, and safely undoes a setup catalog across respons
   assert.equal(fixture.setupCatalogImports[0].status, "staged");
   assert.equal(await page.getByText("BROWSER-ING · Fixture Flour").count(), 1);
   await page.getByRole("button", { name: "Apply reviewed setup" }).click();
-  await page.getByText("Setup import applied.").waitFor();
+  await page.locator("#setup-catalog-status").getByText("1 setup rows created and 0 updated.").waitFor();
   assert.equal(fixture.setupCatalogImports[0].status, "applied");
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await page.getByText("Applied setup · imported values · 1 rows").waitFor();
   assert.equal(await page.getByText("BROWSER-ING · Fixture Flour").count(), 1);
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Undo" }).click();
-  await page.getByText("Setup import undone.").waitFor();
+  await page.locator("#setup-catalog-status").getByText("Setup import undone. Later changes were preserved.").waitFor();
   assert.equal(fixture.setupCatalogImports[0].status, "undone");
 
   for (const viewport of [
@@ -870,3 +926,94 @@ test("manager reviews, applies, and safely undoes a setup catalog across respons
   assert.deepEqual(fixture.pageErrors, []);
   assert.deepEqual(fixture.consoleErrors, []);
 });
+
+for (const browserEngine of [chromium, webkit]) {
+test(
+  `manager previews, applies, and reopens a sauce import in ${browserEngine.name()}`,
+  { skip: browserEngine === webkit && !webkitInstalled ? "Playwright WebKit is not installed on this host." : false },
+  async (t) => {
+  const { fixture, openDevice } = await createFixture(t, undefined, { manager: true, browserEngine });
+  const { page } = await openDevice();
+  await page.locator("#setup-catalog-panel:not([hidden])").waitFor();
+  await page.locator("#source-workbook-family").selectOption("sauce-guides");
+  await page.locator("#source-workbook-file").setInputFiles({
+    name: "synthetic-sauce.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: Buffer.from(XLSX.write((() => {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+        ["Acme uses House Red on Classic at 3.5oz"],
+      ]), "Sauce");
+      return workbook;
+    })(), { type: "buffer", bookType: "xlsx" })),
+  });
+  await page.getByRole("button", { name: "Preview source rows" }).click();
+  try {
+    await page.getByText(/Sauce guide · 1 source rows · 1 proposed V2 records/u).waitFor({ timeout: 5000 });
+  } catch {
+    assert.fail(`Source preview did not load: ${JSON.stringify({
+      status: await page.locator("#setup-catalog-status").innerText(),
+      pageErrors: fixture.pageErrors,
+      consoleErrors: fixture.consoleErrors,
+    })}`);
+  }
+  assert.equal(await page.locator("#source-workbook-preview").isVisible(), true);
+  await page.getByText(/Sauce guide: Acme · Classic/u).click();
+  await page.getByText("I reviewed and confirmed this mapping", { exact: true }).click();
+  await page.getByRole("button", { name: "Stage reviewed rows" }).click();
+  await page.locator("#setup-catalog-status")
+    .getByText("1 sauce guide rows are staged; 0 skipped and 0 remain review-only.")
+    .waitFor();
+
+  const staged = fixture.setupCatalogImports[0];
+  assert.equal(staged.family, "run-templates");
+  assert.equal(staged.sourceSummary.sourceFamily, "sauce-guides");
+  assert.equal(staged.sourceSummary.importedRows, 1);
+  assert.equal(staged.records[0].data.values.sauceOzPerPizza, 3.5);
+  fixture.loseNextApplyResponse = true;
+  fixture.expectedLostApplyConsoleError = true;
+  await page.getByRole("button", { name: "Apply reviewed setup" }).click();
+  await page.locator("#setup-catalog-status[data-kind='error']").waitFor();
+  assert.equal(fixture.setupCatalogImports[0].status, "applied");
+  assert.equal(fixture.setupCatalogApplyCalls, 1);
+  await page.getByRole("button", { name: "Apply reviewed setup" }).click();
+  await page.locator("#setup-catalog-status").getByText("1 setup rows created and 0 updated.").waitFor();
+  assert.equal(fixture.setupCatalogImports[0].status, "applied");
+  assert.equal(fixture.setupCatalogApplyCalls, 2);
+
+  await page.reload();
+  await page.locator("#setup-catalog-history").waitFor();
+  const historyText = await page.locator("#setup-catalog-history").innerText();
+  assert.match(historyText, /Sauce guide · 1 source · 1 staged · 0 skipped · 0 unresolved · applied · 1 created · 0 updated/u);
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page.locator("#setup-catalog-preview").getByText(/Sauce guide · 1 source rows · 1 staged/u).waitFor();
+  assert.ok(await page.locator("#setup-catalog-preview").getByText(/Sauce guide: Acme · Classic/u).count() >= 1);
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
+    { width: 1440, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const overflow = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      offenders: Array.from(document.querySelectorAll("*")).map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName,
+          id: element.id,
+          className: typeof element.className === "string" ? element.className : "",
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+        };
+      }).filter((element) => element.right > window.innerWidth + 1),
+    }));
+    assert.ok(overflow.width <= viewport.width + 1,
+      `source import layout should not overflow at ${viewport.width}×${viewport.height}: ${JSON.stringify(overflow.offenders.slice(0, 8))}`);
+  }
+  assert.deepEqual(fixture.pageErrors, []);
+  assert.deepEqual(fixture.consoleErrors, []);
+  },
+);
+}

@@ -66,6 +66,24 @@ V1 evidence, limitations, and cutover exclusions remain unchanged.
   They do not establish V2 deployment readiness, physical-device behavior,
   manager inventory usability on real devices, or production load.
 
+The following 2026-11-18 importer update supersedes only the import portion of
+the V2 starting-point column. It does not change the V1 evidence or authorize
+customer-data transfer:
+
+- V2 now has deterministic, manager-reviewed adapters for all six non-schedule
+  V1 source families: spec sheets, premix sheets, cheese mix specs, shipping
+  guides, sauce guides, and dough guides. The exact supported layouts, source
+  units, unresolved cases, and recovery limits are recorded in the
+  [V1 import source matrix](v1-import-source-matrix.md).
+- The adapters extend the existing V2 setup-catalog workflow. They target
+  existing mixes and review-only run templates; they do not create a second
+  import workspace or standalone cheese catalog. V2 CSV and capacity-workbook
+  imports remain separate.
+- Source content is not retained. Formula/cached values, photos/OCR,
+  unsupported layouts, and ambiguous mappings are not automatically applied.
+  Synthetic parser, API, browser, and disposable-database evidence is required;
+  no V1 data was changed or transferred.
+
 ## Status of the planning records
 
 Accessible task records were checked on 2026-11-10 and are preserved under

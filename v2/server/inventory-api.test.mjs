@@ -188,6 +188,87 @@ test("setup catalog history and writes stay manager-only and CSRF protected", as
   });
   assert.equal(rejected.status, 403);
   assert.equal(noCsrf.calls.length, 0);
+
+  const restrictedPreview = await send(operator.baseUrl, "/api/v2/setup-catalog/imports/workbooks/preview", {
+    method: "POST",
+    body: { family: "sauce-guides", fileName: "sauce.xlsx", workbookBase64: workbookBase64([["Acme uses Sauce on Classic at 3oz"]]) },
+  });
+  assert.equal(restrictedPreview.status, 403);
+  assert.equal(operator.calls.length, 0);
+});
+
+test("source workbook preview is manager-only and its reviewed summary is bound to an idempotent stage", async (t) => {
+  const csv = 'code,name,brand,flavor,values_json\n' +
+    'SAUCE-ACME,Acme Classic,Acme,Classic,"{""frontlineRecipeName"":""House Red"",""sauceOzPerPizza"":3.5}"\n';
+  const summary = {
+    sourceFamily: "sauce-guides",
+    sourceSha256: "a".repeat(64),
+    parserVersion: "v1-source-import/1",
+    sourceRows: 1,
+    importedRows: 1,
+    skippedRows: 0,
+    unresolvedRows: 0,
+  };
+  const seenRequests = new Map();
+  const api = await withApi(t, {
+    query: async (sql, values) => {
+      assert.match(sql, /stage_setup_catalog_import/u);
+      const priorHash = seenRequests.get(values[2]);
+      if (priorHash && priorHash !== values[3]) {
+        throw Object.assign(new Error("Import request ID was reused with different details"), { code: "22023" });
+      }
+      const replayed = priorHash !== undefined;
+      seenRequests.set(values[2], values[3]);
+      return { rows: [{ result: {
+        outcome: "staged",
+        importId: "10000000-0000-4000-8000-000000000009",
+        family: "run-templates",
+        rowCount: JSON.parse(values[5]).length,
+        sourceSummary: JSON.parse(values[6]),
+        replayed,
+      } }] };
+    },
+  });
+  const preview = await send(api.baseUrl, "/api/v2/setup-catalog/imports/workbooks/preview", {
+    method: "POST",
+    body: {
+      family: "sauce-guides",
+      fileName: "sauce.xlsx",
+      workbookBase64: workbookBase64([["Acme uses House Red on Classic at 3.5oz"]]),
+    },
+  });
+  assert.equal(preview.status, 200);
+  const previewBody = await preview.json();
+  assert.equal(previewBody.family, "sauce-guides");
+  assert.equal(previewBody.records.length, 1);
+  assert.equal(previewBody.records[0].record.data.values.sauceOzPerPizza, 3.5);
+  assert.equal(api.calls.length, 0);
+
+  const request = {
+    requestId: "source-sauce-1",
+    family: "run-templates",
+    csv,
+    sourceSummary: summary,
+  };
+  const staged = await send(api.baseUrl, "/api/v2/setup-catalog/imports", { method: "POST", body: request });
+  assert.equal(staged.status, 201);
+  assert.deepEqual((await staged.json()).sourceSummary, summary);
+  assert.deepEqual(JSON.parse(api.calls[0].values[6]), summary);
+  assert.match(api.calls[0].values[3], /^[0-9a-f]{64}$/u);
+
+  const replay = await send(api.baseUrl, "/api/v2/setup-catalog/imports", { method: "POST", body: request });
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).replayed, true);
+  assert.equal(api.calls[0].values[3], api.calls[1].values[3]);
+  assert.equal(api.calls[0].values[5], api.calls[1].values[5]);
+  assert.equal(api.calls[0].values[6], api.calls[1].values[6]);
+
+  const mismatched = await send(api.baseUrl, "/api/v2/setup-catalog/imports", {
+    method: "POST",
+    body: { ...request, sourceSummary: { ...summary, sourceSha256: "b".repeat(64) } },
+  });
+  assert.equal(mismatched.status, 400);
+  assert.notEqual(api.calls[0].values[3], api.calls[2].values[3]);
 });
 
 test("workbook source rows are linked exactly and staged through the reviewed import lifecycle", async (t) => {

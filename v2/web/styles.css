@@ -282,6 +282,8 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
 .manager-card-wide { grid-column: 1 / -1; }
 .manager-card > .eyebrow { color: var(--brand); }
 .manager-card h3 { margin: 8px 0 14px; font-size: clamp(21px, 2.5vw, 27px); letter-spacing: -.045em; }
+.manager-subsection { min-width: 0; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line-strong); }
+.manager-subsection h4 { margin: 0 0 8px; font-size: 16px; }
 .manager-help { margin: 0 0 15px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .manager-form { display: grid; gap: 13px; margin-top: 16px; }
 .manager-form .field input, .manager-form .field select { width: 100%; min-width: 0; min-height: 46px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--field); color: var(--ink); font: 14px var(--display); }
@@ -305,6 +307,16 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
 .button-small { min-height: 34px; padding: 0 11px; font-size: 11px; }
 .manager-preview { margin-top: 14px; padding: 14px; border: 1px solid var(--line); background: var(--surface-raised); }
 .manager-preview > strong { color: var(--brand); font-size: 12px; }
+.source-review-list { display: grid; gap: 8px; max-height: min(58vh, 700px); margin-top: 10px; overflow: auto; overscroll-behavior: contain; }
+.source-review-row { min-width: 0; padding: 10px; border: 1px solid var(--line); background: var(--surface); }
+.source-review-row summary { min-height: 34px; color: var(--ink); font-size: 12px; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+.source-review-row .field { display: grid; gap: 6px; margin-top: 9px; color: var(--muted); font-size: 11px; }
+.source-review-row input[type="text"], .source-review-row textarea { width: 100%; min-width: 0; min-height: 42px; padding: 9px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--field); color: var(--ink); font: 12px/1.45 var(--mono); }
+.source-review-row textarea { min-height: 110px; resize: vertical; }
+.source-review-row input:focus-visible, .source-review-row textarea:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+.source-review-check { display: flex; align-items: flex-start; gap: 8px; min-width: 0; margin-top: 9px; color: var(--ink-soft); font-size: 11px; line-height: 1.45; }
+.source-review-check input { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; accent-color: var(--brand); }
+.source-review-check input:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
 .preview-summary { margin: 5px 0 9px; color: var(--muted); font: 10px var(--mono); }
 .preview-records { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .preview-records li { display: grid; grid-template-columns: minmax(70px, .35fr) minmax(0, 1fr); gap: 10px; padding-top: 5px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 11px; overflow-wrap: anywhere; }
@@ -336,10 +348,10 @@ h1 { margin: 13px 0 5px; font-size: clamp(38px, 5vw, 62px); line-height: .98; fo
   .manager-grid { gap: 12px; }
 }
 @media (max-width: 680px) {
-  .topbar { min-height: 60px; padding-inline: 18px; }
+  .topbar { min-height: 60px; flex-wrap: wrap; gap: 8px 16px; padding: 10px 18px; }
   .topbar-center { display: none; }
   .connection { margin-left: auto; }
-  .account-controls { gap: 7px; }
+  .account-controls { flex: 1 0 100%; justify-content: flex-end; gap: 7px; }
   .staff-label { max-width: 90px; }
   .sign-out-button { padding: 7px 8px; font-size: 10px; }
   .page { padding: 34px 18px 22px; }

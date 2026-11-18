@@ -129,6 +129,35 @@ function readWorkbook(buffer, fileName) {
   return { workbook, fileName };
 }
 
+export function readWorkbookSheets(buffer, fileName) {
+  const parsedFileName = safeFileName(fileName);
+  const { workbook } = readWorkbook(buffer, parsedFileName);
+  const sheets = workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    const formulas = [];
+    if (sheet && typeof sheet["!ref"] === "string") {
+      let range;
+      try {
+        range = XLSX.utils.decode_range(sheet["!ref"]);
+      } catch {
+        fail("The workbook contains an invalid sheet range.");
+      }
+      for (let row = range.s.r; row <= range.e.r; row += 1) {
+        for (let column = range.s.c; column <= range.e.c; column += 1) {
+          const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })];
+          if (typeof cell?.f === "string" && cell.f) formulas.push({ row, column });
+        }
+      }
+    }
+    return { name, rows: sheetRows(sheet, name), formulas };
+  });
+  return {
+    fileName: parsedFileName,
+    fileSha256: createHash("sha256").update(buffer).digest("hex"),
+    sheets,
+  };
+}
+
 function sheetRows(sheet, sheetName) {
   if (!sheet || typeof sheet["!ref"] !== "string") return [];
   let range;

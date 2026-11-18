@@ -700,7 +700,7 @@ fi
 " >/dev/null
 "${PSQL[@]}" -f "$ROOT/v2/db/0007-approved-setup-catalogs.sql" >/dev/null
 "${PSQL[@]}" -c "
-  GRANT EXECUTE ON FUNCTION v2.stage_setup_catalog_import(uuid, uuid, text, text, text, jsonb) TO v2_api_test;
+  GRANT EXECUTE ON FUNCTION v2.stage_setup_catalog_import(uuid, uuid, text, text, text, jsonb, jsonb) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.apply_setup_catalog_import(uuid, uuid, uuid) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.undo_setup_catalog_import(uuid, uuid, uuid) TO v2_api_test;
   GRANT EXECUTE ON FUNCTION v2.list_setup_catalog_imports(uuid, integer) TO v2_api_test;

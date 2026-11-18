@@ -645,8 +645,10 @@ paths:
       summary: Validate and stage one approved setup-family CSV
       description: >
         Manager-only. Families have strict headers and field allowlists.
-        The server computes request identity; retry the same requestId and CSV
-        after an uncertain response. Apply and undo are separate manager actions.
+        Optional sourceSummary records a prior deterministic source-workbook
+        review. The server computes request identity; retry the same requestId,
+        CSV, and sourceSummary after an uncertain response. Apply and undo are
+        separate manager actions.
       security:
         - v2Session: []
           v2CsrfCookie: []
@@ -682,6 +684,46 @@ paths:
         "413":
           $ref: "#/components/responses/Error"
         "415":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /api/v2/setup-catalog/imports/workbooks/preview:
+    post:
+      operationId: previewV1SourceWorkbook
+      summary: Parse one approved V1 source-workbook family
+      description: >
+        Manager-only. Accepts bounded deterministic XLSX layouts for spec,
+        premix, cheese, shipping, sauce, and dough guides, plus DOCX text for
+        sauce guides. Returns proposed V2 run-template or mix records and
+        unresolved source rows. Formula/cached values, unsupported layouts,
+        photos/OCR, and ambiguous mappings are never applied automatically.
+        The file is parsed in memory and not retained. Preview does not stage
+        data; managers correct mappings in the UI and stage only reviewed rows.
+      security:
+        - v2Session: []
+          v2CsrfCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceWorkbookPreviewRequest"
+      responses:
+        "200":
+          description: Deterministic preview with explicit unresolved rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceWorkbookPreviewResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "413":
           $ref: "#/components/responses/Error"
         "429":
           $ref: "#/components/responses/Error"
@@ -1997,6 +2039,126 @@ components:
           type: string
           maxLength: 1048576
           description: Strict family-specific CSV with a maximum of 2,000 data rows.
+        sourceSummary:
+          $ref: "#/components/schemas/SourceImportSummary"
+    SourceWorkbookPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [family, fileName, workbookBase64]
+      properties:
+        family:
+          type: string
+          enum: [spec-sheets, premix-sheets, cheese-mix-specs, shipping-guides, sauce-guides, dough-guides]
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 180
+        workbookBase64:
+          type: string
+          maxLength: 6990508
+          contentEncoding: base64
+          description: XLSX bytes, or DOCX bytes for sauce guides; maximum 5 MiB.
+    SourceWorkbookPreviewResponse:
+      type: object
+      required: [family, targetFamily, parserVersion, fileSha256, sourceRows, proposedRows, skippedRows, unresolvedRows, records]
+      properties:
+        family:
+          type: string
+          enum: [spec-sheets, premix-sheets, cheese-mix-specs, shipping-guides, sauce-guides, dough-guides]
+        targetFamily:
+          type: string
+          enum: [mixes, run-templates]
+        parserVersion:
+          type: string
+          const: v1-source-import/1
+        fileSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        sourceRows:
+          type: integer
+          minimum: 0
+          maximum: 2000
+          description: Parser-counted physical rows; a row can fan out to flavors or several rows can group into one record.
+        proposedRows:
+          type: integer
+          minimum: 0
+          maximum: 2000
+        skippedRows:
+          type: integer
+          minimum: 0
+          maximum: 2000
+        unresolvedRows:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/SourceImportUnresolved"
+        records:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/SourceWorkbookPreviewRecord"
+    SourceImportUnresolved:
+      type: object
+      additionalProperties: false
+      required: [source, reason]
+      properties:
+        source:
+          type: string
+          maxLength: 240
+        reason:
+          type: string
+          maxLength: 300
+    SourceWorkbookPreviewRecord:
+      type: object
+      additionalProperties: false
+      required: [source, targetFamily, record]
+      properties:
+        source:
+          type: string
+          maxLength: 240
+        targetFamily:
+          type: string
+          enum: [mixes, run-templates]
+        record:
+          $ref: "#/components/schemas/SetupCatalogRecord"
+        sourceDetails:
+          type: object
+          description: Transient parsed evidence for manager correction; not stored after staging.
+          additionalProperties: true
+    SourceImportSummary:
+      type: object
+      additionalProperties: false
+      required: [sourceFamily, sourceSha256, parserVersion, sourceRows, importedRows, skippedRows, unresolvedRows]
+      properties:
+        sourceFamily:
+          type: string
+          enum: [spec-sheets, premix-sheets, cheese-mix-specs, shipping-guides, sauce-guides, dough-guides]
+        sourceSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        parserVersion:
+          type: string
+          const: v1-source-import/1
+        sourceRows:
+          type: integer
+          minimum: 0
+          maximum: 2000
+          description: Parser-counted physical rows; a row can fan out to flavors or several rows can group into one record.
+        importedRows:
+          type: integer
+          minimum: 1
+          maximum: 2000
+          description: Reviewed V2 records staged; Apply separately reports created and updated targets.
+        skippedRows:
+          type: integer
+          minimum: 0
+          maximum: 2000
+          description: Rows or candidates omitted by parser rules or explicitly skipped during review.
+        unresolvedRows:
+          type: integer
+          minimum: 0
+          maximum: 2000
+          description: Unresolved review-only entries left open after staging.
     SetupCatalogRecord:
       type: object
       additionalProperties: false
@@ -2046,6 +2208,10 @@ components:
           maxItems: 2000
           items:
             $ref: "#/components/schemas/SetupCatalogRecord"
+        sourceSummary:
+          oneOf:
+            - $ref: "#/components/schemas/SourceImportSummary"
+            - type: "null"
     SetupCatalogHistoryItem:
       type: object
       required: [id, family, status, rowCount, createdBy, createdAt, appliedAt, undoneAt]
@@ -2074,6 +2240,16 @@ components:
         undoneAt:
           type: [string, "null"]
           format: date-time
+        sourceSummary:
+          oneOf:
+            - $ref: "#/components/schemas/SourceImportSummary"
+            - type: "null"
+        createdCount:
+          type: [integer, "null"]
+          minimum: 0
+        updatedCount:
+          type: [integer, "null"]
+          minimum: 0
     SetupCatalogDetail:
       allOf:
         - $ref: "#/components/schemas/SetupCatalogHistoryItem"
@@ -2107,6 +2283,14 @@ components:
           format: date-time
         replayed:
           type: boolean
+        createdCount:
+          type: integer
+          minimum: 0
+        updatedCount:
+          type: integer
+          minimum: 0
+        sourceSummary:
+          $ref: "#/components/schemas/SourceImportSummary"
     CapacityWorkbookImportRequest:
       type: object
       additionalProperties: false

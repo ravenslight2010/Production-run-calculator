@@ -106,6 +106,13 @@ target, but is not published.
   family template, stages/reopens the exact values, supports idempotent apply
   and guarded undo, and keeps unscoped flavors and unresolved ingredient names
   unlinked rather than guessing their identity.
+- `core/source-workbook-import.mjs` provides bounded, deterministic previews for
+  the six non-schedule V1 workbook families. Their source layouts, units,
+  unknown-value handling, and recovery boundaries are documented in the
+  [source-to-V2 matrix](./research/v1-import-source-matrix.md). Managers review
+  and correct candidates in the same setup-catalog flow; uploaded source files
+  are not retained, and the existing CSV/capacity workbook paths remain
+  separate.
 - `server/inventory-api.mjs` exposes manager-only, facility-scoped inventory
   functions. It derives actor/scope from the V2 session, enforces CSRF on writes,
   rate-limits CSV staging, and returns safe errors. Managers can designate only

@@ -318,6 +318,33 @@
                 <button class="button button-primary" id="setup-catalog-review" type="submit">Validate and stage for review</button>
                 <button class="button button-secondary" id="setup-catalog-retry" type="button" hidden>Retry the same import</button>
               </form>
+              <div class="manager-subsection">
+                <h4>V1 source workbooks</h4>
+                <p class="manager-help">Preview a supported Excel layout, correct its V2 mapping, and stage only reviewed rows. The original workbook is not retained. Photos, OCR suggestions, and unsupported layouts stay out of Apply.</p>
+                <form id="source-workbook-form" class="manager-form">
+                  <label class="field" for="source-workbook-family">
+                    <span>Source family</span>
+                    <select id="source-workbook-family" name="family" required>
+                      <option value="spec-sheets">Spec sheet</option>
+                      <option value="premix-sheets">Premix sheet</option>
+                      <option value="cheese-mix-specs">Cheese mix spec</option>
+                      <option value="shipping-guides">Shipping guide</option>
+                      <option value="sauce-guides">Sauce guide</option>
+                      <option value="dough-guides">Dough guide</option>
+                    </select>
+                  </label>
+                  <label class="field" for="source-workbook-file">
+                    <span id="source-workbook-file-label">XLSX workbook</span>
+                    <input id="source-workbook-file" name="workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required aria-describedby="source-workbook-help" />
+                  </label>
+                  <p class="field-hint" id="source-workbook-help">Up to 5 MiB. Excel formulas and cached formula values require review. Photos and OCR are not applied.</p>
+                  <button class="button button-primary" id="source-workbook-preview-button" type="submit">Preview source rows</button>
+                </form>
+                <div id="source-workbook-preview" class="manager-preview" aria-live="polite" hidden></div>
+                <div class="manager-actions" id="source-workbook-actions" hidden>
+                  <button class="button button-primary" id="source-workbook-stage" type="button">Stage reviewed rows</button>
+                </div>
+              </div>
               <div id="setup-catalog-preview" class="manager-preview" aria-live="polite" hidden></div>
               <div class="manager-actions" id="setup-catalog-actions" hidden>
                 <button class="button button-primary" id="setup-catalog-apply" type="button" hidden>Apply reviewed setup</button>

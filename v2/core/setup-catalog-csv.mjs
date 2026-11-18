@@ -262,8 +262,9 @@ function parseRecord(family, cells, row) {
       fail("Each mix component needs a name, at least one quantity, and optional explicit ingredient code.", row, "components_json");
     }
     return { code, name, data: {
-      brand: pick.brand, flavor: pick.flavor, batchSizeLbs: parseNumber(pick.batch_size_lbs, row, "batch_size_lbs"),
-      daysEarly: parseNumber(pick.days_early, row, "days_early", { integer: true }),
+      brand: pick.brand, flavor: pick.flavor,
+      batchSizeLbs: parseNumber(pick.batch_size_lbs, row, "batch_size_lbs", { optional: true }),
+      daysEarly: parseNumber(pick.days_early, row, "days_early", { optional: true, integer: true }),
       notes: pick.notes, isPrep: parseBoolean(pick.is_prep, row, "is_prep"),
       enabled: parseBoolean(pick.enabled, row, "enabled"), components,
     } };

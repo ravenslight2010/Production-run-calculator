@@ -22,6 +22,19 @@ during a local Docker/Caddy preflight, while an explicit executable path worked.
 explicitly for Docker/Caddy: use the local `chromium` path in Replit and Playwright's
 `chromium.executablePath()` after browser installation in hosted CI.
 
+Playwright WebKit can download successfully yet fail to launch because the Replit
+host lacks `libatomic`, `libGLESv2`, and GStreamer libav. The bundled WPE
+`MiniBrowser` wrapper replaces `LD_LIBRARY_PATH`; when a local WebKit run is
+required, use a temporary wrapper that preserves the bundle's library paths and
+adds compatible Nix-store libraries. Do not set that path globally for the
+release runner, where an older `libstdc++` can prevent pinned Node from starting.
+
+**Why:** The browser bundle and the host system use different library layouts;
+installing the archive alone does not make WPE runnable.
+
+**How to apply:** Keep the workaround test-only and temporary, skip host
+validation only for that local launch, and retain normal TLS verification.
+
 - [Runner locks](release-runner-lock-history.md) — local lock history is private, not platform task history.
 - [Package-manager bootstrap](native-pnpm-runtime.md) — distinguish runtime bootstrap from application failures; preserve exact engine and lockfile constraints.
 - [Pinned Node](pinned-node-nix-runner.md) — use the exact installed Node when provisioning fails.

@@ -197,7 +197,7 @@ $$;
 
 CREATE FUNCTION v2.stage_setup_catalog_import(
   p_facility_id uuid, p_actor_id uuid, p_request_id text, p_request_hash text,
-  p_family text, p_records jsonb
+  p_family text, p_records jsonb, p_source_summary jsonb DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -208,6 +208,7 @@ DECLARE
   v_existing v2.setup_catalog_imports%ROWTYPE;
   v_id uuid;
   v_row jsonb;
+  v_stage_result jsonb;
 BEGIN
   IF p_facility_id IS NULL OR p_actor_id IS NULL
      OR NOT EXISTS (SELECT 1 FROM v2.facility_scope WHERE singleton AND facility_id = p_facility_id)
@@ -230,8 +231,38 @@ BEGIN
     END IF;
     RETURN jsonb_build_object(
       'outcome', v_existing.status, 'importId', v_existing.id, 'family', v_existing.family,
-      'rowCount', jsonb_array_length(v_existing.records), 'replayed', true, 'result', v_existing.result
+      'rowCount', jsonb_array_length(v_existing.records), 'replayed', true, 'result', v_existing.result,
+      'sourceSummary', v_existing.result->'sourceSummary'
     );
+  END IF;
+  IF p_source_summary IS NOT NULL AND (
+    v2.setup_catalog_object_size(p_source_summary) <> 7
+    OR NOT (p_source_summary ?& ARRAY[
+      'sourceFamily','sourceSha256','parserVersion','sourceRows',
+      'importedRows','skippedRows','unresolvedRows'
+    ])
+    OR p_source_summary->>'sourceFamily' NOT IN (
+      'spec-sheets','premix-sheets','cheese-mix-specs',
+      'shipping-guides','sauce-guides','dough-guides'
+    )
+    OR p_source_summary->>'sourceSha256' !~ '^[0-9a-f]{64}$'
+    OR p_source_summary->>'parserVersion' <> 'v1-source-import/1'
+    OR jsonb_typeof(p_source_summary->'sourceRows') <> 'number'
+    OR jsonb_typeof(p_source_summary->'importedRows') <> 'number'
+    OR jsonb_typeof(p_source_summary->'skippedRows') <> 'number'
+    OR jsonb_typeof(p_source_summary->'unresolvedRows') <> 'number'
+    OR (p_source_summary->>'sourceRows')::numeric NOT BETWEEN 0 AND 2000
+    OR (p_source_summary->>'importedRows')::numeric <> jsonb_array_length(p_records)
+    OR (p_source_summary->>'skippedRows')::numeric NOT BETWEEN 0 AND 2000
+    OR (p_source_summary->>'unresolvedRows')::numeric NOT BETWEEN 0 AND 2000
+    OR ((p_source_summary->>'sourceRows')::numeric % 1) <> 0
+    OR ((p_source_summary->>'importedRows')::numeric % 1) <> 0
+    OR ((p_source_summary->>'skippedRows')::numeric % 1) <> 0
+    OR ((p_source_summary->>'unresolvedRows')::numeric % 1) <> 0
+    OR ((p_source_summary->>'sourceFamily' = 'premix-sheets') <> (p_family = 'mixes'))
+    OR (p_source_summary->>'sourceFamily' <> 'premix-sheets' AND p_family <> 'run-templates')
+  ) THEN
+    RAISE EXCEPTION 'Invalid source import summary' USING ERRCODE = '22023';
   END IF;
   FOR v_row IN SELECT value FROM jsonb_array_elements(p_records) LOOP
     IF jsonb_typeof(v_row) <> 'object' OR v2.setup_catalog_object_size(v_row) <> 3
@@ -338,12 +369,17 @@ BEGIN
      <> jsonb_array_length(p_records) THEN
     RAISE EXCEPTION 'Import contains duplicate codes' USING ERRCODE = '22023';
   END IF;
-  INSERT INTO v2.setup_catalog_imports(facility_id, actor_id, request_id, request_hash, family, records)
-  VALUES (p_facility_id, p_actor_id, p_request_id, p_request_hash, p_family, p_records)
+  v_stage_result := CASE WHEN p_source_summary IS NULL THEN NULL
+    ELSE jsonb_build_object('sourceSummary', p_source_summary) END;
+  INSERT INTO v2.setup_catalog_imports(
+    facility_id, actor_id, request_id, request_hash, family, records, result
+  )
+  VALUES (p_facility_id, p_actor_id, p_request_id, p_request_hash, p_family, p_records, v_stage_result)
   RETURNING id INTO v_id;
   RETURN jsonb_build_object(
     'outcome', 'staged', 'importId', v_id, 'family', p_family,
-    'rowCount', jsonb_array_length(p_records), 'replayed', false
+    'rowCount', jsonb_array_length(p_records), 'replayed', false,
+    'sourceSummary', p_source_summary
   );
 END
 $$;
@@ -367,6 +403,8 @@ DECLARE
   v_component jsonb;
   v_component_index integer;
   v_ingredient_code text;
+  v_created_count integer := 0;
+  v_updated_count integer := 0;
 BEGIN
   IF p_facility_id IS NULL OR p_actor_id IS NULL OR p_import_id IS NULL
      OR NOT EXISTS (SELECT 1 FROM v2.facility_scope WHERE singleton AND facility_id = p_facility_id) THEN
@@ -402,12 +440,14 @@ BEGIN
       WHERE facility_id = p_facility_id AND lower(mix_code) = lower(v_row->>'code');
     END IF;
     IF v_old IS NULL THEN
+      v_created_count := v_created_count + 1;
       EXECUTE format(
         'INSERT INTO v2.%I (facility_id, code, name, data, source_import_id, updated_at) ' ||
         'VALUES ($1, $2, $3, $4, $5, $6)',
         v_table
       ) USING p_facility_id, v_row->>'code', v_row->>'name', v_row->'data', p_import_id, v_now;
     ELSE
+      v_updated_count := v_updated_count + 1;
       EXECUTE format(
         'UPDATE v2.%I SET name = $1, data = $2, source_import_id = $3, updated_at = $4 ' ||
         'WHERE facility_id = $5 AND lower(code) = lower($6)',
@@ -464,7 +504,13 @@ BEGIN
   END LOOP;
   v_result := jsonb_build_object(
     'outcome', 'applied', 'importId', p_import_id, 'family', v_import.family,
-    'rowCount', jsonb_array_length(v_import.records), 'appliedAt', v_now, 'replayed', false
+    'rowCount', jsonb_array_length(v_import.records), 'createdCount', v_created_count,
+    'updatedCount', v_updated_count, 'appliedAt', v_now, 'replayed', false
+  ) || COALESCE(
+    CASE WHEN v_import.result ? 'sourceSummary'
+      THEN jsonb_build_object('sourceSummary', v_import.result->'sourceSummary')
+      ELSE NULL END,
+    '{}'::jsonb
   );
   UPDATE v2.setup_catalog_imports
   SET status = 'applied', before_snapshot = v_before, after_snapshot = v_after,
@@ -616,7 +662,15 @@ BEGIN
   v_now := clock_timestamp();
   v_result := jsonb_build_object(
     'outcome', 'undone', 'importId', p_import_id, 'family', v_import.family,
+    'rowCount', jsonb_array_length(v_import.records),
+    'createdCount', COALESCE((v_import.result->>'createdCount')::integer, 0),
+    'updatedCount', COALESCE((v_import.result->>'updatedCount')::integer, 0),
     'undoneAt', v_now, 'replayed', false
+  ) || COALESCE(
+    CASE WHEN v_import.result ? 'sourceSummary'
+      THEN jsonb_build_object('sourceSummary', v_import.result->'sourceSummary')
+      ELSE NULL END,
+    '{}'::jsonb
   );
   UPDATE v2.setup_catalog_imports
   SET status = 'undone', undone_at = v_now, result = v_result
@@ -643,10 +697,13 @@ BEGIN
   RETURN COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
       'id', id, 'family', family, 'status', status, 'rowCount', jsonb_array_length(records),
-      'createdBy', actor_id, 'createdAt', created_at, 'appliedAt', applied_at, 'undoneAt', undone_at
+      'createdBy', actor_id, 'createdAt', created_at, 'appliedAt', applied_at, 'undoneAt', undone_at,
+      'sourceSummary', result->'sourceSummary',
+      'createdCount', (result->>'createdCount')::integer,
+      'updatedCount', (result->>'updatedCount')::integer
     ) ORDER BY created_at DESC, id DESC)
     FROM (
-      SELECT id, family, status, records, actor_id, created_at, applied_at, undone_at
+      SELECT id, family, status, records, result, actor_id, created_at, applied_at, undone_at
       FROM v2.setup_catalog_imports WHERE facility_id = p_facility_id
       ORDER BY created_at DESC, id DESC LIMIT p_limit
     ) recent
@@ -675,7 +732,10 @@ BEGIN
     'id', v_import.id, 'family', v_import.family, 'status', v_import.status, 'records', v_import.records,
     'rowCount', jsonb_array_length(v_import.records),
     'createdBy', v_import.actor_id, 'createdAt', v_import.created_at,
-    'appliedAt', v_import.applied_at, 'undoneAt', v_import.undone_at
+    'appliedAt', v_import.applied_at, 'undoneAt', v_import.undone_at,
+    'sourceSummary', v_import.result->'sourceSummary',
+    'createdCount', (v_import.result->>'createdCount')::integer,
+    'updatedCount', (v_import.result->>'updatedCount')::integer
   );
 END
 $$;
@@ -683,7 +743,7 @@ $$;
 REVOKE ALL ON ALL TABLES IN SCHEMA v2 FROM PUBLIC;
 REVOKE ALL ON FUNCTION v2.setup_catalog_table_name(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION v2.setup_catalog_object_size(jsonb) FROM PUBLIC;
-REVOKE ALL ON FUNCTION v2.stage_setup_catalog_import(uuid, uuid, text, text, text, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION v2.stage_setup_catalog_import(uuid, uuid, text, text, text, jsonb, jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION v2.apply_setup_catalog_import(uuid, uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION v2.undo_setup_catalog_import(uuid, uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION v2.list_setup_catalog_imports(uuid, integer) FROM PUBLIC;

@@ -64,9 +64,12 @@ const V2_ASSETS = new Map([
   ["/v2/web/favicon.svg", ["../web/favicon.svg", "image/svg+xml"]],
   ["/v2/web/app.js", ["../web/app.js", "text/javascript; charset=utf-8"]],
   ["/v2/web/inventory.js", ["../web/inventory.js", "text/javascript; charset=utf-8"]],
+  ["/v2/web/setup-catalog.js", ["../web/setup-catalog.js", "text/javascript; charset=utf-8"]],
   ["/v2/web/styles.css", ["../web/styles.css", "text/css; charset=utf-8"]],
   ["/v2/web/write-gate.mjs", ["../web/write-gate.mjs", "text/javascript; charset=utf-8"]],
   ["/v2/core/import-csv-templates.mjs", ["../core/import-csv-templates.mjs", "text/javascript; charset=utf-8"]],
+  ["/v2/core/import-csv.mjs", ["../core/import-csv.mjs", "text/javascript; charset=utf-8"]],
+  ["/v2/core/setup-catalog-csv.mjs", ["../core/setup-catalog-csv.mjs", "text/javascript; charset=utf-8"]],
   ["/v2/core/station-workflows.mjs", ["../core/station-workflows.mjs", "text/javascript; charset=utf-8"]],
 ]);
 
@@ -190,7 +193,18 @@ test("V2 replaces the cached V1 shell without clearing browser data", { timeout:
   assert.match(cachedRootAssets.icon ?? "", /FF9500/i);
 
   await page.reload();
-  await page.waitForFunction(() => document.title === "Run control — Fieldline");
+  try {
+    await page.waitForFunction(() => document.title === "Run control — Fieldline", undefined, { timeout: 5000 });
+  } catch {
+    assert.fail(`V2 shell did not load after migration: ${JSON.stringify({
+      title: await page.title(),
+      url: page.url(),
+      body: (await page.locator("body").innerText()).slice(0, 500),
+      errors: await page.evaluate(() => performance.getEntriesByType("resource")
+        .filter((entry) => entry.name.includes("/v2/"))
+        .map((entry) => ({ name: entry.name, duration: entry.duration }))),
+    })}`);
+  }
   const preservedData = await page.evaluate(async () => {
     const database = await new Promise((resolve, reject) => {
       const request = indexedDB.open("v1-cache-migration", 1);

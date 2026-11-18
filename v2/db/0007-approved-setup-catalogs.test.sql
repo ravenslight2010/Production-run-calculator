@@ -14,6 +14,9 @@ DECLARE
   v_default_import uuid;
   v_pull_import uuid;
   v_flavor_list_import uuid;
+  v_source_import uuid;
+  v_source_update uuid;
+  v_source_summary jsonb;
   v_failed boolean;
   v_count integer;
 BEGIN
@@ -146,6 +149,66 @@ BEGIN
   ) THEN RAISE EXCEPTION 'Catalog undo did not restore the prior record'; END IF;
   v_result := v2.undo_setup_catalog_import(v_facility, v_actor, v_update);
   IF v_result->>'replayed' <> 'true' THEN RAISE EXCEPTION 'Catalog undo retry was not idempotent'; END IF;
+
+  v_source_summary := jsonb_build_object(
+    'sourceFamily', 'sauce-guides', 'sourceSha256', repeat('a', 64),
+    'parserVersion', 'v1-source-import/1', 'sourceRows', 1,
+    'importedRows', 1, 'skippedRows', 2, 'unresolvedRows', 1
+  );
+  v_result := v2.stage_setup_catalog_import(
+    v_facility, v_actor, 'v1-sauce-source-1', repeat('9', 64), 'run-templates',
+    '[{"code":"V1-SAUCE-ACME-CLASSIC","name":"Acme Classic Sauce","data":{"brand":"Acme","flavor":"Classic","values":{"frontlineRecipeName":"House Red","sauceOzPerPizza":3.5}}}]'::jsonb,
+    v_source_summary
+  );
+  v_source_import := (v_result->>'importId')::uuid;
+  IF v_result->'sourceSummary' <> v_source_summary THEN
+    RAISE EXCEPTION 'Source family and row outcome were not retained when staged';
+  END IF;
+  v_result := v2.stage_setup_catalog_import(
+    v_facility, v_actor, 'v1-sauce-source-1', repeat('9', 64), 'run-templates',
+    '[{"code":"V1-SAUCE-ACME-CLASSIC","name":"Acme Classic Sauce","data":{"brand":"Acme","flavor":"Classic","values":{"frontlineRecipeName":"House Red","sauceOzPerPizza":3.5}}}]'::jsonb,
+    v_source_summary
+  );
+  IF v_result->>'replayed' <> 'true' OR v_result->'sourceSummary' <> v_source_summary THEN
+    RAISE EXCEPTION 'Exact source import stage retry was not idempotent';
+  END IF;
+  v_result := v2.apply_setup_catalog_import(v_facility, v_actor, v_source_import);
+  IF v_result->>'createdCount' <> '1' OR v_result->>'updatedCount' <> '0'
+     OR v_result->'sourceSummary' <> v_source_summary THEN
+    RAISE EXCEPTION 'Source import Apply did not retain counts and source summary';
+  END IF;
+  v_result := v2.apply_setup_catalog_import(v_facility, v_actor, v_source_import);
+  IF v_result->>'replayed' <> 'true' OR v_result->>'createdCount' <> '1'
+     OR v_result->>'updatedCount' <> '0' OR v_result->'sourceSummary' <> v_source_summary THEN
+    RAISE EXCEPTION 'Lost source Apply response could not be retried exactly';
+  END IF;
+  v_result := v2.get_setup_catalog_import(v_facility, v_source_import);
+  IF v_result->>'status' <> 'applied' OR v_result->>'createdCount' <> '1'
+     OR v_result->'sourceSummary' <> v_source_summary
+     OR jsonb_array_length(v_result->'records') <> 1 THEN
+    RAISE EXCEPTION 'Source import history did not reopen its exact result';
+  END IF;
+
+  v_source_summary := jsonb_set(v_source_summary, '{sourceSha256}', to_jsonb(repeat('b', 64)));
+  v_result := v2.stage_setup_catalog_import(
+    v_facility, v_actor, 'v1-sauce-source-2', repeat('8', 64), 'run-templates',
+    '[{"code":"v1-sauce-acme-classic","name":"Acme Classic Sauce","data":{"brand":"Acme","flavor":"Classic","values":{"frontlineRecipeName":"House Red","sauceOzPerPizza":4}}}]'::jsonb,
+    v_source_summary
+  );
+  v_source_update := (v_result->>'importId')::uuid;
+  v_result := v2.apply_setup_catalog_import(v_facility, v_actor, v_source_update);
+  IF v_result->>'createdCount' <> '0' OR v_result->>'updatedCount' <> '1' THEN
+    RAISE EXCEPTION 'Source re-import did not update the same stable target identity';
+  END IF;
+  v_result := v2.undo_setup_catalog_import(v_facility, v_actor, v_source_update);
+  IF v_result->>'outcome' <> 'undone' OR v_result->>'updatedCount' <> '1'
+     OR NOT EXISTS (
+       SELECT 1 FROM v2.setup_run_template_records
+       WHERE facility_id = v_facility AND lower(code) = lower('V1-SAUCE-ACME-CLASSIC')
+         AND data->'values'->>'sauceOzPerPizza' = '3.5'
+     ) THEN
+    RAISE EXCEPTION 'Source re-import undo did not restore the prior template';
+  END IF;
 
   v_result := v2.stage_setup_catalog_import(
     v_facility, v_actor, 'catalog-invalid-die-default', repeat('d', 64), 'die-line-defaults',

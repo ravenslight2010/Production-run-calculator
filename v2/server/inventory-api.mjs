@@ -6,6 +6,11 @@ import {
 } from "../core/import-csv.mjs";
 import { parseSetupCatalogCsv, setupCatalogCsvLimits } from "../core/setup-catalog-csv.mjs";
 import {
+  parseSourceWorkbook,
+  SourceWorkbookImportError,
+  sourceWorkbookImportLimits,
+} from "../core/source-workbook-import.mjs";
+import {
   linkWorkbookCapacityRows,
   parseDoughCapacityWorkbook,
   parseShippingCapacityWorkbook,
@@ -15,6 +20,7 @@ import {
 
 const IMPORTS_PATH = "/api/v2/imports";
 const SETUP_CATALOG_PATH = "/api/v2/setup-catalog/imports";
+const SOURCE_WORKBOOK_PREVIEW_PATH = `${SETUP_CATALOG_PATH}/workbooks/preview`;
 const INVENTORY_PATH = "/api/v2/inventory";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_WORKBOOK_BODY_BYTES = 7_250 * 1024;
@@ -133,6 +139,7 @@ function safeStatus(error) {
   if (error instanceof InventoryApiError) return error.status;
   if (error instanceof ImportCsvError) return 400;
   if (error instanceof WorkbookCapacityImportError) return 400;
+  if (error instanceof SourceWorkbookImportError) return 400;
   switch (error?.code) {
     case "P0002": return 404;
     case "42501": return 403;
@@ -151,6 +158,7 @@ function safeMessage(error, operation) {
   if (error instanceof InventoryApiError) return error.message;
   if (error instanceof ImportCsvError) return error.message;
   if (error instanceof WorkbookCapacityImportError) return error.message;
+  if (error instanceof SourceWorkbookImportError) return error.message;
   switch (error?.code) {
     case "P0002": return "That warehouse, product, import, or count is no longer available.";
     case "42501": return "You do not have access to this inventory.";
@@ -200,6 +208,47 @@ function parseWorkbookUpload(body) {
     ? parseDoughCapacityWorkbook(workbookBytes, body.fileName)
     : parseShippingCapacityWorkbook(workbookBytes, body.fileName);
   return parsed;
+}
+
+function parseSourceWorkbookUpload(body) {
+  if (!sourceWorkbookImportLimits.families.includes(body.family)) {
+    throw new InventoryApiError(400, "Choose one of the six supported V1 source families.");
+  }
+  const sauceDocx = body.family === "sauce-guides" && /\.docx$/iu.test(String(body.fileName ?? ""));
+  if (typeof body.workbookBase64 !== "string"
+    || body.workbookBase64.length > Math.ceil(sourceWorkbookImportLimits.maxBytes / 3) * 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(body.workbookBase64)) {
+    throw new InventoryApiError(400, "Choose a valid supported source file no larger than 5 MiB.");
+  }
+  const workbookBytes = Buffer.from(body.workbookBase64, "base64");
+  if (workbookBytes.byteLength > sourceWorkbookImportLimits.maxBytes
+    || workbookBytes.toString("base64") !== body.workbookBase64) {
+    throw new InventoryApiError(400, "Choose a valid supported source file no larger than 5 MiB.");
+  }
+  if (sauceDocx && workbookBytes.byteLength < 22) {
+    throw new InventoryApiError(400, "Choose a valid sauce guide DOCX no larger than 5 MiB.");
+  }
+  return parseSourceWorkbook(body.family, workbookBytes, body.fileName);
+}
+
+function validateSourceSummary(value, importedRows) {
+  if (value == null) return null;
+  const required = [
+    "sourceFamily", "sourceSha256", "parserVersion", "sourceRows",
+    "importedRows", "skippedRows", "unresolvedRows",
+  ];
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).sort().join("\u0000") !== [...required].sort().join("\u0000")
+    || !sourceWorkbookImportLimits.families.includes(value.sourceFamily)
+    || typeof value.sourceSha256 !== "string" || !/^[0-9a-f]{64}$/u.test(value.sourceSha256)
+    || value.parserVersion !== sourceWorkbookImportLimits.parserVersion
+    || !Number.isSafeInteger(value.sourceRows) || value.sourceRows < 0 || value.sourceRows > 2000
+    || !Number.isSafeInteger(value.importedRows) || value.importedRows !== importedRows
+    || !Number.isSafeInteger(value.skippedRows) || value.skippedRows < 0 || value.skippedRows > 2000
+    || !Number.isSafeInteger(value.unresolvedRows) || value.unresolvedRows < 0 || value.unresolvedRows > 2000) {
+    throw new InventoryApiError(400, "The source review counts are incomplete or do not match the staged rows.");
+  }
+  return value;
 }
 
 function validateWorkbookProductLinks(value) {
@@ -325,6 +374,7 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
           || url.pathname === `${IMPORTS_PATH}/workbooks`
           || url.pathname === `${IMPORTS_PATH}/workbooks/preview`
           || url.pathname === SETUP_CATALOG_PATH
+          || url.pathname === SOURCE_WORKBOOK_PREVIEW_PATH
           || url.pathname === `${INVENTORY_PATH}/opening-counts`
         ) {
           const limit = uploadLimiter.consume(auth.actorId);
@@ -359,19 +409,42 @@ export function createInventoryApi({ pool, authenticate, verifyCsrf, logger = ()
       if (isSetupCatalog && url.pathname === SETUP_CATALOG_PATH && request.method === "POST") {
         operation = "stage_setup_catalog_import";
         const body = await readJsonBody(request);
-        requireKeys(body, ["requestId", "family", "csv"]);
+        const requiredKeys = ["requestId", "family", "csv"];
+        const acceptedKeys = new Set([...requiredKeys, "sourceSummary"]);
+        if (requiredKeys.some((key) => !Object.hasOwn(body, key))
+          || Object.keys(body).some((key) => !acceptedKeys.has(key))) {
+          throw new InventoryApiError(400, "The request contains missing or unsupported fields.");
+        }
         const requestId = validateRequestId(body.requestId);
         if (typeof body.family !== "string" || !setupCatalogCsvLimits.families.includes(body.family)) {
           throw new InventoryApiError(400, "Choose a supported setup family.");
         }
         const records = parseSetupCatalogCsv(body.family, body.csv);
-        const requestHash = hashRequest({ family: body.family, records });
+        const sourceSummary = validateSourceSummary(body.sourceSummary, records.length);
+        if (sourceSummary && (sourceSummary.sourceFamily === "premix-sheets") !== (body.family === "mixes")) {
+          throw new InventoryApiError(400, "The source family does not match its V2 setup target.");
+        }
+        if (sourceSummary && sourceSummary.sourceFamily !== "premix-sheets" && body.family !== "run-templates") {
+          throw new InventoryApiError(400, "This source family must use the V2 run-template target.");
+        }
+        const requestHash = sourceSummary
+          ? hashRequest({ family: body.family, records, sourceSummary })
+          : hashRequest({ family: body.family, records });
         const result = await pool.query(
-          "SELECT v2.stage_setup_catalog_import($1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::jsonb) AS result",
-          [...scope, actor, requestId, requestHash, body.family, JSON.stringify(records)],
+          "SELECT v2.stage_setup_catalog_import($1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::jsonb, $7::jsonb) AS result",
+          [...scope, actor, requestId, requestHash, body.family, JSON.stringify(records), sourceSummary ? JSON.stringify(sourceSummary) : null],
         );
         const staged = resultValue(result);
         sendJson(response, staged.replayed ? 200 : 201, { ...staged, records });
+        return true;
+      }
+
+      if (isSetupCatalog && url.pathname === SOURCE_WORKBOOK_PREVIEW_PATH && request.method === "POST") {
+        operation = "preview_source_workbook_import";
+        const body = await readJsonBody(request, MAX_WORKBOOK_BODY_BYTES);
+        requireKeys(body, ["family", "fileName", "workbookBase64"]);
+        const parsed = parseSourceWorkbookUpload(body);
+        sendJson(response, 200, parsed);
         return true;
       }
 
