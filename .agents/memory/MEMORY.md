@@ -6,6 +6,7 @@
 - [Registry/lockfile integrity](npm-registry-script-metadata.md) + [tarball transport](npm-tarball-transport.md) — verify script metadata and test network transport.
 - [pnpm provenance](pnpm12-lockfile-provenance.md) + [outdated scope](pnpm-outdated-scope-limits.md) — verify importer changes and limit outdated checks.
 - [Dependency override scope](dependency-override-scope.md) — scope vulnerable transitive overrides to affected parents when global replacements risk consumers.
+- [Local security forks](local-security-fork-scanning.md) — directory-version scans can lose package identity; verify advisory protections and active consumer resolution independently.
 - [Events](observability-safe-events.md) + [loop delay](event-loop-delay-monitor-warmup.md) + [diagnostic persistence](diagnostic-persistence-scope.md) — bound event data; separate diagnostic writes.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
 - [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.

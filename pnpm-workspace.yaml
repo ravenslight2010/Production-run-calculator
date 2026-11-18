@@ -40,6 +40,7 @@ packages:
   - lib/*
   - lib/integrations/*
   - scripts
+  - patches/picomatch
 
 catalog:
   '@replit/vite-plugin-cartographer': ^0.6.1
@@ -73,9 +74,10 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
-  # Local security fork based on picomatch 4.0.7. Remove after upstream ships
-  # a published fix for GHSA-fc5q-39xc-vjpf.
-  picomatch: "file:./patches/picomatch"
+  # First-party security fork: upstream 4.0.7 has no published fix for
+  # GHSA-fc5q-39xc-vjpf. Keep it in the workspace so all consumers resolve
+  # the reviewed source, rather than an opaque file: version in the lockfile.
+  picomatch: "workspace:*"
   # Security overrides formerly stored in package.json. Keep them here because
   # pnpm reads workspace overrides and ignores package.json.pnpm.
   adm-zip: "0.6.1"
