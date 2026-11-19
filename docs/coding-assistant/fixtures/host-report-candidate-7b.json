@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "tool": "RunCalculator.HostInspector",
+  "inspectionOnly": true,
+  "generatedAtUtc": "2026-11-09T00:00:00Z",
+  "overallStatus": "warn",
+  "host": {
+    "isWindows": true,
+    "architecture": "x64"
+  },
+  "checks": [],
+  "ai": {
+    "status": "candidate",
+    "candidateModel": "qwen3:4b",
+    "qualification": "unmeasured"
+  },
+  "codingAssistant": {
+    "status": "candidate",
+    "provider": "ollama",
+    "candidateModel": "qwen2.5-coder:7b",
+    "contextTokens": 32768,
+    "approximateArtifactSizeGB": 5,
+    "qualification": "unmeasured",
+    "acceleration": "GPU acceleration unverified; CPU inference speed unmeasured",
+    "maxLoadedModels": 1,
+    "maxParallelRequests": 1,
+    "reasons": [
+      "Fixture report for local pilot/bootstrap testing only.",
+      "Not a measured qualification of any physical host."
+    ]
+  },
+  "limitations": [
+    "Fixture only; no installation or model download was performed."
+  ]
+}

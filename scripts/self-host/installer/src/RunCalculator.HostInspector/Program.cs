@@ -61,8 +61,8 @@ public static class Program
             }
         }
         Console.WriteLine();
-        Console.WriteLine($"AI candidate: {report.Ai.Status} — {report.Ai.CandidateModel ?? "none"}");
-        Console.WriteLine($"AI qualification: {report.Ai.Qualification}; vision/OCR: {report.Ai.VisionOcr}");
+        Console.WriteLine($"Application AI candidate: {report.Ai.Status} — {report.Ai.CandidateModel ?? "none"}");
+        Console.WriteLine($"Application AI qualification: {report.Ai.Qualification}; vision/OCR: {report.Ai.VisionOcr}");
         foreach (var reason in report.Ai.Reasons)
         {
             Console.WriteLine($"  {reason}");
@@ -70,6 +70,16 @@ public static class Program
         foreach (var excluded in report.Ai.ExcludedModels)
         {
             Console.WriteLine($"  Excluded: {excluded}");
+        }
+        Console.WriteLine();
+        Console.WriteLine($"Coding assistant candidate: {report.CodingAssistant.Status} — {report.CodingAssistant.CandidateModel ?? "none"}");
+        if (report.CodingAssistant.ContextTokens is int contextTokens)
+        {
+            Console.WriteLine($"  Context cap: {contextTokens:N0} tokens; qualification: {report.CodingAssistant.Qualification}");
+        }
+        foreach (var reason in report.CodingAssistant.Reasons)
+        {
+            Console.WriteLine($"  {reason}");
         }
         Console.WriteLine();
         Console.WriteLine("No installation, configuration, model download, provider call, or application-data access was performed.");

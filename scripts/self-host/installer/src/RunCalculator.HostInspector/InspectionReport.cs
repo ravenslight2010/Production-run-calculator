@@ -40,10 +40,13 @@ public sealed record InspectionReport
 
     public required AiRecommendation Ai { get; init; }
 
+    public required CodingAssistantRecommendation CodingAssistant { get; init; }
+
     public IReadOnlyList<string> Limitations { get; init; } =
     [
         "No installation, configuration, model download, provider call, or application-data access was performed.",
         "A candidate model is not a measured app-quality or performance qualification.",
+        "Coding-assistant candidates are hardware-fit suggestions; coding quality, speed, and plant-load impact are unmeasured.",
         "Windows GPU detection does not prove WSL2, Docker, or Ollama GPU access.",
         "Native Windows CI does not qualify a specific physical laptop or production hosting.",
     ];

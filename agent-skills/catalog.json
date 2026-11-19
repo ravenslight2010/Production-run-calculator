@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "slug": "api-design",
+      "name": "api-design",
+      "description": "Design and review this project's HTTP APIs, including resource naming, methods, status codes, validation, authorization, pagination, rate limits, error responses, OpenAPI updates, and generated-client compatibility. Use when adding or changing an API endpoint or reviewing an API contract.",
+      "source": "zip:api-design",
+      "path": "agent-skills/api-design/SKILL.md"
+    },
+    {
+      "slug": "brainstorming",
+      "name": "brainstorming",
+      "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+      "source": "zip:brainstorming",
+      "path": "agent-skills/brainstorming/SKILL.md"
+    },
+    {
+      "slug": "check-dependency-licenses",
+      "name": "Check dependency licenses",
+      "description": "Use this skill when adding dependencies or before releasing, or when the user asks whether a library is safe to use commercially or mentions open-source license or IP compliance.",
+      "source": "md:check-licenses.md",
+      "path": "agent-skills/check-dependency-licenses/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "ci-security-review",
+      "name": "ci-security-review",
+      "description": "Perform a read-only security review of CI/CD workflows, especially GitHub Actions, for unsafe permissions, untrusted input interpolation, secret exposure, dependency pinning, artifact/cache poisoning, privileged pull-request execution, and deployment boundary mistakes. Use when adding or changing workflows, release automation, repository bots, or CI credentials, and before trusting an external workflow.",
+      "source": "zip:ci-security-review",
+      "path": "agent-skills/ci-security-review/SKILL.md"
+    },
+    {
+      "slug": "customer-import-audit",
+      "name": "customer-import-audit",
+      "description": "Audit after importing a new customer's spec workbook. Use when the user imports a new brand/customer and wants confirmation everything landed right, or reports something off after a new-customer import.",
+      "source": "zip:customer-import-audit",
+      "path": "agent-skills/customer-import-audit/SKILL.md"
+    },
+    {
+      "slug": "drizzle-best-practices",
+      "name": "drizzle-best-practices",
+      "description": "|",
+      "source": "zip:drizzle-best-practices",
+      "path": "agent-skills/drizzle-best-practices/SKILL.md"
+    },
+    {
+      "slug": "e2e-reviewer",
+      "name": "e2e-reviewer",
+      "description": "Use when reviewing Playwright or Cypress E2E specs, Page Objects (POM), PRs, pull requests, patches, diffs, or changed test files \u2014 asked to review tests, audit test quality, or find weak, flaky, or silently-passing tests; when tests pass CI but prove nothing or miss bugs; when auditing missing awaits, vacuous or always-passing assertions, anti-patterns, or coverage gaps. Not for debugging a test that is currently failing at runtime (use playwright-debugger / cypress-debugger).",
+      "source": "zip:e2e-reviewer",
+      "path": "agent-skills/e2e-reviewer/SKILL.md"
+    },
+    {
+      "slug": "error-handling",
+      "name": "error-handling",
+      "description": "Design, implement, and review robust error handling in this project's TypeScript API and React client. Use when adding error types, API failure responses, client non-OK handling, retries, timeouts, user-facing failure messages, or recovery behavior.",
+      "source": "zip:error-handling",
+      "path": "agent-skills/error-handling/SKILL.md"
+    },
+    {
+      "slug": "evidence-hygiene",
+      "name": "evidence-hygiene",
+      "description": "Safely capture, sanitize, label, store, and review operational evidence such as screenshots, HAR files, browser traces, logs, test reports, exports, and release artifacts. Use whenever evidence may contain credentials, personal data, production records, request payloads, or environment-specific results, especially during release, security, browser, and incident verification.",
+      "source": "zip:evidence-hygiene",
+      "path": "agent-skills/evidence-hygiene/SKILL.md"
+    },
+    {
+      "slug": "external-skill-import",
+      "name": "external-skill-import",
+      "description": "Review externally sourced agent skills from uploaded archives or GitHub before installation. Use whenever a user wants to import, install, copy, adapt, or assess a third-party skill bundle; inventory first, check safety, provenance, licensing, ownership, duplicates, and local compatibility, then recommend accept, adapt, defer, or reject before writing files.",
+      "source": "zip:external-skill-import",
+      "path": "agent-skills/external-skill-import/SKILL.md"
+    },
+    {
+      "slug": "handle-personal-and-sensitive-data",
+      "name": "Handle personal and sensitive data",
+      "description": "Use when building anything that collects, stores, logs, or transmits user data \u2014 sign-up, profiles, payments, uploads, analytics, logging \u2014 or when the user mentions PII, GDPR, CCPA, HIPAA, PCI, or privacy.",
+      "source": "md:handle-sensitive-data.md",
+      "path": "agent-skills/handle-personal-and-sensitive-data/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "instrument-observability-and-graceful-errors",
+      "name": "Instrument observability and graceful errors",
+      "description": "Use when building backend services, APIs, scheduled jobs, or anything going to production \u2014 to add structured logging, health checks, and graceful error handling so the app is debuggable in production without leaking internals to users.",
+      "source": "md:instrument-observability.md",
+      "path": "agent-skills/instrument-observability-and-graceful-errors/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "keep-secrets-out-of-code",
+      "name": "Keep secrets out of code",
+      "description": "Use this skill whenever wiring up an API key, token, password, database URL, OAuth client secret, or any credential, and before every commit or publish.",
+      "source": "md:no-hardcoded-secrets.md",
+      "path": "agent-skills/keep-secrets-out-of-code/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "make-apps-resilient-to-abuse-and-overload",
+      "name": "Make apps resilient to abuse and overload",
+      "description": "Use when building public endpoints, APIs, auth/login routes, forms, file uploads, search, or any endpoint that calls a paid service (AI, email, SMS) \u2014 to add rate limiting, timeouts, and quotas that prevent abuse, runaway cost, and denial of service.",
+      "source": "md:make-apps-resilient.md",
+      "path": "agent-skills/make-apps-resilient-to-abuse-and-overload/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "make-ui-responsive-across-devices",
+      "name": "Make UI responsive across devices",
+      "description": "Use when building or changing any web UI that real people will use on different screens \u2014 pages, dashboards, forms, marketing sites, customer-facing apps \u2014 so the layout works on phone, tablet, and desktop, not just the preview width.",
+      "source": "md:responsive-cross-device-ui.md",
+      "path": "agent-skills/make-ui-responsive-across-devices/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "meet-an-accessibility-baseline",
+      "name": "Meet an accessibility baseline",
+      "description": "Use this skill when building or changing any user-facing UI \u2014 pages, forms, navigation, modals, components \u2014 especially for customer-facing or public apps. Ensures the app meets basic WCAG accessibility so it doesn't exclude users or fail an audit.",
+      "source": "md:accessibility-baseline.md",
+      "path": "agent-skills/meet-an-accessibility-baseline/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "operational-browser-verification",
+      "name": "operational-browser-verification",
+      "description": "Verify manager-facing operational workflows in a real browser, including authorization, scoped navigation, queue actions, import-review reopening, sync diagnostics, reload persistence, and startup health. Use when a request needs user-journey evidence that unit, API, integration, visual, or accessibility checks cannot provide.",
+      "source": "zip:operational-browser-verification",
+      "path": "agent-skills/operational-browser-verification/SKILL.md"
+    },
+    {
+      "slug": "playwright-debugger",
+      "name": "playwright-debugger",
+      "description": "Use when a Playwright end-to-end test has already run and failed and the user wants the root cause and a concrete fix. Trigger on a failing Playwright spec, TimeoutError, broken or ambiguous selector, post-deploy suite failure, retry-only flake, hydration or timing race, or a passes-locally-but-fails-in-CI split. Accept error messages, playwright-report/ or HTML reports, trace.zip, screenshots, and CI artifacts identified by a GitHub owner/repo slug plus run id. Distinguish product regressions from brittle tests. Do not use for writing new Playwright tests, speeding up or reviewing a passing suite, non-Playwright failures (Cypress, Jest, Vitest), or debugging an app/backend without a failing Playwright test.",
+      "source": "zip:playwright-debugger",
+      "path": "agent-skills/playwright-debugger/SKILL.md"
+    },
+    {
+      "slug": "playwright-test-generator",
+      "name": "playwright-test-generator",
+      "description": "Use when someone wants to add, write, create, or scaffold new Playwright end-to-end tests for a page, flow, form, component, uncovered route, or first-project setup. The skill analyzes coverage gaps, explores live pages only on local/disposable or externally isolated approved non-production targets, proposes scenarios for approval, generates Page Object or flat specs in the project''s style, then reviews and runs them. Do not use for debugging an existing failing Playwright test (use playwright-debugger), reviewing tests that already pass (use e2e-reviewer), generating Cypress tests, or writing unit, component, or integration tests with Jest, Vitest, or Testing Library.",
+      "source": "zip:playwright-test-generator",
+      "path": "agent-skills/playwright-test-generator/SKILL.md"
+    },
+    {
+      "slug": "prc-release-ops",
+      "name": "prc-release-ops",
+      "description": "Operational runbook for the Production Run Calculator repo (ravenslight2010/Production-run-calculator). Use when working in that repository on dependency updates, dependabot PR triage, merging PRs, CI failures, evidence-pin regeneration, GitHub Actions SHA pinning, TypeDoc/api-spec toolchain gates, or sync/SSE reliability work. Encodes the repo's evidence-gate systems, the known recurring CI failure engines and their fixes, the safe merge procedure under branch protection, and an index of the in-repo research corpus (research/, docs/superpowers/) so future sessions reuse it instead of re-deriving it.",
+      "source": "zip:prc-release-ops",
+      "path": "agent-skills/prc-release-ops/SKILL.md"
+    },
+    {
+      "slug": "production-go",
+      "name": "production-go",
+      "description": "Decide whether this application is production-ready and give a bounded GO/NO-GO release status. Use whenever the user asks if the app is production-ready, ready to publish, safe to ship, ready to go live, or asks for release status\u2014even if they do not use the words GO or NO-GO. Run the applicable release and shipping gates before recommending publish; do not replace the release checklist.",
+      "source": "zip:production-go",
+      "path": "agent-skills/production-go/SKILL.md"
+    },
+    {
+      "slug": "release-checklist",
+      "name": "release-checklist",
+      "description": "Pre-publish verification for this app. Use before suggesting a deploy/publish, or when the user asks to publish. Runs the right tests, typechecks, workflow restarts, and reminds what data heals will apply live.",
+      "source": "zip:release-checklist",
+      "path": "agent-skills/release-checklist/SKILL.md"
+    },
+    {
+      "slug": "review-before-shipping",
+      "name": "Review before shipping",
+      "description": "Use this skill before committing, opening a pull request, merging, deploying, or publishing, or when the user says the app is \"done\", \"ready to ship\", or \"ready to go live\".",
+      "source": "md:pre-publish-review.md",
+      "path": "agent-skills/review-before-shipping/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "rollback-recovery",
+      "name": "rollback-recovery",
+      "description": "Safely recover missing or regressed behavior after a rollback, checkpoint comparison, rebase, or partial restore. Use whenever the user mentions a checkpoint, rollback, restore, recovery, parity audit, missing post-merge behavior, or divergent historical implementation. Preserve a named baseline, run the repository recovery audit, restore incrementally, and require evidence before declaring recovery complete; never replace the current branch wholesale.",
+      "source": "zip:rollback-recovery",
+      "path": "agent-skills/rollback-recovery/SKILL.md"
+    },
+    {
+      "slug": "schema-change-checklist",
+      "name": "schema-change-checklist",
+      "description": ">",
+      "source": "zip:schema-change-checklist",
+      "path": "agent-skills/schema-change-checklist/SKILL.md"
+    },
+    {
+      "slug": "secure-ai-features-against-prompt-injection",
+      "name": "Secure AI features against prompt injection",
+      "description": "Use when building any feature that sends user input or external content (web pages, files, emails, documents) to an LLM \u2014 chatbots, AI assistants, summarizers, RAG, or agents that can call tools or take actions. Defends against prompt injection and excessive agency.",
+      "source": "md:secure-ai-features.md",
+      "path": "agent-skills/secure-ai-features-against-prompt-injection/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "skill-creator",
+      "name": "skill_creator",
+      "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
+      "source": "zip:skill_creator",
+      "path": "agent-skills/skill-creator/SKILL.md"
+    },
+    {
+      "slug": "test-release-matrix",
+      "name": "Test Release Matrix",
+      "description": "# Test and release evidence matrix",
+      "source": "md:test-release-matrix.md",
+      "path": "agent-skills/test-release-matrix/SKILL.md",
+      "reference": true
+    },
+    {
+      "slug": "threat-model",
+      "name": "Threat_Model",
+      "description": "# Threat Model",
+      "source": "md:threat_model.md",
+      "path": "agent-skills/threat-model/SKILL.md",
+      "reference": true
+    },
+    {
+      "slug": "validate-and-encode-untrusted-input",
+      "name": "Validate and encode untrusted input",
+      "description": "Use whenever the app accepts input from any source the server doesn't control \u2014 form fields, query/path params, headers, JSON/API request bodies, file uploads, webhooks, third-party API responses, and LLM output \u2014 to prevent SQL/NoSQL/command injection, XSS, and SSRF through allow-list validation, parameterized/safe APIs, and contextual output encoding.",
+      "source": "md:validate-and-encode-input.md",
+      "path": "agent-skills/validate-and-encode-untrusted-input/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "vet-dependencies-before-adding",
+      "name": "Vet dependencies before adding",
+      "description": "Use this skill when adding, upgrading, or installing any third-party package or library (npm, pip, etc.), or when the user asks to add a dependency.",
+      "source": "md:vet-dependencies.md",
+      "path": "agent-skills/vet-dependencies-before-adding/SKILL.md",
+      "reference": false
+    },
+    {
+      "slug": "web-navigation-notices-audit",
+      "name": "Web Navigation Notices Audit",
+      "description": "# Web Navigation and Notices \u2014 Information Architecture Audit",
+      "source": "md:web-navigation-notices-audit.md",
+      "path": "agent-skills/web-navigation-notices-audit/SKILL.md",
+      "reference": true
+    },
+    {
+      "slug": "web-push-registration-telemetry",
+      "name": "Web Push Registration Telemetry",
+      "description": "# Web-push registration rejection telemetry",
+      "source": "md:web-push-registration-telemetry.md",
+      "path": "agent-skills/web-push-registration-telemetry/SKILL.md",
+      "reference": false
+    }
+  ]
+}

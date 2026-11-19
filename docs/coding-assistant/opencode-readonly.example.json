@@ -1,0 +1,66 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "update": "disable",
+  "model": "plant-local/REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID",
+  "agents": {
+    "title": {
+      "model": "plant-local/REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID"
+    }
+  },
+  "providers": {
+    "plant-local": {
+      "name": "Loopback Ollama",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://127.0.0.1:11434/v1"
+      },
+      "models": {
+        "REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID": {
+          "name": "Local coding model",
+          "modelID": "REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID",
+          "limit": { "context": 32768, "output": 8192 },
+          "capabilities": {
+            "tools": true,
+            "input": ["text"],
+            "output": ["text"]
+          }
+        }
+      }
+    }
+  },
+  "permissions": [
+    { "action": "*", "resource": "*", "effect": "deny" },
+    { "action": "read", "resource": "*", "effect": "allow" },
+    { "action": "read", "resource": "*.env*", "effect": "deny" },
+    { "action": "read", "resource": "*.npmrc", "effect": "deny" },
+    { "action": "read", "resource": "*.git-credentials", "effect": "deny" },
+    { "action": "read", "resource": "*.pem", "effect": "deny" },
+    { "action": "read", "resource": "*.key", "effect": "deny" },
+    { "action": "read", "resource": "*.p12", "effect": "deny" },
+    { "action": "read", "resource": "*.pfx", "effect": "deny" },
+    { "action": "read", "resource": "*.db", "effect": "deny" },
+    { "action": "read", "resource": "*.sqlite*", "effect": "deny" },
+    { "action": "read", "resource": "*.log", "effect": "deny" },
+    { "action": "glob", "resource": "*", "effect": "allow" },
+    { "action": "grep", "resource": "*", "effect": "allow" },
+    { "action": "question", "resource": "*", "effect": "allow" }
+  ],
+  "policies": [
+    { "action": "provider.use", "resource": "*", "effect": "deny" },
+    { "action": "provider.use", "resource": "plant-local", "effect": "allow" },
+    { "action": "integration.connect", "resource": "*", "effect": "deny" },
+    { "action": "integration.use", "resource": "*", "effect": "deny" },
+    { "action": "integration.use", "resource": "plant-local", "effect": "allow" },
+    { "action": "mcp.use", "resource": "*", "effect": "deny" },
+    { "action": "skill.use", "resource": "*", "effect": "deny" },
+    { "action": "plugin.use", "resource": "*", "effect": "deny" },
+    { "action": "websearch.use", "resource": "*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:*", "effect": "deny" },
+    { "action": "tool.use", "resource": "edit:*", "effect": "deny" },
+    { "action": "tool.use", "resource": "subagent:*", "effect": "deny" },
+    { "action": "tool.use", "resource": "external_directory:*", "effect": "deny" },
+    { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" },
+    { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+    { "action": "tool.use", "resource": "execute:*", "effect": "deny" }
+  ]
+}

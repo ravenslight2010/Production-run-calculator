@@ -1,0 +1,38 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "update": "disable",
+  "model": "plant-local/REPLACE_WITH_INSTALLED_OLLAMA_MODEL_ID",
+  "plugin": [
+    "opencode-agent-skills",
+    "opencode-skills-doctor",
+    "superpowers@git+https://github.com/obra/superpowers.git"
+  ],
+  "mcp": {
+    "context7": {
+      "type": "local",
+      "command": ["npx", "-y", "@upstash/context7-mcp"]
+    }
+  },
+  "permissions": [
+    { "action": "*", "resource": "*", "effect": "deny" },
+    { "action": "read", "resource": "*", "effect": "allow" },
+    { "action": "read", "resource": "*.env*", "effect": "deny" },
+    { "action": "read", "resource": "*.key", "effect": "deny" },
+    { "action": "read", "resource": "*.pem", "effect": "deny" },
+    { "action": "read", "resource": "*.db", "effect": "deny" },
+    { "action": "glob", "resource": "*", "effect": "allow" },
+    { "action": "grep", "resource": "*", "effect": "allow" },
+    { "action": "question", "resource": "*", "effect": "allow" },
+    { "action": "skill", "resource": "*", "effect": "allow" },
+    { "action": "edit", "resource": "*", "effect": "ask" },
+    { "action": "write", "resource": "*", "effect": "ask" }
+  ],
+  "policies": [
+    { "action": "provider.use", "resource": "plant-local", "effect": "allow" },
+    { "action": "skill.use", "resource": "*", "effect": "allow" },
+    { "action": "plugin.use", "resource": "*", "effect": "allow" },
+    { "action": "mcp.use", "resource": "*", "effect": "allow" },
+    { "action": "tool.use", "resource": "edit:*", "effect": "ask" },
+    { "action": "tool.use", "resource": "shell:*", "effect": "ask" }
+  ]
+}
