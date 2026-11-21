@@ -1,0 +1,224 @@
+<!-- adapted for Production Run Calculator local Code Agent -->
+<!-- offline-friendly; do not require cloud APIs unless the task explicitly needs them -->
+---
+name: production-go
+description: Decide whether this application is production-ready and give a bounded GO/NO-GO release status. Use whenever the user asks if the app is production-ready, ready to publish, safe to ship, ready to go live, or asks for release status—even if they do not use the words GO or NO-GO. Run the applicable release and shipping gates before recommending publish; do not replace the release checklist.
+---
+
+# Production GO / NO-GO
+
+Give one authoritative release decision, not an open-ended list of possible
+future work. This skill composes with the repository's detailed
+`.agents/skills/release-checklist/SKILL.md`; read and follow that checklist for
+the commands and surface-specific gates. Also read
+`.local/custom_skills/review-before-shipping` for shipping,
+authorization, dependency, privacy, and deployment-fit gates.
+Use `release-checklist` for evidence gathering even when the user asks only for
+the decision; do not substitute this report for the checklist's required gates.
+
+## 1. Establish the decision contract
+
+Capture:
+
+- the independently captured source and verification-input fingerprints being assessed
+  (Git/GitHub identifiers are optional metadata, never approval prerequisites);
+- the changed surface and affected artifacts;
+- the preview URL/workflows and disposable test database;
+- the intended deployment target;
+- any evidence already supplied (commands, logs, browser results, screenshots,
+  security results, and review links).
+
+If the user asks only for a status, inspect the current diff and environment
+before deciding. Do not infer that an old passing run covers newer code.
+
+The decision has five separate dimensions:
+
+1. **App health** — the server and browser-facing workflows start cleanly and
+   the changed/core journeys work in a real preview.
+2. **Release evidence** — required type, generated-client, unit/integration,
+   smoke, accessibility, visual, PWA, or full E2E gates applicable to the
+   changed surface have current, attributable evidence.
+3. **Security readiness** — shipping review passes: no leaked secrets/PII,
+   authorization isolation holds, dependencies have no unresolved
+   high/critical findings, and static/privacy findings are resolved or
+   explicitly classified as non-blocking by the security review.
+4. **Operational readiness** — data-heal, schema, sync/day-state, destructive
+   test isolation, rollback, post-merge, and deployment-fit questions have
+   explicit answers and owners where needed.
+5. **Accepted exceptions** — only a documented, explicitly accepted
+   exception may explain an otherwise non-applicable or environment-dependent
+   check. It must name the gate, impact, owner, mitigation, expiry/revisit
+   date, and approver. It cannot waive a required failed gate, stale generated
+   client, unhealthy browser-facing workflow, unresolved high/critical security
+   finding, unsafe test isolation, or missing evidence for a required gate.
+
+## 2. Run the bounded verification
+
+1. Read the release checklist and classify the diff. Run every required gate
+   and every applicable conditional gate it selects. A missing result is
+   **MISSING**, not a pass.
+2. Restart the relevant workflows after code/package/toolchain/run-command
+   changes. Verify the browser-facing artifact-managed API and web preview,
+   not only a local process or a non-browser API port. Capture logs and a
+   browser result or screenshot.
+3. For client, API-backed, auth, sync, or routing changes, obtain the
+   desktop and 390×844 browser smoke evidence. For UI changes, obtain axe
+   evidence. Add phone, visual, PWA, physical-device, or full destructive E2E
+   evidence when the checklist says the surface requires it.
+4. Apply the shipping review. If a fresh security scan is requested or is
+   needed to establish current security evidence, use
+   `.local/skills/security-scan` and run all three scanners; one scanner
+   error is itself missing evidence. Treat unresolved high/critical findings as
+   NO-GO.
+5. Check generated-client freshness explicitly whenever API contracts or
+   generated artifacts may be involved. Never accept a stale client or a
+   hand-edited generated file.
+6. Answer each operational warning from the checklist. Identify live-data
+   effects of heals, additive schema and migration implications, sync recovery
+   evidence, disposable-database proof, and rollback/post-merge ownership.
+7. If Frontline applicator, Sauce barrel, automatic claim coordination, or
+   pending-run progress changed, require current state-accuracy, sync-invariant,
+   focused API/client, bounded switch/reload, desktop + 390×844 responsive, and
+   revision-bound evidence. Any missing item is NO-GO; a generic smoke pass or
+   unit-only result is not a substitute.
+8. Keep production reconciliation and destructive release gates in separate
+   trust lanes. Generate source-library reconciliation evidence through a
+    read-only production query, bind it to the exact deployed source fingerprint, report hash,
+   heal ID, repair boundary, and capture time, then import it into the
+   disposable release run. The disposable CI skip by itself remains NO-GO;
+   fixture or development evidence can never satisfy the production gate.
+
+If a workflow reports `DIDNT_OPEN_A_PORT`, a timeout, or a blank preview, read
+`.local/skills/debug-workflow-ports-issues` before attempting another
+restart. A healthy local server does not prove the browser-facing workflow is
+healthy.
+
+## 2a. Failure closure and bounded repair fan-out
+
+For a production-readiness assessment, do not stop the investigation at the
+first unrelated failure. Establish the complete gate matrix, then run every
+gate that remains valid and safe to run. A prerequisite failure may block a
+dependent check, but it must not hide independent evidence.
+
+Record every result as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.
+Classify each non-pass result as a product defect, test or fixture defect,
+environment/workflow problem, data or reconciliation issue,
+security/authorization issue, release-evidence problem, or missing evidence.
+Treat `BLOCKED`, `NOT REACHED`, and `MISSING` as unresolved until the required
+evidence exists or a valid, documented exception applies.
+
+When task planning is requested, keep all failures that belong to the same
+release objective in one durable task and its failure ledger; create the smallest de-duplicated set of bounded repair tasks only for genuinely independent objectives or
+out-of-scope safety, security, data-integrity, or release blockers that cannot
+responsibly be absorbed. Use internal work breakdown or helpers for
+same-objective repair domains; do not create a project task for each failing
+gate, test, fixture, or stopped-run summary. Any separate task must have
+independent acceptance criteria, ownership, and a documented reason it cannot
+remain in the current objective.
+
+The owning task must rerun focused checks as each repair domain closes and report
+the remaining affected-surface evidence. Keep production reconciliation,
+destructive release tests, and live data heals in separate trust lanes. The same
+durable release task then reruns the standard and full release checks from one
+clean revision and verifies the retained records. Do not create an unbounded
+chain of speculative follow-ups.
+
+### Progress updates for an open release objective
+
+When the release objective remains open across multiple investigation or
+validation cycles, update the same owning task with this compact status:
+
+```text
+Current objective: <release outcome and assessed scope>
+Completed work: <closed repair domains and evidence, each with PASS/FAIL>
+Active blockers: <unresolved blocker, evidence, and owner for each>
+Next validation milestone: <next check or decision point; name its prerequisite>
+Owner: <person or team accountable for completion>
+```
+
+Keep completed work, active blockers, and the next milestone current. In-scope
+discoveries remain in the owning task's failure ledger and do not create
+recursive follow-up tasks. Create a separate task only for a genuinely
+independent objective or an out-of-scope safety, security, data-integrity, or
+release blocker that cannot responsibly remain in this objective.
+
+Show release progress in two lanes:
+
+- **Independent evidence:** safe gates that can continue despite another failure;
+  run them and record their actual status.
+- **Dependent checks:** gates waiting on a named prerequisite; record them as
+  `BLOCKED` or `NOT REACHED` rather than implying a pass.
+
+`FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` remain unresolved in progress
+updates. The progress update is not a release decision and cannot change the
+required evidence, the final report, or the fail-closed `GO`/`NO-GO` boundary.
+
+Stop once the evidence is sufficient for a decision. Do not launch speculative
+refactors, invent new release commands, or recursively create “one more task”
+work. If blocked, name the exact blocker, the evidence needed, and the owner
+or next action, then issue NO-GO.
+
+## 3. Decide
+
+Return **GO** only when all required gates and applicable conditional gates
+pass, browser-facing workflows are healthy, security readiness passes, and
+operational warnings have explicit answers. Then—and only then—recommend
+publish.
+
+Return **NO-GO** for any of:
+
+- failed or missing required evidence;
+- a stale generated API client;
+- an unhealthy, stale, or unverified browser-facing workflow;
+- an unresolved high/critical security or authorization finding;
+- a required conditional suite unavailable without a valid accepted exception;
+- unsafe destructive test setup;
+- an operational warning without an owner and plan.
+
+An accepted exception is recorded in the report but does not turn a failed
+required gate into GO. Keep the decision bounded to the assessed revision and
+scope; do not promise that completing a future task will automatically change
+the result.
+
+## 4. Required report
+
+Always write this report before recommending publish. Keep evidence concise and
+specific; never include secrets, tokens, or sensitive payloads.
+
+```text
+Release: <commit/revision>
+Scope: <one-line summary>
+Environment: <preview and disposable test DB; no secrets>
+
+App health: PASS/FAIL — <startup, browser-facing workflow, core journey evidence>
+Release evidence: PASS/FAIL — <required/applicable gates and evidence>
+Security readiness: PASS/FAIL — <shipping review and scanner evidence>
+Operational readiness: PASS/FAIL — <heals, schema, sync, isolation, rollback/deploy>
+Accepted exceptions: none / <gate, owner, mitigation, expiry, approver>
+
+Decision: GO / NO-GO
+Remaining blockers: <exact blocker, evidence/action, owner> / none
+Publish recommendation: <recommend publish only for GO; otherwise stop>
+```
+
+For NO-GO, list the smallest concrete blocker set and stop. Do not pad the
+report with unrelated improvements or create follow-up tasks unless the user
+explicitly asks for task planning.
+
+## Lightweight evaluation plan
+
+Validate future revisions with the prompts in `evals/evals.json`. A correct
+skill must:
+
+- trigger for all three release-status phrasings;
+- produce the exact report sections and exactly one GO/NO-GO decision;
+- refuse GO when required evidence is missing or stale;
+- distinguish a valid, documented exception from a waived required gate;
+- name blockers and stop instead of proposing an unbounded task chain.
+
+
+## Local Code Agent notes
+- Prefer repository paths under the configured RUNCALC_REPO / agent checkout.
+- Do not touch plant data volumes (e.g. C:\\runcalc\\plant).
+- Do not read or write secrets, .env, keys, or production credentials.
+- For Production Run Calculator: prefer existing packages (api-server, run-calculator, lib/*) over new frameworks.

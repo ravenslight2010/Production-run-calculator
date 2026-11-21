@@ -17,6 +17,8 @@ public sealed class ReportSerializationTests
         Assert.Equal("candidate", document.RootElement.GetProperty("ai").GetProperty("status").GetString());
         Assert.Equal("unmeasured", document.RootElement.GetProperty("ai").GetProperty("qualification").GetString());
         Assert.Equal("notQualified", document.RootElement.GetProperty("ai").GetProperty("visionOcr").GetString());
+        Assert.Equal("notRecommended", document.RootElement.GetProperty("codingAssistant").GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("codingAssistant").GetProperty("candidateModel").ValueKind);
     }
 
     [Fact]
@@ -31,5 +33,25 @@ public sealed class ReportSerializationTests
         Assert.DoesNotContain("standardOutput", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("standardError", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("exception", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CodingAssistantCandidateIsSerializedSeparatelyFromAppAi()
+    {
+        var host = TestHosts.Pavilion12GiB() with
+        {
+            TotalMemoryBytes = TestHosts.Gib(64),
+            AvailableMemoryBytes = TestHosts.Gib(40),
+            SystemDriveFreeBytes = TestHosts.Gib(120),
+        };
+        var json = ReportJson.Serialize(HostInspector.Inspect(host, DateTimeOffset.UnixEpoch));
+        using var document = JsonDocument.Parse(json);
+
+        var appAi = document.RootElement.GetProperty("ai");
+        var codingAssistant = document.RootElement.GetProperty("codingAssistant");
+        Assert.Equal("qwen3:4b", appAi.GetProperty("candidateModel").GetString());
+        Assert.Equal("qwen3-coder:30b", codingAssistant.GetProperty("candidateModel").GetString());
+        Assert.Equal(19d, codingAssistant.GetProperty("approximateArtifactSizeGB").GetDouble());
+        Assert.Equal("unmeasured", codingAssistant.GetProperty("qualification").GetString());
     }
 }

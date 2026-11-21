@@ -1,0 +1,42 @@
+Windows long paths and the coding assistant
+===========================================
+
+Problem
+  Extracting or cloning the full repo onto Windows often fails with
+  "file name(s) would be too long". Worst paths are under:
+
+    .agents\skills\error-handling-workspace\...
+
+  If extract skips files, CA-Setup.cmd cannot find what it needs.
+
+Fix A — short standalone zip (recommended for the agent only)
+  Use CodeAgent-Windows-Setup.zip (or build from scripts/ca).
+  Extract to C:\runcalc\ca-src and run SETUP.cmd.
+  Does not need the full monorepo.
+
+Fix B — short git clone path
+  git clone <url> C:\src\prc
+  cd /d C:\src\prc
+  git checkout feature/local-coding-assistant
+  CA-Setup.cmd
+
+Fix C — enable Windows long paths (Admin PowerShell)
+  New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+    -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+  Then reboot. Also prefer a short clone path.
+
+Fix D — sparse checkout without .agents
+  git clone --filter=blob:none --sparse <url> C:\src\prc
+  cd /d C:\src\prc
+  git sparse-checkout set scripts/ca scripts/coding-assistant docs/coding-assistant CA-Setup.cmd package.json
+  git checkout feature/local-coding-assistant
+
+Model policy (testing vs later)
+-------------------------------
+Default for SETUP: speed
+  CA_MODEL_POLICY=speed or -ModelPolicy speed
+  Prefers qwen2.5-coder:3b on weak/CPU hosts; 7b when GPU+RAM allow.
+
+Later more balanced:
+  -ModelPolicy balanced
+  May use 7b more often; 30b only on strong hosts.
