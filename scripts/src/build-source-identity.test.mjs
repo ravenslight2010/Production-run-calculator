@@ -4,7 +4,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { fingerprintSource, verifiedGitRevision } from "./build-source-files.mjs";
+import {
+  fingerprintSource, isPublicCiSourceBuild, verifiedGitRevision,
+} from "./build-source-files.mjs";
 import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "./source-library-pool-approval-assets.mjs";
 import {
   assertSourceUnchanged, buildInfoFromRecord, completeBuildStage, createSourceRecord,
@@ -14,6 +16,11 @@ import {
 import { outputs, put, sourceFixture } from "./fixtures/build-identity-fixture.mjs";
 
 const hash = (root) => fingerprintSource(root).sourceFingerprintSha256;
+const PROPRIETARY_SOURCE_LIBRARY_ASSETS = [
+  "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
+  "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
+  ...SOURCE_LIBRARY_POOL_APPROVAL_ASSETS,
+];
 
 test("source fingerprint is independent of absolute location and file creation order", (t) => {
   const roots = [sourceFixture(t), sourceFixture(t)];
@@ -27,13 +34,13 @@ test("source fingerprint is independent of absolute location and file creation o
 
 test("mutation property across each included source category and varied bytes", (t) => {
   const root = sourceFixture(t);
+  // Under CI_PUBLIC_SOURCE the seal intentionally omits proprietary reconciliation
+  // audits; mutating those bytes is a no-op relative to the fingerprint.
   const paths = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
     "artifacts/api-server/src/index.ts", "artifacts/run-calculator/src/main.ts",
     "artifacts/api-server/build.mjs", "artifacts/run-calculator/vite.config.ts",
     "lib/math/src/index.ts", "scripts/src/build.mjs", "artifacts/run-calculator/public/icon.svg",
-    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
-    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
-    ...SOURCE_LIBRARY_POOL_APPROVAL_ASSETS];
+    ...(isPublicCiSourceBuild() ? [] : PROPRIETARY_SOURCE_LIBRARY_ASSETS)];
   for (const file of paths) {
     const original = readFileSync(path.join(root, file));
     const baseline = hash(root);
@@ -42,6 +49,15 @@ test("mutation property across each included source category and varied bytes", 
       assert.notEqual(hash(root), baseline, file);
       put(root, file, original);
       assert.equal(hash(root), baseline, file);
+    }
+  }
+  if (isPublicCiSourceBuild()) {
+    const baseline = hash(root);
+    for (const file of PROPRIETARY_SOURCE_LIBRARY_ASSETS) {
+      const original = readFileSync(path.join(root, file));
+      put(root, file, Buffer.concat([original, Buffer.from("public-ci-excluded")]));
+      assert.equal(hash(root), baseline, file);
+      put(root, file, original);
     }
   }
 });

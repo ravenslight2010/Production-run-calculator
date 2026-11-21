@@ -56,6 +56,9 @@ describe("buildIncidentContext — privacy-safe bounded evidence", () => {
   });
 
   it("keeps bounded API classifications and client-reported request references explicit", () => {
+    // Stay inside buildIncidentContext's 30-day acceptance window relative to
+    // Date.now(); a fixed calendar fixture ages out and falsely drops the field.
+    const observedAt = new Date(Date.now() - 60_000);
     const data = {
       source: "auto_crash" as const,
       screen: "/",
@@ -69,7 +72,7 @@ describe("buildIncidentContext — privacy-safe bounded evidence", () => {
         requestOutcome: "http_server_error" as const,
         requestReasonCode: "SYNC_PAYLOAD_TOO_LARGE" as const,
         requestElapsedMs: 4_023_360,
-        requestObservedAt: new Date("2026-10-16T22:48:00.000Z"),
+        requestObservedAt: observedAt,
         requestBackgroundInvolvement: "not_observed" as const,
         requestHttpStatus: 500,
       },
@@ -82,7 +85,7 @@ describe("buildIncidentContext — privacy-safe bounded evidence", () => {
       requestOutcome: "http_server_error",
       requestReasonCode: "SYNC_PAYLOAD_TOO_LARGE",
       requestElapsedMs: 4_023_360,
-      requestObservedAt: "2026-10-16T22:48:00.000Z",
+      requestObservedAt: observedAt.toISOString(),
       requestBackgroundInvolvement: "not_observed",
       requestHttpStatus: 500,
     });

@@ -3,6 +3,66 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-11-16 — Public CI build-source gates + pinned-Node cache race
+
+**File(s):** `scripts/src/build-source-identity.test.mjs`, `scripts/src/build-source-integration.test.mjs`, `scripts/src/run-release-node.test.sh`
+
+**Problem:** With `CI_PUBLIC_SOURCE=1`, release gates failed three ways:
+1. Identity mutation property still expected proprietary reconciliation audit / pool-approval paths to change the sealed hash, but `fingerprintSource` intentionally omits those assets under public CI.
+2. Integration isolate copied the public inventory (no private audits) while child prepare/build ran without `CI_PUBLIC_SOURCE`, so preparation exited 1 (`Required build-source inputs are missing`).
+3. Pinned-Node fallback interrupt test raced: it signaled `NPX_STARTED` before writing `npm_config_cache` to the capture file, so CI could observe "started" with an empty cache path (`Pinned-Node fallback did not expose its temporary cache path`).
+
+**Fix:** Omit proprietary paths from the mutation-must-change list under public CI and assert mutations there are hash no-ops; forward `CI_PUBLIC_SOURCE` into isolated build children and skip proprietary embed assertions when public; write the private cache path before the started marker and wait for both.
+
+**Why it was needed:** Unblocks PR #179 Release gates on public checkouts without inventing private audits or weakening full-source seals when `CI_PUBLIC_SOURCE` is unset.
+
+## 2026-11-16 — Sync convergence missed-NOTIFY wait honors idle drain interval
+
+**File(s):** `artifacts/api-server/src/lib/syncOutbox.ts`, `artifacts/api-server/src/lib/syncOutbox.test.ts`, `artifacts/api-server/src/routes/sync.convergence.integration.test.ts`
+
+**Problem:** `startSyncOutboxListener` polls with `DRAIN_IDLE_INTERVAL_MS` (15s) when lag diagnostics are idle. The convergence soak inserts a durable outbox row without `pg_notify` and waited only 8s for the master-data/profiles frame, so periodic drain often missed the deadline (`timed out waiting for matching data frame` on Release gates).
+
+**Fix:** Exported `DRAIN_INTERVAL_MS` / `DRAIN_IDLE_INTERVAL_MS`. The missed-notification `readMatchingFrame` now waits `DRAIN_IDLE_INTERVAL_MS + 5_000`, and the soak `it` timeout is 60s so that idle wait fits with earlier two-process work. Unit tests assert idle > active and advance timers with the exported active interval. Production idle poll cadence is unchanged.
+
+**Why it was needed:** Unblocks PR #179 Release gates without shortening the production idle drain that reduces pool pressure.
+
+## 2026-11-16 — public-source-api-test-excludes.d.mts sidecar for scripts typecheck
+
+**File(s):** `scripts/src/public-source-api-test-excludes.d.mts`
+
+**Problem:** `run-api-unit-tests-isolated.mts` imports `./public-source-api-test-excludes.mjs` without a companion `.d.mts`, so scripts typecheck failed with TS7016 (and blocked Typecheck + Native Windows CI on PR #179).
+
+**Fix:** Added `scripts/src/public-source-api-test-excludes.d.mts` declaring the exported constants and helpers (`PUBLIC_SOURCE_API_TEST_EXCLUDES`, `isPublicCiSource`, `publicSourceApiTestExcludes`, `vitestPublicSourceExcludeArgs`, `warnPublicSourceApiTestExcludes`) to match the `.mjs` module, following nearby sidecar patterns.
+
+**Why it was needed:** Restores `@workspace/scripts` typecheck after the public-source exclude helper landed without declaration types.
+
+## 2026-11-16 — Public CI excludes for source-library reconciliation API suites
+
+**File(s):** `scripts/src/public-source-api-test-excludes.mjs`, `scripts/src/public-source-api-test-excludes.test.mjs`, `scripts/src/run-api-unit-tests-isolated.mts`, `artifacts/api-server/scripts/run-unit-tests.mjs`, `artifacts/api-server/scripts/filter-release-integration-tests.mjs`, `artifacts/api-server/package.json`
+
+**Problem:** With `CI_PUBLIC_SOURCE=1` the private audit `attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json` is absent. `run-unit-tests.mjs` already excluded the Capture unit + Heal integration suites, but release gates launched API unit tests via `run-api-unit-tests-isolated.mts` and integration shards via an unfiltered `find`, so those suites still imported the missing audit and failed release standard evidence.
+
+**Fix:** Shared public-source exclude helper; isolated unit runner applies the same vitest `--exclude` list; release integration `find` pipes through a filter that drops the Heal suite only when public CI lacks the audit. Dedicated `! -path` inventory strings are unchanged so shard membership checks stay valid. Private-source CI (assets present or `CI_PUBLIC_SOURCE` unset) still runs the suites.
+
+**Why it was needed:** Unblocks PR release gates on public checkouts without removing private audits or weakening private-source coverage. Observed sync.convergence "timed out waiting for matching data frame" left as unrelated flake (5s SSE wait), not addressed here.
+
+## 2026-11-16 — Startup-failure smoke + nightly secrets `if` + sync incident age fixture
+
+**File(s):** `scripts/src/verify-startup-failures.mts`, `.github/workflows/nightly-large-spec.yml`, `artifacts/api-server/src/routes/incidentsAi.test.ts`
+
+**Problem:**
+- `pnpm run check:startup-failures` spawned the guarded API `dev` launcher, which always runs `apply-audit-log-protection` against `DATABASE_URL` before failpoints. With the smoke's intentional unreachable database URL, the process exited before `/api/readyz` could report degraded startup stages.
+- Tip commit `eef44b26` gated the Gemini benchmark with a step-level `if: secrets.*`, which actionlint rejects (`secrets` is not available in step `if`). Artifact upload also failed when the step was skipped.
+- Sync incident diagnostics test used a fixed `requestObservedAt` of 2026-10-16; after 30 days that falls outside `buildIncidentContext`'s acceptance window and drops the field.
+
+**Fix:**
+- Startup smoke now launches `dev:without-schema-push` with `CI_PUBLIC_SOURCE=1` so failpoints can mark readiness degraded without a live Postgres or private build assets.
+- `initializeStartup` skips live `seedRoles`/`runDataHeals` when `STARTUP_TEST_DATABASE_READY=true`, matching the existing schema-stage skip, so the `data_heals` failpoint is reachable.
+- Nightly workflow compares mapped `env.*` Gemini credentials and uploads artifacts only when the benchmark step was not skipped.
+- Incident test uses a relative recent `Date.now() - 60_000` observation time.
+
+**Why it was needed:** Restores the DB-free startup-failure contract (including later stages), unblocks workflow lint on `main`'s tip, and keeps sync API-failure incident evidence coverage from aging out.
+
 ## 2026-10-20 — Redact tracked operational details
 
 **File(s):** `.agents/memory/codex-fixes.md`

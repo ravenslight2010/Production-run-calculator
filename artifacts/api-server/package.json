@@ -14,12 +14,12 @@
     "repair-fingerprints": "../../scripts/node_modules/.bin/tsx scripts/generate-repair-fingerprint-manifest.mts",
     "repair-fingerprints:write": "../../scripts/node_modules/.bin/tsx scripts/generate-repair-fingerprint-manifest.mts --write",
     "test:release:unit": "pnpm --filter @workspace/scripts run test:api-unit-isolated",
-    "test:release:integration:1": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=1/6",
-    "test:release:integration:2": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=2/6",
-    "test:release:integration:3": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=3/6",
-    "test:release:integration:4": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=4/6",
-    "test:release:integration:5": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=5/6",
-    "test:release:integration:6": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | sort) --shard=6/6",
+    "test:release:integration:1": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | node ./scripts/filter-release-integration-tests.mjs | sort) --shard=1/6",
+    "test:release:integration:2": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | node ./scripts/filter-release-integration-tests.mjs | sort) --shard=2/6",
+    "test:release:integration:3": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | node ./scripts/filter-release-integration-tests.mjs | sort) --shard=3/6",
+    "test:release:integration:4": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | node ./scripts/filter-release-integration-tests.mjs | sort) --shard=4/6",
+    "test:release:integration:5": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | node ./scripts/filter-release-integration-tests.mjs | sort) --shard=5/6",
+    "test:release:integration:6": "vitest run $(find src -name '*.integration.test.ts' ! -path 'src/routes/sync.integration.test.ts' ! -path 'src/routes/sync.convergence.integration.test.ts' ! -path 'src/routes/roles.integration.test.ts' | node ./scripts/filter-release-integration-tests.mjs | sort) --shard=6/6",
     "test:release:roles": "vitest run src/routes/roles.integration.test.ts",
     "test:release:sync:1": "vitest run src/routes/sync.integration.test.ts --testNamePattern='^(?!.*\\/sync\\/events)(?=.*(?:completed-run inventory corrections from sync writes|GET \\/sync\\/today \u2014 combined wake recovery|POST \\/sync\\/station-activity \u2014 server-confirmed station evidence|POST \\/sync\\/manual-section \u2014 section ownership contract|factory purge retains QC history|POST \\/sync\\/applicator-batch-evidence\\/finalize \u2014 PostgreSQL authority|server-owned applicator ticks \u2014 evidence transaction boundary|server auto-track tick recovery under database pressure|POST \\/sync\\/operational-intents \u2014 canonical transitions|DELETE \\/sync\\/:date \u2014 server-date deletion boundary|\\/sync\\/today \u2014 client-local-date keying|\\/sync day breaks \u2014 canonical round trips and reset fencing|\\/sync large-day complete versus partial measurements|fresh-device unnamed-run remediation|GET \\/sync\\/conflict-stats))'",
     "test:release:sync:2": "vitest run src/routes/sync.integration.test.ts --testNamePattern='^(?!.*\\/sync\\/events)(?=.*(?:POST \\/sync\\/operational-intents \u2014 atomic run finalization|GET \\/completed-history \u2014 bounded stable archive|GET \\/sync\\/operational-intents\\/cursor|GET \\/sync\\/health \u2014 read-only scoped sentinel|POST \\/sync\\/auto-track\\/claim|GET \\/sync\\/scheduled \u2014 client-local-date filtering|\\/sync snapshot conditionals|\\/sync partial payload contract|\\/sync\\/today \u2014 complete-write causal fence|operational intent service boundary))'",
@@ -32,7 +32,7 @@
     "benchmark:second-pass-reviewer-live": "../../scripts/node_modules/.bin/tsx scripts/benchmark-second-pass-reviewer-live.mts"
   },
   "dependencies": {
-    "@google/genai": "^2.32.0",
+    "@google/genai": "^3.2.0",
     "@workspace/ai-memory": "workspace:*",
     "@workspace/anomaly": "workspace:*",
     "@workspace/api-zod": "workspace:*",
@@ -80,7 +80,7 @@
     "esbuild-plugin-pino": "^2.3.3",
     "pg": "^8.23.1",
     "pino-pretty": "^13.2.0",
-    "thread-stream": "4.2.0",
-    "vitest": "5.0.5"
+    "thread-stream": "4.2.1",
+    "vitest": "5.1.0"
   }
 }

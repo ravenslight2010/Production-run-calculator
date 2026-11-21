@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 import { Pool } from "pg";
 import { assertDisposableBrowserDatabase } from "./prepare-isolated-browser-database.mjs";
 import { isConfirmedProductionRuntime } from "./production-runtime.mjs";
+import {
+  publicSourceApiTestExcludes,
+  vitestPublicSourceExcludeArgs,
+  warnPublicSourceApiTestExcludes,
+} from "./public-source-api-test-excludes.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const databaseCommandTimeoutMs = 30_000;
@@ -247,6 +252,11 @@ async function runIsolatedApiUnitTests(): Promise<void> {
       childEnvironment,
       schemaPushTimeoutMs,
     );
+    const publicSourceExcludes = publicSourceApiTestExcludes({
+      env: childEnvironment,
+      root: workspaceRoot,
+    });
+    warnPublicSourceApiTestExcludes(publicSourceExcludes);
     await runCommand(
       "API unit tests",
       "pnpm",
@@ -258,6 +268,10 @@ async function runIsolatedApiUnitTests(): Promise<void> {
         "run",
         "--exclude",
         "**/*.integration.test.ts",
+        ...vitestPublicSourceExcludeArgs({
+          env: childEnvironment,
+          root: workspaceRoot,
+        }),
         ...vitestCountReporterArgs(childEnvironment),
       ],
       childEnvironment,

@@ -30,10 +30,20 @@ vi.mock("./backgroundOperations", async (importOriginal) => {
   };
 });
 vi.mock("./logger", () => ({ logger: { info: vi.fn(), warn: vi.fn() } }));
-import { clearSyncOutboxProcessCursorsForTests, startSyncOutboxListener, syncOutboxFailureReason } from "./syncOutbox";
+import {
+  clearSyncOutboxProcessCursorsForTests,
+  DRAIN_IDLE_INTERVAL_MS,
+  DRAIN_INTERVAL_MS,
+  startSyncOutboxListener,
+  syncOutboxFailureReason,
+} from "./syncOutbox";
 import { startDatabasePhaseCheckout } from "./databasePhaseTelemetry";
 
 describe("durable outbox wake scheduling", () => {
+  it("keeps idle drain slower than the active poll cadence", () => {
+    expect(DRAIN_IDLE_INTERVAL_MS).toBeGreaterThan(DRAIN_INTERVAL_MS);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.stubEnv("SYNC_OUTBOX_LISTENER_TEST_ENABLED", "1");
@@ -135,7 +145,7 @@ describe("durable outbox wake scheduling", () => {
       expect(deliver).toHaveBeenCalledTimes(2);
       expect(deliver.mock.calls[0]![0].cursor).toBe(1);
       expect(deliver.mock.calls[1]![0].cursor).toBe(1);
-      await vi.advanceTimersByTimeAsync(5001);
+      await vi.advanceTimersByTimeAsync(DRAIN_INTERVAL_MS + 1);
       expect(deliver).toHaveBeenCalledTimes(2);
       expect(gap).not.toHaveBeenCalled();
       const phases = vi.mocked(logger.info).mock.calls.map(([fields]) => fields)
@@ -170,7 +180,7 @@ describe("durable outbox wake scheduling", () => {
       await vi.advanceTimersByTimeAsync(1001);
       expect(gap).toHaveBeenCalledTimes(2);
       expect(gap.mock.calls).toEqual([[scope, 3], [scope, 3]]);
-      await vi.advanceTimersByTimeAsync(5001);
+      await vi.advanceTimersByTimeAsync(DRAIN_INTERVAL_MS + 1);
       expect(gap).toHaveBeenCalledTimes(2);
       expect(deliver).not.toHaveBeenCalled();
     } finally { stop(); }

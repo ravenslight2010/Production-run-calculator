@@ -12,13 +12,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@google/genai": "^2.32.0",
+    "@google/genai": "^3.2.0",
     "openai": "^7.52.0",
     "p-limit": "^7.3.3",
     "p-retry": "^8.0.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "vitest": "5.0.5"
+    "vitest": "5.1.0"
   }
 }
