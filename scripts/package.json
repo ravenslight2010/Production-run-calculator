@@ -130,7 +130,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "fast-check": "^4.10.2",
+    "fast-check": "^4.10.3",
     "github-actionlint": "1.7.12",
     "tsx": "catalog:",
     "vitest": "^5.1.0"
