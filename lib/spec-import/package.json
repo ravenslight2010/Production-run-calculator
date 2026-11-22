@@ -14,7 +14,7 @@
     "./import-applied-values": "./src/importAppliedValues.ts"
   },
   "devDependencies": {
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "dependencies": {
     "@workspace/name-match": "workspace:*"
